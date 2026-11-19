@@ -1,0 +1,31 @@
+[package]
+name = "imagine-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "imagine"
+path = "src/main.rs"
+
+[features]
+profile = ["dep:tracing-tracy"]
+
+[dependencies]
+imagine-core.workspace = true
+imagine-gpu.workspace = true
+wgpu.workspace = true
+smithay-client-toolkit.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+wayland-backend.workspace = true
+raw-window-handle.workspace = true
+image.workspace = true
+glam.workspace = true
+half.workspace = true
+pollster.workspace = true
+rayon.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-tracy = { workspace = true, optional = true }
