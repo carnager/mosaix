@@ -51,6 +51,7 @@ const KIND_RADIAL: u32 = 3;
 const KIND_BAKE_MASK: u32 = 5;
 const MODE_PAINT: u32 = 1;
 const MODE_ERASE: u32 = 2;
+const MODE_REPLACE: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GradientKind {
@@ -243,6 +244,7 @@ impl Engine {
         let mut enc = self.device.create_command_encoder(&Default::default());
         let mut stats = Default::default();
         self.encode_paint(&mut enc, &mut stats);
+        self.params.upload(&self.queue);
         self.queue.submit([enc.finish()]);
         let stroke = self.stroke.take().unwrap();
         let target = stroke.params.target;
@@ -259,7 +261,11 @@ impl Engine {
             }
             j.src_kind = KIND_STROKE;
             j.src_slots[0] = stroke.tiles[&c].0.slot().packed();
-            j.mode = if stroke.params.erase { MODE_ERASE } else { MODE_PAINT };
+            j.mode = match (stroke.params.smudge, stroke.params.erase) {
+                (true, _) => MODE_REPLACE,
+                (false, true) => MODE_ERASE,
+                (false, false) => MODE_PAINT,
+            };
             j.opacity = stroke.params.opacity;
             jobs.push(j);
             kept.push(c);

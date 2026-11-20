@@ -12,7 +12,7 @@ struct Op {
     opacity: f32,
     stroke_slot: u32,    // active stroke on this layer, or NONE
     stroke_opacity: f32,
-    stroke_mode: u32,    // 0 none, 1 paint, 2 erase, 3 paint mask, 4 erase mask
+    stroke_mode: u32,    // 0 none, 1 paint, 2 erase, 3 paint mask, 4 erase mask, 5 replace (smudge)
     mask_slot: u32,      // layer/group mask tile, or NONE → mask_const
     mask_const: f32,
     sel_slot: u32,       // selection clipping the stroke, or NONE → sel_const
@@ -69,9 +69,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             var src = load_slot(op.slot, p);
             var m = load_mask(op.mask_slot, op.mask_const, p);
             if op.stroke_mode != 0u {
-                let s = load_slot(op.stroke_slot, p) * (op.stroke_opacity * load_mask(op.sel_slot, op.sel_const, p));
+                let w = op.stroke_opacity * load_mask(op.sel_slot, op.sel_const, p);
+                let raw = load_slot(op.stroke_slot, p);
+                let s = raw * w;
                 switch op.stroke_mode {
                     case 1u: { src = s + src * (1.0 - s.a); }
+                    case 5u: { src = mix(src, raw, w); }
                     case 2u: { src = src * (1.0 - s.a); }
                     case 3u: { m = s.r + m * (1.0 - s.a); }
                     default: { m = m * (1.0 - s.a); }

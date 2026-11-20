@@ -104,6 +104,7 @@ enum Tool {
     Move,
     Crop,
     Wand,
+    Smudge,
 }
 
 impl Tool {
@@ -119,11 +120,12 @@ impl Tool {
             Tool::Move => "Verschieben",
             Tool::Crop => "Zuschneiden",
             Tool::Wand => "Zauberstab",
+            Tool::Smudge => "Wischfinger",
         }
     }
 
     fn paints(self) -> bool {
-        matches!(self, Tool::Brush | Tool::Eraser)
+        matches!(self, Tool::Brush | Tool::Eraser | Tool::Smudge)
     }
 }
 
@@ -204,6 +206,7 @@ pub struct App {
     /// Free transform (Strg+T) or crop box being edited.
     boxed: Option<(BoxKind, BoxEdit)>,
     wand_tolerance: f32,
+    smudge_strength: f32,
     wand_contiguous: bool,
     started: Instant,
 
@@ -361,6 +364,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         quick_mask: false,
         boxed: None,
         wand_tolerance: 32.0,
+        smudge_strength: 0.7,
         wand_contiguous: true,
         started: Instant::now(),
         save_job: None,
@@ -562,7 +566,9 @@ impl App {
         let doc = self.view.screen_to_doc(pos);
         let op = self.combine_op();
         match self.tool {
-            Tool::Brush | Tool::Eraser => self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser),
+            Tool::Brush | Tool::Eraser | Tool::Smudge => {
+                self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
+            }
             Tool::Marquee { ellipse } => Drag::Marquee { start: doc, end: doc, op, ellipse },
             Tool::Lasso => Drag::Lasso { points: vec![doc], op },
             Tool::Gradient { .. } => Drag::Gradient { start: doc, end: doc },
@@ -689,6 +695,9 @@ impl App {
     fn begin_stroke(&mut self, pos: DVec2, pressure: f32, eraser: bool) -> Drag {
         let mut settings = self.brush;
         settings.eraser = eraser;
+        if self.tool == Tool::Smudge && !eraser {
+            settings.smudge = Some(self.smudge_strength);
+        }
         let target = self.stroke_target();
         if target == StrokeTarget::Mask {
             // Masks are grey: paint the (perceptual) luminance of the brush colour.
@@ -698,7 +707,7 @@ impl App {
         }
         let doc_pos = self.view.screen_to_doc(pos);
         let Some(engine) = self.engine() else { return Drag::None };
-        let params = StrokeParams { opacity: settings.opacity, erase: settings.eraser, target };
+        let params = StrokeParams { opacity: settings.opacity, erase: settings.eraser, target, smudge: settings.smudge.is_some() };
         if let Err(e) = engine.begin_stroke(params) {
             tracing::warn!("Malen nicht möglich: {e}");
             return Drag::None;
@@ -993,6 +1002,9 @@ impl App {
                     l.opacity = pct;
                     changed
                 });
+            } else if self.tool == Tool::Smudge {
+                self.smudge_strength = pct;
+                tracing::info!("Wischfinger-Stärke {:.0} %", pct * 100.0);
             } else {
                 self.brush.opacity = pct;
                 tracing::info!("Pinsel-Deckkraft {:.0} %", pct * 100.0);
@@ -1121,6 +1133,18 @@ impl App {
             Keysym::bracketright => self.brush.size = (self.brush.size * 1.2).min(5000.0),
             Keysym::e => self.set_tool(Tool::Eraser),
             Keysym::b => self.set_tool(Tool::Brush),
+            Keysym::B => {
+                self.brush.tip = (self.brush.tip + 1) % imagine_core::TIP_NAMES.len() as u32;
+                tracing::info!("Pinselspitze: {}", imagine_core::TIP_NAMES[self.brush.tip as usize]);
+            }
+            Keysym::u => self.set_tool(Tool::Smudge),
+            Keysym::j => {
+                let on = self.brush.size_jitter == 0.0;
+                let b = &mut self.brush;
+                (b.size_jitter, b.angle_jitter, b.scatter, b.flow_jitter) =
+                    if on { (0.3, 30.0, 0.25, 0.3) } else { (0.0, 0.0, 0.0, 0.0) };
+                tracing::info!("Pinsel-Dynamik (Größe, Winkel, Streuung, Fluss zufällig) {}", if on { "an" } else { "aus" });
+            }
             Keysym::m => {
                 let ellipse = matches!(self.tool, Tool::Marquee { ellipse: false });
                 self.set_tool(Tool::Marquee { ellipse })

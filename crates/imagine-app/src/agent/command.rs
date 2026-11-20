@@ -17,7 +17,9 @@ use imagine_core::color::{Pixels, extract_region, srgb_to_linear, linear_to_srgb
 use imagine_core::doc::Content;
 use imagine_core::tile::tiles_in_rect;
 use imagine_core::mask::{CombineOp, Shape};
-use imagine_core::{BlendMode, BlendSpace, BrushSettings, Document, InputSample, LayerId, Stroke, TILE_SIZE, TileCoord};
+use imagine_core::{
+    BlendMode, BlendSpace, BrushSettings, Document, InputSample, LayerId, Stroke, TILE_SIZE, TIP_NAMES, TileCoord, tip_from_name,
+};
 use imagine_gpu::{GpuContext, GradientKind, Interp, SampleFrom, StrokeParams, StrokeTarget, Tile};
 use imagine_io::export::blit_region;
 use serde::Deserialize;
@@ -91,6 +93,15 @@ pub enum Command {
         #[serde(default)]
         eraser: bool,
         target: Option<String>,
+        tip: Option<String>,
+        angle: Option<f32>,
+        roundness: Option<f32>,
+        size_jitter: Option<f32>,
+        angle_jitter: Option<f32>,
+        scatter: Option<f32>,
+        flow_jitter: Option<f32>,
+        follow_direction: Option<bool>,
+        smudge: Option<f32>,
     },
     Fill { layer: Option<LayerId>, color: ColorSpec, opacity: Option<f32>, target: Option<String> },
     Clear { layer: Option<LayerId> },
@@ -499,7 +510,27 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             })?;
             ok(s)
         }
-        Command::PaintStroke { layer, points, color, size, hardness, opacity, flow, spacing, eraser, target } => {
+        Command::PaintStroke {
+            layer,
+            points,
+            color,
+            size,
+            hardness,
+            opacity,
+            flow,
+            spacing,
+            eraser,
+            target,
+            tip,
+            angle,
+            roundness,
+            size_jitter,
+            angle_jitter,
+            scatter,
+            flow_jitter,
+            follow_direction,
+            smudge,
+        } => {
             pixel_layer(s, layer)?;
             not_painting(s)?;
             let target = parse_target(&target)?;
@@ -507,8 +538,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             ensure!(size > 0.0 && size <= 5000.0, "size must be 0–5000 px");
             let (mut color, alpha) = match &color {
                 Some(c) => c.linear()?,
-                None if eraser => ([0.0; 3], 1.0),
-                None => bail!("color is required unless eraser is true"),
+                None if eraser || smudge.is_some() => ([0.0; 3], 1.0),
+                None => bail!("color is required unless eraser or smudge is set"),
             };
             if target == StrokeTarget::Mask {
                 let l = linear_to_srgb(0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]);
@@ -524,6 +555,18 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 smoothing: 0.0,
                 color,
                 eraser,
+                tip: match &tip {
+                    None => 0,
+                    Some(t) => tip_from_name(t).with_context(|| format!("unknown tip {t:?}, use one of {TIP_NAMES:?}"))?,
+                },
+                angle: angle.unwrap_or(0.0),
+                roundness: roundness.unwrap_or(1.0).clamp(0.05, 1.0),
+                size_jitter: size_jitter.unwrap_or(0.0).clamp(0.0, 1.0),
+                angle_jitter: angle_jitter.unwrap_or(0.0).clamp(0.0, 180.0),
+                scatter: scatter.unwrap_or(0.0).clamp(0.0, 5.0),
+                flow_jitter: flow_jitter.unwrap_or(0.0).clamp(0.0, 1.0),
+                follow_direction: follow_direction.unwrap_or(false),
+                smudge: smudge.map(|v| v.clamp(0.0, 1.0)),
             };
             let samples = points
                 .iter()
@@ -533,7 +576,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             s.engine
-                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target })
+                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target, smudge: smudge.is_some() })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);
             let mut dabs = 0;
@@ -545,7 +588,13 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let d = stroke.finish(*samples.last().unwrap());
             dabs += d.len();
             s.engine.stroke_dabs(&d);
-            s.engine.end_stroke(if eraser { "Radieren" } else { "Pinselstrich" });
+            s.engine.end_stroke(if smudge.is_some() {
+                "Verwischen"
+            } else if eraser {
+                "Radieren"
+            } else {
+                "Pinselstrich"
+            });
             Ok(Output::json(json!({ "ok": true, "dabs": dabs })))
         }
         Command::FillRect { layer, x, y, width, height, color, opacity } => {

@@ -26,6 +26,8 @@ mod frame;
 mod magic;
 mod readback;
 mod selection;
+mod smudge;
+mod tips;
 mod transform;
 mod util;
 
@@ -108,11 +110,13 @@ pub struct StrokeParams {
     pub opacity: f32,
     pub erase: bool,
     pub target: StrokeTarget,
+    /// Smudge (drag colour) instead of painting; dab alpha = strength.
+    pub smudge: bool,
 }
 
 impl Default for StrokeParams {
     fn default() -> Self {
-        Self { opacity: 1.0, erase: false, target: StrokeTarget::Pixels }
+        Self { opacity: 1.0, erase: false, target: StrokeTarget::Pixels, smudge: false }
     }
 }
 
@@ -191,6 +195,15 @@ pub struct Engine {
     sampler_linear: wgpu::Sampler,
     sampler_nearest: wgpu::Sampler,
     brush_bgl: wgpu::BindGroupLayout,
+    tips_bg: wgpu::BindGroup,
+    tips_view: wgpu::TextureView,
+    smudge_tex_bgl: wgpu::BindGroupLayout,
+    smudge_buffers: Option<smudge::SmudgeBuffers>,
+    smudge_jobs: DynBuf,
+    smudge_primed: bool,
+    smudge_cur: usize,
+    smudge_pickup_pipeline: wgpu::RenderPipeline,
+    smudge_write_pipeline: wgpu::RenderPipeline,
     arrays_bgl: wgpu::BindGroupLayout,
     arrays_bg: Option<wgpu::BindGroup>,
     arrays_gen: (u64, u64),
@@ -285,13 +298,15 @@ impl Engine {
         };
         let display_shader = shader("display", include_str!("../shaders/display.wgsl").into());
         let overlay_shader = shader("overlay", include_str!("../shaders/overlay.wgsl").into());
-        let brush_shader = shader("brush", include_str!("../shaders/brush.wgsl").into());
+        let tip_src = include_str!("../shaders/tip.wgsl");
+        let brush_shader = shader("brush", format!("{}\n{tip_src}", include_str!("../shaders/brush.wgsl")));
         let flatten_shader = shader(
             "flatten",
             format!("enable wgpu_binding_array;\n{blend_src}\n{}", include_str!("../shaders/flatten.wgsl")),
         );
         let apply_shader = shader("apply", include_str!("../shaders/apply.wgsl").into());
         let mip_shader = shader("mip", include_str!("../shaders/mip.wgsl").into());
+        let smudge_shader = shader("smudge", format!("{}\n{tip_src}", include_str!("../shaders/smudge.wgsl")));
         let warp_shader = shader("warp", include_str!("../shaders/warp.wgsl").into());
         let bounds_shader = shader("bounds", include_str!("../shaders/bounds.wgsl").into());
         let similar_shader = shader("similar", include_str!("../shaders/similar.wgsl").into());
@@ -405,9 +420,31 @@ impl Engine {
         let sel_layout = layout("selection", &[&globals_bgl, &arrays_bgl]);
         let ants_layout = layout("ants", &[&globals_bgl, &screen_bgl]);
         let line_layout = layout("lines", &[&globals_bgl]);
-        let brush_layout = layout("brush", &[&brush_bgl]);
+        let tips_bgl = bgl(
+            "brush tips",
+            &[
+                texture(0, S::FRAGMENT, true, D::D2Array, None),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: S::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        );
+        let brush_layout = layout("brush", &[&brush_bgl, &tips_bgl]);
+        let smudge_tex_bgl = bgl(
+            "smudge textures",
+            &[
+                texture(0, S::FRAGMENT, true, D::D2, None),
+                sampler(1),
+                texture(2, S::FRAGMENT, true, D::D2Array, None),
+                sampler(3),
+            ],
+        );
         let apply_layout = layout("apply", &[&arrays_bgl, &apply_bgl]);
         let warp_layout = layout("warp", &[&arrays_bgl, &warp_bgl]);
+        let smudge_layout = layout("smudge", &[&arrays_bgl, &warp_bgl, &smudge_tex_bgl]);
         let similar_layout = layout("similar", &[&arrays_bgl, &apply_bgl, &comp_array_bgl]);
 
         // ---- pipelines ------------------------------------------------------
@@ -429,7 +466,9 @@ impl Engine {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &line_attrs,
         };
-        let dab_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32, 2 => Float32, 3 => Float32x4];
+        let dab_attrs = wgpu::vertex_attr_array![
+            0 => Float32x2, 1 => Float32, 2 => Float32, 3 => Float32x4, 4 => Float32, 5 => Float32, 6 => Uint32
+        ];
         let dab_vb = wgpu::VertexBufferLayout {
             array_stride: size_of::<Dab>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
@@ -479,6 +518,10 @@ impl Engine {
             rp("warp rgba", &warp_layout, &warp_shader, ("vs", "fs_rgba"), &[], TILE_FORMAT, None, TriangleList);
         let warp_mask_pipeline =
             rp("warp mask", &warp_layout, &warp_shader, ("vs", "fs_mask"), &[], MASK_FORMAT, None, TriangleList);
+        let smudge_pickup_pipeline =
+            rp("smudge pickup", &smudge_layout, &smudge_shader, ("vs", "fs_pickup"), &[], TILE_FORMAT, None, TriangleList);
+        let smudge_write_pipeline =
+            rp("smudge write", &smudge_layout, &smudge_shader, ("vs", "fs_write"), &[], TILE_FORMAT, None, TriangleList);
         let similar_pipeline =
             rp("similar", &similar_layout, &similar_shader, ("vs", "fs"), &[], MASK_FORMAT, None, TriangleList);
         let bounds_pipeline = compute_pipeline(
@@ -537,6 +580,52 @@ impl Engine {
         };
         let (scratch_rgba, scratch_rgba_views) = scratch("apply scratch rgba", TILE_FORMAT);
         let (scratch_mask, scratch_mask_views) = scratch("apply scratch mask", MASK_FORMAT);
+        // Brush tips.
+        let tip_levels = tips::generate();
+        let tips_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("brush tips"),
+            size: wgpu::Extent3d {
+                width: tips::TIP_SIZE,
+                height: tips::TIP_SIZE,
+                depth_or_array_layers: tip_levels[0].len() as u32,
+            },
+            mip_level_count: tips::TIP_MIPS,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: U::TEXTURE_BINDING | U::COPY_DST,
+            view_formats: &[],
+        });
+        for (mip, layers) in tip_levels.iter().enumerate() {
+            let size = tips::TIP_SIZE >> mip;
+            for (layer, data) in layers.iter().enumerate() {
+                queue.write_texture(
+                    texel_copy(&tips_tex, mip as u32, layer as u32),
+                    data,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size), rows_per_image: Some(size) },
+                    wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+                );
+            }
+        }
+        let tips_view = tips_tex.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(D::D2Array),
+            ..Default::default()
+        });
+        let tips_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("brush tips"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        let tips_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("brush tips"),
+            layout: &tips_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&tips_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&tips_sampler) },
+            ],
+        });
         let origin_cap = 64;
         let (origin_buf, origin_bg) = make_origin_buf(device, &brush_bgl, origin_cap);
         use wgpu::BufferUsages as B;
@@ -585,6 +674,15 @@ impl Engine {
             sampler_linear,
             sampler_nearest,
             brush_bgl,
+            tips_bg,
+            tips_view,
+            smudge_tex_bgl,
+            smudge_buffers: None,
+            smudge_jobs: DynBuf::new(device, "smudge jobs", B::STORAGE, 16 << 10),
+            smudge_primed: false,
+            smudge_cur: 0,
+            smudge_pickup_pipeline,
+            smudge_write_pipeline,
             arrays_bgl,
             arrays_bg: None,
             arrays_gen: (0, 0),
@@ -790,6 +888,10 @@ impl Engine {
         if params.target == StrokeTarget::Mask && l.mask.is_none() {
             return Err("die Ebene hat keine Maske");
         }
+        if params.smudge && (params.target == StrokeTarget::Mask || params.erase) {
+            return Err("Verwischen geht nur auf Pixeln");
+        }
+        self.smudge_primed = false;
         if self.doc.selection.as_ref().is_some_and(|s| s.tiles.is_empty() && s.default == 0) {
             return Err("die Auswahl ist leer");
         }

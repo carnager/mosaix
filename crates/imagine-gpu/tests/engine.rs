@@ -567,3 +567,54 @@ fn magic_wand_and_color_range() {
     let s = e.selection_cpu().unwrap();
     assert_eq!(s.value_at(699, 399), 255);
 }
+
+#[test]
+fn textured_tips_and_smudge() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 300));
+    // Chalk tip: grainy, so coverage inside the dab varies.
+    e.begin_stroke(StrokeParams::default()).unwrap();
+    let mut s = Stroke::new(BrushSettings { size: 120.0, tip: 1, spacing: 5.0, ..red_brush() });
+    e.stroke_dabs(&s.add(InputSample { pos: DVec2::new(100.0, 100.0), pressure: 1.0 }));
+    e.end_stroke("Kreide");
+    e.flush();
+    let tile = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+    let alphas: Vec<f32> = (60..140).flat_map(|y| (60..140).map(move |x| (x, y))).map(|(x, y)| px(&tile, x, y)[3]).collect();
+    let full = alphas.iter().filter(|a| **a > 0.95).count();
+    let empty = alphas.iter().filter(|a| **a < 0.05).count();
+    assert!(full > 300 && empty > 300, "grain: {full} full, {empty} empty of {}", alphas.len());
+    e.undo();
+
+    // Smudge: red left half, blue right half; drag from red into blue.
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 300.0, h: 300.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Rot").unwrap();
+    e.invert_selection("Umkehren").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 1.0, "Blau").unwrap();
+    e.deselect("Auswahl aufheben").unwrap();
+    e.flush();
+    let before = composite_px(&e, TileCoord::new(1, 0), 340 - 256, 150);
+    assert!(before[0] < 0.01 && before[2] > 0.99);
+
+    e.begin_stroke(StrokeParams { smudge: true, ..Default::default() }).unwrap();
+    let mut s = Stroke::new(BrushSettings { size: 40.0, hardness: 0.9, smudge: Some(0.8), spacing: 0.1, ..red_brush() });
+    let mut dabs = s.add(InputSample { pos: DVec2::new(250.0, 150.0), pressure: 1.0 });
+    for i in 1..=30 {
+        dabs.extend(s.add(InputSample { pos: DVec2::new(250.0 + i as f64 * 5.0, 150.0), pressure: 1.0 }));
+    }
+    e.stroke_dabs(&dabs);
+    e.flush();
+    let live = composite_px(&e, TileCoord::new(1, 0), 340 - 256, 150);
+    assert!(live[0] > 0.2, "red dragged into blue (live): {live:?}");
+    e.end_stroke("Verwischen");
+    e.flush();
+    let after = composite_px(&e, TileCoord::new(1, 0), 340 - 256, 150);
+    assert!((after[0] - live[0]).abs() < 0.02 && (after[3] - 1.0).abs() < 0.01, "{after:?} vs {live:?}");
+    let far = composite_px(&e, TileCoord::new(1, 0), 500 - 256, 150);
+    assert!(far[2] > 0.99 && far[0] < 0.01, "untouched beyond the stroke");
+    let outside = composite_px(&e, TileCoord::new(1, 0), 340 - 256, 250);
+    assert!(outside[2] > 0.99, "untouched outside the brush");
+    e.undo();
+    e.flush();
+    let undone = composite_px(&e, TileCoord::new(1, 0), 340 - 256, 150);
+    assert!(undone[0] < 0.01);
+}

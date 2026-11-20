@@ -1,6 +1,7 @@
 // Brush dabs rendered into a single tile (mip 0 of one array layer).
-// Blending is done by fixed-function hardware (premultiplied "over", or
-// "destination-out" for the eraser).
+// Blending is done by fixed-function hardware (premultiplied "over").
+// Tip 0 is an analytic round tip with hardness; others sample the tip
+// texture array, rotated by the dab angle and squashed by its roundness.
 
 struct TileOrigin {
     origin: vec2<f32>,
@@ -8,6 +9,8 @@ struct TileOrigin {
 };
 
 @group(0) @binding(0) var<uniform> tile: TileOrigin;
+@group(1) @binding(0) var tips: texture_2d_array<f32>;
+@group(1) @binding(1) var tip_sampler: sampler;
 
 const HALF_TILE: f32 = 128.0;
 
@@ -16,6 +19,9 @@ struct DabIn {
     @location(1) radius: f32,
     @location(2) hardness: f32,
     @location(3) color: vec4<f32>,
+    @location(4) angle: f32,
+    @location(5) roundness: f32,
+    @location(6) tip: u32,
 };
 
 struct DabOut {
@@ -24,6 +30,8 @@ struct DabOut {
     @location(1) @interpolate(flat) radius: f32,
     @location(2) @interpolate(flat) hardness: f32,
     @location(3) @interpolate(flat) color: vec4<f32>,
+    @location(4) @interpolate(flat) shape: vec3<f32>,   // cos, sin, roundness
+    @location(5) @interpolate(flat) tip: u32,
 };
 
 @vertex
@@ -33,15 +41,12 @@ fn vs(@builtin(vertex_index) i: u32, d: DabIn) -> DabOut {
     let local = (c * 2.0 - 1.0) * r;
     let p = d.center + local - tile.origin;
     let clip = vec2<f32>(p.x / HALF_TILE - 1.0, 1.0 - p.y / HALF_TILE);
-    return DabOut(vec4<f32>(clip, 0.0, 1.0), local, d.radius, d.hardness, d.color);
+    let shape = vec3<f32>(cos(d.angle), sin(d.angle), d.roundness);
+    return DabOut(vec4<f32>(clip, 0.0, 1.0), local, d.radius, d.hardness, d.color, shape, d.tip);
 }
 
 @fragment
 fn fs(in: DabOut) -> @location(0) vec4<f32> {
-    let dist = length(in.local);
-    // Falloff width as a fraction of the radius; at least one pixel for anti-aliasing.
-    let edge = max(1.0 - in.hardness, 1.0 / in.radius);
-    let t = clamp((in.radius - dist) / (edge * in.radius), 0.0, 1.0);
-    let a = in.color.a * smoothstep(0.0, 1.0, t);
+    let a = in.color.a * coverage(in.local, in.radius, in.hardness, in.shape, in.tip);
     return vec4<f32>(in.color.rgb * a, a);
 }

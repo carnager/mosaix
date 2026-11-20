@@ -37,7 +37,8 @@ Ansicht:
   Einpassen/100 % Strg+0 / Strg+1
 
 Werkzeuge:
-  B Pinsel   E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
+  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; J: Dynamik)   U Wischfinger
+  E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
   G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
   W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)
   C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)
@@ -51,7 +52,7 @@ Frei transformieren (Strg+T):
 Malen:
   Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts
   Größe           [ / ], Strg + Mausrad
-  Deckkraft       Ziffern 1…9, 0 (10 … 100 %)
+  Deckkraft       Ziffern 1…9, 0 (10 … 100 %; beim Wischfinger: Stärke)
   Härte/Glättung  H / S       Farbe  P (Palette), X (Schwarz ↔ Weiß)
   Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)
 

@@ -107,11 +107,23 @@ impl Engine {
             self.recheck.insert(c);
         }
         let stroke = self.stroke.as_mut().unwrap();
+        let smudge = stroke.params.smudge;
+        let mut fresh = Vec::new();
         for c in touched {
             if let Some((tile, needs_clear)) = stroke.tiles.get_mut(&c) {
-                passes.push((c, tile.slot(), std::mem::replace(needs_clear, false)));
+                let clear = std::mem::replace(needs_clear, false);
+                if clear {
+                    fresh.push(c);
+                }
+                passes.push((c, tile.slot(), clear));
                 self.dirty.insert(c);
             }
+        }
+        if smudge {
+            self.init_smudge_tiles(enc, &fresh);
+            stats.dabs = self.encode_smudge(enc, &dabs);
+            stats.paint_passes = passes.len() as u32;
+            return;
         }
 
         self.dab_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&dabs));
@@ -137,6 +149,7 @@ impl Engine {
             });
             rp.set_pipeline(&self.brush_pipeline);
             rp.set_bind_group(0, &self.origin_bg, &[(i as u64 * UNIFORM_STRIDE) as u32]);
+            rp.set_bind_group(1, &self.tips_bg, &[]);
             rp.set_vertex_buffer(0, self.dab_buf.buf.slice(..));
             rp.draw(0..4, 0..dabs.len() as u32);
         }
@@ -159,7 +172,7 @@ impl Engine {
         hash_program(&ops, |t: &Tile| t.serial(), &mut h);
         (self.shown().blend_space as u32).hash(&mut h);
         if let Some((_, t, p)) = stroke {
-            (t.serial(), p.opacity.to_bits(), p.erase, p.target).hash(&mut h);
+            (t.serial(), p.opacity.to_bits(), p.erase, p.target, p.smudge).hash(&mut h);
             let (slot, val) = self.sel_slot(c);
             (slot, val.to_bits()).hash(&mut h);
         }
@@ -249,6 +262,7 @@ impl Engine {
                         let (mask_slot, mask_const) = mask_slot(mask);
                         let st = stroke.filter(|s| s.0 == id);
                         let stroke_mode = st.map_or(0, |s| match (s.2.target, s.2.erase) {
+                            _ if s.2.smudge => 5,
                             (StrokeTarget::Pixels, false) => 1,
                             (StrokeTarget::Pixels, true) => 2,
                             (StrokeTarget::Mask, false) => 3,

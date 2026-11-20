@@ -20,7 +20,7 @@ struct Job {
     old_slot: u32,          // current target tile, or NONE → old_const
     old_const: f32,
     src_kind: u32,          // 0 stroke, 1 colour, 2 linear, 3 radial, 5 bake mask
-    mode: u32,              // 1 paint (over), 2 erase
+    mode: u32,              // 1 paint (over), 2 erase, 3 replace
     opacity: f32,
     sel_slot: u32,          // selection, or NONE → sel_const
     sel_const: f32,
@@ -124,6 +124,10 @@ fn fs_rgba(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let old = load_layer(job.old_slot, p);
     if job.src_kind == 5u {
         return old * load_mask(job.src_slots.x, job.src_consts.x, p);
+    }
+    if job.mode == 3u {
+        // Replace (smudge): the stroke tile is a modified copy of the layer.
+        return mix(old, load_layer(job.src_slots.x, p), job.opacity * load_mask(job.sel_slot, job.sel_const, p));
     }
     let s = source(job, p) * (job.opacity * load_mask(job.sel_slot, job.sel_const, p));
     if job.mode == 2u {
