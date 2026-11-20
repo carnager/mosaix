@@ -43,6 +43,99 @@ pub fn font_families() -> Vec<String> {
     v
 }
 
+// ---- editing text on the canvas -------------------------------------------------
+
+/// A text selection (anchor and focus, with the column remembered for
+/// up / down). Collapsed = a caret.
+pub use parley::Selection as TextSelection;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextMove {
+    Left,
+    Right,
+    WordLeft,
+    WordRight,
+    Up,
+    Down,
+    LineStart,
+    LineEnd,
+    Start,
+    End,
+}
+
+/// How a click selects: a caret, a word (double click) or a line (triple).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickKind {
+    Caret,
+    Word,
+    Line,
+}
+
+/// Selection at a point (text-box coordinates); with `extend`, the old
+/// selection grows to it (Shift+click, dragging).
+pub fn text_select_at(t: &TextSpec, x: f32, y: f32, kind: ClickKind, extend: Option<&TextSelection>) -> TextSelection {
+    let l = build_layout(t);
+    match (extend, kind) {
+        (Some(old), _) => old.refresh(&l).extend_to_point(&l, x, y),
+        (None, ClickKind::Caret) => TextSelection::from_point(&l, x, y),
+        (None, ClickKind::Word) => TextSelection::word_from_point(&l, x, y),
+        (None, ClickKind::Line) => TextSelection::line_from_point(&l, x, y),
+    }
+}
+
+/// A selection from byte offsets (clamped to char boundaries).
+pub fn text_range(t: &TextSpec, anchor: usize, focus: usize) -> TextSelection {
+    let l = build_layout(t);
+    let fix = |i: usize| {
+        let mut i = i.min(t.text.len());
+        while !t.text.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    };
+    let a = parley::Cursor::from_byte_index(&l, fix(anchor), parley::Affinity::Downstream);
+    let f = parley::Cursor::from_byte_index(&l, fix(focus), parley::Affinity::Downstream);
+    TextSelection::new(a, f)
+}
+
+/// Moves the caret (or extends the selection with `extend`).
+pub fn text_move(t: &TextSpec, sel: &TextSelection, m: TextMove, extend: bool) -> TextSelection {
+    let l = build_layout(t);
+    let s = sel.refresh(&l);
+    match m {
+        TextMove::Left => s.previous_visual(&l, extend),
+        TextMove::Right => s.next_visual(&l, extend),
+        TextMove::WordLeft => s.previous_visual_word(&l, extend),
+        TextMove::WordRight => s.next_visual_word(&l, extend),
+        TextMove::Up => s.previous_line(&l, extend),
+        TextMove::Down => s.next_line(&l, extend),
+        TextMove::LineStart => s.line_start(&l, extend),
+        TextMove::LineEnd => s.line_end(&l, extend),
+        TextMove::Start | TextMove::End => {
+            let i = if m == TextMove::Start { 0 } else { t.text.len() };
+            let c = parley::Cursor::from_byte_index(&l, i, parley::Affinity::Downstream);
+            if extend { s.extend(c) } else { TextSelection::new(c, c) }
+        }
+    }
+}
+
+/// Size of the laid-out text box (width, height).
+pub fn text_box_size(t: &TextSpec) -> (f32, f32) {
+    let l = build_layout(t);
+    (t.width.unwrap_or(0.0).max(l.width()), l.height().max(t.size * t.line_height))
+}
+
+/// Selection rectangles and the caret (x0, y0, x1, y1) in text-box coordinates.
+pub fn text_geometry(t: &TextSpec, sel: &TextSelection) -> (Vec<[f32; 4]>, [f32; 4]) {
+    let l = build_layout(t);
+    let s = sel.refresh(&l);
+    let rects = s.geometry(&l).into_iter().map(|(b, _)| [b.x0 as f32, b.y0 as f32, b.x1 as f32, b.y1 as f32]).collect();
+    let c = s.focus().geometry(&l, (t.size / 24.0).max(1.5));
+    // An empty text has no line: a caret of the font's height at the start.
+    let caret = if c.height() < 1.0 { [0.0, 0.0, (t.size / 24.0).max(1.5), t.size * t.line_height] } else { [c.x0 as f32, c.y0 as f32, c.x1 as f32, c.y1 as f32] };
+    (rects, caret)
+}
+
 /// One installable face of a font group: render it with `family` + `weight`
 /// + `italic`.
 #[derive(Debug, Clone, PartialEq)]
@@ -262,7 +355,8 @@ struct TextLayout {
     height: f32,
 }
 
-fn layout_text(t: &TextSpec) -> TextLayout {
+/// The parley layout of a text spec (positions relative to the text box).
+fn build_layout(t: &TextSpec) -> parley::Layout<()> {
     let mut guard = fonts().lock().unwrap();
     let Fonts { font, layout } = &mut *guard;
     let mut b = layout.ranged_builder(font, &t.text, 1.0, false);
@@ -285,6 +379,11 @@ fn layout_text(t: &TextSpec) -> TextLayout {
     };
     l.set_alignment(align, AlignmentOptions::default());
     l.break_all_lines(t.width);
+    l
+}
+
+fn layout_text(t: &TextSpec) -> TextLayout {
+    let l = build_layout(t);
     let mut runs = Vec::new();
     for line in l.lines() {
         for item in line.items() {
@@ -540,6 +639,29 @@ mod tests {
         for g in &groups {
             assert!(g.regular().is_some());
         }
+    }
+
+    #[test]
+    fn text_editing_moves_and_measures() {
+        let t = TextSpec::new("Hallo Welt\nzweite Zeile", 0.0, 0.0, 40.0, [1.0; 4]);
+        let s = text_select_at(&t, 0.0, 10.0, ClickKind::Caret, None);
+        assert_eq!(s.focus().index(), 0);
+        let s = text_move(&t, &s, TextMove::Right, false);
+        assert_eq!(s.focus().index(), 1);
+        let w = text_move(&t, &s, TextMove::WordRight, false);
+        assert!(w.focus().index() >= 5, "{}", w.focus().index());
+        let down = text_move(&t, &s, TextMove::Down, false);
+        assert!(down.focus().index() > "Hallo Welt".len());
+        let all = text_move(&t, &text_move(&t, &s, TextMove::Start, false), TextMove::End, true);
+        assert_eq!(all.text_range(), 0..t.text.len());
+        let (rects, caret) = text_geometry(&t, &all);
+        assert_eq!(rects.len(), 2, "one rectangle per line");
+        assert!(caret[1] > 30.0, "caret on the second line: {caret:?}");
+        let (_, c1) = text_geometry(&t, &text_range(&t, 1, 1));
+        let (_, c3) = text_geometry(&t, &text_range(&t, 3, 3));
+        assert!(c3[0] > c1[0]);
+        let word = text_select_at(&t, 160.0, 10.0, ClickKind::Word, None);
+        assert_eq!(&t.text[word.text_range()], "Welt");
     }
 
     #[test]

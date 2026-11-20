@@ -89,6 +89,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         boxed: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| "Frei transformieren"),
         box_angle: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| 30.0),
         mask_edit: false,
+        text_overlay: None,
         liquify: std::env::var_os("IMAGINE_SNAPSHOT_LIQUIFY").map(|_| (imagine_gpu::LiquifyTool::TwirlCw, 300.0, 0.6)),
         layers: panels::layer_rows(doc),
         active: active.id,
@@ -160,6 +161,15 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         let v: imagine_core::VectorLayer = serde_json::from_str(&j)?;
         s.engine.add_vector(v.clone(), "Vektor");
         model.active_vector = Some(v.clone());
+        if let Ok(r) = std::env::var("IMAGINE_SNAPSHOT_TEXTEDIT")
+            && let imagine_core::vector::VectorKind::Text(t) = &v.kind
+        {
+            // "a,b": selection by byte offsets.
+            let mut it = r.split(',').filter_map(|x| x.trim().parse::<usize>().ok());
+            let (a, b) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+            let sel = imagine_vector::text_range(t, a, b);
+            model.text_overlay = crate::app::textedit::overlay(&v, &sel, &view, ppp);
+        }
         if let Ok(q) = std::env::var("IMAGINE_SNAPSHOT_FONTS") {
             let fonts = model.fonts.clone();
             state.vec_editor.fonts.open_for(&v, &fonts, &q);

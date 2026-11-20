@@ -445,7 +445,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 - **Schriftwahl:** Fenster mit Suche, Filter nach Art (Sans, Serif, Mono, Schreibschrift, Display, Symbole – aus OS/2-Familienklasse, PANOSE und Festbreite, Name als Rückfall), Favoriten (Stern) und zuletzt verwendet (beide in den Einstellungen gespeichert); Schriften ohne lateinische Buchstaben ausgeblendet (zuschaltbar). Jede Familie mit dem eigenen Text als Vorschau; Pfeiltasten/Klick zeigen die Schrift live im Bild (Engine-Vorschau, Dokument unverändert), Enter übernimmt, Esc stellt zurück. Familien mit Schnitten als einzelne Systemfamilien (Plex: „… Medm“, „… SmBld“) werden zu einer Familie mit Schnitt-Auswahl zusammengefasst (937 → 294).
 - Konturkanten der Ebenenstile subpixelgenau (Abstand zu Kantenpunkten aus Deckung und Gradient), keine Pixeltreppen mehr.
 
-**Noch offen in Phase 6:** Text direkt im Bild bearbeiten (Cursor, Auswahl), Zeichenstift/Pfade bearbeiten, Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
+- **Text direkt im Bild bearbeiten:** Cursor, Markieren mit Maus (Klick, Doppel-/Dreifachklick, Ziehen, Umschalt+Klick) und Tastatur (Pfeile, Wortweise mit Strg, Pos1/Ende, Strg+A), Tippen, Rück-/Entf-Taste (mit Strg wortweise), Enter = neue Zeile, Esc/Strg+Enter beendet; leer gelassene Textebenen verschwinden. Arbeitet mit parleys Selection auf demselben Layout wie das Rendern, auch auf gedrehtem Text; Markierung und Cursor zeichnet die Oberfläche über die Leinwand. Eine Sitzung = ein Undo-Schritt.
+
+**Noch offen in Phase 6:** Zwischenablage (Text kopieren/einfügen), Zeichenstift/Pfade bearbeiten, Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
 
 ## Nächster konkreter Schritt
 

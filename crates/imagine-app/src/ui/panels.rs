@@ -66,6 +66,15 @@ pub struct LayerRow {
     pub fx: bool,
 }
 
+/// Caret, selection and frame of the text edited on the canvas, as quads
+/// in screen points.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextOverlay {
+    pub selection: Vec<[[f32; 2]; 4]>,
+    pub caret: [[f32; 2]; 4],
+    pub frame: [[f32; 2]; 4],
+}
+
 /// The filter dialog: a new filter (destructive or smart) or an existing
 /// smart filter being edited.
 pub struct FilterDialog {
@@ -126,6 +135,8 @@ pub struct Model {
     pub box_angle: Option<f64>,
     /// Liquify session: tool, brush diameter, strength.
     pub liquify: Option<(imagine_gpu::LiquifyTool, f32, f32)>,
+    /// Text edited on the canvas: caret, selection, frame (screen points).
+    pub text_overlay: Option<TextOverlay>,
     pub mask_edit: bool,
     pub layers: Vec<LayerRow>,
     pub active: LayerId,
@@ -272,6 +283,18 @@ pub fn style(ctx: &egui::Context) {
 
 pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
     let mut out = Vec::new();
+    if let Some(t) = &m.text_overlay {
+        // Under the panels, over the canvas.
+        let p = ctx.layer_painter(egui::LayerId::background());
+        let pts = |q: &[[f32; 2]; 4]| q.iter().map(|v| egui::pos2(v[0], v[1])).collect::<Vec<_>>();
+        let mut frame = pts(&t.frame);
+        frame.push(frame[0]);
+        p.add(egui::Shape::dashed_line(&frame, Stroke::new(1.0, Color32::from_white_alpha(140)), 4.0, 3.0));
+        for q in &t.selection {
+            p.add(egui::Shape::convex_polygon(pts(q), Color32::from_rgba_unmultiplied(70, 130, 255, 90), Stroke::NONE));
+        }
+        p.add(egui::Shape::convex_polygon(pts(&t.caret), Color32::from_rgb(70, 140, 255), Stroke::new(0.5, Color32::WHITE)));
+    }
     if let Some(what) = &st.confirm
         && let Some(a) = super::files::confirm_unsaved(ctx, &m.name, what)
     {

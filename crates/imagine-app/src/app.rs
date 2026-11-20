@@ -4,6 +4,8 @@
 //! by `wl_surface.frame` callbacks: input is batched per event-loop dispatch
 //! and at most one frame is rendered per compositor refresh.
 
+pub(crate) mod textedit;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ptr::NonNull;
 use std::time::{Duration, Instant};
@@ -89,6 +91,8 @@ enum Drag {
     Liquify { last: DVec2, pressure: f32 },
     /// Shape tool: dragging out a rectangle / ellipse (document px).
     Shape { start: DVec2, end: DVec2 },
+    /// Selecting text with the mouse while editing it on the canvas.
+    TextSelect,
     Pan { last: DVec2 },
     Rotate { last: DVec2 },
     Zoom { last: DVec2, anchor: DVec2 },
@@ -287,6 +291,8 @@ pub struct App {
     clone_aligned: bool,
     /// Font families for the text properties (loaded on first use).
     fonts: std::sync::Arc<Vec<imagine_vector::FontGroup>>,
+    /// Text being edited on the canvas.
+    text_edit: Option<textedit::TextEdit>,
     liq_tool: LiquifyTool,
     /// Liquify brush diameter (document px) and strength 0…1.
     liq_size: f32,
@@ -497,6 +503,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         clone_all: false,
         clone_aligned: true,
         fonts: Default::default(),
+        text_edit: None,
         liq_tool: LiquifyTool::Push,
         liq_size: 200.0,
         liq_strength: 0.6,
@@ -777,6 +784,10 @@ impl App {
             Tool::Move => Drag::Move { start: doc, end: doc },
             Tool::Shape { .. } => Drag::Shape { start: doc, end: doc },
             Tool::Text => {
+                if self.text_edit.is_some() && self.text_edit_press(pos, doc) {
+                    return Drag::TextSelect;
+                }
+                self.end_text_edit();
                 self.text_click(doc);
                 Drag::None
             }
@@ -1034,6 +1045,10 @@ impl App {
                 if let (Some(stroke), Some(s)) = (&mut self.stroke, &mut self.session) {
                     s.engine.stroke_dabs(&stroke.add(InputSample { pos: doc_pos, pressure }));
                 }
+            }
+            Drag::TextSelect => {
+                let doc = self.view.screen_to_doc(pos);
+                self.text_edit_drag(doc);
             }
             Drag::Liquify { last, pressure: p } => {
                 let (from, to) = (*last, self.view.screen_to_doc(pos));
@@ -1663,15 +1678,15 @@ impl App {
             })
         });
         match hit {
-            Some(id) => e.select(|d| d.active = id),
+            Some(id) => self.begin_text_edit(id, Some(at)),
             None => {
-                let spec = imagine_core::vector::TextSpec::new("Text", at.x, at.y - size as f64 * 0.6, size, [color[0], color[1], color[2], 1.0]);
-                if e.add_vector(imagine_core::VectorLayer::text(spec), "Text").is_some() {
-                    self.touch();
+                // A new, empty text with the caret at the click (removed again if left empty).
+                let spec = imagine_core::vector::TextSpec::new("", at.x, at.y - size as f64 * 0.6, size, [color[0], color[1], color[2], 1.0]);
+                if let Some(id) = e.add_vector(imagine_core::VectorLayer::text(spec), "Text") {
+                    self.begin_text_edit(id, None);
                 }
             }
         }
-        self.ui_state.vec_editor.focus_text = true;
         self.ui_state.hidden = false;
         self.needs_redraw = true;
     }
@@ -1732,6 +1747,16 @@ impl App {
             }
             self.needs_redraw = true;
             return;
+        }
+        // Typing into a text on the canvas.
+        if self.text_edit.is_some() {
+            if pressed && self.text_edit_key(ev) {
+                self.needs_redraw = true;
+                return;
+            }
+            if matches!(sym, Keysym::space | Keysym::r) && !self.mods.ctrl {
+                return;
+            }
         }
         match sym {
             Keysym::space => self.space = pressed,
@@ -2061,6 +2086,9 @@ impl App {
     }
 
     fn set_tool(&mut self, tool: Tool) {
+        if tool != Tool::Text {
+            self.end_text_edit();
+        }
         match self.boxed.as_ref().map(|b| b.0) {
             Some(BoxKind::Transform) => self.commit_box(),
             Some(BoxKind::Crop) if tool != Tool::Crop => self.boxed = None,
@@ -2330,6 +2358,7 @@ impl App {
                 _ => None,
             },
             liquify: e.liquify_active().then_some((self.liq_tool, self.liq_size, self.liq_strength)),
+            text_overlay: self.text_overlay(),
             layers: ui::panels::layer_rows(doc),
             active: doc.active,
             active_opacity: active.map_or(1.0, |l| l.opacity),
@@ -2596,6 +2625,12 @@ impl App {
 
     /// Builds the interface for this frame and applies what the user did.
     fn run_ui(&mut self) {
+        // Editing ends when its layer is no longer the active one.
+        if let Some(te) = &self.text_edit
+            && self.session.as_ref().is_none_or(|s| s.engine.doc().active != te.layer || s.engine.doc().find(te.layer).is_none())
+        {
+            self.text_edit = None;
+        }
         // Thumbnails: a few per frame, not while dragging.
         if matches!(self.drag, Drag::None)
             && let Some(s) = &mut self.session
@@ -3065,7 +3100,7 @@ impl KeyboardHandler for App {
     }
 
     fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
-        if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() {
+        if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() || self.text_edit.is_some() {
             self.key(&ev, true);
         }
     }
