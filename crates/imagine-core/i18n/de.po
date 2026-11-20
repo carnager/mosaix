@@ -2209,3 +2209,6 @@ msgstr "Fläche"
 
 msgid "Fill: opacity of the layer's own pixels; its layer style keeps full strength"
 msgstr "Fläche: Deckkraft der Ebenenpixel selbst; der Ebenenstil bleibt voll sichtbar"
+
+msgid "AVIF cannot be saved in {space} (sRGB, Display P3 and Rec. 2020 can)"
+msgstr "AVIF kann nicht in {space} gespeichert werden (sRGB, Display P3 und Rec. 2020 schon)"

@@ -467,6 +467,8 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Editierbarer Text im PSD-Export** (2026-11-20): Textebenen werden als Photoshop-Text (`TySh`) geschrieben – Punkt- und Absatztext, Schrift (PostScript-Name der tatsächlich verwendeten Schrift), Größe, Farbe, Ausrichtung je Absatz, Zeilenabstand, Laufweite, OpenType-Schalter, Transformation. Die EngineData basiert auf Photoshops eigener (Schreiber erzeugt sie byte-gleich neu). Rundreise pixelgleich (auch gedreht); Text auf Pfad bleibt Pixel. Beim Import sitzt Text jetzt auf Photoshops Grundlinie (Abweichung zu Photoshops Rendering 0,036 → 0,0095 RMSE).
 
+- **Wide-Gamut AVIF/JPEG XL** (2026-11-21): JPEG XL in allen Export-Farbräumen (Display P3, Adobe RGB, Rec. 2020; als Farbcodierung signalisiert, 8/16 Bit, verlustfrei bitgenau), AVIF in Display P3 und Rec. 2020 (10 Bit, CICP-Codes im `nclx`-Kasten; Adobe RGB hat keinen Code). Beim Öffnen werden AVIF-`nclx`-Angaben ausgewertet; Profile wie „…_P3_Srgb“ werden nicht mehr fälschlich als sRGB behandelt.
+
 **Noch offen in Phase 6:** Musterüberlagerung (braucht eine Musterbibliothek), Cursor direkt in Text auf Pfad.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)

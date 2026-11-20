@@ -601,7 +601,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "export",
-            "Export the image; format by extension: png, jpg, webp, avif, jxl, tif (flattened) or psd/psb (layers, groups and masks as shown; text, shapes and layer styles rasterised; adjustment layers only in the merged image). Wide-gamut colour spaces embed their ICC profile; 16 bit works for png, tif, psd and jxl; avif and jxl are sRGB only; quality 100 makes jxl lossless.",
+            "Export the image; format by extension: png, jpg, webp, avif, jxl, tif (flattened) or psd/psb (layers, groups, masks, adjustment layers, layer styles, fill opacity; text and shape layers stay editable; smart filters and text on a path rasterised). Wide-gamut colour spaces embed their ICC profile; 16 bit works for png, tif, psd and jxl; jxl takes every colour space, avif srgb, display_p3 and rec2020 (signalled by CICP code); quality 100 makes jxl lossless.",
             json!({ "path": { "type": "string" },
                     "color_space": { "type": "string", "enum": ["srgb", "display_p3", "adobe_rgb", "rec2020"], "description": "default srgb" },
                     "bit_depth": { "type": "integer", "enum": [8, 16] },

@@ -35,6 +35,52 @@ impl ColorSpace {
         }
     }
 
+    /// CICP colour primaries and transfer characteristics (ITU-T H.273),
+    /// for formats that signal the space by code; Adobe RGB has none.
+    pub fn cicp(self) -> Option<(u16, u16)> {
+        match self {
+            Self::Srgb => Some((1, 13)),
+            Self::DisplayP3 => Some((12, 13)),
+            Self::Rec2020 => Some((9, 1)),
+            Self::AdobeRgb => None,
+        }
+    }
+
+    /// The colour encoding libjxl signals for this space.
+    fn jxl_encoding(self) -> jpegxl_sys::color::color_encoding::JxlColorEncoding {
+        use jpegxl_sys::color::color_encoding::*;
+        let mut e = JxlColorEncoding {
+            color_space: JxlColorSpace::Rgb,
+            white_point: JxlWhitePoint::D65,
+            white_point_xy: [0.3127, 0.3290],
+            primaries: JxlPrimaries::SRgb,
+            primaries_red_xy: [0.0; 2],
+            primaries_green_xy: [0.0; 2],
+            primaries_blue_xy: [0.0; 2],
+            transfer_function: JxlTransferFunction::SRGB,
+            gamma: 0.0,
+            rendering_intent: JxlRenderingIntent::Relative,
+        };
+        match self {
+            Self::Srgb => {}
+            Self::DisplayP3 => e.primaries = JxlPrimaries::P3,
+            Self::Rec2020 => {
+                e.primaries = JxlPrimaries::Rec2100;
+                e.transfer_function = JxlTransferFunction::BT709;
+            }
+            Self::AdobeRgb => {
+                e.primaries = JxlPrimaries::Custom;
+                e.primaries_red_xy = [0.64, 0.33];
+                e.primaries_green_xy = [0.21, 0.71];
+                e.primaries_blue_xy = [0.15, 0.06];
+                e.transfer_function = JxlTransferFunction::Gamma;
+                // libjxl's gamma is the encoding exponent.
+                e.gamma = 1.0 / 2.19921875;
+            }
+        }
+        e
+    }
+
     pub(crate) fn profile(self) -> moxcms::ColorProfile {
         use moxcms::ColorProfile as P;
         match self {
@@ -167,8 +213,8 @@ pub fn write(
             )
         );
     }
-    if format == ImageFormat::Avif && opts.space != ColorSpace::Srgb {
-        bail!("{}", imagine_core::tr("AVIF export is sRGB only for now"));
+    if format == ImageFormat::Avif && opts.space.cicp().is_none() {
+        bail!("{}", imagine_core::tr!("AVIF cannot be saved in {space} (sRGB, Display P3 and Rec. 2020 can)", space = opts.space.name()));
     }
     let icc = opts.space.icc()?;
     if opts.space == ColorSpace::Srgb && !(opts.sixteen_bit && supports_16bit(path)) {
@@ -177,9 +223,88 @@ pub fn write(
         return encode8(&img, path, format, opts.quality, icc);
     }
     let convert = opts.space.converter()?;
+    let converted = convert_tiles(tiles, &convert);
+    if format == ImageFormat::Avif && opts.space != ColorSpace::Srgb {
+        let mut img = RgbaImage::new(width, height);
+        place(&mut img, (width, height), &converted, |v| ((v as u32 * 255 + 32767) / 65535) as u8);
+        return write_avif_wide(path, (width, height), img.as_raw(), opts.quality, opts.space);
+    }
+    if opts.sixteen_bit && supports_16bit(path) {
+        let mut img: ImageBuffer<Rgba<u16>, Vec<u16>> = ImageBuffer::new(width, height);
+        place(&mut img, (width, height), &converted, |v| v);
+        drop(converted);
+        let bytes: &[u8] = bytemuck::cast_slice(img.as_raw());
+        encode(
+            path,
+            format,
+            (width, height),
+            bytes,
+            ExtendedColorType::Rgba16,
+            100,
+            icc,
+        )
+    } else {
+        let mut img = RgbaImage::new(width, height);
+        place(&mut img, (width, height), &converted, |v| {
+            ((v as u32 * 255 + 32767) / 65535) as u8
+        });
+        drop(converted);
+        encode8(&img, path, format, opts.quality, icc)
+    }
+}
+
+/// AVIF in a wide-gamut space: encoded by ravif, then the container is
+/// written again with the space's CICP codes in an "nclx" colour box
+/// (ravif always describes sRGB).
+fn write_avif_wide(path: &Path, (width, height): (u32, u32), rgba: &[u8], quality: u8, space: ColorSpace) -> anyhow::Result<()> {
+    use avif_serialize::constants::{ColorPrimaries, MatrixCoefficients, TransferCharacteristics};
+    let px: Vec<ravif::RGBA8> = rgba.as_chunks::<4>().0.iter().map(|p| ravif::RGBA8::new(p[0], p[1], p[2], p[3])).collect();
+    let q = quality.clamp(1, 100) as f32;
+    let enc = ravif::Encoder::new()
+        .with_quality(q)
+        .with_alpha_quality(q)
+        .with_speed(6)
+        .with_bit_depth(ravif::BitDepth::Ten)
+        .with_alpha_color_mode(ravif::AlphaColorMode::UnassociatedClean);
+    let r = enc
+        .encode_rgba(ravif::Img::new(&px[..], width as usize, height as usize))
+        .map_err(|e| anyhow!("AVIF: {e}"))?;
+    // The AV1 data: colour, then alpha, at the end of the file ("mdat").
+    let f = &r.avif_file;
+    let n = r.color_byte_size + r.alpha_byte_size;
+    anyhow::ensure!(f.len() >= n && f.windows(4).any(|w| w == b"mdat"), "AVIF: unexpected layout");
+    let data = &f[f.len() - n..];
+    let (color, alpha) = data.split_at(r.color_byte_size);
+    let (cp, tc) = match space {
+        ColorSpace::DisplayP3 => (ColorPrimaries::DisplayP3, TransferCharacteristics::Srgb),
+        ColorSpace::Rec2020 => (ColorPrimaries::Bt2020, TransferCharacteristics::Bt709),
+        _ => (ColorPrimaries::Bt709, TransferCharacteristics::Srgb),
+    };
+    let file = avif_serialize::Aviffy::new()
+        .set_color_primaries(cp)
+        .set_transfer_characteristics(tc)
+        .set_matrix_coefficients(MatrixCoefficients::Bt601)
+        .set_full_color_range(true)
+        .to_vec(color, (!alpha.is_empty()).then_some(alpha), width, height, 10);
+    std::fs::write(path, file).with_context(|| imagine_core::tr!("creating {path}", path = path.display()))?;
+    Ok(())
+}
+
+/// The ICC profile for an AVIF file's "nclx" colour box, if it names a
+/// space other than sRGB that imagine knows (the decoder ignores the box).
+pub fn avif_nclx_icc(bytes: &[u8]) -> Option<Vec<u8>> {
+    let i = bytes.windows(8).position(|w| w == b"colrnclx")?;
+    let r = |o: usize| Some(u16::from_be_bytes([*bytes.get(i + o)?, *bytes.get(i + o + 1)?]));
+    let (p, t) = (r(8)?, r(10)?);
+    let space = ColorSpace::ALL.into_iter().find(|s| s.cicp() == Some((p, t)) || (s.cicp().map(|c| c.0) == Some(p) && p != 1))?;
+    space.icc().ok().flatten()
+}
+
+/// Premultiplied linear tiles → straight RGBA, 16-bit, encoded by `convert`.
+fn convert_tiles(tiles: &[(TileCoord, Vec<f16>)], convert: &Converter) -> Vec<(TileCoord, Vec<u16>)> {
     let ts = TILE_SIZE as usize;
     // Straight, encoded, 16-bit per tile.
-    let converted: Vec<(TileCoord, Vec<u16>)> = tiles
+    tiles
         .par_iter()
         .map(|(c, px)| {
             let mut rgb = vec![0.0f32; ts * ts * 3];
@@ -216,29 +341,7 @@ pub fn write(
             }
             (*c, out)
         })
-        .collect();
-    if opts.sixteen_bit && supports_16bit(path) {
-        let mut img: ImageBuffer<Rgba<u16>, Vec<u16>> = ImageBuffer::new(width, height);
-        place(&mut img, (width, height), &converted, |v| v);
-        drop(converted);
-        let bytes: &[u8] = bytemuck::cast_slice(img.as_raw());
-        encode(
-            path,
-            format,
-            (width, height),
-            bytes,
-            ExtendedColorType::Rgba16,
-            100,
-            icc,
-        )
-    } else {
-        let mut img = RgbaImage::new(width, height);
-        place(&mut img, (width, height), &converted, |v| {
-            ((v as u32 * 255 + 32767) / 65535) as u8
-        });
-        drop(converted);
-        encode8(&img, path, format, opts.quality, icc)
-    }
+        .collect()
 }
 
 /// Copies converted tiles into an image, cropping at its edges.
@@ -382,21 +485,32 @@ fn encode(
     }
 }
 
-/// JPEG XL through libjxl: sRGB, 8 or 16 bit with alpha; quality 100 is
-/// lossless, below that the JPEG-like quality scale.
+/// JPEG XL through libjxl: 8 or 16 bit with alpha in any of the export
+/// colour spaces (signalled as a colour encoding); quality 100 is lossless,
+/// below that the JPEG-like quality scale.
 fn write_jxl(path: &Path, (width, height): (u32, u32), tiles: &[(TileCoord, Vec<f16>)], opts: &ExportOptions) -> anyhow::Result<()> {
     use jpegxl_rs::encode::{EncoderFrame, encoder_builder};
-    if opts.space != ColorSpace::Srgb {
-        bail!("{}", imagine_core::tr("JPEG XL export is sRGB only for now"));
-    }
     let lossless = opts.quality >= 100;
     let mut enc = encoder_builder().has_alpha(true).lossless(lossless).build().map_err(|e| anyhow!("JPEG XL: {e}"))?;
+    if opts.space != ColorSpace::Srgb {
+        enc.color_encoding = Some(jpegxl_rs::encode::ColorEncoding::Custom(opts.space.jxl_encoding()));
+    }
     if lossless {
         enc.uses_original_profile = true;
     } else {
         enc.quality = jxl_distance(opts.quality);
     }
-    let data = if opts.sixteen_bit {
+    let data = if opts.space != ColorSpace::Srgb {
+        let conv = convert_tiles(tiles, &opts.space.converter()?);
+        let mut img16 = vec![0u16; width as usize * height as usize * 4];
+        place(&mut img16, (width, height), &conv, |v| v);
+        if opts.sixteen_bit {
+            enc.encode_frame(&EncoderFrame::new(&img16).num_channels(4), width, height)
+        } else {
+            let img8: Vec<u8> = img16.iter().map(|&v| ((v as u32 * 255 + 32767) / 65535) as u8).collect();
+            enc.encode_frame(&EncoderFrame::new(&img8).num_channels(4), width, height)
+        }
+    } else if opts.sixteen_bit {
         let img16 = to_srgb16(width, height, tiles);
         enc.encode_frame(&EncoderFrame::new(&img16).num_channels(4), width, height)
     } else {
@@ -556,9 +670,49 @@ mod tests {
                 assert!(b.starts_with(&[0xff, 0x0a]) || b.starts_with(b"\0\0\0\x0cJXL "), "JPEG XL signature");
             }
         }
-        // Wide gamut is refused (sRGB only for now).
-        let p = dir.path().join("w.jxl");
-        assert!(write(&p, (64, 48), &tiles, &ExportOptions { space: ColorSpace::DisplayP3, ..Default::default() }).is_err());
+    }
+
+    #[test]
+    fn wide_gamut_avif_and_jpeg_xl() {
+        let ts = TILE_SIZE as usize;
+        // Pure sRGB red: inside the wider spaces it is less saturated.
+        let mut t = vec![f16::ZERO; ts * ts * 4];
+        for p in t.chunks_mut(4) {
+            p.copy_from_slice(&[1.0, 0.0, 0.0, 1.0].map(f16::from_f32));
+        }
+        let tiles = vec![(TileCoord::new(0, 0), t)];
+        let dir = tempfile::tempdir().unwrap();
+        for space in [ColorSpace::DisplayP3, ColorSpace::Rec2020, ColorSpace::AdobeRgb] {
+            // Expected encoded values of sRGB red in that space.
+            let mut want = [1.0f32, 0.0, 0.0];
+            space.converter().unwrap()(&mut want);
+            let near = |px: &[u8], tol: f32| (0..3).all(|k| (px[k] as f32 / 255.0 - want[k]).abs() < tol);
+            // JPEG XL (lossless, so exact), with the colour encoding signalled.
+            let p = dir.path().join("w.jxl");
+            let opts = ExportOptions { space, quality: 100, ..Default::default() };
+            write(&p, (64, 48), &tiles, &opts).unwrap();
+            let dec = jpegxl_rs::decoder_builder().icc_profile(true).build().unwrap();
+            let (meta, px) = dec.decode_with::<u8>(&std::fs::read(&p).unwrap()).unwrap();
+            assert!(near(&px, 1.5 / 255.0), "{space:?} JXL {:?} vs {want:?}", &px[..4]);
+            let icc = meta.icc_profile.expect("colour profile");
+            let prof = moxcms::ColorProfile::new_from_slice(&icc).unwrap();
+            // Wider than sRGB: the green primary differs (Adobe RGB shares red and blue).
+            let xy = |c: moxcms::Xyzd| (c.x / (c.x + c.y + c.z), c.y / (c.x + c.y + c.z));
+            let (g, s) = (xy(prof.green_colorant), xy(moxcms::ColorProfile::new_srgb().green_colorant));
+            assert!((g.0 - s.0).hypot(g.1 - s.1) > 0.05, "{space:?}: not sRGB's primaries");
+            // AVIF: only spaces with a CICP code.
+            let p = dir.path().join("w.avif");
+            let r = write(&p, (64, 48), &tiles, &ExportOptions { space, quality: 95, ..Default::default() });
+            if space.cicp().is_none() {
+                assert!(r.is_err());
+                continue;
+            }
+            r.unwrap();
+            let b = std::fs::read(&p).unwrap();
+            let img = image::open(&p).unwrap().into_rgba8();
+            assert!(near(img.get_pixel(10, 10).0.as_slice(), 0.03), "{space:?} AVIF {:?} vs {want:?}", img.get_pixel(10, 10));
+            assert_eq!(avif_nclx_icc(&b), space.icc().unwrap(), "{space:?} signalled");
+        }
     }
 
     #[test]

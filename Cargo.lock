@@ -1397,14 +1397,17 @@ name = "imagine-io"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "avif-serialize",
  "bytemuck",
  "half",
  "i_overlay",
  "image",
  "imagine-core",
  "jpegxl-rs",
+ "jpegxl-sys",
  "miniz_oxide 0.8.9",
  "moxcms",
+ "ravif",
  "rayon",
  "serde",
  "serde_json",

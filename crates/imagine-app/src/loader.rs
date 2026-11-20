@@ -246,7 +246,14 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
             let mut decoder = reader.into_decoder()?;
             let icc = image::ImageDecoder::icc_profile(&mut decoder)
                 .ok()
-                .flatten();
+                .flatten()
+                .or_else(|| {
+                    // AVIF names wide-gamut spaces by code, which the decoder ignores.
+                    let avif = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("avif"));
+                    avif.then(|| std::fs::read(&path).ok())
+                        .flatten()
+                        .and_then(|b| imagine_io::export::avif_nclx_icc(&b))
+                });
             let img = DynamicImage::from_decoder(decoder)?;
             let decode_ms = ms(t0);
             tracing::info!(
@@ -705,11 +712,15 @@ pub fn color_transform(icc: &[u8]) -> Option<(String, RowConverter)> {
         Some(moxcms::ProfileText::PlainString(s)) => s.clone(),
         _ => String::new(),
     };
+    tracing::debug!("embedded color profile: {name:?}");
     let srgb = ColorProfile::new_srgb();
-    let same_primaries = src.red_colorant == srgb.red_colorant
-        && src.green_colorant == srgb.green_colorant
-        && src.blue_colorant == srgb.blue_colorant;
-    if name.to_lowercase().contains("srgb") || (same_primaries && src.red_trc == srgb.red_trc) {
+    // sRGB primaries (up to rounding in the profile).
+    let close = |a: moxcms::Xyzd, b: moxcms::Xyzd| (a.x - b.x).abs() + (a.y - b.y).abs() + (a.z - b.z).abs() < 0.003;
+    let same_primaries = close(src.red_colorant, srgb.red_colorant)
+        && close(src.green_colorant, srgb.green_colorant)
+        && close(src.blue_colorant, srgb.blue_colorant);
+    // The name alone is not enough: "…P3_Srgb" is P3 with sRGB's curve.
+    if same_primaries && (name.to_lowercase().contains("srgb") || src.red_trc == srgb.red_trc) {
         return None;
     }
     let mut linear = ColorProfile::new_srgb();
