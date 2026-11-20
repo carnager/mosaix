@@ -165,6 +165,8 @@ pub struct Model {
     pub active: LayerId,
     pub active_opacity: f32,
     pub active_blend: BlendMode,
+    /// The user's keyboard shortcuts.
+    pub keymap: std::sync::Arc<palette::Keymap>,
     /// Active layer is a group: whether it is Pass Through.
     pub active_pass_through: Option<bool>,
     pub history: Vec<String>,
@@ -193,6 +195,9 @@ pub enum Action {
     Tool(ToolId),
     Color([f32; 3]),
     BgColor([f32; 3]),
+    /// Keyboard shortcut of a command: `None` removes it, `reset` restores the default.
+    Shortcut { id: String, combo: Option<palette::Combo>, reset: bool },
+    ResetShortcuts,
     /// Groups: Pass Through on/off (choosing a blend mode turns it off).
     PassThrough(bool),
     SwapColors,
@@ -303,6 +308,9 @@ pub struct State {
     /// Area left for the canvas (points); `None` = whole window.
     pub canvas: Option<egui::Rect>,
     pub palette: Option<(String, usize)>,
+    /// The keyboard-shortcuts dialog: search text and the command whose new
+    /// keys are being recorded.
+    pub shortcuts: Option<ShortcutsDialog>,
     rename: Option<(LayerId, String)>,
     dialog: Option<Dialog>,
     show_log: bool,
@@ -368,6 +376,12 @@ impl State {
             || self.filter.is_some()
             || self.vec_editor.fonts.open
     }
+}
+
+#[derive(Default)]
+pub struct ShortcutsDialog {
+    pub query: String,
+    pub capturing: Option<String>,
 }
 
 pub fn style(ctx: &egui::Context) {
@@ -511,9 +525,10 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
         st.new_doc = None;
     }
     filter_dialog(ctx, st, &mut out);
+    shortcuts_dialog(ctx, m, st, &mut out);
     if let Some((query, sel)) = &mut st.palette {
         let mut close = false;
-        command_palette(ctx, query, sel, &mut out, &mut close);
+        command_palette(ctx, &m.keymap, query, sel, &mut out, &mut close);
         if close {
             st.palette = None;
         }
@@ -582,7 +597,7 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
             ui.menu_button(palette::menu_text(menu), |ui| {
                 for c in COMMANDS.iter().filter(|c| c.menu == menu) {
                     if ui
-                        .add(egui::Button::new(c.label_text()).shortcut_text(c.shortcut()))
+                        .add(egui::Button::new(c.label_text()).shortcut_text(palette::shortcut_text(&c, &m.keymap)))
                         .clicked()
                     {
                         out.push(Action::Command(*c));
@@ -1577,7 +1592,7 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
             ] {
                 let c = cmd(label);
                 if icons::button(ui, icon, 24.0, false)
-                    .on_hover_text(format!("{} ({})", c.label_text(), c.shortcut()))
+                    .on_hover_text(format!("{} ({})", c.label_text(), palette::shortcut_text(&c, &m.keymap)))
                     .clicked()
                 {
                     out.push(Action::Command(c));
@@ -1972,6 +1987,7 @@ fn size_fields(ui: &mut egui::Ui, w: &mut u32, h: &mut u32) {
 
 fn command_palette(
     ctx: &egui::Context,
+    keymap: &palette::Keymap,
     query: &mut String,
     sel: &mut usize,
     out: &mut Vec<Action>,
@@ -2059,7 +2075,7 @@ fn command_palette(
                         } else {
                             Color32::from_gray(150)
                         };
-                        let shortcut = c.shortcut();
+                        let shortcut = palette::shortcut_text(c, keymap);
                         let right = if shortcut.is_empty() {
                             c.menu_text().to_string()
                         } else {
@@ -2313,5 +2329,72 @@ fn smart_filter_rows(
                 edit: Some((row.id, index)),
             });
         }
+    }
+}
+
+/// Edit › Keyboard Shortcuts: every menu command with its shortcut; click
+/// one and press the new keys.
+fn shortcuts_dialog(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    let Some(d) = &mut st.shortcuts else { return };
+    let mut open = true;
+    egui::Window::new(tr("Keyboard Shortcuts"))
+        .open(&mut open)
+        .default_size([520.0, 560.0])
+        .default_pos(ctx.content_rect().center() - Vec2::new(260.0, 300.0))
+        .collapsible(false)
+        .show(ctx, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut d.query).hint_text(tr("Search commands …")).desired_width(f32::INFINITY));
+            ui.label(
+                RichText::new(tr("Click a shortcut, then press the new keys. Backspace removes it, Esc cancels. Keys taken from another command are removed there."))
+                    .weak()
+                    .small(),
+            );
+            ui.separator();
+            let q = d.query.to_lowercase();
+            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(460.0).show(ui, |ui| {
+                egui::Grid::new("shortcuts").num_columns(3).striped(true).spacing([12.0, 4.0]).show(ui, |ui| {
+                    for menu in MENUS {
+                        let cmds: Vec<&palette::Cmd> = COMMANDS
+                            .iter()
+                            .filter(|c| c.menu == menu)
+                            .filter(|c| q.is_empty() || c.label_text().to_lowercase().contains(&q) || c.label.to_lowercase().contains(&q))
+                            .collect();
+                        if cmds.is_empty() {
+                            continue;
+                        }
+                        ui.label(RichText::new(palette::menu_text(menu)).strong());
+                        ui.end_row();
+                        for c in cmds {
+                            let id = c.id();
+                            ui.label(c.label_text());
+                            let capturing = d.capturing.as_deref() == Some(id.as_str());
+                            let text = if capturing {
+                                tr("Press keys …").to_string()
+                            } else {
+                                let s = palette::shortcut_text(c, &m.keymap);
+                                if s.is_empty() { "—".to_string() } else { s }
+                            };
+                            if ui.add(egui::Button::selectable(capturing, text).min_size(Vec2::new(150.0, 0.0))).clicked() {
+                                d.capturing = if capturing { None } else { Some(id.clone()) };
+                            }
+                            if m.keymap.contains_key(&id) {
+                                if ui.small_button(tr("Default")).on_hover_text(format!("{} {}", tr("Default:"), palette::Combo::of(c).text())).clicked() {
+                                    out.push(Action::Shortcut { id, combo: None, reset: true });
+                                }
+                            } else {
+                                ui.label("");
+                            }
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+            ui.separator();
+            if ui.add_enabled(!m.keymap.is_empty(), egui::Button::new(tr("Reset All"))).clicked() {
+                out.push(Action::ResetShortcuts);
+            }
+        });
+    if !open {
+        st.shortcuts = None;
     }
 }

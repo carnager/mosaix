@@ -110,6 +110,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         active: active.id,
         active_opacity: active.opacity,
         active_blend: active.blend,
+        keymap: Default::default(),
         active_pass_through: active.is_group().then_some(active.pass_through),
         history: labels,
         history_done: done,
@@ -274,6 +275,9 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             let view = s.engine.thumbnail_view(slot);
             row.thumb = Some((gui.register_texture(&gpu.device, &view), uv));
         }
+    }
+    if let Ok(q) = std::env::var("IMAGINE_SNAPSHOT_SHORTCUTS") {
+        state.shortcuts = Some(panels::ShortcutsDialog { query: q, capturing: Some("Edit/Copy".into()) });
     }
     if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TAB") {
         state.focus_pane = Some(match t.as_str() {

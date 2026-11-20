@@ -2,8 +2,105 @@
 //! its keyboard shortcut. Executing a command replays its shortcut, so
 //! menus, palette and keyboard can never disagree.
 
+use std::collections::BTreeMap;
+
 use imagine_core::tr;
+use serde::{Deserialize, Serialize};
 use smithay_client_toolkit::seat::keyboard::Keysym as K;
+
+/// A key combination, normalised (an upper-case letter is the lower-case
+/// letter with Shift).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Combo {
+    pub key: u32,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub alt: bool,
+}
+
+impl Combo {
+    pub fn new(key: K, ctrl: bool, shift: bool, alt: bool) -> Self {
+        let raw = key.raw();
+        let (key, shift) = if (0x41..=0x5a).contains(&raw) { (raw + 0x20, true) } else { (raw, shift) };
+        Self { key, ctrl, shift, alt }
+    }
+
+    pub fn of(c: &Cmd) -> Self {
+        Self::new(c.key, c.ctrl, c.shift, c.alt)
+    }
+
+    pub fn text(&self) -> String {
+        Cmd { menu: "", label: "", key: K::new(self.key), ctrl: self.ctrl, shift: self.shift, alt: self.alt }.shortcut()
+    }
+}
+
+/// The user's shortcuts: command id → combination (`None` = no shortcut).
+/// Commands not listed keep their default.
+pub type Keymap = BTreeMap<String, Option<Combo>>;
+
+/// The shortcut a command has with the user's keymap.
+pub fn effective(c: &Cmd, km: &Keymap) -> Option<Combo> {
+    match km.get(&c.id()) {
+        Some(o) => *o,
+        None => Some(Combo::of(c)),
+    }
+}
+
+/// Text of a command's shortcut ("" if it has none).
+pub fn shortcut_text(c: &Cmd, km: &Keymap) -> String {
+    effective(c, km).map(|k| k.text()).unwrap_or_default()
+}
+
+/// What a key combination means with the user's keymap.
+pub enum Lookup {
+    /// Bound by the user to this command.
+    Command(Cmd),
+    /// A default shortcut whose command was given another one (or none).
+    Freed,
+    /// Not affected by the keymap: handle as usual.
+    Default,
+}
+
+pub fn lookup(combo: Combo, km: &Keymap) -> Lookup {
+    if km.is_empty() {
+        return Lookup::Default;
+    }
+    if let Some(c) = COMMANDS.iter().find(|c| km.get(&c.id()) == Some(&Some(combo))) {
+        return Lookup::Command(*c);
+    }
+    let defaults = |overridden: bool| COMMANDS.iter().any(|c| km.contains_key(&c.id()) == overridden && Combo::of(c) == combo);
+    if defaults(false) {
+        Lookup::Default
+    } else if defaults(true) {
+        Lookup::Freed
+    } else {
+        Lookup::Default
+    }
+}
+
+/// Sets a command's shortcut (`None` = remove; `reset` = back to the
+/// default). Another command using the same keys loses them, like in Photoshop.
+pub fn rebind(km: &mut Keymap, id: &str, combo: Option<Combo>, reset: bool) {
+    let Some(cmd) = COMMANDS.iter().find(|c| c.id() == id) else { return };
+    let new = if reset { Some(Combo::of(cmd)) } else { combo };
+    if let Some(k) = new {
+        for other in COMMANDS.iter().filter(|c| c.id() != id) {
+            if effective(other, km) == Some(k) {
+                km.insert(other.id(), None);
+            }
+        }
+    }
+    if reset {
+        km.remove(id);
+    } else {
+        km.insert(id.to_string(), combo);
+    }
+    // Entries equal to their default are not needed.
+    km.retain(|id, v| COMMANDS.iter().find(|c| c.id() == *id).is_some_and(|c| *v != Some(Combo::of(c))));
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Cmd {
@@ -45,6 +142,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("File", "Quit", K::q, true, false, false),
     c("Edit", "Undo", K::z, true, false, false),
     c("Edit", "Redo", K::Z, true, true, false),
+    c("Edit", "Keyboard Shortcuts …", K::k, true, true, true),
     c("Edit", "Copy", K::c, true, false, false),
     c("Edit", "Copy Merged", K::C, true, true, false),
     c("Edit", "Cut", K::x, true, false, false),
@@ -244,6 +342,11 @@ impl Cmd {
     }
 
     /// Human-readable shortcut, e.g. "Ctrl+Shift+N".
+    /// Stable id (English menu and label) for the keymap.
+    pub fn id(&self) -> String {
+        format!("{}/{}", self.menu, self.label)
+    }
+
     pub fn shortcut(&self) -> String {
         let ctrl = tr("Ctrl");
         let shift = tr("Shift");
@@ -353,6 +456,31 @@ pub fn search(query: &str) -> Vec<&'static Cmd> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keymap_rebinds_frees_and_resolves_conflicts() {
+        let mut km = Keymap::new();
+        let copy = find("Copy");
+        let paste = find("Paste");
+        let ctrl_k = Combo::new(K::k, true, false, false);
+        // Copy → Ctrl+K: runs Copy; Ctrl+C is free now.
+        rebind(&mut km, &copy.id(), Some(ctrl_k), false);
+        assert!(matches!(lookup(ctrl_k, &km), Lookup::Command(c) if c.label == "Copy"));
+        assert!(matches!(lookup(Combo::of(&copy), &km), Lookup::Freed));
+        assert_eq!(shortcut_text(&copy, &km), ctrl_k.text());
+        // Paste takes Ctrl+K: Copy loses it (no shortcut).
+        rebind(&mut km, &paste.id(), Some(ctrl_k), false);
+        assert_eq!(effective(&copy, &km), None);
+        assert!(matches!(lookup(ctrl_k, &km), Lookup::Command(c) if c.label == "Paste"));
+        // Untouched defaults keep working.
+        assert!(matches!(lookup(Combo::of(&find("Cut")), &km), Lookup::Default));
+        // Reset: back to defaults, nothing stored.
+        rebind(&mut km, &paste.id(), None, true);
+        rebind(&mut km, &copy.id(), None, true);
+        assert!(km.is_empty(), "{km:?}");
+        // Upper-case keysym = Shift + letter.
+        assert_eq!(Combo::new(K::C, true, false, false), Combo::new(K::c, true, true, false));
+    }
 
     #[test]
     fn shortcuts_read_like_photoshop() {

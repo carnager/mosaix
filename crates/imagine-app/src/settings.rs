@@ -97,6 +97,8 @@ pub struct Settings {
     pub favourite_fonts: Vec<String>,
     /// Panel layout (egui_dock state); `None` = default.
     pub dock_layout: Option<serde_json::Value>,
+    /// The user's keyboard shortcuts (only those that differ from the defaults).
+    pub keymap: crate::ui::palette::Keymap,
     pub recent_fonts: Vec<String>,
 }
 
@@ -117,6 +119,7 @@ impl Default for Settings {
             language: "auto".into(),
             favourite_fonts: Vec::new(),
             dock_layout: None,
+            keymap: Default::default(),
             recent_fonts: Vec::new(),
         }
     }

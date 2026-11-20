@@ -302,6 +302,9 @@ msgstr "Löschen"
 msgid "Clear Area"
 msgstr "Fläche löschen"
 
+msgid "Click a shortcut, then press the new keys. Backspace removes it, Esc cancels. Keys taken from another command are removed there."
+msgstr "Kürzel anklicken, dann die neuen Tasten drücken. Rücktaste entfernt es, Esc bricht ab. Tasten, die ein anderer Befehl hatte, werden dort entfernt."
+
 msgid "Click adds a point, drag moves it, drag it out of the graph to remove it."
 msgstr "Klick setzt einen Punkt, Ziehen verschiebt ihn, aus dem Feld ziehen entfernt ihn."
 
@@ -503,8 +506,14 @@ msgstr "Abdunkeln"
 msgid "decoded {w}×{h} {color} in {ms} ms"
 msgstr "dekodiert {w}×{h} {color} in {ms} ms"
 
+msgid "Default"
+msgstr "Standard"
+
 msgid "Default colors: black/white (D)"
 msgstr "Standardfarben: Schwarz/Weiß (D)"
+
+msgid "Default:"
+msgstr "Standard:"
 
 msgid "Del"
 msgstr "Entf"
@@ -938,6 +947,12 @@ msgstr "Block"
 msgid "Justify"
 msgstr "Blocksatz"
 
+msgid "Keyboard Shortcuts"
+msgstr "Tastaturbefehle"
+
+msgid "Keyboard Shortcuts …"
+msgstr "Tastaturbefehle …"
+
 msgid "Lasso"
 msgstr "Lasso"
 
@@ -1319,6 +1334,9 @@ msgstr "Tontrennung"
 msgid "PRESS Ctrl+Q AGAIN TO DISCARD"
 msgstr "NOCHMAL Strg+Q ZUM VERWERFEN"
 
+msgid "Press keys …"
+msgstr "Tasten drücken …"
+
 msgid "Preview"
 msgstr "Vorschau"
 
@@ -1417,6 +1435,9 @@ msgstr "{path} ersetzen"
 
 msgid "Reset"
 msgstr "Zurücksetzen"
+
+msgid "Reset All"
+msgstr "Alle zurücksetzen"
 
 msgid "Reset Panel Layout"
 msgstr "Bedienfelder zurücksetzen"

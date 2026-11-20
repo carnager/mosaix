@@ -2328,6 +2328,34 @@ impl App {
     fn key(&mut self, ev: &KeyEvent, pressed: bool) {
         let sym = ev.keysym;
         tracing::debug!(?sym, raw = ev.raw_code, pressed, "key");
+        // Recording a new shortcut (keyboard-shortcuts dialog).
+        if let Some(id) = self.ui_state.shortcuts.as_mut().and_then(|d| d.capturing.clone()) {
+            let modifier = matches!(
+                sym,
+                Keysym::Shift_L | Keysym::Shift_R | Keysym::Control_L | Keysym::Control_R | Keysym::Alt_L | Keysym::Alt_R | Keysym::Super_L | Keysym::Super_R | Keysym::ISO_Level3_Shift
+            );
+            if pressed && !modifier {
+                let (ctrl, shift, alt) = (self.mods.ctrl, self.mods.shift, self.mods.alt);
+                let plain = !ctrl && !shift && !alt;
+                match sym {
+                    Keysym::Escape if plain => {}
+                    Keysym::BackSpace | Keysym::Delete if plain => {
+                        ui::palette::rebind(&mut self.settings.keymap, &id, None, false);
+                        self.store_settings();
+                    }
+                    _ => {
+                        let combo = ui::palette::Combo::new(sym, ctrl, shift, alt);
+                        ui::palette::rebind(&mut self.settings.keymap, &id, Some(combo), false);
+                        self.store_settings();
+                    }
+                }
+                if let Some(d) = &mut self.ui_state.shortcuts {
+                    d.capturing = None;
+                }
+                self.needs_redraw = true;
+            }
+            return;
+        }
         // Text fields and the command palette take the keyboard.
         if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() {
             // Clipboard in text fields.
@@ -2371,7 +2399,13 @@ impl App {
         if !pressed || self.stroke.is_some() {
             return;
         }
-        self.hotkey(ev);
+        // The user's shortcuts come first; a default given away does nothing.
+        let combo = ui::palette::Combo::new(sym, self.mods.ctrl, self.mods.shift, self.mods.alt);
+        match ui::palette::lookup(combo, &self.settings.keymap) {
+            ui::palette::Lookup::Command(c) => self.run_cmd(c),
+            ui::palette::Lookup::Freed => {}
+            ui::palette::Lookup::Default => self.hotkey(ev),
+        }
         self.needs_redraw = true;
     }
 
@@ -2497,6 +2531,9 @@ impl App {
             Keysym::j if ctrl => self.edit(tr("Duplicate Layer"), |d| d.duplicate_active().is_some()),
             Keysym::g | Keysym::G if ctrl && shift => self.edit(tr("Ungroup Layers"), |d| d.ungroup_active()),
             // Ctrl+Alt+G: clipping mask on/off (clips to the layer below).
+            Keysym::k | Keysym::K if ctrl && alt && shift => {
+                self.ui_state.shortcuts = Some(Default::default());
+            }
             Keysym::g if ctrl && alt => self.edit(tr("Clipping Mask"), |d| d.toggle_clip_active()),
             Keysym::g if ctrl => self.edit(tr("Group Layers"), |d| d.group_active().is_some()),
             // Shift+Rücktaste: content-aware fill (Strg: learn from all layers).
@@ -3106,6 +3143,7 @@ impl App {
             active: doc.active,
             active_opacity: active.map_or(1.0, |l| l.opacity),
             active_blend: active.map_or(imagine_core::BlendMode::Normal, |l| l.blend),
+            keymap: std::sync::Arc::new(self.settings.keymap.clone()),
             active_pass_through: active.filter(|l| l.is_group()).map(|l| l.pass_through),
             history,
             history_done,
@@ -3169,6 +3207,14 @@ impl App {
                 }
                 Action::Color(c) => self.brush.color = c,
                 Action::BgColor(c) => self.bg_color = c,
+                Action::Shortcut { id, combo, reset } => {
+                    ui::palette::rebind(&mut self.settings.keymap, &id, combo, reset);
+                    self.store_settings();
+                }
+                Action::ResetShortcuts => {
+                    self.settings.keymap.clear();
+                    self.store_settings();
+                }
                 Action::SwapColors => self.swap_colors(),
                 Action::ResetColors => self.reset_colors(),
                 Action::Eyedrop { radius, all } => {
