@@ -23,6 +23,7 @@
 mod apply;
 mod display;
 mod frame;
+mod magic;
 mod readback;
 mod selection;
 mod transform;
@@ -39,6 +40,7 @@ use half::f16;
 use imagine_core::{Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TILE_SIZE, TileCoord};
 
 pub use apply::GradientKind;
+pub use magic::SampleFrom;
 pub use readback::{PoolKind, Readback};
 pub use transform::{Interp, is_integer_translation};
 
@@ -49,7 +51,7 @@ use util::{DynBuf, Params, PipelineSpec, compute_pipeline, make_origin_buf, rend
 pub const MAX_LAYER_CHUNKS: u32 = 64;
 pub const MAX_MASK_CHUNKS: u32 = 64;
 const CHUNK_LAYERS: u32 = 256;
-const MAX_COMPOSITE_CHUNKS: u32 = 64;
+pub(super) const MAX_COMPOSITE_CHUNKS: u32 = 64;
 const NONE: u32 = u32::MAX;
 const UNIFORM_STRIDE: u64 = 256;
 const PARAM_SLOTS: usize = 4096;
@@ -195,6 +197,7 @@ pub struct Engine {
     flatten_bgl: wgpu::BindGroupLayout,
     apply_bgl: wgpu::BindGroupLayout,
     warp_bgl: wgpu::BindGroupLayout,
+    comp_array_bgl: wgpu::BindGroupLayout,
     bounds_bgl: wgpu::BindGroupLayout,
     mip_bgl: wgpu::BindGroupLayout,
     screen_bgl: wgpu::BindGroupLayout,
@@ -211,6 +214,7 @@ pub struct Engine {
     warp_rgba_pipeline: wgpu::RenderPipeline,
     warp_mask_pipeline: wgpu::RenderPipeline,
     bounds_pipeline: wgpu::ComputePipeline,
+    similar_pipeline: wgpu::RenderPipeline,
     flatten_pipeline: wgpu::ComputePipeline,
     mip_pipeline: wgpu::ComputePipeline,
 }
@@ -290,6 +294,7 @@ impl Engine {
         let mip_shader = shader("mip", include_str!("../shaders/mip.wgsl").into());
         let warp_shader = shader("warp", include_str!("../shaders/warp.wgsl").into());
         let bounds_shader = shader("bounds", include_str!("../shaders/bounds.wgsl").into());
+        let similar_shader = shader("similar", include_str!("../shaders/similar.wgsl").into());
 
         // ---- bind group layouts ---------------------------------------------
         use wgpu::ShaderStages as S;
@@ -364,6 +369,10 @@ impl Engine {
                 buffer(2, S::FRAGMENT, storage, false),
             ],
         );
+        // Binding arrays cannot share a group with dynamic offsets: the
+        // composite array gets its own group.
+        let comp_array_bgl =
+            bgl("composite array", &[texture(0, S::FRAGMENT, false, D::D2Array, NonZeroU32::new(MAX_COMPOSITE_CHUNKS))]);
         let storage_rw = wgpu::BufferBindingType::Storage { read_only: false };
         let bounds_bgl = bgl(
             "bounds",
@@ -399,6 +408,7 @@ impl Engine {
         let brush_layout = layout("brush", &[&brush_bgl]);
         let apply_layout = layout("apply", &[&arrays_bgl, &apply_bgl]);
         let warp_layout = layout("warp", &[&arrays_bgl, &warp_bgl]);
+        let similar_layout = layout("similar", &[&arrays_bgl, &apply_bgl, &comp_array_bgl]);
 
         // ---- pipelines ------------------------------------------------------
         let tile_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32];
@@ -469,6 +479,8 @@ impl Engine {
             rp("warp rgba", &warp_layout, &warp_shader, ("vs", "fs_rgba"), &[], TILE_FORMAT, None, TriangleList);
         let warp_mask_pipeline =
             rp("warp mask", &warp_layout, &warp_shader, ("vs", "fs_mask"), &[], MASK_FORMAT, None, TriangleList);
+        let similar_pipeline =
+            rp("similar", &similar_layout, &similar_shader, ("vs", "fs"), &[], MASK_FORMAT, None, TriangleList);
         let bounds_pipeline = compute_pipeline(
             device,
             "bounds",
@@ -579,6 +591,7 @@ impl Engine {
             flatten_bgl,
             apply_bgl,
             warp_bgl,
+            comp_array_bgl,
             bounds_bgl,
             mip_bgl,
             screen_bgl,
@@ -594,6 +607,7 @@ impl Engine {
             warp_rgba_pipeline,
             warp_mask_pipeline,
             bounds_pipeline,
+            similar_pipeline,
             flatten_pipeline,
             mip_pipeline,
         };

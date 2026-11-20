@@ -13,7 +13,7 @@ use glam::{DAffine2, DVec2};
 use imagine_core::color::linear_to_srgb;
 use imagine_core::mask::{CombineOp, Shape};
 use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View};
-use imagine_gpu::{Engine, GpuContext, GradientKind, Interp, Overlay, OverlayLine, StrokeParams, StrokeTarget};
+use imagine_gpu::{Engine, GpuContext, GradientKind, Interp, Overlay, SampleFrom, OverlayLine, StrokeParams, StrokeTarget};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
@@ -103,6 +103,7 @@ enum Tool {
     Gradient { radial: bool },
     Move,
     Crop,
+    Wand,
 }
 
 impl Tool {
@@ -117,6 +118,7 @@ impl Tool {
             Tool::Gradient { radial: true } => "Verlauf radial",
             Tool::Move => "Verschieben",
             Tool::Crop => "Zuschneiden",
+            Tool::Wand => "Zauberstab",
         }
     }
 
@@ -201,6 +203,8 @@ pub struct App {
     quick_mask: bool,
     /// Free transform (Strg+T) or crop box being edited.
     boxed: Option<(BoxKind, BoxEdit)>,
+    wand_tolerance: f32,
+    wand_contiguous: bool,
     started: Instant,
 
     // Saving
@@ -356,6 +360,8 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         mask_edit: false,
         quick_mask: false,
         boxed: None,
+        wand_tolerance: 32.0,
+        wand_contiguous: true,
         started: Instant::now(),
         save_job: None,
         saving: false,
@@ -562,6 +568,18 @@ impl App {
             Tool::Gradient { .. } => Drag::Gradient { start: doc, end: doc },
             Tool::Move => Drag::Move { start: doc, end: doc },
             Tool::Crop => Drag::None,
+            Tool::Wand => {
+                let (x, y) = (doc.x.floor(), doc.y.floor());
+                let (tol, contiguous) = (self.wand_tolerance, self.wand_contiguous);
+                if x >= 0.0 && y >= 0.0 {
+                    let t0 = Instant::now();
+                    self.engine_op(|e| {
+                        e.magic_wand(x as u32, y as u32, tol, contiguous, true, SampleFrom::Image, op, "Zauberstab")
+                    });
+                    tracing::info!("Zauberstab: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+                }
+                Drag::None
+            }
         }
     }
 
@@ -1094,6 +1112,11 @@ impl App {
                 let r = self.view.rotation;
                 self.view.rotate_at(center, -r);
             }
+            Keysym::bracketleft | Keysym::bracketright if self.tool == Tool::Wand => {
+                let step = if sym == Keysym::bracketleft { -8.0 } else { 8.0 };
+                self.wand_tolerance = (self.wand_tolerance + step).clamp(0.0, 255.0);
+                tracing::info!("Toleranz {:.0}", self.wand_tolerance);
+            }
             Keysym::bracketleft => self.brush.size = (self.brush.size / 1.2).max(1.0),
             Keysym::bracketright => self.brush.size = (self.brush.size * 1.2).min(5000.0),
             Keysym::e => self.set_tool(Tool::Eraser),
@@ -1119,6 +1142,17 @@ impl App {
                 tracing::info!("Farbe: {}", if dark { "Weiß" } else { "Schwarz" });
             }
             Keysym::c => self.set_tool(Tool::Crop),
+            Keysym::w => {
+                if self.tool == Tool::Wand {
+                    self.wand_contiguous = !self.wand_contiguous;
+                }
+                self.set_tool(Tool::Wand);
+                tracing::info!(
+                    "Zauberstab: Toleranz {:.0} ([ / ]), {} (W wechselt), nimmt alle Ebenen auf",
+                    self.wand_tolerance,
+                    if self.wand_contiguous { "nur zusammenhängend" } else { "überall im Bild" }
+                );
+            }
             Keysym::p => {
                 self.palette_idx = (self.palette_idx + 1) % PALETTE.len();
                 self.brush.color = PALETTE[self.palette_idx];

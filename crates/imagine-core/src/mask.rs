@@ -429,3 +429,168 @@ mod tests {
         assert_eq!(f.value_at(10, 10), 0, "far outside stays empty");
     }
 }
+
+/// Gathers the document area of a mask into one row-major buffer.
+fn gather(mask: &CpuMask, w: usize, h: usize) -> Vec<u8> {
+    let mut img = vec![mask.default; w * h];
+    let (gw, _) = grid_size(w as u32, h as u32);
+    img.par_chunks_mut(w * TS).enumerate().for_each(|(trow, band)| {
+        let rows = band.len() / w;
+        for tcol in 0..gw as usize {
+            let t = mask.tile(TileCoord::new(tcol as i32, trow as i32));
+            let x0 = tcol * TS;
+            let cols = TS.min(w - x0);
+            match &t {
+                MaskData::Solid(v) if *v == mask.default => {}
+                MaskData::Solid(v) => (0..rows).for_each(|y| band[y * w + x0..][..cols].fill(*v)),
+                MaskData::Pixels(p) => (0..rows).for_each(|y| band[y * w + x0..][..cols].copy_from_slice(&p[y * TS..][..cols])),
+            }
+        }
+    });
+    img
+}
+
+/// Splits a row-major document buffer back into (compacted) tiles.
+fn scatter(img: &[u8], w: usize, h: usize) -> CpuMask {
+    let (gw, gh) = grid_size(w as u32, h as u32);
+    let coords: Vec<(u32, u32)> = (0..gh).flat_map(|y| (0..gw).map(move |x| (x, y))).collect();
+    let tiles: HashMap<TileCoord, MaskData> = coords
+        .par_iter()
+        .filter_map(|&(tx, ty)| {
+            let (x0, y0) = (tx as usize * TS, ty as usize * TS);
+            let (cols, rows) = (TS.min(w - x0), TS.min(h - y0));
+            let mut p = vec![0u8; TILE_PX];
+            for y in 0..rows {
+                p[y * TS..][..cols].copy_from_slice(&img[(y0 + y) * w + x0..][..cols]);
+            }
+            let t = MaskData::Pixels(p).normalized();
+            (t != MaskData::Solid(0)).then_some((TileCoord::new(tx as i32, ty as i32), t))
+        })
+        .collect();
+    CpuMask { tiles, default: 0 }
+}
+
+/// Magic wand: the 4-connected region of fully matching pixels (value 255)
+/// around `(x, y)`, plus a one-pixel ring of partially matching neighbours
+/// (soft, anti-aliased edge). Restricted to the `w × h` document.
+pub fn flood(similar: &CpuMask, x: u32, y: u32, w: u32, h: u32) -> CpuMask {
+    let (w, h) = (w as usize, h as usize);
+    if x as usize >= w || y as usize >= h {
+        return CpuMask::filled(0);
+    }
+    let src = gather(similar, w, h);
+    let mut out = vec![0u8; w * h];
+    let core = |i: usize| src[i] == 255;
+    if !core(y as usize * w + x as usize) {
+        return CpuMask::filled(0);
+    }
+    // Scanline fill: each stack entry is a seed pixel; fill its whole run,
+    // then queue the runs above and below.
+    let mut stack = vec![(x as usize, y as usize)];
+    while let Some((sx, sy)) = stack.pop() {
+        let row = sy * w;
+        if out[row + sx] != 0 {
+            continue;
+        }
+        let mut l = sx;
+        while l > 0 && core(row + l - 1) && out[row + l - 1] == 0 {
+            l -= 1;
+        }
+        let mut r = sx;
+        while r + 1 < w && core(row + r + 1) && out[row + r + 1] == 0 {
+            r += 1;
+        }
+        out[row + l..=row + r].fill(255);
+        for ny in [sy.wrapping_sub(1), sy + 1] {
+            if ny >= h {
+                continue;
+            }
+            let nrow = ny * w;
+            let mut i = l;
+            while i <= r {
+                if core(nrow + i) && out[nrow + i] == 0 {
+                    stack.push((i, ny));
+                    // Skip the rest of this run; it is filled from the seed.
+                    while i <= r && core(nrow + i) {
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+    // Soft ring: partially similar pixels touching the region.
+    let ring: Vec<(usize, u8)> = (0..h)
+        .into_par_iter()
+        .flat_map_iter(|yy| {
+            let (src, out) = (&src, &out);
+            (0..w).filter_map(move |xx| {
+                let i = yy * w + xx;
+                let v = src[i];
+                if v == 0 || v == 255 || out[i] != 0 {
+                    return None;
+                }
+                let touches = (xx > 0 && out[i - 1] == 255)
+                    || (xx + 1 < w && out[i + 1] == 255)
+                    || (yy > 0 && out[i - w] == 255)
+                    || (yy + 1 < h && out[i + w] == 255);
+                touches.then_some((i, v))
+            })
+        })
+        .collect();
+    for (i, v) in ring {
+        out[i] = v;
+    }
+    scatter(&out, w, h)
+}
+
+#[cfg(test)]
+mod flood_tests {
+    use super::*;
+
+    fn from_fn(w: usize, h: usize, f: impl Fn(usize, usize) -> u8) -> CpuMask {
+        let img: Vec<u8> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| f(x, y)).collect();
+        let mut m = scatter(&img, w, h);
+        m.compact();
+        m
+    }
+
+    #[test]
+    fn flood_stays_inside_the_region_and_crosses_tiles() {
+        // Two separate bands (x < 300 and x > 400) of 255; a wall between.
+        let (w, h) = (700, 600);
+        let m = from_fn(w, h, |x, _| if !(300..=400).contains(&x) { 255 } else { 0 });
+        let f = flood(&m, 10, 10, w as u32, h as u32);
+        assert_eq!(f.value_at(299, 599), 255, "crosses tile borders");
+        assert_eq!(f.value_at(500, 10), 0, "other region untouched");
+        assert_eq!(f.value_at(350, 10), 0);
+    }
+
+    #[test]
+    fn flood_follows_a_spiral_and_adds_a_soft_ring() {
+        // A U-shaped corridor: down along x = 0..10, across y = 590..600, up along x = 500..510.
+        let (w, h) = (600, 600);
+        let m = from_fn(w, h, |x, y| {
+            let in_u = x < 10 || (y >= 590) || (500..510).contains(&x);
+            if in_u {
+                255
+            } else if x == 10 && y < 590 {
+                100 // soft edge right of the left arm
+            } else {
+                0
+            }
+        });
+        let f = flood(&m, 505, 0, w as u32, h as u32);
+        assert_eq!(f.value_at(0, 0), 255, "reached through the U");
+        assert_eq!(f.value_at(10, 300), 100, "ring keeps its partial value");
+        assert_eq!(f.value_at(11, 300), 0);
+        assert_eq!(f.value_at(300, 300), 0);
+    }
+
+    #[test]
+    fn flood_from_a_non_matching_pixel_is_empty() {
+        let m = from_fn(300, 300, |x, _| if x < 100 { 255 } else { 0 });
+        assert!(flood(&m, 200, 10, 300, 300).is_empty());
+    }
+}

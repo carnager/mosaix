@@ -160,6 +160,22 @@ pub fn tools() -> Vec<Value> {
         tool("select_invert", "Invert the selection.", json!({}), &[], false),
         tool("select_feather", "Soften the selection edge by a radius in px.",
             json!({ "radius": { "type": "number", "minimum": 0, "maximum": 1000 } }), &["radius"], false),
+        tool("select_magic_wand",
+            "Magic wand: select pixels similar in colour to the one at (x, y). tolerance 0–255 (default 32) is the largest \
+             allowed channel difference in 8-bit sRGB; contiguous (default true) keeps only the connected region; \
+             sample \"layer\" (default, active layer) or \"image\" (all layers).",
+            json!({ "x": { "type": "integer" }, "y": { "type": "integer" },
+                    "tolerance": { "type": "number", "minimum": 0, "maximum": 255 },
+                    "contiguous": { "type": "boolean" }, "antialias": { "type": "boolean" },
+                    "sample": { "type": "string", "enum": ["layer", "image"] }, "mode": mode_param() }),
+            &["x", "y"], false),
+        tool("select_color_range",
+            "Select all pixels of a colour anywhere in the image (soft edges), given as color or picked at (x, y). \
+             fuzziness 0–200 (default 40) widens the range.",
+            json!({ "color": color_param("colour to select (alternative to x/y)"), "x": { "type": "integer" }, "y": { "type": "integer" },
+                    "fuzziness": { "type": "number", "minimum": 0, "maximum": 200 },
+                    "sample": { "type": "string", "enum": ["layer", "image"] }, "mode": mode_param() }),
+            &[], false),
         tool("layer_mask_add", "Add a mask to a layer or group: from the selection (default when one exists) or revealing everything.",
             json!({ "layer": layer_param(), "from_selection": { "type": "boolean" } }), &[], false),
         tool("layer_mask_delete", "Remove a layer's mask.", json!({ "layer": layer_param() }), &[], false),
@@ -361,7 +377,8 @@ mod tests {
         let mut samples = samples;
         let more = json!({
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
-            "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1}
+            "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
+            "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"}
         });
         samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
         for t in tools() {
@@ -386,6 +403,7 @@ mod tests {
                         ("points", _) => json!([[0, 0], [1, 1], [2, 0]]),
                         ("interp", _) => json!("nearest"),
                         ("anchor", _) => json!("top-left"),
+                        ("sample", _) => json!("image"),
                         (_, Some("boolean")) => json!(true),
                         (_, Some("string")) => json!("x"),
                         _ => json!(1),

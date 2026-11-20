@@ -520,3 +520,50 @@ fn crop_extend_and_resize_keep_content() {
     assert_eq!(e.size(), (1000, 800));
     assert!(alpha_at(&mut e, 650, 550) > 0.99);
 }
+
+#[test]
+fn magic_wand_and_color_range() {
+    use imagine_gpu::SampleFrom;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(700, 400));
+    // White background, two red squares (one far right), a blue bar between.
+    e.fill(StrokeTarget::Pixels, [1.0, 1.0, 1.0, 1.0], 1.0, "Weiß").unwrap();
+    for x in [50.0, 500.0] {
+        e.select_shape(&Shape::Rect { x, y: 50.0, w: 100.0, h: 100.0 }, CombineOp::Replace, "Auswahl").unwrap();
+        e.fill(StrokeTarget::Pixels, [0.8, 0.0, 0.0, 1.0], 1.0, "Rot").unwrap();
+    }
+    e.deselect("Auswahl aufheben").unwrap();
+
+    // Contiguous: only the clicked square (exact edges with antialiasing off).
+    e.magic_wand(60, 60, 32.0, true, false, SampleFrom::Layer, CombineOp::Replace, "Zauberstab").unwrap();
+    let s = e.selection_cpu().unwrap();
+    assert_eq!(s.value_at(100, 100), 255);
+    assert_eq!(s.value_at(149, 149), 255);
+    assert_eq!(s.value_at(150, 100), 0);
+    assert_eq!(s.value_at(550, 100), 0, "other square not connected");
+
+    // Shift-click (add) the second one, non-contiguous selects both anyway.
+    e.magic_wand(510, 60, 32.0, true, true, SampleFrom::Layer, CombineOp::Add, "Zauberstab").unwrap();
+    assert_eq!(e.selection_cpu().unwrap().value_at(550, 100), 255);
+    e.magic_wand(10, 10, 10.0, false, false, SampleFrom::Image, CombineOp::Replace, "Zauberstab").unwrap();
+    let s = e.selection_cpu().unwrap();
+    assert_eq!(s.value_at(300, 300), 255, "white everywhere");
+    assert_eq!(s.value_at(100, 100), 0, "red excluded");
+
+    // Colour range by colour: the red squares, soft edge by fuzziness.
+    let red = e.sample_straight(100, 100, SampleFrom::Layer).unwrap();
+    e.select_color_range(red, 40.0, SampleFrom::Layer, CombineOp::Replace, "Farbbereich").unwrap();
+    let s = e.selection_cpu().unwrap();
+    assert_eq!(s.value_at(100, 100), 255);
+    assert_eq!(s.value_at(550, 100), 255);
+    assert_eq!(s.value_at(300, 300), 0);
+
+    // Clicking a transparent area of an empty layer selects all of it.
+    e.edit("Neue Ebene", |d| {
+        d.add_pixel_layer();
+        true
+    });
+    e.magic_wand(10, 10, 0.0, true, false, SampleFrom::Layer, CombineOp::Replace, "Zauberstab").unwrap();
+    let s = e.selection_cpu().unwrap();
+    assert_eq!(s.value_at(699, 399), 255);
+}

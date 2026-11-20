@@ -12,6 +12,7 @@ use imagine_core::{LayerId, MaskRef, TILE_SIZE, TileCoord};
 
 use super::util::color_attachment;
 use super::{Engine, NONE, SCRATCH_LAYERS, StrokeTarget, mask_slot};
+use super::magic::SimilarJob;
 use super::transform::WarpJob;
 use crate::pool::{Tile, texel_copy};
 
@@ -19,6 +20,7 @@ use crate::pool::{Tile, texel_copy};
 enum Kernel {
     Apply,
     Warp,
+    Similar,
 }
 
 #[repr(C)]
@@ -99,6 +101,11 @@ impl Engine {
         self.run_tiles(target, Kernel::Warp, bytemuck::cast_slice(jobs), size_of::<WarpJob>())
     }
 
+    /// Colour similarity tiles (mask pool) for the magic wand.
+    pub(super) fn run_similar(&mut self, jobs: &[SimilarJob]) -> Option<Vec<Tile>> {
+        self.run_tiles(StrokeTarget::Mask, Kernel::Similar, bytemuck::cast_slice(jobs), size_of::<SimilarJob>())
+    }
+
     fn run_tiles(&mut self, target: StrokeTarget, kernel: Kernel, jobs: &[u8], stride: usize) -> Option<Vec<Tile>> {
         let count = jobs.len() / stride;
         let mut out = Vec::with_capacity(count);
@@ -116,8 +123,9 @@ impl Engine {
         for (b, batch) in jobs.chunks(batch_bytes).enumerate() {
             let n = batch.len() / stride;
             self.apply_buf.write(&self.device, &self.queue, batch);
+            let mut extra = None;
             let bg = match kernel {
-                Kernel::Apply => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                Kernel::Apply | Kernel::Similar => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("apply"),
                     layout: &self.apply_bgl,
                     entries: &[
@@ -135,11 +143,20 @@ impl Engine {
                     ],
                 }),
             };
+            if matches!(kernel, Kernel::Similar) {
+                let comp = super::frame::chunk_views(&self.comp_pool, super::MAX_COMPOSITE_CHUNKS);
+                extra = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("composite array"),
+                    layout: &self.comp_array_bgl,
+                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureViewArray(&comp) }],
+                }));
+            }
             let pipeline = match (kernel, target) {
                 (Kernel::Apply, StrokeTarget::Pixels) => &self.apply_rgba_pipeline,
                 (Kernel::Apply, StrokeTarget::Mask) => &self.apply_mask_pipeline,
                 (Kernel::Warp, StrokeTarget::Pixels) => &self.warp_rgba_pipeline,
                 (Kernel::Warp, StrokeTarget::Mask) => &self.warp_mask_pipeline,
+                (Kernel::Similar, _) => &self.similar_pipeline,
             };
             let (views, scratch) = match target {
                 StrokeTarget::Pixels => (&self.scratch_rgba_views, &self.scratch_rgba),
@@ -156,6 +173,9 @@ impl Engine {
                 rp.set_pipeline(pipeline);
                 rp.set_bind_group(0, self.arrays_bg.as_ref().unwrap(), &[]);
                 rp.set_bind_group(1, &bg, &[off]);
+                if let Some(extra) = &extra {
+                    rp.set_bind_group(2, extra, &[]);
+                }
                 rp.draw(0..3, 0..1);
             }
             let pool = match target {

@@ -18,7 +18,7 @@ use imagine_core::doc::Content;
 use imagine_core::tile::tiles_in_rect;
 use imagine_core::mask::{CombineOp, Shape};
 use imagine_core::{BlendMode, BlendSpace, BrushSettings, Document, InputSample, LayerId, Stroke, TILE_SIZE, TileCoord};
-use imagine_gpu::{GpuContext, GradientKind, Interp, StrokeParams, StrokeTarget, Tile};
+use imagine_gpu::{GpuContext, GradientKind, Interp, SampleFrom, StrokeParams, StrokeTarget, Tile};
 use imagine_io::export::blit_region;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -113,6 +113,23 @@ pub enum Command {
     SelectNone,
     SelectInvert,
     SelectFeather { radius: f64 },
+    SelectMagicWand {
+        x: u32,
+        y: u32,
+        tolerance: Option<f32>,
+        contiguous: Option<bool>,
+        antialias: Option<bool>,
+        sample: Option<String>,
+        mode: Option<String>,
+    },
+    SelectColorRange {
+        color: Option<ColorSpec>,
+        x: Option<u32>,
+        y: Option<u32>,
+        fuzziness: Option<f32>,
+        sample: Option<String>,
+        mode: Option<String>,
+    },
     LayerMaskAdd { layer: Option<LayerId>, from_selection: Option<bool> },
     LayerMaskDelete { layer: Option<LayerId> },
     LayerMaskSet { layer: Option<LayerId>, enabled: bool },
@@ -199,6 +216,8 @@ impl Command {
             Self::LayerMaskApply { .. } => "layer_mask_apply",
             Self::LayerTranslate { .. } => "layer_translate",
             Self::LayerTransform { .. } => "layer_transform",
+            Self::SelectMagicWand { .. } => "select_magic_wand",
+            Self::SelectColorRange { .. } => "select_color_range",
             Self::LayerBounds { .. } => "layer_bounds",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
@@ -307,6 +326,14 @@ fn premul(c: &ColorSpec, target: StrokeTarget) -> anyhow::Result<[f32; 4]> {
             [l * a, l * a, l * a, a]
         }
     })
+}
+
+fn parse_sample(v: &Option<String>) -> anyhow::Result<SampleFrom> {
+    match v.as_deref() {
+        None | Some("layer") => Ok(SampleFrom::Layer),
+        Some("image") => Ok(SampleFrom::Image),
+        Some(o) => bail!("sample must be \"layer\" or \"image\", got {o:?}"),
+    }
 }
 
 fn parse_interp(i: &Option<String>) -> anyhow::Result<Interp> {
@@ -598,6 +625,40 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
         Command::SelectFeather { radius } => {
             ensure!((0.0..=1000.0).contains(&radius), "radius must be 0–1000 px");
             s.engine.feather_selection(radius, "Weiche Auswahlkante").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectMagicWand { x, y, tolerance, contiguous, antialias, sample, mode } => {
+            let tolerance = tolerance.unwrap_or(32.0);
+            ensure!((0.0..=255.0).contains(&tolerance), "tolerance must be 0–255");
+            s.engine
+                .magic_wand(
+                    x,
+                    y,
+                    tolerance,
+                    contiguous.unwrap_or(true),
+                    antialias.unwrap_or(true),
+                    parse_sample(&sample)?,
+                    parse_mode(&mode)?,
+                    "Zauberstab",
+                )
+                .map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectColorRange { color, x, y, fuzziness, sample, mode } => {
+            let from = parse_sample(&sample)?;
+            let reference = match (color, x, y) {
+                (Some(c), None, None) => {
+                    let (rgb, a) = c.linear()?;
+                    [linear_to_srgb(rgb[0]), linear_to_srgb(rgb[1]), linear_to_srgb(rgb[2]), a]
+                }
+                (None, Some(x), Some(y)) => s.engine.sample_straight(x, y, from).map_err(engine_err)?,
+                _ => bail!("give either color or x and y"),
+            };
+            let fuzziness = fuzziness.unwrap_or(40.0);
+            ensure!((0.0..=200.0).contains(&fuzziness), "fuzziness must be 0–200");
+            s.engine
+                .select_color_range(reference, fuzziness, from, parse_mode(&mode)?, "Farbbereich")
+                .map_err(engine_err)?;
             Ok(Output::json(selection_info(s)))
         }
         Command::LayerMaskAdd { layer, from_selection } => {

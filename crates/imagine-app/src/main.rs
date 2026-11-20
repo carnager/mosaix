@@ -39,6 +39,7 @@ Ansicht:
 Werkzeuge:
   B Pinsel   E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
   G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
+  W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)
   C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)
   Mit Auswahl verschieben/transformieren V und Strg+T nur die ausgewählten Pixel.
 
