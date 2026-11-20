@@ -93,6 +93,8 @@ fn parse_size(s: &str) -> anyhow::Result<(u32, u32)> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Language first: everything after this may show text.
+    imagine_core::i18n::init(&settings::Settings::load_from(&settings::config_path()).language);
     init_tracing();
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match argv.first().map(String::as_str) {
