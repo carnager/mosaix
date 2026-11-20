@@ -1027,6 +1027,12 @@ fn adjustment_layers_match_cpu_reference() {
         Adjustment::BrightnessContrast {
             brightness: 60.0,
             contrast: 40.0,
+            legacy: false,
+        },
+        Adjustment::BrightnessContrast {
+            brightness: -30.0,
+            contrast: 60.0,
+            legacy: true,
         },
         Adjustment::Levels {
             master: Levels {
@@ -2662,19 +2668,24 @@ fn clipping_mask_limits_to_base_and_uses_base_opacity() {
 fn pass_through_group_blends_with_what_is_below() {
     let Some(g) = gpu() else { return };
     let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
-    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 1.0, "blue").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 1.0, "blue")
+        .unwrap();
     e.edit("new", |d| {
         d.add_pixel_layer();
         true
     });
-    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "red").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "red")
+        .unwrap();
     let red = e.doc().active;
     e.edit("multiply + group", |d| {
         d.find_mut(red).unwrap().blend = BlendMode::Multiply;
         d.group_active().is_some()
     });
     let group = e.doc().active;
-    assert!(e.doc().find(group).unwrap().pass_through, "new groups are Pass Through");
+    assert!(
+        e.doc().find(group).unwrap().pass_through,
+        "new groups are Pass Through"
+    );
     e.flush();
     let t = TileCoord::new(0, 0);
     let c = composite_px(&e, t, 10, 10);

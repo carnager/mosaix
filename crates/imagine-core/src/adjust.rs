@@ -51,6 +51,9 @@ fn identity_curve() -> Curve {
 }
 
 /// Monotone cubic interpolation (Fritsch–Carlson): smooth, no overshoot.
+/// Value of a curve through `points` (input, output) at `x`, like
+/// Photoshop: a natural cubic spline through the points (it may overshoot,
+/// the result is clamped), constant outside the first and last point.
 pub fn eval_curve(points: &[[f32; 2]], x: f32) -> f32 {
     let mut p: Vec<[f32; 2]> = points.to_vec();
     p.sort_by(|a, b| a[0].total_cmp(&b[0]));
@@ -60,52 +63,85 @@ pub fn eval_curve(points: &[[f32; 2]], x: f32) -> f32 {
         1 => return p[0][1].clamp(0.0, 1.0),
         _ => {}
     }
-    if x <= p[0][0] {
-        return p[0][1].clamp(0.0, 1.0);
+    let xs: Vec<f64> = p.iter().map(|q| q[0] as f64).collect();
+    let ys: Vec<f64> = p.iter().map(|q| q[1] as f64).collect();
+    natural_spline(&xs, &ys, (x as f64).clamp(xs[0], xs[xs.len() - 1])).clamp(0.0, 1.0) as f32
+}
+
+/// Natural cubic spline through (xs, ys) evaluated at `x` (xs ascending).
+pub fn natural_spline(xs: &[f64], ys: &[f64], x: f64) -> f64 {
+    let n = xs.len();
+    if n == 2 {
+        let t = (x - xs[0]) / (xs[1] - xs[0]);
+        return ys[0] + (ys[1] - ys[0]) * t;
     }
-    if x >= p[p.len() - 1][0] {
-        return p[p.len() - 1][1].clamp(0.0, 1.0);
-    }
-    let n = p.len();
-    let d: Vec<f32> = (0..n - 1)
-        .map(|i| (p[i + 1][1] - p[i][1]) / (p[i + 1][0] - p[i][0]))
-        .collect();
-    let mut m = vec![0.0f32; n];
-    m[0] = d[0];
-    m[n - 1] = d[n - 2];
+    // Second derivatives (tridiagonal system, zero at the ends).
+    let mut m = vec![0.0; n];
+    let mut c = vec![0.0; n];
+    let mut d = vec![0.0; n];
     for i in 1..n - 1 {
-        m[i] = if d[i - 1] * d[i] <= 0.0 {
+        let (h0, h1) = (xs[i] - xs[i - 1], xs[i + 1] - xs[i]);
+        let a = h0;
+        let b = 2.0 * (h0 + h1);
+        let cc = h1;
+        let r = 6.0 * ((ys[i + 1] - ys[i]) / h1 - (ys[i] - ys[i - 1]) / h0);
+        let w = b - a * c[i - 1];
+        c[i] = cc / w;
+        d[i] = (r - a * d[i - 1]) / w;
+    }
+    for i in (1..n - 1).rev() {
+        m[i] = d[i] - c[i] * m[i + 1];
+    }
+    let k = xs.partition_point(|&v| v <= x).clamp(1, n - 1);
+    let (x0, x1) = (xs[k - 1], xs[k]);
+    let h = x1 - x0;
+    let (a, b) = ((x1 - x) / h, (x - x0) / h);
+    a * ys[k - 1] + b * ys[k] + ((a * a * a - a) * m[k - 1] + (b * b * b - b) * m[k]) * h * h / 6.0
+}
+
+/// Photoshop's brightness/contrast curve (the modern one), as reverse
+/// engineered by psd-tools: a contrast S-spline plus a brightness bump,
+/// sheared 45°. Returns the output for `x` (sRGB 0…1).
+fn brightness_contrast_curve(brightness: f32, contrast: f32) -> impl Fn(f32) -> f32 {
+    const N: usize = 1024;
+    let b = (brightness.clamp(-150.0, 150.0) / 150.0) as f64;
+    let c = (contrast.clamp(-50.0, 100.0) / 100.0) as f64;
+    let cx = [0.0, 63.0 / 255.0, 191.0 / 255.0, 1.0];
+    let delta = 25.0 / 255.0;
+    let cy = [0.0, cx[1] - c * delta, cx[2] + c * delta, 1.0];
+    let (a, r) = ([1.65, -1.0, 1.96, 1.0, 1.0], [0.35, 10.0, 0.4, 4.0, 1.25]);
+    let pol = |i: usize, t: f64| a[i] * t.powf(r[i]);
+    let mut xr = Vec::with_capacity(N);
+    let mut yr = Vec::with_capacity(N);
+    for i in 0..N {
+        let t = i as f64 / (N - 1) as f64;
+        let h = 0.5
+            * (b.abs() * (pol(0, t) + pol(1, t))
+                + (1.0 - b.abs()) * (pol(2, t) + pol(3, t))
+                + pol(4, t));
+        let bump = b * t * (1.0 - t) * h;
+        xr.push(t - bump);
+        yr.push(natural_spline(&cx, &cy, t) + bump);
+    }
+    move |x: f32| {
+        let x = x as f64;
+        // Linear interpolation in the (sorted) sheared samples.
+        let k = xr.partition_point(|&v| v <= x).clamp(1, N - 1);
+        let (x0, x1) = (xr[k - 1], xr[k]);
+        let t = if x1 > x0 {
+            ((x - x0) / (x1 - x0)).clamp(0.0, 1.0)
+        } else {
             0.0
-        } else {
-            (d[i - 1] + d[i]) / 2.0
         };
-    }
-    for i in 0..n - 1 {
-        if d[i] == 0.0 {
-            m[i] = 0.0;
-            m[i + 1] = 0.0;
+        let y = if x <= xr[0] {
+            yr[0]
+        } else if x >= xr[N - 1] {
+            yr[N - 1]
         } else {
-            let (a, b) = (m[i] / d[i], m[i + 1] / d[i]);
-            let s = a * a + b * b;
-            if s > 9.0 {
-                let t = 3.0 / s.sqrt();
-                m[i] = t * a * d[i];
-                m[i + 1] = t * b * d[i];
-            }
-        }
+            yr[k - 1] + (yr[k] - yr[k - 1]) * t
+        };
+        y.clamp(0.0, 1.0) as f32
     }
-    let i = p
-        .windows(2)
-        .position(|w| x >= w[0][0] && x <= w[1][0])
-        .unwrap_or(n - 2);
-    let h = p[i + 1][0] - p[i][0];
-    let t = (x - p[i][0]) / h;
-    let (t2, t3) = (t * t, t * t * t);
-    let y = (2.0 * t3 - 3.0 * t2 + 1.0) * p[i][1]
-        + (t3 - 2.0 * t2 + t) * h * m[i]
-        + (-2.0 * t3 + 3.0 * t2) * p[i + 1][1]
-        + (t3 - t2) * h * m[i + 1];
-    y.clamp(0.0, 1.0)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,6 +153,9 @@ pub enum Adjustment {
         brightness: f32,
         #[serde(default)]
         contrast: f32,
+        /// Photoshop's "Use Legacy": a straight line through mid-grey.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        legacy: bool,
     },
     Levels {
         #[serde(default)]
@@ -219,6 +258,7 @@ impl Adjustment {
             Adjustment::BrightnessContrast {
                 brightness: 0.0,
                 contrast: 0.0,
+                legacy: false,
             },
             Adjustment::Levels {
                 master: Levels::default(),
@@ -292,19 +332,27 @@ impl Adjustment {
             Adjustment::BrightnessContrast {
                 brightness,
                 contrast,
+                legacy: true,
             } => {
-                // Brightness bends the midtones (gamma), contrast is an S-curve around 0.5.
-                let g = 2f32.powf(-brightness.clamp(-150.0, 150.0) / 100.0);
-                let c = contrast.clamp(-50.0, 100.0) / 100.0;
-                let k = if c >= 0.0 {
-                    1.0 / (1.0 - 0.7 * c)
-                } else {
-                    1.0 + c
-                };
+                // Photoshop's legacy mode: shift, then a line through mid-grey.
+                let (shift, c) = (brightness / 255.0, *contrast);
+                let pivot = 127.0 / 255.0;
                 Box::new(move |_, x| {
-                    let x = x.clamp(0.0, 1.0).powf(g);
-                    (0.5 + (x - 0.5) * k).clamp(0.0, 1.0)
+                    let y = if c > 0.0 {
+                        (x + shift - pivot) * (100.0 / (100.0 - c).max(1e-6)) + pivot
+                    } else {
+                        (x - pivot) * ((100.0 + c) / 100.0) + pivot + shift
+                    };
+                    y.clamp(0.0, 1.0)
                 })
+            }
+            Adjustment::BrightnessContrast {
+                brightness,
+                contrast,
+                legacy: false,
+            } => {
+                let f = brightness_contrast_curve(*brightness, *contrast);
+                Box::new(move |_, x| f(x.clamp(0.0, 1.0)))
             }
             Adjustment::Levels {
                 master,
@@ -314,7 +362,8 @@ impl Adjustment {
             } => {
                 let ch = [*red, *green, *blue];
                 let m = *master;
-                Box::new(move |c, x| ch[c].map(m.map(x)))
+                // Like Photoshop: the channel first, then the composite.
+                Box::new(move |c, x| m.map(ch[c].map(x)))
             }
             Adjustment::Curves {
                 master,
@@ -323,12 +372,18 @@ impl Adjustment {
                 blue,
             } => {
                 let ch = [red, green, blue];
-                Box::new(move |c, x| eval_curve(ch[c], eval_curve(master, x)))
+                Box::new(move |c, x| eval_curve(master, eval_curve(ch[c], x)))
             }
             Adjustment::Invert => Box::new(|_, x| 1.0 - x.clamp(0.0, 1.0)),
             Adjustment::Posterize { levels } => {
                 let n = levels.clamp(2.0, 255.0).round();
-                Box::new(move |_, x| ((x.clamp(0.0, 1.0) * n).floor().min(n - 1.0)) / (n - 1.0))
+                // Photoshop scales by 255/256 before flooring.
+                Box::new(move |_, x| {
+                    ((x.clamp(0.0, 1.0) * n * (255.0 / 256.0))
+                        .floor()
+                        .min(n - 1.0))
+                        / (n - 1.0)
+                })
             }
             _ => return None,
         })
@@ -414,8 +469,10 @@ impl Adjustment {
                     return rgb.map(|v| ((v * p[0] + p[1]).max(0.0)).powf(p[2]));
                 }
                 KIND_THRESHOLD => {
-                    let l = 0.299 * enc[0] + 0.587 * enc[1] + 0.114 * enc[2];
-                    [if l >= p[0] { 1.0 } else { 0.0 }; 3]
+                    // Photoshop: luminance in 8-bit steps.
+                    let l =
+                        ((0.3 * enc[0] + 0.59 * enc[1] + 0.11 * enc[2]) * 255.0).round() / 255.0;
+                    [if l >= p[0] - 0.5 / 255.0 { 1.0 } else { 0.0 }; 3]
                 }
                 KIND_HSL => hue_sat(enc, p),
                 KIND_VIBRANCE => vibrance(enc, p),
@@ -481,26 +538,32 @@ fn hsl_to_rgb(h: [f32; 3]) -> [f32; 3] {
 
 /// Hue/saturation/lightness on sRGB values (mirrors `adjust.wgsl`).
 fn hue_sat(c: [f32; 3], p: [f32; 8]) -> [f32; 3] {
-    let mut hsl = rgb_to_hsl(c.map(|v| v.clamp(0.0, 1.0)));
+    // Photoshop (as measured by psd-tools): lightness first on RGB, then hue
+    // and saturation in HSL; colorize sets hue and saturation and lightens in HSL.
+    let light = |v: f32, l: f32| {
+        if l > 0.0 {
+            v * (1.0 - l) + l
+        } else {
+            v * (1.0 + l)
+        }
+    };
+    let c = c.map(|v| v.clamp(0.0, 1.0));
     if p[3] > 0.5 {
-        // Colorize: fixed hue and saturation (p[1] = 0 means 25 %).
+        let mut hsl = rgb_to_hsl(c);
         hsl[0] = p[0].rem_euclid(1.0);
         hsl[1] = (0.25 + p[1] * 0.75).clamp(0.0, 1.0);
-    } else {
-        hsl[0] = (hsl[0] + p[0]).rem_euclid(1.0);
-        hsl[1] = if p[1] >= 0.0 {
-            hsl[1] + (1.0 - hsl[1]) * p[1] * hsl[1].sqrt()
-        } else {
-            hsl[1] * (1.0 + p[1])
-        };
+        hsl[2] = light(hsl[2], p[2]).clamp(0.0, 1.0);
+        return hsl_to_rgb(hsl);
     }
-    let mut rgb = hsl_to_rgb(hsl);
-    if p[2] > 0.0 {
-        rgb = rgb.map(|v| v + (1.0 - v) * p[2]);
+    let mut hsl = rgb_to_hsl(c.map(|v| light(v, p[2]).clamp(0.0, 1.0)));
+    hsl[0] = (hsl[0] + p[0]).rem_euclid(1.0);
+    hsl[1] = if p[1] > 0.0 {
+        hsl[1] / (1.0 - p[1] + 0.01)
     } else {
-        rgb = rgb.map(|v| v * (1.0 + p[2]));
+        hsl[1] * (1.0 + p[1])
     }
-    rgb
+    .clamp(0.0, 1.0);
+    hsl_to_rgb(hsl)
 }
 
 fn vibrance(c: [f32; 3], p: [f32; 8]) -> [f32; 3] {

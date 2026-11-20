@@ -70,6 +70,33 @@ pub struct Info {
     pub mask: Option<LayerMask>,
     /// Special content we don't carry over (adjustment, text, smart object …).
     pub special: Option<&'static str>,
+    /// An adjustment layer imagine can represent.
+    pub adjustment: Option<imagine_core::Adjustment>,
+    /// A text layer (editable if the font is available).
+    pub text: Option<Text>,
+}
+
+/// A Photoshop text layer, as far as imagine can use it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Text {
+    pub text: String,
+    /// PostScript name of the first run's font ("ArialMT", "Helvetica-Bold" …).
+    pub font: String,
+    /// Size in px before `transform`.
+    pub size: f32,
+    /// sRGB-encoded RGBA.
+    pub color: [f32; 4],
+    pub align: imagine_core::vector::TextAlign,
+    /// Line height as a multiple of the size (auto leading: 1.2).
+    pub line_height: f32,
+    /// Letter spacing in px.
+    pub tracking: f32,
+    pub faux_bold: bool,
+    pub faux_italic: bool,
+    /// Paragraph text: box width (px).
+    pub width: Option<f32>,
+    /// [xx, xy, yx, yy, tx, ty]: baseline origin of the first line.
+    pub transform: [f64; 6],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -278,10 +305,14 @@ struct Record {
     clipping: u8,
     flags: u8,
     mask: Option<(Rect, u8, bool)>,
+    /// The pixel mask when the layer also has a vector mask (channel −3).
+    real_mask: Option<(Rect, u8, bool)>,
     name: String,
     divider: Option<u32>,
     fill_opacity: Option<u8>,
     special: Option<&'static str>,
+    adjustment: Option<imagine_core::Adjustment>,
+    text: Option<Text>,
 }
 
 fn rect(c: &mut Cur) -> Result<Rect> {
@@ -347,12 +378,30 @@ fn record(c: &mut Cur) -> Result<Record> {
     // Layer mask.
     let mlen = e.u32()? as usize;
     let mut mask = None;
+    let mut real_mask = None;
     if mlen > 0 {
         let mut m = e.sub(mlen)?;
         let mr = rect(&mut m)?;
         let default = m.u8()?;
         let mflags = m.u8()?;
         mask = Some((mr, default, mflags & 2 == 0));
+        if mlen >= 36 {
+            // Optional mask parameters, then the real (pixel) mask.
+            if mflags & 0x10 != 0 {
+                let params = m.u8()?;
+                for (bit, n) in [(1u8, 1usize), (2, 8), (4, 1), (8, 8)] {
+                    if params & bit != 0 {
+                        m.skip(n)?;
+                    }
+                }
+            }
+            if m.left() >= 18 {
+                let rflags = m.u8()?;
+                let rdefault = m.u8()?;
+                let rr = rect(&mut m)?;
+                real_mask = Some((rr, rdefault, rflags & 2 == 0));
+            }
+        }
     }
     // Blending ranges.
     let blen = e.u32()? as usize;
@@ -366,6 +415,9 @@ fn record(c: &mut Cur) -> Result<Record> {
     let mut divider = None;
     let mut fill_opacity = None;
     let mut special = None;
+    let mut adjustment = None;
+    let mut text = None;
+    let mut cged: Option<crate::psd_data::Desc> = None;
     while e.left() >= 12 {
         let sig = e.bytes(4)?;
         if sig != b"8BIM" && sig != b"8B64" {
@@ -384,7 +436,26 @@ fn record(c: &mut Cur) -> Result<Record> {
             }
             b"lsct" | b"lsdk" => divider = Some(d.u32()?),
             b"iOpa" => fill_opacity = Some(d.u8()?),
-            k => special = special.or(special_name(k)),
+            b"CgEd" => {
+                // New-style brightness/contrast (overrides "brit").
+                // Descriptor version (16), then the descriptor.
+                if d.left() > 4 {
+                    d.skip(4)?;
+                    cged = crate::psd_data::read_desc(d.bytes(d.left())?).ok();
+                }
+            }
+            b"TySh" => {
+                special = special.or(Some("text"));
+                text = crate::psd_layers::read_text(d.bytes(d.left())?).ok();
+            }
+            k => {
+                if let Some(s) = special_name(k) {
+                    special = special.or(Some(s));
+                    if s == "adjustment layer" {
+                        adjustment = crate::psd_layers::read_adjustment(k, d.bytes(d.left())?);
+                    }
+                }
+            }
         }
     }
     Ok(Record {
@@ -395,10 +466,24 @@ fn record(c: &mut Cur) -> Result<Record> {
         clipping,
         flags,
         mask,
+        real_mask,
         name,
         divider,
         fill_opacity,
         special,
+        adjustment: match (adjustment, cged) {
+            (Some(imagine_core::Adjustment::BrightnessContrast { .. }), Some(c))
+                if c.bool("useLegacy") != Some(true) =>
+            {
+                Some(imagine_core::Adjustment::BrightnessContrast {
+                    brightness: c.num("Brgh").unwrap_or(0.0) as f32,
+                    contrast: c.num("Cntr").unwrap_or(0.0) as f32,
+                    legacy: false,
+                })
+            }
+            (a, _) => a,
+        },
+        text,
     })
 }
 
@@ -637,7 +722,9 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
                     continue;
                 }
                 let comp = d.u16()?;
-                let rr = if id == -2 || id == -3 {
+                let rr = if id == -3 {
+                    r.real_mask.or(r.mask).map(|m| m.0).unwrap_or_default()
+                } else if id == -2 {
                     r.mask.map(|m| m.0).unwrap_or_default()
                 } else {
                     r.rect
@@ -734,14 +821,27 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             merged = Some(to_rgba(w * h, depth, mode, &get));
         }
     }
+    let ranged = crate::psd_layers::RANGED_HUE_SAT.with(|c| c.replace(0));
+    if ranged > 0 {
+        warnings.push(imagine_core::tr!(
+            "{n} Hue/Saturation layers change single color ranges (Reds, Blues …): imagine applies only the master values so far",
+            n = ranged
+        ));
+    }
     // Records (bottom → top) → tree.
     let mut stack: Vec<Vec<Node>> = vec![Vec::new()];
     let mut specials = std::collections::BTreeMap::<&str, usize>::new();
     let mut unknown_blend = 0;
     for (r, data) in records.into_iter().zip(layer_data) {
         let get_mask = |id: i16| data.iter().find(|(i, _)| *i == id).map(|(_, v)| v.clone());
-        let mask = r.mask.and_then(|(mr, default, enabled)| {
-            let d = get_mask(-2)?;
+        // With a vector mask too, −2 is the rasterised vector mask and −3
+        // the user's pixel mask; prefer the pixel mask.
+        let (which, m) = match (get_mask(-3).is_some(), r.real_mask) {
+            (true, Some(rm)) => (-3, Some(rm)),
+            _ => (-2, r.mask),
+        };
+        let mask = m.and_then(|(mr, default, enabled)| {
+            let d = get_mask(which)?;
             Some(LayerMask {
                 rect: mr,
                 default,
@@ -766,8 +866,16 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             clipped: r.clipping != 0,
             mask,
             special: r.special,
+            adjustment: r.adjustment.clone(),
+            text: r.text.clone(),
         };
-        if let Some(s) = r.special {
+        // Report only what is not carried over.
+        let handled = match r.special {
+            Some("adjustment layer") => r.adjustment.is_some(),
+            Some("text") => r.text.is_some(),
+            _ => false,
+        };
+        if let Some(s) = r.special.filter(|_| !handled) {
             *specials.entry(s).or_default() += 1;
         }
         match r.divider {
@@ -852,6 +960,8 @@ pub struct WLayer {
     pub clip: bool,
     /// Groups: Pass Through.
     pub pass_through: bool,
+    /// An adjustment layer (written as Photoshop's adjustment layer).
+    pub adjustment: Option<imagine_core::Adjustment>,
     pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
     pub mask: Option<WMask>,
 }
@@ -1189,6 +1299,15 @@ fn write_record(o: &mut Out, l: &WLayer, e: &Encoded, divider: Option<u32>) {
         o.u16(u);
     }
     o.close(blk, 4);
+    if let Some(a) = &l.adjustment {
+        for (key, data) in crate::psd_layers::adjustment_blocks(a) {
+            o.b.extend(b"8BIM");
+            o.b.extend(key);
+            let blk = o.open(false);
+            o.b.extend(&data);
+            o.close(blk, 2);
+        }
+    }
     if let Some(t) = divider {
         o.b.extend(b"8BIMlsct");
         let blk = o.open(false);
@@ -1250,6 +1369,7 @@ pub fn write(
         visible: true,
         clip: false,
         pass_through: false,
+        adjustment: None,
         tiles: Vec::new(),
         mask: None,
     };
@@ -1267,6 +1387,7 @@ pub fn write(
                     visible: l.visible,
                     clip: false,
                     pass_through: l.pass_through,
+                    adjustment: None,
                     tiles: Vec::new(),
                     mask: l.mask.clone(),
                 },
@@ -1331,6 +1452,7 @@ pub fn write(
         visible: true,
         clip: false,
         pass_through: false,
+        adjustment: None,
         tiles: composite.to_vec(),
         mask: None,
     };

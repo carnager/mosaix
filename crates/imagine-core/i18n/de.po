@@ -752,6 +752,9 @@ msgstr "Schrift"
 msgid "Font, size and color are under Properties; new text uses the brush color."
 msgstr "Schrift, Größe und Farbe stehen unter Eigenschaften; neue Texte nehmen die Pinselfarbe."
 
+msgid "Fonts not installed, those text layers stay pixels: {fonts}"
+msgstr "Schriften nicht installiert, diese Textebenen bleiben Pixel: {fonts}"
+
 msgid "Free Transform"
 msgstr "Frei transformieren"
 
@@ -1322,8 +1325,8 @@ msgstr "Vorschau: {err}"
 msgid "Properties"
 msgstr "Eigenschaften"
 
-msgid "PSD: {n} adjustment layers were left out (the merged image includes them)"
-msgstr "PSD: {n} Einstellungsebenen wurden ausgelassen (das zusammengefügte Bild enthält sie)"
+msgid "PSD: {n} layers were left out (the merged image includes them)"
+msgstr "PSD: {n} Ebenen wurden ausgelassen (das zusammengefügte Bild enthält sie)"
 
 msgid "Pucker"
 msgstr "Zusammenziehen"
@@ -1904,6 +1907,9 @@ msgstr "unbenannt"
 msgid "Up Arrow"
 msgstr "Pfeil hoch"
 
+msgid "Use Legacy"
+msgstr "Früheren Wert verwenden"
+
 msgid "Vector"
 msgstr "Vektor"
 
@@ -1981,6 +1987,9 @@ msgstr "{n} Schnittmasken werden noch nicht unterstützt: diese Ebenen erscheine
 
 msgid "{n} font families in {ms} ms"
 msgstr "{n} Schriftfamilien in {ms} ms"
+
+msgid "{n} Hue/Saturation layers change single color ranges (Reds, Blues …): imagine applies only the master values so far"
+msgstr "{n} Farbton/Sättigung-Ebenen ändern einzelne Farbbereiche (Rottöne, Blautöne …): imagine wendet bisher nur die Gesamtwerte an"
 
 msgid "{n} layers use a blend mode imagine does not have yet (shown as Normal)"
 msgstr "{n} Ebenen nutzen eine Füllmethode, die imagine noch nicht hat (als Normal gezeigt)"

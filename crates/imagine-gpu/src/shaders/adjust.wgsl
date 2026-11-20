@@ -81,23 +81,20 @@ fn adjust_rgb(lin: vec3<f32>, kind: u32, off: u32) -> vec3<f32> {
             o = vec3<f32>(lut_channel(off, e.r, 0u), lut_channel(off, e.g, 1u), lut_channel(off, e.b, 2u));
         }
         case 1u: {
-            var hsl = rgb_to_hsl(clamp(e, vec3<f32>(0.0), vec3<f32>(1.0)));
+            // Mirrors hue_sat in adjust.rs (Photoshop's order).
+            let c = clamp(e, vec3<f32>(0.0), vec3<f32>(1.0));
             if a.w > 0.5 {
+                var hsl = rgb_to_hsl(c);
                 hsl.x = a.x - floor(a.x);
                 hsl.y = clamp(0.25 + a.y * 0.75, 0.0, 1.0);
+                hsl.z = clamp(select(hsl.z * (1.0 + a.z), hsl.z * (1.0 - a.z) + a.z, a.z > 0.0), 0.0, 1.0);
+                o = hsl_to_rgb(hsl);
             } else {
+                let lit = clamp(select(c * (1.0 + a.z), c * (1.0 - a.z) + vec3<f32>(a.z), a.z > 0.0), vec3<f32>(0.0), vec3<f32>(1.0));
+                var hsl = rgb_to_hsl(lit);
                 hsl.x = (hsl.x + a.x) - floor(hsl.x + a.x);
-                if a.y >= 0.0 {
-                    hsl.y = hsl.y + (1.0 - hsl.y) * a.y * sqrt(hsl.y);
-                } else {
-                    hsl.y = hsl.y * (1.0 + a.y);
-                }
-            }
-            o = hsl_to_rgb(hsl);
-            if a.z > 0.0 {
-                o = o + (vec3<f32>(1.0) - o) * a.z;
-            } else {
-                o = o * (1.0 + a.z);
+                hsl.y = clamp(select(hsl.y * (1.0 + a.y), hsl.y / (1.0 - a.y + 0.01), a.y > 0.0), 0.0, 1.0);
+                o = hsl_to_rgb(hsl);
             }
         }
         case 2u: {
@@ -118,8 +115,9 @@ fn adjust_rgb(lin: vec3<f32>, kind: u32, off: u32) -> vec3<f32> {
             o = vec3<f32>(g);
         }
         case 5u: {
-            let l = 0.299 * e.r + 0.587 * e.g + 0.114 * e.b;
-            o = vec3<f32>(select(0.0, 1.0, l >= a.x));
+            // Photoshop: luminance in 8-bit steps.
+            let l = round((0.3 * e.r + 0.59 * e.g + 0.11 * e.b) * 255.0) / 255.0;
+            o = vec3<f32>(select(0.0, 1.0, l >= a.x - 0.5 / 255.0));
         }
         default: {}
     }

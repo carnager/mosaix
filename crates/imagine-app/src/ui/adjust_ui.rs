@@ -88,9 +88,16 @@ pub fn editor(
         Adjustment::BrightnessContrast {
             brightness,
             contrast,
+            legacy,
         } => {
             row(ui, "Brightness", slider(brightness, -150.0..=150.0), &mut t);
             row(ui, "Contrast", slider(contrast, -50.0..=100.0), &mut t);
+            row(
+                ui,
+                "Use Legacy",
+                egui::Checkbox::without_text(legacy),
+                &mut t,
+            );
         }
         Adjustment::Levels {
             master,

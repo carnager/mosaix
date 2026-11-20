@@ -463,7 +463,11 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Gruppen „Hindurchwirken“** (Photoshops Standard, jetzt auch für neue Gruppen): die Ebenen der Gruppe wirken direkt auf alles darunter (Füllmethoden, Einstellungsebenen), Deckkraft und Maske der Gruppe blenden das Ergebnis über. Im Füllmethoden-Menü einer Gruppe ganz oben; eine andere Füllmethode macht die Gruppe isoliert. Ältere `.imagine`-Dateien bleiben isoliert (unverändertes Aussehen). PSD-Import/-Export übernehmen es; Agenten: `layer_set pass_through`.
 
-**Noch offen in Phase 7:** Einstellungsebenen und Text als PSD-Ebenen, JPEG XL/AVIF, ABR-Pinsel.
+- **PSD: Einstellungsebenen und Text.** Import und Export von Einstellungsebenen als echte Photoshop-Einstellungsebenen (Tonwertkorrektur, Gradationskurven, Helligkeit/Kontrast modern und „Früheren Wert“, Farbton/Sättigung inkl. Färben, Belichtung, Dynamik, Schwarzweiß, Umkehren, Tontrennung, Schwellenwert); Deskriptoren lesen/schreiben (`psd_data.rs`). Textebenen werden editierbar importiert (Text, Schrift aus PostScript-Name, Größe, Farbe, Ausrichtung, Zeilenabstand, Laufweite, Absatzbreite, Transformation; Lage an Photoshops Pixeln ausgerichtet); fehlende Arial/Helvetica/Times/Courier/Calibri/Cambria/Georgia werden durch metrisch gleiche freie Schriften ersetzt, sonst bleiben die Pixel. Text-Export bleibt Pixel (Photoshops EngineData lässt sich hier ohne Photoshop nicht prüfen).
+- **Einstellungen rechnen wie Photoshop** (gemessen an Photoshops eigenen Renderings, `scripts/psd-reference.sh`): Kurven als natürlicher kubischer Spline, Kanal vor Gesamt bei Tonwert/Kurven, Helligkeit/Kontrast nach psd-tools (modern) bzw. Gerade (Legacy), Farbton/Sättigung in Photoshops Reihenfolge, Schwellenwert/Tontrennung in 8-Bit-Schritten. Abweichung (RMSE) jetzt 0,001–0,004, modern Helligkeit/Kontrast 0,013. Farbton/Sättigung für einzelne Farbbereiche fehlt noch (Hinweis beim Import).
+- PSD-Masken mit Vektormaske (Kanal −3) werden gelesen.
+
+**Noch offen in Phase 7:** Farbbereiche in Farbton/Sättigung, editierbarer Text im PSD-Export, JPEG XL/AVIF, ABR-Pinsel.
 
 ## Nächster konkreter Schritt
 

@@ -954,7 +954,15 @@ mod adjust_tests {
         let g = d.group_active().unwrap();
         let p = d.program(TileCoord::new(0, 0), None);
         assert!(
-            matches!(p.as_slice(), [Op::Layer { .. }, Op::Push { pass: true }, Op::Adjust { .. }, Op::Pop { pass: true, .. }]),
+            matches!(
+                p.as_slice(),
+                [
+                    Op::Layer { .. },
+                    Op::Push { pass: true },
+                    Op::Adjust { .. },
+                    Op::Pop { pass: true, .. }
+                ]
+            ),
             "{:?}",
             p.len()
         );

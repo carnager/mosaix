@@ -13,16 +13,23 @@ fn show(nodes: &[Node], depth: usize) {
                     None => "no pixels".into(),
                 };
                 println!(
-                    "{pad}{:?} {:?} {:.0}% vis={} rect={:?} mask={:?} {px}",
+                    "{pad}{:?} {:?} {:.0}% vis={} clip={} rect={:?} mask={:?} {px}",
                     info.name,
                     info.blend,
                     info.opacity * 100.0,
                     info.visible,
+                    info.clipped,
                     rect,
                     info.mask
                         .as_ref()
                         .map(|m| (m.rect, m.default, m.enabled, m.data.len()))
                 );
+                if let Some(a) = &info.adjustment {
+                    println!("{pad}    adjustment: {a:?}");
+                }
+                if let Some(t) = &info.text {
+                    println!("{pad}    text: {t:?}");
+                }
             }
             Node::Group {
                 info,
@@ -54,6 +61,12 @@ fn main() -> anyhow::Result<()> {
         d.merged.is_some()
     );
     show(&d.layers, 0);
+    // Optional second argument: write the merged image (Photoshop's composite) as PNG.
+    if let (Some(out), Some(Raster::U8(px))) = (std::env::args().nth(2), &d.merged) {
+        image::RgbaImage::from_raw(d.width, d.height, px.clone())
+            .expect("size")
+            .save(out)?;
+    }
     for w in &d.warnings {
         println!("warning: {w}");
     }

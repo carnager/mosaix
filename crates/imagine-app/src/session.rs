@@ -509,6 +509,7 @@ impl PsdLayers {
                     visible: l.visible,
                     clip: l.clip,
                     pass_through: l.pass_through,
+                    adjustment: None,
                     tiles: Vec::new(),
                     mask,
                 };
@@ -524,8 +525,12 @@ impl PsdLayers {
                         let children = build(children, px, mk, ts, skipped);
                         out.push(WNode::Group { layer: w, children });
                     }
-                    // Not representable yet; the merged image still shows it.
-                    Content::Adjustment(_) | Content::Vector(_) => *skipped += 1,
+                    Content::Adjustment(a) => {
+                        w.adjustment = Some(a.clone());
+                        out.push(WNode::Layer(w));
+                    }
+                    // The render document has no vector layers left (rasterised).
+                    Content::Vector(_) => *skipped += 1,
                 }
             }
             out
@@ -535,7 +540,7 @@ impl PsdLayers {
             tracing::warn!(
                 "{}",
                 tr!(
-                    "PSD: {n} adjustment layers were left out (the merged image includes them)",
+                    "PSD: {n} layers were left out (the merged image includes them)",
                     n = skipped
                 )
             );

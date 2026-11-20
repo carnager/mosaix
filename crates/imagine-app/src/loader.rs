@@ -326,11 +326,15 @@ fn load_psd(
         l.visible = i.visible;
         l.clip = i.clipped;
     }
+    let mut fonts: Option<Vec<imagine_vector::FontGroup>> = None;
+    let mut missing_fonts = std::collections::BTreeSet::new();
     fn build(
         nodes: Vec<Node>,
         doc: &mut Document<()>,
         rasters: &mut Vec<(LayerId, Rect, Raster)>,
         masks: &mut Vec<(LayerId, imagine_io::psd::LayerMask)>,
+        fonts: &mut Option<Vec<imagine_vector::FontGroup>>,
+        missing_fonts: &mut std::collections::BTreeSet<String>,
     ) -> Vec<Layer<()>> {
         nodes
             .into_iter()
@@ -340,7 +344,19 @@ fn load_psd(
                     Node::Layer { info, rect, pixels } => {
                         let mut l = Layer::pixels(id, &info.name);
                         info_to_layer(&mut l, &info);
-                        if let Some(px) = pixels {
+                        let vector = info.text.as_ref().and_then(|t| {
+                            let groups = fonts.get_or_insert_with(imagine_vector::font_groups);
+                            let v = psd_text_layer(t, rect, groups);
+                            if v.is_none() {
+                                missing_fonts.insert(t.font.clone());
+                            }
+                            v
+                        });
+                        if let Some(adj) = info.adjustment.clone() {
+                            l.content = Content::Adjustment(adj);
+                        } else if let Some(v) = vector {
+                            l.content = Content::Vector(v);
+                        } else if let Some(px) = pixels {
                             rasters.push((id, rect, px));
                         }
                         if let Some(m) = info.mask {
@@ -352,7 +368,14 @@ fn load_psd(
                     Node::Group { info, children, .. } => {
                         let mut l = Layer::pixels(id, &info.name);
                         info_to_layer(&mut l, &info);
-                        l.content = Content::Group(build(children, doc, rasters, masks));
+                        l.content = Content::Group(build(
+                            children,
+                            doc,
+                            rasters,
+                            masks,
+                            fonts,
+                            missing_fonts,
+                        ));
                         l.pass_through = &info.blend_key == b"pass";
                         if let Some(m) = info.mask {
                             l.mask_enabled = m.enabled;
@@ -379,6 +402,8 @@ fn load_psd(
                 clipped: false,
                 mask: None,
                 special: None,
+                adjustment: None,
+                text: None,
             },
             rect: Rect { x: 0, y: 0, w, h },
             pixels: Some(merged),
@@ -386,7 +411,24 @@ fn load_psd(
     } else {
         psd.layers
     };
-    doc.layers = build(nodes, &mut doc, &mut rasters, &mut masks);
+    doc.layers = build(
+        nodes,
+        &mut doc,
+        &mut rasters,
+        &mut masks,
+        &mut fonts,
+        &mut missing_fonts,
+    );
+    if !missing_fonts.is_empty() {
+        let list: Vec<_> = missing_fonts.into_iter().collect();
+        tracing::warn!(
+            "{}",
+            tr!(
+                "Fonts not installed, those text layers stay pixels: {fonts}",
+                fonts = list.join(", ")
+            )
+        );
+    }
     // The top-most layer becomes active.
     if let Some(top) = doc.display_order().last() {
         doc.active = *top;
@@ -485,6 +527,133 @@ fn load_psd(
         }))?;
     }
     Ok(())
+}
+
+/// Finds an installed face for a PostScript font name ("Arial-BoldMT").
+fn find_font(
+    ps_name: &str,
+    groups: &[imagine_vector::FontGroup],
+) -> Option<imagine_vector::FontFace> {
+    let (base, style) = ps_name.split_once('-').unwrap_or((ps_name, ""));
+    let norm = |s: &str| {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_lowercase()
+    };
+    let base = norm(base.trim_end_matches("MT").trim_end_matches("PS"));
+    let style = style.to_lowercase();
+    // Missing common fonts: metric-compatible free substitutes (same widths,
+    // so lines break and align like in Photoshop).
+    const SUBSTITUTES: &[(&str, &[&str])] = &[
+        ("arial", &["Liberation Sans", "Arimo", "Nimbus Sans"]),
+        ("helvetica", &["Nimbus Sans", "Liberation Sans", "Arimo"]),
+        ("helveticaneue", &["Nimbus Sans", "Liberation Sans"]),
+        (
+            "arialnarrow",
+            &["Liberation Sans Narrow", "Nimbus Sans Narrow"],
+        ),
+        (
+            "timesnewroman",
+            &["Liberation Serif", "Tinos", "Nimbus Roman"],
+        ),
+        ("times", &["Nimbus Roman", "Liberation Serif", "Tinos"]),
+        (
+            "couriernew",
+            &["Liberation Mono", "Cousine", "Nimbus Mono PS"],
+        ),
+        ("courier", &["Nimbus Mono PS", "Liberation Mono", "Cousine"]),
+        ("calibri", &["Carlito"]),
+        ("cambria", &["Caladea"]),
+        ("georgia", &["Gelasio"]),
+    ];
+    let group = groups.iter().find(|g| norm(&g.name) == base).or_else(|| {
+        let subs = SUBSTITUTES.iter().find(|(k, _)| *k == base)?.1;
+        subs.iter()
+            .find_map(|name| groups.iter().find(|g| norm(&g.name) == norm(name)))
+    })?;
+    let weight = [
+        ("thin", 100.0),
+        ("extralight", 200.0),
+        ("light", 300.0),
+        ("medium", 500.0),
+        ("semibold", 600.0),
+        ("demibold", 600.0),
+        ("extrabold", 800.0),
+        ("bold", 700.0),
+        ("black", 900.0),
+        ("heavy", 900.0),
+    ]
+    .iter()
+    .find(|(k, _)| style.contains(k))
+    .map_or(400.0, |(_, w)| *w);
+    let italic = style.contains("italic") || style.contains("oblique") || style.ends_with("it");
+    group
+        .faces
+        .iter()
+        .min_by_key(|f| {
+            ((f.weight - weight).abs() as i32) + if f.italic == italic { 0 } else { 1000 }
+        })
+        .cloned()
+}
+
+/// A Photoshop text layer as an editable text layer, placed where
+/// Photoshop drew it (`rect`: its pixel bounds). `None` if the font is missing.
+fn psd_text_layer(
+    t: &imagine_io::psd::Text,
+    rect: imagine_io::psd::Rect,
+    groups: &[imagine_vector::FontGroup],
+) -> Option<imagine_core::VectorLayer> {
+    use imagine_core::color::srgb_to_linear;
+    use imagine_core::vector::{TextSpec, VectorLayer};
+    let face = find_font(&t.font, groups)?;
+    let c = t.color;
+    let mut spec = TextSpec::new(
+        &t.text,
+        0.0,
+        0.0,
+        t.size,
+        [
+            srgb_to_linear(c[0]),
+            srgb_to_linear(c[1]),
+            srgb_to_linear(c[2]),
+            c[3],
+        ],
+    );
+    spec.font = face.family;
+    spec.weight = if t.faux_bold {
+        face.weight.max(700.0)
+    } else {
+        face.weight
+    };
+    spec.italic = face.italic || t.faux_italic;
+    spec.align = t.align;
+    spec.line_height = t.line_height;
+    spec.letter_spacing = t.tracking;
+    spec.width = t.width;
+    let mut v = VectorLayer::text(spec);
+    v.transform = t.transform;
+    // Align the ink with Photoshop's pixels (baselines and metrics differ a little).
+    if rect.w > 0 && rect.h > 0 {
+        let tiles = imagine_vector::render(&v);
+        let ts = TILE_SIZE as i64;
+        let (mut x0, mut y0) = (i64::MAX, i64::MAX);
+        for (c, px) in &tiles {
+            let (ox, oy) = c.origin();
+            for (i, p) in px.chunks(4).enumerate() {
+                if p[3].to_f32() > 0.25 {
+                    let (x, y) = (ox + i as i64 % ts, oy + i as i64 / ts);
+                    x0 = x0.min(x);
+                    y0 = y0.min(y);
+                }
+            }
+        }
+        if x0 != i64::MAX {
+            v.transform[4] += (rect.x - x0) as f64;
+            v.transform[5] += (rect.y - y0) as f64;
+        }
+    }
+    Some(v)
 }
 
 /// Turns a row of encoded RGB triples into linear sRGB in place.

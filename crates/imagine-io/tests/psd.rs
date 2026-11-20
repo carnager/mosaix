@@ -104,6 +104,7 @@ mod roundtrip {
             visible: true,
             clip: false,
             pass_through: false,
+            adjustment: None,
             tiles,
             mask: None,
         }
@@ -228,4 +229,93 @@ mod roundtrip {
         write(&dir.join("imagine8.psd"), false);
         write(&dir.join("imagine16.psd"), true);
     }
+}
+
+#[test]
+fn reads_photoshop_text_layer() {
+    let d = psd::open(&data("ps-text.psd")).unwrap();
+    let Node::Layer { info, rect, .. } = &d.layers[1] else {
+        panic!()
+    };
+    let t = info.text.as_ref().expect("text layer");
+    assert_eq!(t.text, "Line 1\nLine 2\nLine 3 and text");
+    assert_eq!(t.font, "ArialMT");
+    assert_eq!(t.size, 13.0);
+    assert_eq!(t.color, [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!((rect.x, rect.y), (84, 110));
+    assert!(
+        d.warnings.is_empty(),
+        "the text is carried over: {:?}",
+        d.warnings
+    );
+}
+
+#[test]
+fn reads_photoshop_clipping_mask() {
+    let d = psd::open(&data("ps-clipping.psd")).unwrap();
+    let Node::Layer { info, .. } = &d.layers[2] else {
+        panic!()
+    };
+    assert_eq!(info.name, "Rectangle 2");
+    assert!(info.clipped, "clipped onto the group below");
+}
+
+#[test]
+fn adjustment_layers_roundtrip() {
+    use imagine_core::Adjustment;
+    use imagine_io::psd::{WLayer, WNode};
+    let adj = [
+        Adjustment::Levels {
+            master: imagine_core::adjust::Levels {
+                in_black: 26.0 / 255.0,
+                in_white: 230.0 / 255.0,
+                gamma: 1.3,
+                out_black: 0.0,
+                out_white: 1.0,
+            },
+            red: Default::default(),
+            green: Default::default(),
+            blue: Default::default(),
+        },
+        Adjustment::BrightnessContrast {
+            brightness: 25.0,
+            contrast: -10.0,
+            legacy: false,
+        },
+        Adjustment::BrightnessContrast {
+            brightness: 25.0,
+            contrast: -10.0,
+            legacy: true,
+        },
+        Adjustment::Invert,
+    ];
+    let nodes: Vec<WNode> = adj
+        .iter()
+        .map(|a| {
+            WNode::Layer(WLayer {
+                name: a.name().into(),
+                opacity: 1.0,
+                blend: BlendMode::Normal,
+                visible: true,
+                clip: false,
+                pass_through: false,
+                adjustment: Some(a.clone()),
+                tiles: Vec::new(),
+                mask: None,
+            })
+        })
+        .collect();
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("adj.psd");
+    imagine_io::psd::write(&p, (64, 64), &nodes, &[], &Default::default()).unwrap();
+    let d = psd::open(&p).unwrap();
+    let back: Vec<_> = d
+        .layers
+        .iter()
+        .map(|n| match n {
+            Node::Layer { info, .. } => info.adjustment.clone().unwrap(),
+            _ => panic!(),
+        })
+        .collect();
+    assert_eq!(back, adj);
 }
