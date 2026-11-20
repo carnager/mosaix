@@ -774,7 +774,7 @@ impl App {
         let Some(e) = self.engine() else { return };
         match e.liquify_begin() {
             Ok(()) => tracing::info!(
-                "Verflüssigen: W schieben, R rekonstruieren, C Strudel (Alt: links), S zusammenziehen, B aufblähen (Alt tauscht), [ ] Größe. Enter übernimmt, Esc bricht ab, Strg+Z nimmt den letzten Strich zurück."
+                "Verflüssigen: w schieben, r rekonstruieren, c Strudel (Alt: links), s zusammenziehen, b aufblähen (Alt tauscht), [ ] Größe. Enter übernimmt, Esc bricht ab, Strg+Z nimmt den letzten Strich zurück."
             ),
             Err(e) => tracing::warn!("Verflüssigen nicht möglich: {e}"),
         }

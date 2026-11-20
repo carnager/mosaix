@@ -9,19 +9,19 @@ use super::palette::{self, Cmd, COMMANDS, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut).
 pub const TOOLS: [(ToolId, &str, &str); 13] = [
-    (ToolId::Move, "Verschieben", "V"),
-    (ToolId::Marquee, "Auswahlrechteck", "M"),
-    (ToolId::Ellipse, "Auswahlellipse", "M"),
-    (ToolId::Lasso, "Lasso", "L"),
-    (ToolId::Wand, "Zauberstab", "W"),
-    (ToolId::Crop, "Zuschneiden", "C"),
-    (ToolId::Brush, "Pinsel", "B"),
-    (ToolId::Smudge, "Wischfinger", "U"),
-    (ToolId::Clone, "Kopierstempel", "S"),
-    (ToolId::Heal, "Reparaturpinsel", "J"),
-    (ToolId::Eraser, "Radierer", "E"),
-    (ToolId::Gradient, "Verlauf linear", "G"),
-    (ToolId::Radial, "Verlauf radial", "G"),
+    (ToolId::Move, "Verschieben", "v"),
+    (ToolId::Marquee, "Auswahlrechteck", "m"),
+    (ToolId::Ellipse, "Auswahlellipse", "m"),
+    (ToolId::Lasso, "Lasso", "l"),
+    (ToolId::Wand, "Zauberstab", "w"),
+    (ToolId::Crop, "Zuschneiden", "c"),
+    (ToolId::Brush, "Pinsel", "b"),
+    (ToolId::Smudge, "Wischfinger", "u"),
+    (ToolId::Clone, "Kopierstempel", "s"),
+    (ToolId::Heal, "Reparaturpinsel", "j"),
+    (ToolId::Eraser, "Radierer", "e"),
+    (ToolId::Gradient, "Verlauf linear", "g"),
+    (ToolId::Radial, "Verlauf radial", "g"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -437,7 +437,7 @@ fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action
             ui.label(RichText::new("Verflüssigen").strong());
             let (mut t, mut sz, mut st) = (tool, size, strength);
             ui.horizontal_wrapped(|ui| {
-                for (lt, key) in imagine_gpu::LiquifyTool::ALL.into_iter().zip(["W", "R", "C", "Alt+C", "S", "B"]) {
+                for (lt, key) in imagine_gpu::LiquifyTool::ALL.into_iter().zip(["w", "r", "c", "Alt+C", "s", "b"]) {
                     if ui.selectable_label(t == lt, lt.name()).on_hover_text(key).clicked() {
                         t = lt;
                     }

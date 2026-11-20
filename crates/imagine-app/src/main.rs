@@ -35,17 +35,17 @@ Für Agenten (siehe docs/agenten.md):
 Ansicht:
   Schwenken       Leertaste + Ziehen, mittlere Maustaste, Stifttaste 1
   Zoomen          Mausrad (zum Cursor), Strg + Leertaste + Ziehen
-  Drehen          R halten + Ziehen, Umschalt + Mausrad, Stifttaste 2; Umschalt+R zurücksetzen
+  Drehen          r halten + Ziehen, Umschalt + Mausrad, Stifttaste 2; Umschalt+R zurücksetzen
   Einpassen/100 % Strg+0 / Strg+1
 
 Werkzeuge:
-  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   U Wischfinger
-  S Kopierstempel, J Reparaturpinsel (Alt+Klick: Quelle)
-  E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
-  G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
-  W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)
-  C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)
-  Mit Auswahl verschieben/transformieren V und Strg+T nur die ausgewählten Pixel.
+  b Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   u Wischfinger
+  s Kopierstempel, j Reparaturpinsel (Alt+Klick: Quelle)
+  e Radierer   m Auswahlrechteck (nochmal: Ellipse)   l Lasso
+  g Verlauf (nochmal: radial)   v Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
+  w Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; w nochmal: zusammenhängend ↔ überall)
+  c Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)
+  Mit Auswahl verschieben/transformieren v und Strg+T nur die ausgewählten Pixel.
 
 Frei transformieren (Strg+T):
   Ecken skalieren (proportional, Umschalt = frei), Kanten strecken, Alt = um die Mitte,
@@ -56,13 +56,13 @@ Malen:
   Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts
   Größe           [ / ], Strg + Mausrad
   Deckkraft       Ziffern 1…9, 0 (10 … 100 %; beim Wischfinger: Stärke)
-  Härte/Glättung  H / Umschalt+S   Farbe  P (Palette), X (Schwarz ↔ Weiß)
+  Härte/Glättung  h / Umschalt+S   Farbe  p (Palette), x (Schwarz ↔ Weiß)
   Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)
 
 Auswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):
   Alles / nichts  Strg+A / Strg+D        Umkehren   Strg+Umschalt+I
   Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf oder Rücktaste (Pixel in der Auswahl)
-  Maskierungsmodus-Ansicht  Q (rot = nicht ausgewählt)
+  Maskierungsmodus-Ansicht  q (rot = nicht ausgewählt)
 
 Ebenenmasken:
   Neue Maske      Strg+Umschalt+M (aus der Auswahl, sonst alles sichtbar)
