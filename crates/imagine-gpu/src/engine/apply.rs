@@ -366,6 +366,8 @@ impl Engine {
         if target == StrokeTarget::Pixels && !l.is_pixels() {
             return Err(if l.is_group() {
                 "Gruppen haben keine Pixel"
+            } else if l.vector().is_some() {
+                "Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Rastern)"
             } else {
                 "Einstellungsebenen haben keine Pixel – in die Maske malen (\\)"
             });

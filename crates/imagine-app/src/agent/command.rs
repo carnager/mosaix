@@ -1097,6 +1097,13 @@ pub fn info(s: &Session) -> Value {
                         v["type"] = "group".into();
                         v["children"] = layers(c).into();
                     }
+                    Content::Vector(vl) => {
+                        v["type"] = "vector".into();
+                        v["vector"] = serde_json::to_value(vl).unwrap_or_default();
+                        if let Some(b) = imagine_vector::bounds(vl) {
+                            v["bounds"] = json!(b.map(|x| x.round()));
+                        }
+                    }
                     Content::Adjustment(a) => {
                         v["type"] = "adjustment".into();
                         v["adjustment"] = serde_json::to_value(a).unwrap_or_default();

@@ -237,9 +237,11 @@ impl Engine {
         use_selection: bool,
         only: Option<(DVec2, DVec2)>,
     ) -> Result<(LayerId, Document<Tile>), &'static str> {
-        let layer = self.check_target(StrokeTarget::Pixels)?;
+        // Text and shape layers keep their description: the transform is composed.
+        let vector = self.stroke.is_none() && self.doc.active_layer().is_some_and(|l| l.vector().is_some());
+        let layer = if vector { self.doc.active } else { self.check_target(StrokeTarget::Pixels)? };
         let mut doc = self.doc.clone();
-        self.warp_layer(layer, fwd, interp, use_selection, only, &mut doc)?;
+        self.warp_layer(layer, fwd, interp, use_selection && !vector, only, &mut doc)?;
         Ok((layer, doc))
     }
 
@@ -258,6 +260,15 @@ impl Engine {
             return Err("Transformation ist zu flach (Größe 0)");
         }
         let l = self.doc.find(layer).ok_or("Ebene existiert nicht")?;
+        if let Some(v) = l.vector() {
+            let mut v = v.clone();
+            let m = fwd.matrix2;
+            let f = [m.x_axis.x, m.x_axis.y, m.y_axis.x, m.y_axis.y, fwd.translation.x, fwd.translation.y];
+            v.transform = imagine_core::vector::compose(f, v.transform);
+            if let Some(o) = out.find_mut(layer) {
+                o.content = imagine_core::doc::Content::Vector(v);
+            }
+        }
         let has_pixels = l.tiles().is_some();
         let src: HashMap<TileCoord, Tile> = l.tiles().map(|t| (**t).clone()).unwrap_or_default();
         let mask = l.mask.clone();
@@ -453,7 +464,9 @@ impl Engine {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
-        self.check_target(StrokeTarget::Pixels)?;
+        if !self.doc.active_layer().is_some_and(|l| l.vector().is_some()) {
+            self.check_target(StrokeTarget::Pixels)?;
+        }
         if fwd == DAffine2::IDENTITY {
             return Ok(());
         }
@@ -605,6 +618,10 @@ impl Engine {
     /// visible pixels, restricted to the selection if there is one.
     pub fn content_bounds(&mut self, layer: LayerId) -> Option<(i64, i64, i64, i64)> {
         let l = self.doc.find(layer)?;
+        if let Some(v) = l.vector() {
+            let b = imagine_vector::bounds(v)?;
+            return Some((b[0].floor() as i64, b[1].floor() as i64, b[2].ceil() as i64, b[3].ceil() as i64));
+        }
         let tiles: Vec<(TileCoord, Tile)> = l.tiles()?.iter().map(|(c, t)| (*c, t.clone())).collect();
         let jobs: Vec<BoundsJob> = tiles
             .iter()

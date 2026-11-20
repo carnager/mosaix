@@ -24,6 +24,9 @@ pub enum Content<T> {
     Group(Vec<Layer<T>>),
     /// Non-destructive correction of everything below.
     Adjustment(Adjustment),
+    /// Text or shape, rasterised when composited (the engine substitutes
+    /// the rendered pixels; `program` skips it in the raw document).
+    Vector(crate::vector::VectorLayer),
 }
 
 /// One tile of a GPU-side mask.
@@ -116,6 +119,13 @@ impl<T> Layer<T> {
     /// Whether the layer has pixels (it can be painted on).
     pub fn is_pixels(&self) -> bool {
         matches!(self.content, Content::Pixels(_))
+    }
+
+    pub fn vector(&self) -> Option<&crate::vector::VectorLayer> {
+        match &self.content {
+            Content::Vector(v) => Some(v),
+            _ => None,
+        }
     }
 
     pub fn adjustment(&self) -> Option<&Adjustment> {
@@ -304,6 +314,14 @@ impl<T: Clone> Document<T> {
         let mut d = self.clone();
         walk(&mut d.layers, id, &mut false);
         d
+    }
+
+    /// Adds a text or shape layer above the active one.
+    pub fn add_vector(&mut self, v: crate::vector::VectorLayer) -> LayerId {
+        let id = self.alloc_id();
+        let mut l = Layer::pixels(id, &v.default_name());
+        l.content = Content::Vector(v);
+        self.insert_above_active(l)
     }
 
     pub fn add_pixel_layer(&mut self) -> LayerId {
@@ -524,6 +542,7 @@ impl<T: Clone> Document<T> {
                             out.push(Op::Layer { id: l.id, tile, opacity, blend: l.blend, mask: m });
                         }
                     }
+                    Content::Vector(_) => {}
                     Content::Adjustment(adj) => {
                         // Nothing below in this group: nothing to adjust.
                         if !out.is_empty() && !matches!(out.last(), Some(Op::Push)) {
@@ -587,6 +606,7 @@ impl<T: Clone> Document<T> {
                         }
                         Content::Group(c) => Content::Group(map(c, f)),
                         Content::Adjustment(a) => Content::Adjustment(a.clone()),
+                        Content::Vector(v) => Content::Vector(v.clone()),
                     },
                     mask: l.mask.as_ref().map(|m| m.map(f)),
                     mask_enabled: l.mask_enabled,

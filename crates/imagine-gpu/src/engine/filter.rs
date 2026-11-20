@@ -311,20 +311,27 @@ impl Engine {
     /// Brings the smart-filter results up to date and rebuilds the document
     /// that is composited (the shown document with filtered layer pixels).
     pub(super) fn refresh_smart(&mut self) {
+        let mut changed = self.refresh_vectors();
         let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
+        let vectors = &self.vectors;
         let mut want: Vec<(LayerId, u64, Arc<TileSet>, Vec<Filter>)> = Vec::new();
         base.for_each(&mut |l, _| {
-            if let Some(t) = l.tiles() {
+            let src = match &l.content {
+                Content::Pixels(t) => Some(t.clone()),
+                Content::Vector(_) => vectors.get(&l.id).map(|(_, t)| t.clone()),
+                _ => None,
+            };
+            if let Some(t) = src {
                 let fs: Vec<Filter> = l.active_filters().cloned().collect();
                 if !fs.is_empty() {
                     let mut h = DefaultHasher::new();
-                    (Arc::as_ptr(t) as usize).hash(&mut h);
+                    (Arc::as_ptr(&t) as usize).hash(&mut h);
                     format!("{fs:?}").hash(&mut h);
-                    want.push((l.id, h.finish(), t.clone(), fs));
+                    want.push((l.id, h.finish(), t, fs));
                 }
             }
         });
-        if want.is_empty() {
+        if want.is_empty() && self.vectors.is_empty() {
             self.smart.clear();
             if self.render.take().is_some() {
                 self.recheck_all = true;
@@ -332,7 +339,6 @@ impl Engine {
             return;
         }
         self.smart.retain(|id, _| want.iter().any(|w| w.0 == *id));
-        let mut changed = false;
         for (id, key, src, fs) in want {
             if self.smart.get(&id).is_some_and(|e| e.key == key) {
                 continue;
@@ -353,26 +359,75 @@ impl Engine {
             changed = true;
         }
         if changed || self.render.is_none() || self.recheck_all || !self.recheck.is_empty() {
-            fn substitute(ls: &mut [imagine_core::Layer<Tile>], smart: &HashMap<LayerId, SmartEntry>) {
+            fn substitute(
+                ls: &mut [imagine_core::Layer<Tile>],
+                smart: &HashMap<LayerId, SmartEntry>,
+                vectors: &HashMap<LayerId, (u64, Arc<TileSet>)>,
+            ) {
                 for l in ls {
+                    let filtered = smart.get(&l.id).map(|e| e.tiles.clone());
                     match &mut l.content {
                         Content::Pixels(t) => {
-                            if let Some(e) = smart.get(&l.id) {
-                                *t = e.tiles.clone();
+                            if let Some(f) = filtered {
+                                *t = f;
                             }
                         }
-                        Content::Group(c) => substitute(c, smart),
+                        Content::Vector(_) => {
+                            let tiles = filtered.or_else(|| vectors.get(&l.id).map(|(_, t)| t.clone())).unwrap_or_default();
+                            l.content = Content::Pixels(tiles);
+                        }
+                        Content::Group(c) => substitute(c, smart, vectors),
                         Content::Adjustment(_) => {}
                     }
                 }
             }
             let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
             let mut d = base.clone();
-            substitute(&mut d.layers, &self.smart);
+            substitute(&mut d.layers, &self.smart, &self.vectors);
             self.render = Some(d);
             if changed {
                 self.recheck_all = true;
             }
         }
     }
+
+    /// Rasterises vector layers whose description changed. True if any did.
+    fn refresh_vectors(&mut self) -> bool {
+        let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
+        let mut want: Vec<(LayerId, u64, imagine_core::VectorLayer)> = Vec::new();
+        base.for_each(&mut |l, _| {
+            if let Some(v) = l.vector() {
+                let mut h = DefaultHasher::new();
+                format!("{v:?}").hash(&mut h);
+                want.push((l.id, h.finish(), v.clone()));
+            }
+        });
+        let before = self.vectors.len();
+        self.vectors.retain(|id, _| want.iter().any(|w| w.0 == *id));
+        let mut changed = self.vectors.len() != before;
+        for (id, key, v) in want {
+            if self.vectors.get(&id).is_some_and(|(k, _)| *k == key) {
+                continue;
+            }
+            let t0 = std::time::Instant::now();
+            let rendered = imagine_vector::render(&v);
+            let mut map = TileSet::new();
+            for (c, px) in rendered {
+                match self.write_new_tile(&px) {
+                    Some(t) => {
+                        map.insert(c, t);
+                    }
+                    None => {
+                        tracing::warn!("Ebenen-Speicher voll");
+                        break;
+                    }
+                }
+            }
+            tracing::debug!("Vektorebene {id}: {} Kacheln, {:.1} ms", map.len(), t0.elapsed().as_secs_f64() * 1e3);
+            self.vectors.insert(id, (key, Arc::new(map)));
+            changed = true;
+        }
+        changed
+    }
+
 }

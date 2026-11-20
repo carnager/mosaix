@@ -37,6 +37,7 @@ mod thumbs;
 mod tips;
 mod transform;
 mod util;
+mod vector;
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
@@ -205,6 +206,8 @@ pub struct Engine {
     histogram: Option<(u64, std::sync::Arc<Histogram>)>,
     /// Smart-filter results per layer.
     smart: HashMap<LayerId, filter::SmartEntry>,
+    /// Rasterised vector layers: description hash and tiles.
+    vectors: HashMap<LayerId, (u64, Arc<HashMap<TileCoord, Tile>>)>,
     /// The composited document when smart filters substitute layer pixels.
     render: Option<Document<Tile>>,
     liquify: Option<liquify::Liquify>,
@@ -715,6 +718,7 @@ impl Engine {
             thumbs: None,
             histogram: None,
             smart: HashMap::new(),
+            vectors: HashMap::new(),
             render: None,
             liquify: None,
             fill_gpu: None,
@@ -1002,6 +1006,9 @@ impl Engine {
         let l = self.doc.active_layer().ok_or("keine aktive Ebene")?;
         if l.is_group() {
             return Err("auf Gruppen kann nicht gemalt werden");
+        }
+        if l.vector().is_some() && params.target != StrokeTarget::Mask {
+            return Err("Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Rastern) oder in die Maske malen");
         }
         if l.adjustment().is_some() && params.target != StrokeTarget::Mask {
             return Err("Einstellungsebenen haben keine Pixel – Maske anlegen und hineinmalen");

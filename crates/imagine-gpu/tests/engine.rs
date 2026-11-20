@@ -1221,3 +1221,47 @@ fn content_aware_fill_speed() {
         eprintln!("hole {mp:.2} MP: read {read:?}, GPU {gpu_ms:.0} ms, CPU {cpu_ms:.0} ms");
     }
 }
+
+#[test]
+fn vector_layers_render_transform_and_rasterize() {
+    use imagine_core::VectorLayer;
+    use imagine_core::vector::{Geometry, ShapeSpec, TextSpec};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1024, 512));
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let rect = VectorLayer::shape(ShapeSpec { geometry: Geometry::Rect { x: 300.0, y: 100.0, w: 200.0, h: 100.0, radius: 0.0 }, fill: Some(red), stroke: None });
+    let id = e.add_vector(rect.clone(), "Rechteck").unwrap();
+    e.flush();
+    let at = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), x % 256, y % 256);
+    assert_eq!(at(&e, 350, 150), red);
+    assert_eq!(at(&e, 520, 150)[3], 0.0);
+    // Painting on it is refused with an explanation.
+    assert!(e.begin_stroke(StrokeParams::default()).is_err());
+    // Free transform stays a description: moved by 200 px.
+    e.transform_active(glam::DAffine2::from_translation(DVec2::new(200.0, 0.0)), imagine_gpu::Interp::Bicubic, "T").unwrap();
+    assert!(e.doc().find(id).unwrap().vector().is_some());
+    e.flush();
+    assert_eq!(at(&e, 350, 150)[3], 0.0);
+    assert_eq!(at(&e, 650, 150), red);
+    assert_eq!(e.content_bounds(id).map(|b| b.0 <= 500 && b.2 >= 700), Some(true));
+    // Editing the description re-renders; undo goes back.
+    let mut green = rect.clone();
+    if let imagine_core::vector::VectorKind::Shape(s) = &mut green.kind {
+        s.fill = Some([0.0, 1.0, 0.0, 1.0]);
+    }
+    e.set_vector(id, green, "Farbe", None).unwrap();
+    e.flush();
+    assert_eq!(at(&e, 350, 150), [0.0, 1.0, 0.0, 1.0], "the edit replaced the transformed description");
+    e.undo();
+    e.flush();
+    assert_eq!(at(&e, 650, 150), red);
+    // Text renders; rasterising keeps the look and makes it paintable.
+    let text = e.add_vector(VectorLayer::text(TextSpec::new("Imagine", 40.0, 300.0, 120.0, [1.0, 1.0, 1.0, 1.0])), "Text").unwrap();
+    e.flush();
+    let ink = (40..500).filter(|&x| at(&e, x, 370)[3] > 0.5).count();
+    assert!(ink > 40, "text ink along a line: {ink}");
+    e.rasterize(text, "Rastern").unwrap();
+    e.flush();
+    assert_eq!((40..500).filter(|&x| at(&e, x, 370)[3] > 0.5).count(), ink);
+    assert!(e.doc().find(text).unwrap().tiles().is_some_and(|t| !t.is_empty()));
+}

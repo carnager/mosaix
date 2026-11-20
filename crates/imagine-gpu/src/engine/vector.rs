@@ -1,0 +1,52 @@
+//! Text and shape layers: adding, editing and rasterising. The pixels are
+//! produced in `filter::refresh_vectors` when the document is composited.
+
+use imagine_core::doc::Content;
+use imagine_core::{LayerId, VectorLayer};
+
+use super::Engine;
+
+impl Engine {
+    /// Adds a text or shape layer above the active one (one undo step).
+    pub fn add_vector(&mut self, v: VectorLayer, label: &str) -> Option<LayerId> {
+        let mut id = None;
+        self.edit(label, |d| {
+            id = Some(d.add_vector(v));
+            true
+        });
+        id
+    }
+
+    /// Replaces a vector layer's description. With a `merge` key, repeated
+    /// changes (typing, dragging a slider) form one undo step.
+    pub fn set_vector(&mut self, layer: LayerId, v: VectorLayer, label: &str, merge: Option<&str>) -> Result<(), &'static str> {
+        if self.doc.find(layer).is_none_or(|l| l.vector().is_none()) {
+            return Err("keine Text- oder Formebene");
+        }
+        let f = |d: &mut imagine_core::Document<crate::pool::Tile>| {
+            let l = d.find_mut(layer).unwrap();
+            let changed = l.vector() != Some(&v);
+            l.content = Content::Vector(v);
+            changed
+        };
+        match merge {
+            Some(key) => self.edit_merged(label, key, f),
+            None => self.edit(label, f),
+        };
+        Ok(())
+    }
+
+    /// Converts a vector layer into ordinary pixels.
+    pub fn rasterize(&mut self, layer: LayerId, label: &str) -> Result<(), &'static str> {
+        if self.doc.find(layer).is_none_or(|l| l.vector().is_none()) {
+            return Err("keine Text- oder Formebene");
+        }
+        self.refresh_smart();
+        let tiles = self.vectors.get(&layer).map(|(_, t)| t.clone()).unwrap_or_default();
+        self.edit(label, |d| {
+            d.find_mut(layer).unwrap().content = Content::Pixels(tiles);
+            true
+        });
+        Ok(())
+    }
+}
