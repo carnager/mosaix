@@ -43,6 +43,28 @@ pub fn font_families() -> Vec<String> {
     v
 }
 
+/// A small preview of `text` in `family` (white on transparent, straight
+/// RGBA 8 bit): width, height, pixels. For font lists.
+pub fn font_preview(family: &str, text: &str, size: f32, max_width: u16) -> Option<(u16, u16, Vec<u8>)> {
+    let mut spec = TextSpec::new(text, 0.0, 0.0, size, [1.0; 4]);
+    spec.font = family.into();
+    let l = layout_text(&spec);
+    if l.runs.is_empty() {
+        return None;
+    }
+    let w = (l.width.ceil() as u16 + 2).clamp(1, max_width);
+    let h = (l.height.ceil() as u16 + 2).max(1);
+    let mut ctx = RenderContext::new(w, h);
+    let mut res = Resources::new();
+    ctx.set_transform(Affine::translate((1.0, 1.0)));
+    draw(&mut ctx, &mut res, &Prepared::Text(spec, l));
+    ctx.flush();
+    let mut pix = Pixmap::new(w, h);
+    ctx.render(&mut pix, &mut res);
+    let rgba = pix.data().iter().flat_map(|p| [255, 255, 255, p.a]).collect();
+    Some((w, h, rgba))
+}
+
 /// One run of glyphs with the same font (positions relative to the text box).
 struct Run {
     font: FontData,

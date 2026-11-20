@@ -328,7 +328,7 @@ fn signed_distance(w: usize, h: usize, alpha: &[f32]) -> Vec<f32> {
         (px - s.0).powi(2) + (py - s.1).powi(2)
     };
     let mut best: Vec<f32> = seed.iter().enumerate().map(|(i, s)| if s.0.is_nan() { f32::INFINITY } else { d2(i, *s) }).collect();
-    let mut relax = |i: usize, j: usize, seed: &mut Vec<(f32, f32)>, best: &mut Vec<f32>| {
+    let relax = |i: usize, j: usize, seed: &mut [(f32, f32)], best: &mut [f32]| {
         let s = seed[j];
         if s.0.is_nan() {
             return;

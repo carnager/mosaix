@@ -9,7 +9,136 @@ use imagine_core::vector::{Geometry, StrokeStyle, TextAlign, VectorKind};
 pub struct EditorState {
     /// Give the text field the keyboard on the next pass (new text layer).
     pub focus_text: bool,
-    font_filter: String,
+    /// Font list open, its search text and the highlighted row.
+    font_open: bool,
+    font_query: String,
+    font_sel: usize,
+    focus_query: bool,
+    /// Fonts picked recently (newest first).
+    recent: Vec<String>,
+    /// Rendered previews per family (`None`: the font has no glyphs for it).
+    previews: std::collections::HashMap<String, Option<egui::TextureHandle>>,
+}
+
+impl EditorState {
+    /// Opens the font list (for snapshots).
+    pub fn open_font_list(&mut self, query: &str) {
+        self.font_open = true;
+        self.font_query = query.into();
+        self.focus_query = true;
+    }
+}
+
+const PREVIEW_TEXT: &str = "Imagine 123";
+const ROW_H: f32 = 26.0;
+
+/// Font picker: the current font (shown in itself); click opens a search
+/// field and a list where every family is previewed in its own face.
+/// Returns the chosen family.
+fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[String], st: &mut EditorState) -> Option<String> {
+    let mut chosen = None;
+    // Closed: a button with the current font's preview.
+    let r = ui.add_sized([ui.available_width().min(220.0), 22.0], egui::Button::new(current).truncate()).on_hover_text("Schrift wählen");
+    if r.clicked() {
+        st.font_open = !st.font_open;
+        st.font_query.clear();
+        st.font_sel = 0;
+    }
+    if !st.font_open {
+        return None;
+    }
+    let q = ui.add(egui::TextEdit::singleline(&mut st.font_query).hint_text("Schrift suchen …").desired_width(f32::INFINITY));
+    if r.clicked() || std::mem::take(&mut st.focus_query) {
+        q.request_focus();
+    }
+    if q.changed() {
+        st.font_sel = 0;
+    }
+    // Entries: recent and generic first (without a query), then all matches.
+    let query = st.font_query.to_lowercase();
+    let mut list: Vec<(String, bool)> = Vec::new();
+    if query.is_empty() {
+        list.extend(st.recent.iter().map(|f| (f.clone(), true)));
+        list.extend(["sans-serif", "serif", "monospace"].iter().map(|f| (f.to_string(), false)));
+    }
+    list.extend(fonts.iter().filter(|f| query.is_empty() || f.to_lowercase().contains(&query)).map(|f| (f.clone(), false)));
+    // Keyboard: arrows move, Enter picks, Escape closes.
+    let (up, down, enter, esc) = ui.input(|i| {
+        (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape))
+    });
+    if !list.is_empty() {
+        if down {
+            st.font_sel = (st.font_sel + 1).min(list.len() - 1);
+        }
+        if up {
+            st.font_sel = st.font_sel.saturating_sub(1);
+        }
+        if enter {
+            chosen = Some(list[st.font_sel.min(list.len() - 1)].0.clone());
+        }
+    }
+    if esc {
+        st.font_open = false;
+        return None;
+    }
+    let mut rendered = 0;
+    let ctx = ui.ctx().clone();
+    egui::ScrollArea::vertical().id_salt("font list").max_height(ROW_H * 10.0).auto_shrink([false, true]).show_rows(ui, ROW_H, list.len(), |ui, rows| {
+        for i in rows {
+            let (name, recent) = &list[i];
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), egui::Sense::click());
+            let selected = i == st.font_sel || name == current;
+            if i == st.font_sel {
+                ui.painter().rect_filled(rect, 3.0, egui::Color32::from_rgb(60, 90, 140));
+                if up || down {
+                    ui.scroll_to_rect(rect, None);
+                }
+            } else if resp.hovered() {
+                ui.painter().rect_filled(rect, 3.0, egui::Color32::from_white_alpha(12));
+            }
+            let text_col = if selected { egui::Color32::WHITE } else { egui::Color32::from_gray(200) };
+            ui.painter().text(
+                rect.left_center() + egui::vec2(6.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                if *recent { format!("{name}  ·") } else { name.clone() },
+                egui::FontId::proportional(12.5),
+                text_col,
+            );
+            // Preview in the font itself (rendered once, a few per frame).
+            if !st.previews.contains_key(name) && rendered < 12 {
+                rendered += 1;
+                let tex = imagine_vector::font_preview(name, PREVIEW_TEXT, 17.0, 150).map(|(w, h, px)| {
+                    let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px);
+                    ctx.load_texture(format!("font:{name}"), img, egui::TextureOptions::LINEAR)
+                });
+                st.previews.insert(name.clone(), tex);
+            }
+            match st.previews.get(name) {
+                Some(Some(tex)) => {
+                    let size = tex.size_vec2();
+                    let scale = ((ROW_H - 4.0) / size.y).min(1.0);
+                    let s = size * scale;
+                    let r = egui::Rect::from_min_size(egui::pos2(rect.max.x - s.x - 6.0, rect.center().y - s.y / 2.0), s);
+                    ui.painter().image(tex.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), text_col);
+                }
+                Some(None) => {}
+                None => ctx.request_repaint(),
+            }
+            if resp.clicked() {
+                chosen = Some(name.clone());
+            }
+        }
+    });
+    if list.is_empty() {
+        ui.label(RichText::new("keine passende Schrift").weak());
+    }
+    if let Some(f) = &chosen {
+        st.recent.retain(|r| r != f);
+        st.recent.insert(0, f.clone());
+        st.recent.truncate(6);
+        st.font_open = false;
+    }
+    chosen
 }
 
 #[derive(Default)]
@@ -62,27 +191,16 @@ pub fn editor(ui: &mut egui::Ui, v: &VectorLayer, fonts: &[String], brush: [f32;
                 r.request_focus();
             }
             t.add(&r);
-            row(ui, "Schrift", |ui| {
-                let mut chosen = None;
-                let r = egui::ComboBox::from_id_salt("font").selected_text(&s.font).width(170.0).height(320.0).show_ui(ui, |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut st.font_filter).hint_text("suchen …"));
-                    let f = st.font_filter.to_lowercase();
-                    for name in ["sans-serif", "serif", "monospace"].iter().map(|s| s.to_string()).chain(fonts.iter().cloned()) {
-                        if !f.is_empty() && !name.to_lowercase().contains(&f) {
-                            continue;
-                        }
-                        if ui.selectable_label(s.font == name, &name).clicked() {
-                            chosen = Some(name);
-                        }
+            ui.horizontal_top(|ui| {
+                ui.add_sized([86.0, 18.0], egui::Label::new("Schrift"));
+                ui.vertical(|ui| {
+                    if let Some(f) = font_picker(ui, &s.font.clone(), fonts, st) {
+                        s.font = f;
+                        t.changed = true;
+                        t.done = true;
                     }
                 });
-                let mut resp = r.response;
-                if let Some(c) = chosen {
-                    s.font = c;
-                    resp.mark_changed();
-                }
-                resp
-            }, &mut t);
+            });
             row(ui, "Größe", |ui| ui.add(egui::Slider::new(&mut s.size, 4.0..=2000.0).logarithmic(true).suffix(" px").max_decimals(0)), &mut t);
             ui.horizontal(|ui| {
                 ui.add_sized([86.0, 18.0], egui::Label::new("Schnitt"));
