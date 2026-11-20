@@ -21,7 +21,7 @@ struct Job {
     grid_y0: i32,
     grid_w: u32,
     grid_h: u32,
-    _pad: vec2<u32>,
+    offset: vec2<i32>,    // clone: source = destination + offset
 };
 
 struct Params {
@@ -97,4 +97,20 @@ fn fs_write(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     }
     let b = textureSampleLevel(buf, buf_sampler, local / (2.0 * job.radius) + 0.5, 0.0);
     return mix(old, b, cov);
+}
+
+// Clone stamp: paints the source pixels (exact, integer offset) through the
+// tip over the stroke tile; `rate` is the dab's flow.
+@fragment
+fn fs_clone(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    let job = jobs[params.index];
+    let p = vec2<i32>(frag.xy);
+    let old = textureLoad(layer_tiles[job.stroke_slot >> 16u], p, job.stroke_slot & 0xffffu, 0);
+    let local = job.origin + frag.xy - job.center;
+    let cov = coverage(local, job.radius, job.hardness, job.shape.xyz, job.tip) * job.rate;
+    if cov <= 0.0 {
+        return old;
+    }
+    let src = canvas_texel(job, vec2<i32>(job.origin) + p + job.offset);
+    return src * cov + old * (1.0 - src.a * cov);
 }

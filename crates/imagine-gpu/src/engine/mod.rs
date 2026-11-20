@@ -119,11 +119,29 @@ pub struct StrokeParams {
     pub target: StrokeTarget,
     /// Smudge (drag colour) instead of painting; dab alpha = strength.
     pub smudge: bool,
+    /// Clone stamp: paints pixels from `offset` away (document px) instead
+    /// of a colour; dab alpha = flow.
+    pub clone: Option<CloneSource>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CloneSource {
+    /// Source = destination + offset.
+    pub offset: [i32; 2],
+    /// The active layer or the flattened image.
+    pub all_layers: bool,
+}
+
+impl StrokeParams {
+    /// Stroke tiles are a working copy of the layer that replaces it (smudge, clone).
+    pub fn working_copy(&self) -> bool {
+        self.smudge || self.clone.is_some()
+    }
 }
 
 impl Default for StrokeParams {
     fn default() -> Self {
-        Self { opacity: 1.0, erase: false, target: StrokeTarget::Pixels, smudge: false }
+        Self { opacity: 1.0, erase: false, target: StrokeTarget::Pixels, smudge: false, clone: None }
     }
 }
 
@@ -221,6 +239,9 @@ pub struct Engine {
     smudge_jobs: DynBuf,
     smudge_primed: bool,
     smudge_cur: usize,
+    /// Clone stamp from the flattened image: composite tiles copied on first use.
+    clone_cache: HashMap<TileCoord, Option<Tile>>,
+    clone_pipeline: wgpu::RenderPipeline,
     smudge_pickup_pipeline: wgpu::RenderPipeline,
     smudge_write_pipeline: wgpu::RenderPipeline,
     arrays_bgl: wgpu::BindGroupLayout,
@@ -551,6 +572,7 @@ impl Engine {
             rp("smudge pickup", &smudge_layout, &smudge_shader, ("vs", "fs_pickup"), &[], TILE_FORMAT, None, TriangleList);
         let smudge_write_pipeline =
             rp("smudge write", &smudge_layout, &smudge_shader, ("vs", "fs_write"), &[], TILE_FORMAT, None, TriangleList);
+        let clone_pipeline = rp("clone", &smudge_layout, &smudge_shader, ("vs", "fs_clone"), &[], TILE_FORMAT, None, TriangleList);
         let filter_pipeline = rp("filter", &warp_layout, &filter_shader, ("vs", "fs"), &[], TILE_FORMAT, None, TriangleList);
         let liquify_pipeline =
             rp("liquify", &liquify_layout, &liquify_shader, ("vs", "fs"), &[], TILE_FORMAT, None, TriangleList);
@@ -722,6 +744,8 @@ impl Engine {
             smudge_jobs: DynBuf::new(device, "smudge jobs", B::STORAGE, 16 << 10),
             smudge_primed: false,
             smudge_cur: 0,
+            clone_cache: HashMap::new(),
+            clone_pipeline,
             smudge_pickup_pipeline,
             smudge_write_pipeline,
             arrays_bgl,
@@ -974,14 +998,20 @@ impl Engine {
         if params.target == StrokeTarget::Mask && l.mask.is_none() {
             return Err("die Ebene hat keine Maske");
         }
-        if params.smudge && (params.target == StrokeTarget::Mask || params.erase) {
-            return Err("Verwischen geht nur auf Pixeln");
+        if params.working_copy() && (params.target == StrokeTarget::Mask || params.erase) {
+            return Err("Verwischen und Stempeln gehen nur auf Pixeln");
         }
         self.smudge_primed = false;
+        self.clone_cache.clear();
         if self.doc.selection.as_ref().is_some_and(|s| s.tiles.is_empty() && s.default == 0) {
             return Err("die Auswahl ist leer");
         }
-        self.stroke = Some(ActiveStroke { layer: l.id, params, tiles: HashMap::new() });
+        let layer = l.id;
+        if params.clone.is_some_and(|c| c.all_layers) {
+            // The source is the composite: make sure it is complete.
+            self.flush();
+        }
+        self.stroke = Some(ActiveStroke { layer, params, tiles: HashMap::new() });
         Ok(())
     }
 

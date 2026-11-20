@@ -102,6 +102,10 @@ pub enum Command {
         flow_jitter: Option<f32>,
         follow_direction: Option<bool>,
         smudge: Option<f32>,
+        /// Clone stamp: source = point + clone_offset.
+        clone_offset: Option<[i32; 2]>,
+        #[serde(default)]
+        clone_all_layers: bool,
     },
     Fill { layer: Option<LayerId>, color: ColorSpec, opacity: Option<f32>, target: Option<String> },
     Clear { layer: Option<LayerId> },
@@ -551,6 +555,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             flow_jitter,
             follow_direction,
             smudge,
+            clone_offset,
+            clone_all_layers,
         } => {
             pixel_layer(s, layer)?;
             not_painting(s)?;
@@ -559,8 +565,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             ensure!(size > 0.0 && size <= 5000.0, "size must be 0–5000 px");
             let (mut color, alpha) = match &color {
                 Some(c) => c.linear()?,
-                None if eraser || smudge.is_some() => ([0.0; 3], 1.0),
-                None => bail!("color is required unless eraser or smudge is set"),
+                None if eraser || smudge.is_some() || clone_offset.is_some() => ([0.0; 3], 1.0),
+                None => bail!("color is required unless eraser, smudge or clone_offset is set"),
             };
             if target == StrokeTarget::Mask {
                 let l = linear_to_srgb(0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]);
@@ -597,7 +603,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             s.engine
-                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target, smudge: smudge.is_some() })
+                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target, smudge: smudge.is_some() && clone_offset.is_none(), clone: clone_offset.map(|offset| imagine_gpu::CloneSource { offset, all_layers: clone_all_layers }) })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);
             let mut dabs = 0;
@@ -609,7 +615,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let d = stroke.finish(*samples.last().unwrap());
             dabs += d.len();
             s.engine.stroke_dabs(&d);
-            s.engine.end_stroke(if smudge.is_some() {
+            s.engine.end_stroke(if clone_offset.is_some() {
+                "Kopierstempel"
+            } else if smudge.is_some() {
                 "Verwischen"
             } else if eraser {
                 "Radieren"

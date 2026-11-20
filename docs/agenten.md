@@ -52,6 +52,7 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 | `layer_bounds` | pixelgenaue Grenzen des sichtbaren Inhalts einer Ebene |
 | `filter_apply` mit `smart: true`, `smart_filter_set` | Smart-Filter: nicht-destruktiv an der Ebene, ändern, ein/aus, entfernen, in die Pixel übernehmen (`apply`); `document_info` listet sie unter `smart_filters` |
 | `liquify` | Verflüssigen mit Strichen (push entlang eines Pfads, reconstruct, twirl_cw/ccw, pucker, bloat), ein Undo-Schritt |
+| `paint_stroke` mit `clone_offset` | Kopierstempel: kopiert pixelgenau von Punkt + Versatz; `clone_all_layers` nimmt das ganze Bild als Quelle |
 | `histogram` | Histogramm je Kanal mit Mittelwert, Median, 1./99. Perzentil und Clipping, wahlweise von dem, was unter einer Ebene liegt |
 | `crop`, `canvas_size`, `image_resize` | Zuschneiden (darf über den Rand hinausgehen), Arbeitsfläche mit Anker, Bildgröße; Pixel außerhalb bleiben erhalten |
 | `select_magic_wand`, `select_color_range` | Zauberstab (Toleranz 0–255, zusammenhängend oder nicht, `sample` layer/image) und Farbbereich (Farbe oder Punkt, Unschärfe 0–200) |

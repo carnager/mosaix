@@ -8,7 +8,7 @@ use super::icons::{self, Icon};
 use super::palette::{self, Cmd, COMMANDS, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut).
-pub const TOOLS: [(ToolId, &str, &str); 11] = [
+pub const TOOLS: [(ToolId, &str, &str); 12] = [
     (ToolId::Move, "Verschieben", "V"),
     (ToolId::Marquee, "Auswahlrechteck", "M"),
     (ToolId::Ellipse, "Auswahlellipse", "M"),
@@ -17,6 +17,7 @@ pub const TOOLS: [(ToolId, &str, &str); 11] = [
     (ToolId::Crop, "Zuschneiden", "C"),
     (ToolId::Brush, "Pinsel", "B"),
     (ToolId::Smudge, "Wischfinger", "U"),
+    (ToolId::Clone, "Kopierstempel", "S"),
     (ToolId::Eraser, "Radierer", "E"),
     (ToolId::Gradient, "Verlauf linear", "G"),
     (ToolId::Radial, "Verlauf radial", "G"),
@@ -32,6 +33,7 @@ pub enum ToolId {
     Crop,
     Brush,
     Smudge,
+    Clone,
     Eraser,
     Gradient,
     Radial,
@@ -101,6 +103,10 @@ pub struct Model {
     pub color: [f32; 3],
     pub brush: BrushModel,
     pub smudge_strength: f32,
+    /// Clone stamp: sample all layers, aligned, source set.
+    pub clone_all: bool,
+    pub clone_aligned: bool,
+    pub clone_source: bool,
     pub wand_tolerance: f32,
     pub wand_contiguous: bool,
     pub boxed: Option<&'static str>,
@@ -129,6 +135,7 @@ pub enum Action {
     Color([f32; 3]),
     Brush(BrushModel),
     SmudgeStrength(f32),
+    CloneOptions { all: bool, aligned: bool },
     WandTolerance(f32),
     WandContiguous(bool),
     SelectLayer(LayerId),
@@ -627,7 +634,7 @@ fn slider(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInc
 
 fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     match m.tool {
-        ToolId::Brush | ToolId::Eraser | ToolId::Smudge => {
+        ToolId::Brush | ToolId::Eraser | ToolId::Smudge | ToolId::Clone => {
             let mut b = m.brush;
             let mut changed = false;
             ui.horizontal(|ui| {
@@ -646,6 +653,17 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             });
             if b.tip == 0 {
                 changed |= slider(ui, "Härte", &mut b.hardness, 0.0..=1.0, true);
+            }
+            if m.tool == ToolId::Clone {
+                let (mut all, mut aligned) = (m.clone_all, m.clone_aligned);
+                let a = ui.checkbox(&mut all, "Alle Ebenen aufnehmen").on_hover_text("Quelle ist das ganze Bild – zum Stempeln auf eine leere Ebene");
+                let b = ui.checkbox(&mut aligned, "Ausgerichtet").on_hover_text("Der Abstand zur Quelle bleibt über alle Striche gleich");
+                if a.changed() || b.changed() {
+                    out.push(Action::CloneOptions { all, aligned });
+                }
+                if !m.clone_source {
+                    ui.label(RichText::new("Alt+Klick setzt die Quelle").color(Color32::from_rgb(255, 200, 120)));
+                }
             }
             if m.tool == ToolId::Smudge {
                 let mut s = m.smudge_strength;

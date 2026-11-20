@@ -81,6 +81,9 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             follow_direction: false,
         },
         smudge_strength: 0.7,
+        clone_all: false,
+        clone_aligned: true,
+        clone_source: false,
         wand_tolerance: 32.0,
         wand_contiguous: true,
         boxed: None,
@@ -163,6 +166,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         model.tool = match t.as_str() {
             "wand" => ToolId::Wand,
             "smudge" => ToolId::Smudge,
+            "clone" => ToolId::Clone,
             "move" => ToolId::Move,
             _ => ToolId::Brush,
         };

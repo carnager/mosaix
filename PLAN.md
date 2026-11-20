@@ -413,11 +413,15 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 | 24-MP-TIFF exportieren: sRGB / Display P3 / P3 16 Bit | 65 / 112 / 118 ms |
 
 **Noch offen in Phase 4:**
-- Monitorprofil (Wayland color-management)
+- Monitorprofil: zurückgestellt (niri kann kein Wayland-Farbmanagement, der Nutzer hat kein Profil)
 
-## Nächster konkreter Schritt
+## Stand Phase 5 (20.11.2026) – Retusche (begonnen)
 
-Rest von Phase 4: Monitorprofil. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
+- **Kopierstempel** (`S`): Alt+Klick setzt die Quelle, ein Kreuz zeigt beim Malen, woher kopiert wird. Ausgerichtet (Abstand bleibt) oder nicht; Quelle ist die Ebene oder das ganze Bild (dann auch auf eine leere Ebene). Läuft über die Arbeitskopie des Wischfingers, jeder Tupfer kopiert pixelgenau mit ganzzahligem Versatz (kein Weichzeichnen durch Neuabtasten). Agent: `paint_stroke` mit `clone_offset`, `clone_all_layers`.
+- Pinsel-Glättung wechselt jetzt mit Umschalt+S (vorher S).
+
+
+Phase 5: Reparaturpinsel (Poisson-Angleich), Bereichsreparatur, inhaltsbasiertes Füllen.
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

@@ -77,7 +77,7 @@ impl FlattenBatch {
                     let (mask_slot, mask_const) = mask_slot(mask);
                     let st = stroke.filter(|s| s.0 == id);
                     let stroke_mode = st.map_or(0, |s| match (s.2.target, s.2.erase) {
-                        _ if s.2.smudge => 5,
+                        _ if s.2.working_copy() => 5,
                         (StrokeTarget::Pixels, false) => 1,
                         (StrokeTarget::Pixels, true) => 2,
                         (StrokeTarget::Mask, false) => 3,
@@ -220,7 +220,8 @@ impl Engine {
             self.recheck.insert(c);
         }
         let stroke = self.stroke.as_mut().unwrap();
-        let smudge = stroke.params.smudge;
+        let smudge = stroke.params.working_copy();
+        let clone = stroke.params.clone;
         let mut fresh = Vec::new();
         for c in touched {
             if let Some((tile, needs_clear)) = stroke.tiles.get_mut(&c) {
@@ -234,7 +235,10 @@ impl Engine {
         }
         if smudge {
             self.init_smudge_tiles(enc, &fresh);
-            stats.dabs = self.encode_smudge(enc, &dabs);
+            stats.dabs = match clone {
+                Some(src) => self.encode_clone(enc, &dabs, src),
+                None => self.encode_smudge(enc, &dabs),
+            };
             stats.paint_passes = passes.len() as u32;
             return;
         }
@@ -285,7 +289,7 @@ impl Engine {
         hash_program(&ops, |t: &Tile| t.serial(), &mut h);
         (self.shown().blend_space as u32).hash(&mut h);
         if let Some((_, t, p)) = stroke {
-            (t.serial(), p.opacity.to_bits(), p.erase, p.target, p.smudge).hash(&mut h);
+            (t.serial(), p.opacity.to_bits(), p.erase, p.target, p.working_copy()).hash(&mut h);
             let (slot, val) = self.sel_slot(c);
             (slot, val.to_bits()).hash(&mut h);
         }

@@ -91,6 +91,13 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.circle_filled(at(15.5, 7.0), 2.6 * u, color);
             p.line_segment([at(15.5, 7.0), at(17.5, 2.5)], Stroke::new(2.6 * u, color));
         }
+        Icon::Tool(ToolId::Clone) => {
+            // A stamp: handle, neck and base.
+            p.circle_filled(at(10.0, 4.5), 2.8 * u, color);
+            p.add(Shape::convex_polygon(vec![at(8.5, 7.0), at(11.5, 7.0), at(12.5, 11.5), at(7.5, 11.5)], color, Stroke::NONE));
+            p.add(Shape::convex_polygon(vec![at(3.5, 12.0), at(16.5, 12.0), at(16.5, 15.0), at(3.5, 15.0)], color, Stroke::NONE));
+            p.line_segment([at(4.0, 17.5), at(16.0, 17.5)], thin);
+        }
         Icon::Tool(ToolId::Eraser) => {
             let pts = [at(3.0, 13.0), at(10.0, 6.0), at(16.0, 12.0), at(9.0, 19.0)];
             p.add(Shape::convex_polygon(pts.to_vec(), Color32::TRANSPARENT, mid));

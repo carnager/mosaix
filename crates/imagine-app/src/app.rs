@@ -112,6 +112,7 @@ enum Tool {
     Crop,
     Wand,
     Smudge,
+    Clone,
 }
 
 impl Tool {
@@ -128,11 +129,12 @@ impl Tool {
             Tool::Crop => "Zuschneiden",
             Tool::Wand => "Zauberstab",
             Tool::Smudge => "Wischfinger",
+            Tool::Clone => "Kopierstempel",
         }
     }
 
     fn paints(self) -> bool {
-        matches!(self, Tool::Brush | Tool::Eraser | Tool::Smudge)
+        matches!(self, Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone)
     }
 }
 
@@ -254,6 +256,12 @@ pub struct App {
     boxed: Option<(BoxKind, BoxEdit)>,
     wand_tolerance: f32,
     smudge_strength: f32,
+    /// Clone stamp: source point (document px), the aligned offset once a
+    /// stroke used it, and the options.
+    clone_source: Option<DVec2>,
+    clone_offset: Option<[i32; 2]>,
+    clone_all: bool,
+    clone_aligned: bool,
     liq_tool: LiquifyTool,
     /// Liquify brush diameter (document px) and strength 0…1.
     liq_size: f32,
@@ -459,6 +467,10 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         boxed: None,
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
+        clone_source: None,
+        clone_offset: None,
+        clone_all: false,
+        clone_aligned: true,
         liq_tool: LiquifyTool::Push,
         liq_size: 200.0,
         liq_strength: 0.6,
@@ -720,7 +732,17 @@ impl App {
         let doc = self.view.screen_to_doc(pos);
         let op = self.combine_op();
         match self.tool {
-            Tool::Brush | Tool::Eraser | Tool::Smudge => {
+            Tool::Clone if self.mods.alt => {
+                self.clone_source = Some(doc);
+                self.clone_offset = None;
+                tracing::info!("Stempelquelle: {:.0}, {:.0}", doc.x, doc.y);
+                Drag::None
+            }
+            Tool::Clone if self.clone_source.is_none() => {
+                tracing::warn!("Kopierstempel: erst mit Alt+Klick die Quelle setzen");
+                Drag::None
+            }
+            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone => {
                 self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
             }
             Tool::Marquee { ellipse } => Drag::Marquee { start: doc, end: doc, op, ellipse },
@@ -930,6 +952,18 @@ impl App {
         if self.tool == Tool::Smudge && !eraser {
             settings.smudge = Some(self.smudge_strength);
         }
+        let start = self.view.screen_to_doc(pos);
+        let clone = (self.tool == Tool::Clone && !eraser).then(|| {
+            let offset = match self.clone_offset {
+                Some(o) if self.clone_aligned => o,
+                _ => {
+                    let d = (self.clone_source.unwrap_or(start) - start).round();
+                    [d.x as i32, d.y as i32]
+                }
+            };
+            self.clone_offset = Some(offset);
+            imagine_gpu::CloneSource { offset, all_layers: self.clone_all }
+        });
         let target = self.stroke_target();
         if target == StrokeTarget::Mask {
             // Masks are grey: paint the (perceptual) luminance of the brush colour.
@@ -939,7 +973,7 @@ impl App {
         }
         let doc_pos = self.view.screen_to_doc(pos);
         let Some(engine) = self.engine() else { return Drag::None };
-        let params = StrokeParams { opacity: settings.opacity, erase: settings.eraser, target, smudge: settings.smudge.is_some() };
+        let params = StrokeParams { opacity: settings.opacity, erase: settings.eraser, target, smudge: settings.smudge.is_some(), clone };
         if let Err(e) = engine.begin_stroke(params) {
             tracing::warn!("Malen nicht möglich: {e}");
             return Drag::None;
@@ -1268,6 +1302,7 @@ impl App {
         self.tool = match st.tool.as_str() {
             "eraser" => Tool::Eraser,
             "smudge" => Tool::Smudge,
+            "clone" => Tool::Clone,
             "marquee" => Tool::Marquee { ellipse: false },
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
@@ -1290,6 +1325,7 @@ impl App {
             Tool::Brush => "brush",
             Tool::Eraser => "eraser",
             Tool::Smudge => "smudge",
+            Tool::Clone => "clone",
             Tool::Marquee { ellipse: false } => "marquee",
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
@@ -1787,6 +1823,7 @@ impl App {
                 tracing::info!("Pinselspitze: {}", imagine_core::TIP_NAMES[self.brush.tip as usize]);
             }
             Keysym::u => self.set_tool(Tool::Smudge),
+            Keysym::s if !ctrl => self.set_tool(Tool::Clone),
             Keysym::j => {
                 let on = self.brush.size_jitter == 0.0;
                 let b = &mut self.brush;
@@ -1836,7 +1873,7 @@ impl App {
                 self.brush.hardness = steps[(i + 1) % steps.len()];
                 tracing::info!("Härte {:.0} %", self.brush.hardness * 100.0);
             }
-            Keysym::s => {
+            Keysym::S if shift => {
                 let steps = [0.0, 0.4, 0.7, 0.85];
                 let i = steps.iter().position(|&s| s >= self.brush.smoothing - 1e-3).unwrap_or(0);
                 self.brush.smoothing = steps[(i + 1) % steps.len()];
@@ -2050,6 +2087,7 @@ impl App {
             Tool::Brush => ToolId::Brush,
             Tool::Eraser => ToolId::Eraser,
             Tool::Smudge => ToolId::Smudge,
+            Tool::Clone => ToolId::Clone,
             Tool::Marquee { ellipse: false } => ToolId::Marquee,
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
@@ -2099,6 +2137,9 @@ impl App {
                 follow_direction: b.follow_direction,
             },
             smudge_strength: self.smudge_strength,
+            clone_all: self.clone_all,
+            clone_aligned: self.clone_aligned,
+            clone_source: self.clone_source.is_some(),
             wand_tolerance: self.wand_tolerance,
             wand_contiguous: self.wand_contiguous,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
@@ -2132,6 +2173,7 @@ impl App {
                         ToolId::Brush => Tool::Brush,
                         ToolId::Eraser => Tool::Eraser,
                         ToolId::Smudge => Tool::Smudge,
+                        ToolId::Clone => Tool::Clone,
                         ToolId::Marquee => Tool::Marquee { ellipse: false },
                         ToolId::Ellipse => Tool::Marquee { ellipse: true },
                         ToolId::Lasso => Tool::Lasso,
@@ -2153,6 +2195,13 @@ impl App {
                         (m.size_jitter, m.angle_jitter, m.scatter, m.flow_jitter);
                 }
                 Action::SmudgeStrength(v) => self.smudge_strength = v,
+                Action::CloneOptions { all, aligned } => {
+                    self.clone_all = all;
+                    if aligned != self.clone_aligned {
+                        self.clone_offset = None;
+                    }
+                    self.clone_aligned = aligned;
+                }
                 Action::WandTolerance(v) => self.wand_tolerance = v,
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::SelectLayer(id) => {
@@ -2495,9 +2544,27 @@ impl App {
             }
             _ => match &self.boxed {
                 Some((_, b)) => b.lines(v, self.scale),
-                None => Vec::new(),
+                None => self.clone_marker(),
             },
         }
+    }
+
+    /// Clone stamp: a cross where the source is sampled for the cursor position.
+    fn clone_marker(&self) -> Vec<OverlayLine> {
+        if self.tool != Tool::Clone || self.space {
+            return Vec::new();
+        }
+        let at = match (self.clone_offset.filter(|_| self.clone_aligned), self.cursor, self.clone_source) {
+            (Some([ox, oy]), Some(c), _) => self.view.screen_to_doc(c) + DVec2::new(ox as f64, oy as f64),
+            (_, _, Some(src)) => src,
+            _ => return Vec::new(),
+        };
+        let s = self.view.doc_to_screen(at);
+        let k = 7.0 * self.scale;
+        vec![
+            OverlayLine { points: vec![s - DVec2::new(k, 0.0), s + DVec2::new(k, 0.0)], closed: false },
+            OverlayLine { points: vec![s - DVec2::new(0.0, k), s + DVec2::new(0.0, k)], closed: false },
+        ]
     }
 
     fn update_title(&self) {

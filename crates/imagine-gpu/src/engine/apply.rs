@@ -281,6 +281,7 @@ impl Engine {
         self.encode_paint(&mut enc, &mut stats);
         self.params.upload(&self.queue);
         self.queue.submit([enc.finish()]);
+        self.clone_cache.clear();
         let stroke = self.stroke.take().unwrap();
         let target = stroke.params.target;
         let layer = stroke.layer;
@@ -296,7 +297,7 @@ impl Engine {
             }
             j.src_kind = KIND_STROKE;
             j.src_slots[0] = stroke.tiles[&c].0.slot().packed();
-            j.mode = match (stroke.params.smudge, stroke.params.erase) {
+            j.mode = match (stroke.params.working_copy(), stroke.params.erase) {
                 (true, _) => MODE_REPLACE,
                 (false, true) => MODE_ERASE,
                 (false, false) => MODE_PAINT,
