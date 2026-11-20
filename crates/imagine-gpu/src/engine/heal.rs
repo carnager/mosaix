@@ -17,22 +17,52 @@ impl Engine {
     /// Reads a rectangle (document px) of the active layer or the composite
     /// as straight f32 RGBA (premultiplied, as stored), plus the full tiles it
     /// came from (layer source only).
-    pub(super) fn read_region(&mut self, layer: Option<LayerId>, x0: i64, y0: i64, w: usize, h: usize) -> (Vec<Px>, HashMap<TileCoord, Vec<f16>>) {
+    pub(super) fn read_region(
+        &mut self,
+        layer: Option<LayerId>,
+        x0: i64,
+        y0: i64,
+        w: usize,
+        h: usize,
+    ) -> (Vec<Px>, HashMap<TileCoord, Vec<f16>>) {
         let ts = TILE_SIZE as i64;
         let coords: Vec<TileCoord> = (y0.div_euclid(ts)..=(y0 + h as i64 - 1).div_euclid(ts))
-            .flat_map(|ty| (x0.div_euclid(ts)..=(x0 + w as i64 - 1).div_euclid(ts)).map(move |tx| TileCoord::new(tx as i32, ty as i32)))
+            .flat_map(|ty| {
+                (x0.div_euclid(ts)..=(x0 + w as i64 - 1).div_euclid(ts))
+                    .map(move |tx| TileCoord::new(tx as i32, ty as i32))
+            })
             .collect();
         let tiles: HashMap<TileCoord, Vec<f16>> = match layer {
             Some(id) => {
-                let map = self.doc.find(id).and_then(|l| l.tiles()).cloned().unwrap_or_default();
-                let present: Vec<TileCoord> = coords.iter().copied().filter(|c| map.contains_key(c)).collect();
+                let map = self
+                    .doc
+                    .find(id)
+                    .and_then(|l| l.tiles())
+                    .cloned()
+                    .unwrap_or_default();
+                let present: Vec<TileCoord> = coords
+                    .iter()
+                    .copied()
+                    .filter(|c| map.contains_key(c))
+                    .collect();
                 let handles: Vec<_> = present.iter().map(|c| map[c].clone()).collect();
-                present.into_iter().zip(self.read_layer_tiles(&handles)).collect()
+                present
+                    .into_iter()
+                    .zip(self.read_layer_tiles(&handles))
+                    .collect()
             }
             None => {
                 self.flush();
-                let inside: Vec<TileCoord> = coords.iter().copied().filter(|c| self.in_document(*c)).collect();
-                inside.iter().copied().zip(self.read_composite(&inside)).collect()
+                let inside: Vec<TileCoord> = coords
+                    .iter()
+                    .copied()
+                    .filter(|c| self.in_document(*c))
+                    .collect();
+                inside
+                    .iter()
+                    .copied()
+                    .zip(self.read_composite(&inside))
+                    .collect()
             }
         };
         let mut out = vec![[0.0f32; 4]; w * h];
@@ -49,7 +79,12 @@ impl Engine {
                         continue;
                     }
                     let s = ((ly * ts + lx) * 4) as usize;
-                    out[y as usize * w + x as usize] = [px[s].to_f32(), px[s + 1].to_f32(), px[s + 2].to_f32(), px[s + 3].to_f32()];
+                    out[y as usize * w + x as usize] = [
+                        px[s].to_f32(),
+                        px[s + 1].to_f32(),
+                        px[s + 2].to_f32(),
+                        px[s + 3].to_f32(),
+                    ];
                 }
             }
         }
@@ -57,7 +92,14 @@ impl Engine {
     }
 
     /// Heals the area covered by `dabs` (centre x, y, radius) on `layer`.
-    pub(super) fn heal_stroke(&mut self, layer: LayerId, src: CloneSource, dabs: &[[f32; 3]], opacity: f32, label: &str) {
+    pub(super) fn heal_stroke(
+        &mut self,
+        layer: LayerId,
+        src: CloneSource,
+        dabs: &[[f32; 3]],
+        opacity: f32,
+        label: &str,
+    ) {
         if dabs.is_empty() {
             return;
         }
@@ -96,8 +138,18 @@ impl Engine {
         // Pixels outside the canvas cannot be healed from; keep the canvas edge as border.
         let (dest, mut tiles) = self.read_region(Some(layer), x0, y0, w, h);
         let [ox, oy] = src.offset;
-        let (source, _) = self.read_region(if src.all_layers { None } else { Some(layer) }, x0 + ox as i64, y0 + oy as i64, w, h);
-        let mut v: Vec<Px> = dest.iter().zip(&source).map(|(d, s)| [0, 1, 2, 3].map(|c| d[c] - s[c])).collect();
+        let (source, _) = self.read_region(
+            if src.all_layers { None } else { Some(layer) },
+            x0 + ox as i64,
+            y0 + oy as i64,
+            w,
+            h,
+        );
+        let mut v: Vec<Px> = dest
+            .iter()
+            .zip(&source)
+            .map(|(d, s)| [0, 1, 2, 3].map(|c| d[c] - s[c]))
+            .collect();
         membrane(w, h, &inside, &mut v);
         // Write the result into the layer's tiles.
         let ts = TILE_SIZE as i64;
@@ -114,7 +166,9 @@ impl Engine {
                 let px = [o[0].max(0.0), o[1].max(0.0), o[2].max(0.0), alpha];
                 let (gx, gy) = (x0 + x as i64, y0 + y as i64);
                 let c = TileCoord::new(gx.div_euclid(ts) as i32, gy.div_euclid(ts) as i32);
-                let tile = tiles.entry(c).or_insert_with(|| vec![f16::ZERO; (TILE_SIZE * TILE_SIZE * 4) as usize]);
+                let tile = tiles
+                    .entry(c)
+                    .or_insert_with(|| vec![f16::ZERO; (TILE_SIZE * TILE_SIZE * 4) as usize]);
                 let s = ((gy.rem_euclid(ts) * ts + gx.rem_euclid(ts)) * 4) as usize;
                 for k in 0..4 {
                     tile[s + k] = f16::from_f32(px[k]);
@@ -122,31 +176,66 @@ impl Engine {
                 touched.insert(c);
             }
         }
-        let changes: Vec<(TileCoord, Option<Vec<f16>>)> = touched.into_iter().map(|c| (c, tiles.remove(&c))).collect();
+        let changes: Vec<(TileCoord, Option<Vec<f16>>)> =
+            touched.into_iter().map(|c| (c, tiles.remove(&c))).collect();
         self.replace_tiles(layer, changes, label);
-        tracing::debug!("Reparieren {w}×{h}: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+        tracing::debug!(
+            "{}",
+            imagine_core::tr!(
+                "Healing {w}×{h}: {ms} ms",
+                w = w,
+                h = h,
+                ms = format!("{:.0}", t0.elapsed().as_secs_f64() * 1e3)
+            )
+        );
     }
 
     /// Spot healing: finds a source offset whose surroundings match the
     /// surroundings of the painted area, then heals from there.
-    pub(super) fn spot_heal(&mut self, layer: LayerId, all_layers: bool, dabs: &[[f32; 3]], opacity: f32, label: &str) {
+    pub(super) fn spot_heal(
+        &mut self,
+        layer: LayerId,
+        all_layers: bool,
+        dabs: &[[f32; 3]],
+        opacity: f32,
+        label: &str,
+    ) {
         if dabs.is_empty() {
             return;
         }
         match self.find_spot_source(layer, all_layers, dabs) {
             Some(offset) => {
-                tracing::debug!("Bereichsreparatur: Quelle bei {offset:?}");
-                let src = CloneSource { offset, all_layers, heal: true, spot: false };
+                tracing::debug!(
+                    "{}",
+                    imagine_core::tr!(
+                        "Spot healing: source at {offset}",
+                        offset = format!("{offset:?}")
+                    )
+                );
+                let src = CloneSource {
+                    offset,
+                    all_layers,
+                    heal: true,
+                    spot: false,
+                };
                 self.heal_stroke(layer, src, dabs, opacity, label);
             }
-            None => tracing::warn!("Bereichsreparatur: keine passende Quelle im Bild gefunden"),
+            None => tracing::warn!(
+                "{}",
+                imagine_core::tr("Spot healing: no matching source found in the image")
+            ),
         }
     }
 
     /// Picks the offset (from a ring of candidates around the area) whose
     /// band around the shifted area has the most similar detail (gradients)
     /// to the band around the area itself.
-    fn find_spot_source(&mut self, layer: LayerId, all_layers: bool, dabs: &[[f32; 3]]) -> Option<[i32; 2]> {
+    fn find_spot_source(
+        &mut self,
+        layer: LayerId,
+        all_layers: bool,
+        dabs: &[[f32; 3]],
+    ) -> Option<[i32; 2]> {
         let (dw, dh) = (self.doc.width as i64, self.doc.height as i64);
         let (mut a, mut b) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
         for d in dabs {
@@ -156,7 +245,11 @@ impl Engine {
         let size = (b.0 - a.0).max(b.1 - a.1).max(4.0) as f64;
         let band = (size / 6.0).clamp(3.0, 40.0) as f32;
         // Candidate distances (in area sizes); fewer for huge areas.
-        let scales: &[f64] = if size > 700.0 { &[1.15, 1.6] } else { &[1.15, 1.6, 2.3, 3.2] };
+        let scales: &[f64] = if size > 700.0 {
+            &[1.15, 1.6]
+        } else {
+            &[1.15, 1.6, 2.3, 3.2]
+        };
         let reach = (size * scales[scales.len() - 1]).ceil() as i64 + band as i64 + 2;
         // Search window: the area plus `reach` around it, clipped to the canvas.
         let wx0 = (a.0.floor() as i64 - reach).max(0);
@@ -167,10 +260,19 @@ impl Engine {
             return None;
         }
         let (ww, wh) = ((wx1 - wx0) as usize, (wy1 - wy0) as usize);
-        let (img, _) = self.read_region(if all_layers { None } else { Some(layer) }, wx0, wy0, ww, wh);
+        let (img, _) = self.read_region(
+            if all_layers { None } else { Some(layer) },
+            wx0,
+            wy0,
+            ww,
+            wh,
+        );
         // Band pixels (window coordinates): within `band` of a dab, not inside one.
         let step = ((size / 48.0).floor() as usize).max(1);
-        let (bx0, by0) = (((a.0 - band).floor() as i64 - wx0).max(1), ((a.1 - band).floor() as i64 - wy0).max(1));
+        let (bx0, by0) = (
+            ((a.0 - band).floor() as i64 - wx0).max(1),
+            ((a.1 - band).floor() as i64 - wy0).max(1),
+        );
         let (bx1, by1) = (
             ((b.0 + band).ceil() as i64 - wx0).min(ww as i64 - 1),
             ((b.1 + band).ceil() as i64 - wy0).min(wh as i64 - 1),
@@ -201,7 +303,16 @@ impl Engine {
         let grad = |x: usize, y: usize| -> [f32; 8] {
             let p = |x: usize, y: usize| img[y * ww + x];
             let (c, r, d) = (p(x, y), p(x + 1, y), p(x, y + 1));
-            [r[0] - c[0], r[1] - c[1], r[2] - c[2], r[3] - c[3], d[0] - c[0], d[1] - c[1], d[2] - c[2], d[3] - c[3]]
+            [
+                r[0] - c[0],
+                r[1] - c[1],
+                r[2] - c[2],
+                r[3] - c[3],
+                d[0] - c[0],
+                d[1] - c[1],
+                d[2] - c[2],
+                d[3] - c[3],
+            ]
         };
         let here: Vec<[f32; 8]> = ring.iter().map(|&(x, y)| grad(x, y)).collect();
         // Mean colour of the band, to prefer similar tone among equal textures.
@@ -221,18 +332,37 @@ impl Engine {
         for &k in scales {
             for i in 0..16 {
                 let t = i as f64 / 16.0 * std::f64::consts::TAU;
-                let (ox, oy) = ((t.cos() * size * k).round() as i64, (t.sin() * size * k).round() as i64);
+                let (ox, oy) = (
+                    (t.cos() * size * k).round() as i64,
+                    (t.sin() * size * k).round() as i64,
+                );
                 // The shifted area and its band must lie in the window (= canvas).
-                if bx0 + ox < 0 || by0 + oy < 0 || bx1 + ox + 1 >= ww as i64 || by1 + oy + 1 >= wh as i64 {
+                if bx0 + ox < 0
+                    || by0 + oy < 0
+                    || bx1 + ox + 1 >= ww as i64
+                    || by1 + oy + 1 >= wh as i64
+                {
                     continue;
                 }
                 let mut score = 0.0f32;
                 for (j, &(x, y)) in ring.iter().enumerate() {
                     let g = grad((x as i64 + ox) as usize, (y as i64 + oy) as usize);
-                    score += g.iter().zip(&here[j]).map(|(a, b)| (a - b) * (a - b)).sum::<f32>();
+                    score += g
+                        .iter()
+                        .zip(&here[j])
+                        .map(|(a, b)| (a - b) * (a - b))
+                        .sum::<f32>();
                 }
-                let there = mean(&mut ring.iter().map(|&(x, y)| ((x as i64 + ox) as usize, (y as i64 + oy) as usize)));
-                let tone: f32 = here_mean.iter().zip(&there).map(|(a, b)| (a - b) * (a - b)).sum();
+                let there = mean(
+                    &mut ring
+                        .iter()
+                        .map(|&(x, y)| ((x as i64 + ox) as usize, (y as i64 + oy) as usize)),
+                );
+                let tone: f32 = here_mean
+                    .iter()
+                    .zip(&there)
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum();
                 // Detail matters most; tone is corrected by healing anyway.
                 let score = score / ring.len() as f32 + 0.05 * tone + 1e-4 * k as f32;
                 if best.is_none_or(|(s, _)| score < s) {

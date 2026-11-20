@@ -55,10 +55,10 @@ impl TextAlign {
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::Left => "links",
-            Self::Center => "zentriert",
-            Self::Right => "rechts",
-            Self::Justify => "Blocksatz",
+            Self::Left => crate::tr("Left"),
+            Self::Center => crate::tr("Center"),
+            Self::Right => crate::tr("Right"),
+            Self::Justify => crate::tr("Justify"),
         }
     }
 }
@@ -134,7 +134,12 @@ pub enum Geometry {
         #[serde(default)]
         radius: f64,
     },
-    Ellipse { cx: f64, cy: f64, rx: f64, ry: f64 },
+    Ellipse {
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+    },
     /// Straight segments through the points.
     Polygon {
         points: Vec<[f64; 2]>,
@@ -142,7 +147,9 @@ pub enum Geometry {
         closed: bool,
     },
     /// SVG path data ("M 0 0 L 10 0 C …").
-    Path { d: String },
+    Path {
+        d: String,
+    },
     /// An editable Bézier path (pen tool).
     Bezier {
         nodes: Vec<PathNode>,
@@ -162,7 +169,11 @@ pub struct PathNode {
 
 impl PathNode {
     pub fn corner(p: [f64; 2]) -> Self {
-        Self { p, h_in: p, h_out: p }
+        Self {
+            p,
+            h_in: p,
+            h_out: p,
+        }
     }
 
     /// Has handles (a smooth curve point).
@@ -195,11 +206,17 @@ pub struct ShapeSpec {
 
 impl VectorLayer {
     pub fn text(spec: TextSpec) -> Self {
-        Self { kind: VectorKind::Text(spec), transform: IDENTITY }
+        Self {
+            kind: VectorKind::Text(spec),
+            transform: IDENTITY,
+        }
     }
 
     pub fn shape(spec: ShapeSpec) -> Self {
-        Self { kind: VectorKind::Shape(spec), transform: IDENTITY }
+        Self {
+            kind: VectorKind::Shape(spec),
+            transform: IDENTITY,
+        }
     }
 
     /// A short layer name from the content.
@@ -214,10 +231,10 @@ impl VectorLayer {
                 if name.is_empty() { "Text".into() } else { name }
             }
             VectorKind::Shape(s) => match s.geometry {
-                Geometry::Rect { .. } => "Rechteck".into(),
+                Geometry::Rect { .. } => crate::tr("Rectangle").into(),
                 Geometry::Ellipse { .. } => "Ellipse".into(),
                 Geometry::Polygon { .. } => "Polygon".into(),
-                Geometry::Path { .. } | Geometry::Bezier { .. } => "Pfad".into(),
+                Geometry::Path { .. } | Geometry::Bezier { .. } => crate::tr("Path").into(),
             },
         }
     }
@@ -229,12 +246,28 @@ mod tests {
 
     #[test]
     fn serde_roundtrip_and_defaults() {
-        let t = VectorLayer::text(TextSpec::new("Hallo\nWelt", 10.0, 20.0, 48.0, [1.0, 0.0, 0.0, 1.0]));
+        let t = VectorLayer::text(TextSpec::new(
+            "Hallo\nWelt",
+            10.0,
+            20.0,
+            48.0,
+            [1.0, 0.0, 0.0, 1.0],
+        ));
         let j = serde_json::to_string(&t).unwrap();
         assert_eq!(serde_json::from_str::<VectorLayer>(&j).unwrap(), t);
-        let s: VectorLayer = serde_json::from_str(r#"{"type":"shape","shape":"rect","x":1,"y":2,"w":3,"h":4,"fill":[0,0,1,1]}"#).unwrap();
+        let s: VectorLayer = serde_json::from_str(
+            r#"{"type":"shape","shape":"rect","x":1,"y":2,"w":3,"h":4,"fill":[0,0,1,1]}"#,
+        )
+        .unwrap();
         assert_eq!(s.transform, IDENTITY);
-        assert!(matches!(s.kind, VectorKind::Shape(ShapeSpec { geometry: Geometry::Rect { radius: 0.0, .. }, stroke: None, .. })));
+        assert!(matches!(
+            s.kind,
+            VectorKind::Shape(ShapeSpec {
+                geometry: Geometry::Rect { radius: 0.0, .. },
+                stroke: None,
+                ..
+            })
+        ));
         assert_eq!(t.default_name(), "Hallo");
     }
 

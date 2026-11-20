@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use glam::DVec2;
-use imagine_core::{BlendMode, View};
+use imagine_core::{BlendMode, View, tr};
 use imagine_gpu::Overlay;
 
 use super::Gui;
@@ -15,12 +15,19 @@ use crate::loader::Source;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
-    let gpu = pollster::block_on(imagine_gpu::GpuContext::new(imagine_gpu::GpuContext::create_instance(), None))?;
+    let gpu = pollster::block_on(imagine_gpu::GpuContext::new(
+        imagine_gpu::GpuContext::create_instance(),
+        None,
+    ))?;
     let mut s = crate::session::load(&gpu, FORMAT, source)?;
     let (w, h) = size;
     let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("snapshot"),
-        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -34,26 +41,29 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     let ppp = 1.0;
 
     // Some structure for the layer panel.
-    s.engine.edit("Ebene", |d| {
+    s.engine.edit(tr("Layer"), |d| {
         let id = d.add_pixel_layer();
-        d.find_mut(id).unwrap().name = "Schatten".into();
+        d.find_mut(id).unwrap().name = tr("Shadow").into();
         d.group_active();
         let id = d.add_pixel_layer();
-        d.find_mut(id).unwrap().name = "Licht".into();
+        d.find_mut(id).unwrap().name = tr("Light").into();
         d.find_mut(id).unwrap().blend = BlendMode::Screen;
         true
     });
-    let _ = s.engine.add_layer_mask("Maske");
-    s.engine.edit("Ausblenden", |d| {
+    let _ = s.engine.add_layer_mask(tr("Mask"));
+    s.engine.edit(tr("Hide"), |d| {
         let id = d.active;
         d.find_mut(id).unwrap().visible = false;
         true
     });
-    let mut view = View { viewport: DVec2::new(w as f64, h as f64), ..Default::default() };
+    let mut view = View {
+        viewport: DVec2::new(w as f64, h as f64),
+        ..Default::default()
+    };
     let (dw, dh) = s.engine.size();
     view.fit(dw, dh);
     let doc = s.engine.doc();
-    let active = doc.active_layer().context("keine Ebene")?;
+    let active = doc.active_layer().context(tr("no layer"))?;
     let (labels, done) = s.engine.history_labels();
     let model = Model {
         doc_size: (dw, dh),
@@ -86,12 +96,13 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         clone_source: false,
         wand_tolerance: 32.0,
         wand_contiguous: true,
-        boxed: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| "Frei transformieren"),
+        boxed: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| "Free Transform"),
         box_angle: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| 30.0),
         mask_edit: false,
         text_overlay: None,
         path_overlay: None,
-        liquify: std::env::var_os("IMAGINE_SNAPSHOT_LIQUIFY").map(|_| (imagine_gpu::LiquifyTool::TwirlCw, 300.0, 0.6)),
+        liquify: std::env::var_os("IMAGINE_SNAPSHOT_LIQUIFY")
+            .map(|_| (imagine_gpu::LiquifyTool::TwirlCw, 300.0, 0.6)),
         layers: panels::layer_rows(doc),
         active: active.id,
         active_opacity: active.opacity,
@@ -111,41 +122,77 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         shape_ellipse: false,
         histogram: None,
     };
-    tracing::info!("UI-Schnappschuss {w}×{h}");
+    tracing::info!("{}", tr!("UI snapshot {w}×{h}", w = w, h = h));
     let palette = std::env::var("IMAGINE_SNAPSHOT_PALETTE").ok();
     if let Some(q) = &palette {
         state.palette = Some((q.clone(), 0));
     }
     match std::env::var("IMAGINE_SNAPSHOT_DIALOG").as_deref() {
         Ok("open") => {
-            let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
-            state.file = Some(super::files::FileDialog::new(super::files::FileMode::Open, home.join("Pictures"), String::new()));
+            let home = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
+            state.file = Some(super::files::FileDialog::new(
+                super::files::FileMode::Open,
+                home.join("Pictures"),
+                String::new(),
+            ));
         }
         Ok("new") => state.new_doc = Some(Default::default()),
         Ok("export") => {
-            let mut d = super::files::FileDialog::new(super::files::FileMode::ExportAs, std::env::temp_dir(), "bild.jpg".into());
+            let mut d = super::files::FileDialog::new(
+                super::files::FileMode::ExportAs,
+                std::env::temp_dir(),
+                tr("image.jpg").into(),
+            );
             d.export.space = imagine_io::export::ColorSpace::DisplayP3;
             state.file = Some(d);
         }
-        Ok("confirm") => state.confirm = Some("Beim Beenden gehen sie verloren.".into()),
+        Ok("confirm") => state.confirm = Some(tr("They will be lost when quitting.").into()),
         Ok("filter") => state.open_filter(imagine_core::Filter::GaussianBlur { radius: 25.0 }),
         _ => {}
     }
     let mut model = model;
     // Paint something into "Schatten" so its thumbnail differs.
-    if let Some(id) = model.layers.iter().find(|r| r.name == "Schatten").map(|r| r.id) {
+    if let Some(id) = model
+        .layers
+        .iter()
+        .find(|r| r.name == tr("Shadow"))
+        .map(|r| r.id)
+    {
         s.engine.select(|d| d.active = id);
         let _ = s.engine.select_shape(
-            &imagine_core::mask::Shape::Ellipse { cx: dw as f64 * 0.3, cy: dh as f64 * 0.5, rx: dw as f64 * 0.2, ry: dh as f64 * 0.3 },
+            &imagine_core::mask::Shape::Ellipse {
+                cx: dw as f64 * 0.3,
+                cy: dh as f64 * 0.5,
+                rx: dw as f64 * 0.2,
+                ry: dh as f64 * 0.3,
+            },
             imagine_core::mask::CombineOp::Replace,
-            "Auswahl",
+            tr("Selection"),
         );
-        let _ = s.engine.fill(imagine_gpu::StrokeTarget::Pixels, [0.0, 0.0, 0.0, 0.8], 1.0, "Füllen");
+        let _ = s.engine.fill(
+            imagine_gpu::StrokeTarget::Pixels,
+            [0.0, 0.0, 0.0, 0.8],
+            1.0,
+            tr("Fill"),
+        );
         let _ = s.engine.deselect("x");
         if std::env::var_os("IMAGINE_SNAPSHOT_SMART").is_some() {
-            let _ = s.engine.add_smart_filter(&imagine_core::Filter::GaussianBlur { radius: 40.0 }, "Smart");
-            let _ = s.engine.add_smart_filter(&imagine_core::Filter::AddNoise { amount: 10.0, monochrome: true, gaussian: true, seed: 0 }, "Smart");
-            s.engine.edit("Aus", |d| {
+            let _ = s.engine.add_smart_filter(
+                &imagine_core::Filter::GaussianBlur { radius: 40.0 },
+                "Smart",
+            );
+            let _ = s.engine.add_smart_filter(
+                &imagine_core::Filter::AddNoise {
+                    amount: 10.0,
+                    monochrome: true,
+                    gaussian: true,
+                    seed: 0,
+                },
+                "Smart",
+            );
+            s.engine.edit(tr("Off"), |d| {
                 let id = d.active;
                 d.find_mut(id).unwrap().filters[1].enabled = false;
                 true
@@ -161,13 +208,24 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_PATH") {
         // A path being drawn (JSON list of nodes), the cursor near its start.
         let nodes: Vec<imagine_core::vector::PathNode> = serde_json::from_str(&j)?;
-        let cursor = nodes.first().map(|n| view.doc_to_screen(DVec2::new(n.p[0] + 3.0, n.p[1])));
-        model.path_overlay = Some(crate::app::pen::overlay(&nodes, false, glam::DAffine2::IDENTITY, true, None, cursor, &view, ppp));
+        let cursor = nodes
+            .first()
+            .map(|n| view.doc_to_screen(DVec2::new(n.p[0] + 3.0, n.p[1])));
+        model.path_overlay = Some(crate::app::pen::overlay(
+            &nodes,
+            false,
+            glam::DAffine2::IDENTITY,
+            true,
+            None,
+            cursor,
+            &view,
+            ppp,
+        ));
         model.tool = ToolId::Pen;
     }
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_VECTOR") {
         let v: imagine_core::VectorLayer = serde_json::from_str(&j)?;
-        s.engine.add_vector(v.clone(), "Vektor");
+        s.engine.add_vector(v.clone(), tr("Vector"));
         model.active_vector = Some(v.clone());
         if let Ok(r) = std::env::var("IMAGINE_SNAPSHOT_TEXTEDIT")
             && let imagine_core::vector::VectorKind::Text(t) = &v.kind
@@ -191,7 +249,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     }
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_ADJ") {
         let adj: imagine_core::Adjustment = serde_json::from_str(&j)?;
-        s.engine.add_adjustment(adj.clone(), "Einstellung");
+        s.engine.add_adjustment(adj.clone(), tr("Adjustment"));
         model.active_adjustment = Some(adj);
         model.layers = panels::layer_rows(s.engine.doc());
         model.active = s.engine.doc().active;
@@ -218,7 +276,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "move" => ToolId::Move,
             _ => ToolId::Brush,
         };
-        model.boxed = (t == "move").then_some("Frei transformieren");
+        model.boxed = (t == "move").then_some("Free Transform");
     }
     // A few passes so that egui's layout settles.
     // Enough passes (and time) for layout and fade-in animations to settle.
@@ -227,14 +285,24 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(15));
         let _ = match &state.filter_preview {
             Some(panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
-            Some(panels::FilterPreview::Smart(i, f)) => s.engine.set_smart_filter_preview(Some((*i, f))),
+            Some(panels::FilterPreview::Smart(i, f)) => {
+                s.engine.set_smart_filter_preview(Some((*i, f)))
+            }
             None if state.vec_editor.fonts.preview.is_some() => {
                 let id = s.engine.doc().active;
-                s.engine.set_vector_preview(state.vec_editor.fonts.preview.as_ref().map(|v| (id, v)))
+                s.engine
+                    .set_vector_preview(state.vec_editor.fonts.preview.as_ref().map(|v| (id, v)))
             }
             None => Ok(()),
         };
-        s.engine.render(&target, &view, &Overlay { checker_px: 8.0, ..Default::default() });
+        s.engine.render(
+            &target,
+            &view,
+            &Overlay {
+                checker_px: 8.0,
+                ..Default::default()
+            },
+        );
         let t0 = std::time::Instant::now();
         gui.run((w, h), ppp, |ctx| {
             panels::build(ctx, &model, &mut state);
@@ -244,7 +312,14 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         ui_ms.push(t0.elapsed().as_secs_f64() * 1e3);
     }
     let tail = &ui_ms[10..];
-    println!("Oberfläche pro Frame (inkl. GPU): Ø {:.2} ms, max {:.2} ms", tail.iter().sum::<f64>() / tail.len() as f64, tail.iter().cloned().fold(0.0, f64::max));
+    println!(
+        "{}",
+        tr!(
+            "UI per frame (incl. GPU): avg {avg} ms, max {max} ms",
+            avg = format!("{:.2}", tail.iter().sum::<f64>() / tail.len() as f64),
+            max = format!("{:.2}", tail.iter().cloned().fold(0.0, f64::max))
+        )
+    );
 
     // Read back.
     let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
@@ -259,12 +334,21 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         tex.as_image_copy(),
         wgpu::TexelCopyBufferInfo {
             buffer: &buf,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) },
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: Some(h),
+            },
         },
-        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
     );
     gpu.queue.submit([enc.finish()]);
-    buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("map"));
+    buf.slice(..)
+        .map_async(wgpu::MapMode::Read, |r| r.expect("map"));
     let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
     let data = buf.slice(..).get_mapped_range().expect("mapped");
     let mut img = image::RgbaImage::new(w, h);
@@ -272,7 +356,8 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         let src = &data[(y * row) as usize..][..(w * 4) as usize];
         img.as_mut()[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
     }
-    img.save(out).with_context(|| format!("{} schreiben", out.display()))?;
+    img.save(out)
+        .with_context(|| tr!("writing {path}", path = out.display()))?;
     println!("{}", out.display());
     Ok(())
 }

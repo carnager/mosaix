@@ -32,7 +32,11 @@ impl Histogram {
     /// The largest bin of a channel, ignoring the two extremes so clipped
     /// pixels don't flatten the rest of the graph.
     pub fn peak(&self, ch: usize) -> f32 {
-        self.bins[ch][1..255].iter().copied().fold(0.0, f32::max).max(1e-6)
+        self.bins[ch][1..255]
+            .iter()
+            .copied()
+            .fold(0.0, f32::max)
+            .max(1e-6)
     }
 }
 
@@ -50,7 +54,14 @@ fn bin_table() -> &'static [u8; 65536] {
     })
 }
 
-fn add_tile(h: &mut Histogram, px: &[f16], (x0, y0): (i64, i64), size: usize, step: i64, (w, h_doc): (i64, i64)) {
+fn add_tile(
+    h: &mut Histogram,
+    px: &[f16],
+    (x0, y0): (i64, i64),
+    size: usize,
+    step: i64,
+    (w, h_doc): (i64, i64),
+) {
     let table = bin_table();
     for y in 0..size {
         let dy = y0 + y as i64 * step;
@@ -68,7 +79,11 @@ fn add_tile(h: &mut Histogram, px: &[f16], (x0, y0): (i64, i64), size: usize, st
                 continue;
             }
             let ch = |c: f16| {
-                if a >= 0.999 { table[c.to_bits() as usize] } else { table[f16::from_f32(c.to_f32() / a).to_bits() as usize] }
+                if a >= 0.999 {
+                    table[c.to_bits() as usize]
+                } else {
+                    table[f16::from_f32(c.to_f32() / a).to_bits() as usize]
+                }
             };
             let (r, g, b) = (ch(p[0]), ch(p[1]), ch(p[2]));
             h.bins[1][r as usize] += a;
@@ -87,7 +102,11 @@ impl Engine {
     pub fn histogram(&mut self, below: Option<LayerId>) -> Arc<Histogram> {
         self.refresh_smart();
         // With smart filters, what is composited (not the raw pixels).
-        let src = self.render.as_ref().filter(|_| self.preview.is_none()).unwrap_or(&self.doc);
+        let src = self
+            .render
+            .as_ref()
+            .filter(|_| self.preview.is_none())
+            .unwrap_or(&self.doc);
         let doc = match below {
             Some(id) => src.below(id),
             None => src.clone(),
@@ -116,15 +135,23 @@ impl Engine {
         let size = (TILE_SIZE >> mip) as usize;
         let step = 1i64 << mip;
         let dims = (doc.width as i64, doc.height as i64);
-        let mut hist = Histogram { bins: [[0.0; 256]; 4] };
+        let mut hist = Histogram {
+            bins: [[0.0; 256]; 4],
+        };
         let saved_mips = std::mem::take(&mut self.pending_mips);
-        let work: Vec<TileCoord> = coords.into_iter().filter(|c| !doc.program(*c, None).is_empty()).collect();
+        let work: Vec<TileCoord> = coords
+            .into_iter()
+            .filter(|c| !doc.program(*c, None).is_empty())
+            .collect();
         for chunk in work.chunks(BATCH) {
             let mut b = FlattenBatch::default();
             let mut tiles: Vec<(TileCoord, Tile)> = Vec::new();
             for &c in chunk {
                 let Some(t) = self.comp_pool.alloc() else {
-                    tracing::warn!("Composite-Speicher voll – Histogramm unvollständig");
+                    tracing::warn!(
+                        "{}",
+                        imagine_core::tr("Composite memory full – histogram incomplete")
+                    );
                     break;
                 };
                 b.push(&doc.program(c, None), None, mask_slot(None), t.slot());
@@ -138,7 +165,15 @@ impl Engine {
             self.queue.submit([enc.finish()]);
             let slots: Vec<_> = tiles.iter().map(|(_, t)| t.slot()).collect();
             let keep: Vec<Tile> = tiles.iter().map(|(_, t)| t.clone()).collect();
-            let data = Readback::start(&self.device, &self.queue, &self.comp_pool, &slots, mip, keep).wait(&self.device);
+            let data = Readback::start(
+                &self.device,
+                &self.queue,
+                &self.comp_pool,
+                &slots,
+                mip,
+                keep,
+            )
+            .wait(&self.device);
             for ((c, _), raw) in tiles.iter().zip(data) {
                 let (x, y) = c.origin();
                 add_tile(&mut hist, &to_f16(raw), (x, y), size, step, dims);

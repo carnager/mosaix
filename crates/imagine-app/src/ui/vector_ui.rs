@@ -2,8 +2,8 @@
 //! whether the edit is finished (so typing or a drag is one undo step).
 
 use egui::RichText;
-use imagine_core::VectorLayer;
 use imagine_core::vector::{Geometry, StrokeStyle, TextAlign, VectorKind};
+use imagine_core::{VectorLayer, tr};
 
 #[derive(Default)]
 pub struct EditorState {
@@ -42,7 +42,12 @@ impl Track {
     }
 }
 
-fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> egui::Response, t: &mut Track) {
+fn row(
+    ui: &mut egui::Ui,
+    label: &str,
+    add: impl FnOnce(&mut egui::Ui) -> egui::Response,
+    t: &mut Track,
+) {
     ui.horizontal(|ui| {
         ui.add_sized([86.0, 18.0], egui::Label::new(label));
         let r = add(ui);
@@ -53,7 +58,11 @@ fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> egui::
 /// Linear RGBA colour button (alpha included).
 fn color_button(ui: &mut egui::Ui, c: &mut [f32; 4]) -> egui::Response {
     let mut rgba = egui::Rgba::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
-    let r = egui::color_picker::color_edit_button_rgba(ui, &mut rgba, egui::color_picker::Alpha::OnlyBlend);
+    let r = egui::color_picker::color_edit_button_rgba(
+        ui,
+        &mut rgba,
+        egui::color_picker::Alpha::OnlyBlend,
+    );
     if r.changed() {
         let [cr, cg, cb, ca] = rgba.to_rgba_unmultiplied();
         *c = [cr, cg, cb, ca];
@@ -79,16 +88,28 @@ pub fn editor(
     match &mut out.kind {
         VectorKind::Text(s) => {
             ui.label(RichText::new("Text").strong());
-            let r = ui.add(egui::TextEdit::multiline(&mut s.text).desired_rows(3).desired_width(f32::INFINITY));
+            let r = ui.add(
+                egui::TextEdit::multiline(&mut s.text)
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            );
             if std::mem::take(&mut st.focus_text) {
                 r.request_focus();
             }
             t.add(&r);
             ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new("Schrift"));
+                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Font")));
                 // The family name (the face is chosen below).
-                let shown = fonts.iter().find(|g| g.faces.iter().any(|f| f.family == s.font)).map_or(s.font.clone(), |g| g.name.clone());
-                let r = ui.add_sized([ui.available_width().min(220.0), 22.0], egui::Button::new(shown).truncate()).on_hover_text("Schrift wählen");
+                let shown = fonts
+                    .iter()
+                    .find(|g| g.faces.iter().any(|f| f.family == s.font))
+                    .map_or(s.font.clone(), |g| g.name.clone());
+                let r = ui
+                    .add_sized(
+                        [ui.available_width().min(220.0), 22.0],
+                        egui::Button::new(shown).truncate(),
+                    )
+                    .on_hover_text(tr("Choose font"));
                 if r.clicked() {
                     if st.fonts.open {
                         st.fonts.open = false;
@@ -105,87 +126,157 @@ pub fn editor(
                 t.changed = true;
                 t.done = true;
             }
-            row(ui, "Größe", |ui| ui.add(egui::Slider::new(&mut s.size, 4.0..=2000.0).logarithmic(true).suffix(" px").max_decimals(0)), &mut t);
+            row(
+                ui,
+                tr("Size"),
+                |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut s.size, 4.0..=2000.0)
+                            .logarithmic(true)
+                            .suffix(" px")
+                            .max_decimals(0),
+                    )
+                },
+                &mut t,
+            );
             // Faces of the family (all weights and italics), else bold/italic toggles.
-            let group = fonts.iter().find(|g| g.faces.iter().any(|f| f.family == s.font)).filter(|g| g.faces.len() > 1);
+            let group = fonts
+                .iter()
+                .find(|g| g.faces.iter().any(|f| f.family == s.font))
+                .filter(|g| g.faces.len() > 1);
             ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new("Schnitt"));
+                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Style")));
                 match group {
                     Some(g) => {
-                        let cur = g.face(&s.font, s.weight, s.italic).map(|f| f.label.clone()).unwrap_or_default();
-                        egui::ComboBox::from_id_salt("face").selected_text(cur.clone()).width(150.0).height(400.0).show_ui(ui, |ui| {
-                            for f in &g.faces {
-                                if ui.selectable_label(f.label == cur, &f.label).clicked() {
-                                    s.font = f.family.clone();
-                                    s.weight = f.weight;
-                                    s.italic = f.italic;
-                                    t.changed = true;
-                                    t.done = true;
+                        let cur = g
+                            .face(&s.font, s.weight, s.italic)
+                            .map(|f| f.label.clone())
+                            .unwrap_or_default();
+                        egui::ComboBox::from_id_salt("face")
+                            .selected_text(cur.clone())
+                            .width(150.0)
+                            .height(400.0)
+                            .show_ui(ui, |ui| {
+                                for f in &g.faces {
+                                    if ui.selectable_label(f.label == cur, &f.label).clicked() {
+                                        s.font = f.family.clone();
+                                        s.weight = f.weight;
+                                        s.italic = f.italic;
+                                        t.changed = true;
+                                        t.done = true;
+                                    }
                                 }
-                            }
-                        });
+                            });
                     }
                     None => {
                         let mut bold = s.weight >= 600.0;
-                        let r = ui.toggle_value(&mut bold, RichText::new("F").strong()).on_hover_text("fett (künstlich, wenn die Schrift keinen fetten Schnitt hat)");
+                        let r = ui
+                            .toggle_value(&mut bold, RichText::new(tr("B")).strong())
+                            .on_hover_text(tr("bold (synthetic if the font has no bold style)"));
                         if r.changed() {
                             s.weight = if bold { 700.0 } else { 400.0 };
                             t.changed = true;
                             t.done = true;
                         }
-                        let r = ui.toggle_value(&mut s.italic, RichText::new("K").italics());
+                        let r = ui.toggle_value(&mut s.italic, RichText::new(tr("I")).italics());
                         t.add(&r);
                     }
                 }
             });
             ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new("Ausrichtung"));
+                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Align")));
                 for a in TextAlign::ALL {
                     let label = match a {
-                        TextAlign::Left => "links",
-                        TextAlign::Center => "Mitte",
-                        TextAlign::Right => "rechts",
-                        TextAlign::Justify => "Block",
+                        TextAlign::Left => tr("Left"),
+                        TextAlign::Center => tr("Middle"),
+                        TextAlign::Right => tr("Right"),
+                        TextAlign::Justify => tr("Justified"),
                     };
-                    if ui.selectable_label(s.align == a, label).on_hover_text(a.name()).clicked() && s.align != a {
+                    if ui
+                        .selectable_label(s.align == a, label)
+                        .on_hover_text(a.name())
+                        .clicked()
+                        && s.align != a
+                    {
                         s.align = a;
                         t.changed = true;
                         t.done = true;
                     }
                 }
             });
-            row(ui, "Farbe", |ui| {
-                let mut r = color_button(ui, &mut s.color);
-                if ui.small_button("Pinselfarbe").clicked() {
-                    s.color = [brush[0], brush[1], brush[2], s.color[3]];
-                    r.mark_changed();
-                }
-                r
-            }, &mut t);
-            row(ui, "Zeilenabstand", |ui| ui.add(egui::Slider::new(&mut s.line_height, 0.6..=3.0).max_decimals(2)), &mut t);
-            row(ui, "Laufweite", |ui| ui.add(egui::Slider::new(&mut s.letter_spacing, -20.0..=100.0).suffix(" px").max_decimals(1)), &mut t);
+            row(
+                ui,
+                tr("Color"),
+                |ui| {
+                    let mut r = color_button(ui, &mut s.color);
+                    if ui.small_button(tr("Brush Color")).clicked() {
+                        s.color = [brush[0], brush[1], brush[2], s.color[3]];
+                        r.mark_changed();
+                    }
+                    r
+                },
+                &mut t,
+            );
+            row(
+                ui,
+                tr("Line height"),
+                |ui| ui.add(egui::Slider::new(&mut s.line_height, 0.6..=3.0).max_decimals(2)),
+                &mut t,
+            );
+            row(
+                ui,
+                tr("Tracking"),
+                |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut s.letter_spacing, -20.0..=100.0)
+                            .suffix(" px")
+                            .max_decimals(1),
+                    )
+                },
+                &mut t,
+            );
             ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new("Absatz"));
+                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Paragraph")));
                 let mut wrap = s.width.is_some();
-                if ui.checkbox(&mut wrap, "").on_hover_text("Zeilen bei einer Breite umbrechen").changed() {
+                if ui
+                    .checkbox(&mut wrap, "")
+                    .on_hover_text(tr("Wrap lines at a width"))
+                    .changed()
+                {
                     s.width = wrap.then_some(s.size * 12.0);
                     t.changed = true;
                     t.done = true;
                 }
                 if let Some(w) = &mut s.width {
-                    let r = ui.add(egui::Slider::new(w, 20.0..=10000.0).logarithmic(true).suffix(" px").max_decimals(0));
+                    let r = ui.add(
+                        egui::Slider::new(w, 20.0..=10000.0)
+                            .logarithmic(true)
+                            .suffix(" px")
+                            .max_decimals(0),
+                    );
                     t.add(&r);
                 }
             });
         }
         VectorKind::Shape(s) => {
-            ui.label(RichText::new("Form").strong());
+            ui.label(RichText::new(tr("Shape")).strong());
             if let Geometry::Rect { radius, w, h, .. } = &mut s.geometry {
                 let max = (w.abs().min(h.abs()) * 0.5).max(1.0);
-                row(ui, "Ecken", |ui| ui.add(egui::Slider::new(radius, 0.0..=max).suffix(" px").max_decimals(0)), &mut t);
+                row(
+                    ui,
+                    tr("Corners"),
+                    |ui| {
+                        ui.add(
+                            egui::Slider::new(radius, 0.0..=max)
+                                .suffix(" px")
+                                .max_decimals(0),
+                        )
+                    },
+                    &mut t,
+                );
             }
             ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new("Fläche"));
+                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Fill Color")));
                 let mut on = s.fill.is_some();
                 if ui.checkbox(&mut on, "").changed() {
                     s.fill = on.then_some([brush[0], brush[1], brush[2], 1.0]);
@@ -198,23 +289,37 @@ pub fn editor(
                 }
             });
             ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new("Kontur"));
+                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Stroke")));
                 let mut on = s.stroke.is_some();
                 if ui.checkbox(&mut on, "").changed() {
-                    s.stroke = on.then_some(StrokeStyle { color: [brush[0], brush[1], brush[2], 1.0], width: 4.0 });
+                    s.stroke = on.then_some(StrokeStyle {
+                        color: [brush[0], brush[1], brush[2], 1.0],
+                        width: 4.0,
+                    });
                     t.changed = true;
                     t.done = true;
                 }
                 if let Some(st) = &mut s.stroke {
                     let r = color_button(ui, &mut st.color);
                     t.add(&r);
-                    let r = ui.add(egui::DragValue::new(&mut st.width).range(0.5..=500.0).suffix(" px").speed(0.2));
+                    let r = ui.add(
+                        egui::DragValue::new(&mut st.width)
+                            .range(0.5..=500.0)
+                            .suffix(" px")
+                            .speed(0.2),
+                    );
                     t.add(&r);
                 }
             });
         }
     }
-    ui.label(RichText::new("Strg+T transformiert verlustfrei, Ebene › Rastern macht Pixel daraus").weak().small());
+    ui.label(
+        RichText::new(tr(
+            "Ctrl+T transforms losslessly, Layer › Rasterize turns it into pixels",
+        ))
+        .weak()
+        .small(),
+    );
     edit.change = (t.changed || t.done).then_some((out, t.done));
     edit
 }

@@ -16,9 +16,14 @@ use anyhow::Context;
 use glam::{DAffine2, DVec2};
 use imagine_core::color::linear_to_srgb;
 use imagine_core::mask::{CombineOp, CpuMask, Shape};
-use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View};
-use imagine_gpu::{Engine, GpuContext, GradientKind, Interp, LiquifyTool, Overlay, SampleFrom, OverlayLine, StrokeParams, StrokeTarget};
-use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
+use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View, tr};
+use imagine_gpu::{
+    Engine, GpuContext, GradientKind, Interp, LiquifyTool, Overlay, OverlayLine, SampleFrom,
+    StrokeParams, StrokeTarget,
+};
+use raw_window_handle::{
+    RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle,
+};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
     delegate_registry,
@@ -33,7 +38,9 @@ use smithay_client_toolkit::{
     seat::{
         Capability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
-        pointer::{CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer},
+        pointer::{
+            CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer,
+        },
     },
     shell::{
         WaylandSurface,
@@ -54,17 +61,22 @@ use wayland_protocols::wp::{
         wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
         wp_fractional_scale_v1::{self, WpFractionalScaleV1},
     },
-    tablet::zv2::client::{zwp_tablet_manager_v2::ZwpTabletManagerV2, zwp_tablet_seat_v2::ZwpTabletSeatV2},
+    tablet::zv2::client::{
+        zwp_tablet_manager_v2::ZwpTabletManagerV2, zwp_tablet_seat_v2::ZwpTabletSeatV2,
+    },
     viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
 };
 
 use crate::agent::{command, ipc};
 use crate::boxedit::{self, BoxEdit};
-use crate::settings::{self, Settings};
-use crate::ui::{self, panels::{Action, ToolId}};
 use crate::loader::{self, LoaderMsg, Source, TileData};
 use crate::session::{ExportJob, SaveDone, SaveJob, Session};
+use crate::settings::{self, Settings};
 use crate::tablet::{self, TabletFrame};
+use crate::ui::{
+    self,
+    panels::{Action, ToolId},
+};
 
 const BTN_LEFT: u32 = 0x110;
 const BTN_MIDDLE: u32 = 0x112;
@@ -90,25 +102,57 @@ enum Drag {
     None,
     Paint,
     /// Liquify brush: last position (document px) and pressure.
-    Liquify { last: DVec2, pressure: f32 },
+    Liquify {
+        last: DVec2,
+        pressure: f32,
+    },
     /// Shape tool: dragging out a rectangle / ellipse (document px).
-    Shape { start: DVec2, end: DVec2 },
+    Shape {
+        start: DVec2,
+        end: DVec2,
+    },
     /// Selecting text with the mouse while editing it on the canvas.
     TextSelect,
     /// Pen tool: placing a node's handles, moving nodes or handles.
     Pen(pen::PenDrag),
-    Pan { last: DVec2 },
-    Rotate { last: DVec2 },
-    Zoom { last: DVec2, anchor: DVec2 },
+    Pan {
+        last: DVec2,
+    },
+    Rotate {
+        last: DVec2,
+    },
+    Zoom {
+        last: DVec2,
+        anchor: DVec2,
+    },
     /// Document coordinates.
-    Marquee { start: DVec2, end: DVec2, op: CombineOp, ellipse: bool },
-    Lasso { points: Vec<DVec2>, op: CombineOp },
-    Gradient { start: DVec2, end: DVec2 },
-    Move { start: DVec2, end: DVec2 },
+    Marquee {
+        start: DVec2,
+        end: DVec2,
+        op: CombineOp,
+        ellipse: bool,
+    },
+    Lasso {
+        points: Vec<DVec2>,
+        op: CombineOp,
+    },
+    Gradient {
+        start: DVec2,
+        end: DVec2,
+    },
+    Move {
+        start: DVec2,
+        end: DVec2,
+    },
     /// Dragging a free-transform or crop handle.
     Box,
     /// Alt + right drag: brush size (horizontal) and hardness (vertical), shown at `origin`.
-    BrushHud { origin: DVec2, start: DVec2, size: f32, hardness: f32 },
+    BrushHud {
+        origin: DVec2,
+        start: DVec2,
+        size: f32,
+        hardness: f32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -133,39 +177,56 @@ enum Tool {
 impl Tool {
     fn name(self) -> &'static str {
         match self {
-            Tool::Brush => "Pinsel",
-            Tool::Eraser => "Radierer",
-            Tool::Marquee { ellipse: false } => "Auswahlrechteck",
-            Tool::Marquee { ellipse: true } => "Auswahlellipse",
-            Tool::Lasso => "Lasso",
-            Tool::Gradient { radial: false } => "Verlauf linear",
-            Tool::Gradient { radial: true } => "Verlauf radial",
-            Tool::Move => "Verschieben",
-            Tool::Crop => "Zuschneiden",
-            Tool::Wand => "Zauberstab",
-            Tool::Smudge => "Wischfinger",
-            Tool::Clone => "Kopierstempel",
-            Tool::Heal => "Reparaturpinsel",
-            Tool::SpotHeal => "Bereichsreparatur",
-            Tool::Text => "Text",
-            Tool::Shape { ellipse: false } => "Rechteck",
-            Tool::Shape { ellipse: true } => "Ellipse",
-            Tool::Pen => "Zeichenstift",
+            Tool::Brush => tr("Brush"),
+            Tool::Eraser => tr("Eraser"),
+            Tool::Marquee { ellipse: false } => tr("Rectangular Marquee"),
+            Tool::Marquee { ellipse: true } => tr("Elliptical Marquee"),
+            Tool::Lasso => tr("Lasso"),
+            Tool::Gradient { radial: false } => tr("Linear Gradient"),
+            Tool::Gradient { radial: true } => tr("Radial Gradient"),
+            Tool::Move => tr("Move"),
+            Tool::Crop => tr("Crop"),
+            Tool::Wand => tr("Magic Wand"),
+            Tool::Smudge => tr("Smudge"),
+            Tool::Clone => tr("Clone Stamp"),
+            Tool::Heal => tr("Healing Brush"),
+            Tool::SpotHeal => tr("Spot Healing"),
+            Tool::Text => tr("Text"),
+            Tool::Shape { ellipse: false } => tr("Rectangle"),
+            Tool::Shape { ellipse: true } => tr("Ellipse"),
+            Tool::Pen => tr("Pen"),
         }
     }
 
     fn paints(self) -> bool {
-        matches!(self, Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal | Tool::SpotHeal)
+        matches!(
+            self,
+            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal | Tool::SpotHeal
+        )
     }
 }
 
 /// Result of a background job.
 enum BgDone {
     /// A new selection computed from the one identified by `base`.
-    Selection { label: &'static str, base: usize, mask: anyhow::Result<CpuMask>, started: Instant },
-    Exported { path: std::path::PathBuf, result: anyhow::Result<f64> },
-    Autosaved { path: std::path::PathBuf, result: anyhow::Result<()> },
-    Filled { result: Result<imagine_gpu::FillResult, &'static str>, started: Instant },
+    Selection {
+        label: &'static str,
+        base: usize,
+        mask: anyhow::Result<CpuMask>,
+        started: Instant,
+    },
+    Exported {
+        path: std::path::PathBuf,
+        result: anyhow::Result<f64>,
+    },
+    Autosaved {
+        path: std::path::PathBuf,
+        result: anyhow::Result<()>,
+    },
+    Filled {
+        result: Result<imagine_gpu::FillResult, &'static str>,
+        started: Instant,
+    },
     /// Clipboard data read from another program: (mime type, bytes).
     Pasted(Result<(String, Vec<u8>), String>),
 }
@@ -177,7 +238,11 @@ fn shape_rect(start: DVec2, end: DVec2, square: bool, centre: bool) -> (DVec2, D
         let m = d.x.abs().max(d.y.abs());
         d = DVec2::new(m.copysign(d.x), m.copysign(d.y));
     }
-    let (a, b) = if centre { (start - d, start + d) } else { (start, start + d) };
+    let (a, b) = if centre {
+        (start - d, start + d)
+    } else {
+        (start, start + d)
+    };
     (a.min(b), a.max(b))
 }
 
@@ -194,19 +259,32 @@ enum Pending {
 fn autosave_dir() -> std::path::PathBuf {
     let base = std::env::var_os("XDG_STATE_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state"))
+        })
         .unwrap_or_else(std::env::temp_dir);
     base.join("imagine/autosave")
 }
 
 /// Mentions recovery copies left behind by windows that no longer run.
 fn report_orphaned_autosaves() {
-    let Ok(dir) = std::fs::read_dir(autosave_dir()) else { return };
+    let Ok(dir) = std::fs::read_dir(autosave_dir()) else {
+        return;
+    };
     for e in dir.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        let pid = name.rsplit_once('-').and_then(|(_, p)| p.strip_suffix(".imagine")).and_then(|p| p.parse::<u32>().ok());
+        let pid = name
+            .rsplit_once('-')
+            .and_then(|(_, p)| p.strip_suffix(".imagine"))
+            .and_then(|p| p.parse::<u32>().ok());
         if pid.is_some_and(|p| !std::path::Path::new(&format!("/proc/{p}")).exists()) {
-            tracing::warn!("Wiederherstellungskopie gefunden: imagine {}", e.path().display());
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "Recovery copy found: imagine {path}",
+                    path = e.path().display()
+                )
+            );
         }
     }
 }
@@ -359,7 +437,8 @@ pub struct App {
 }
 
 pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
-    let conn = Connection::connect_to_env().context("keine Wayland-Verbindung (WAYLAND_DISPLAY?)")?;
+    let conn =
+        Connection::connect_to_env().context(tr("no Wayland connection (WAYLAND_DISPLAY?)"))?;
     let (globals, event_queue) = registry_queue_init(&conn)?;
     let qh = event_queue.handle();
     let mut event_loop: EventLoop<App> = EventLoop::try_new()?;
@@ -367,9 +446,9 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         .insert(event_loop.handle())
         .map_err(|e| anyhow::anyhow!("wayland source: {e}"))?;
 
-    let compositor = CompositorState::bind(&globals, &qh).context("wl_compositor fehlt")?;
-    let xdg = XdgShell::bind(&globals, &qh).context("xdg_shell fehlt")?;
-    let shm = Shm::bind(&globals, &qh).context("wl_shm fehlt")?;
+    let compositor = CompositorState::bind(&globals, &qh).context(tr("wl_compositor missing"))?;
+    let xdg = XdgShell::bind(&globals, &qh).context(tr("xdg_shell missing"))?;
+    let shm = Shm::bind(&globals, &qh).context(tr("wl_shm missing"))?;
 
     let wl_surface = compositor.create_surface(&qh);
     let window = xdg.create_window(wl_surface, WindowDecorations::RequestServer, &qh);
@@ -379,7 +458,8 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
 
     // Fractional scaling (wp_fractional_scale + wp_viewporter) where available.
     let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, tablet::Ignore).ok();
-    let frac_mgr: Option<WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, tablet::Ignore).ok();
+    let frac_mgr: Option<WpFractionalScaleManagerV1> =
+        globals.bind(&qh, 1..=1, tablet::Ignore).ok();
     let (viewport, fractional) = match (viewporter, frac_mgr) {
         (Some(vp), Some(fm)) => (
             Some(vp.get_viewport(window.wl_surface(), &qh, tablet::Ignore)),
@@ -389,7 +469,10 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     };
     let tablet_manager: Option<ZwpTabletManagerV2> = globals.bind(&qh, 1..=1, tablet::Ignore).ok();
     if tablet_manager.is_none() {
-        tracing::warn!("Compositor unterstützt kein tablet-v2 – Stift funktioniert nur als Maus");
+        tracing::warn!(
+            "{}",
+            tr("Compositor does not support tablet-v2 – the pen only works as a mouse")
+        );
     }
     window.commit();
 
@@ -410,7 +493,12 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     };
     let gpu = pollster::block_on(GpuContext::new(instance, Some(&surface)))?;
     let caps = surface.get_capabilities(&gpu.adapter);
-    let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
+    let format = caps
+        .formats
+        .iter()
+        .copied()
+        .find(|f| f.is_srgb())
+        .unwrap_or(caps.formats[0]);
     let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
         wgpu::PresentMode::Mailbox
     } else {
@@ -515,7 +603,12 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         fonts: Default::default(),
         text_edit: None,
         pen: Default::default(),
-        clipboard: clipboard::Clipboard::new(smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(&globals, &qh).ok()),
+        clipboard: clipboard::Clipboard::new(
+            smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(
+                &globals, &qh,
+            )
+            .ok(),
+        ),
         liq_tool: LiquifyTool::Push,
         liq_size: 200.0,
         liq_strength: 0.6,
@@ -557,27 +650,42 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     };
     match ipc::bind() {
         Ok((listener, guard)) => {
-            tracing::info!("Agenten-Socket: {} (imagine mcp --attach)", guard.path().display());
+            tracing::info!(
+                "{}",
+                tr!(
+                    "Agent socket: {path} (imagine mcp --attach)",
+                    path = guard.path().display()
+                )
+            );
             app.socket = Some(guard);
             let handle = event_loop.handle();
             event_loop
                 .handle()
-                .insert_source(Generic::new(listener, Interest::READ, Mode::Level), move |_, listener, _app: &mut App| {
-                    while let Ok((stream, _)) = listener.accept() {
-                        if stream.set_nonblocking(true).is_err() {
-                            continue;
+                .insert_source(
+                    Generic::new(listener, Interest::READ, Mode::Level),
+                    move |_, listener, _app: &mut App| {
+                        while let Ok((stream, _)) = listener.accept() {
+                            if stream.set_nonblocking(true).is_err() {
+                                continue;
+                            }
+                            let mut buf = Vec::new();
+                            let _ = handle.insert_source(
+                                Generic::new(stream, Interest::READ, Mode::Level),
+                                move |_, stream, app: &mut App| Ok(app.agent_io(stream, &mut buf)),
+                            );
                         }
-                        let mut buf = Vec::new();
-                        let _ = handle.insert_source(
-                            Generic::new(stream, Interest::READ, Mode::Level),
-                            move |_, stream, app: &mut App| Ok(app.agent_io(stream, &mut buf)),
-                        );
-                    }
-                    Ok(PostAction::Continue)
-                })
+                        Ok(PostAction::Continue)
+                    },
+                )
                 .map_err(|e| anyhow::anyhow!("agent socket: {e}"))?;
         }
-        Err(e) => tracing::warn!("Agenten-Socket nicht verfügbar: {e:#}"),
+        Err(e) => tracing::warn!(
+            "{}",
+            tr!(
+                "Agent socket not available: {error}",
+                error = format!("{e:#}")
+            )
+        ),
     }
     let seats: Vec<_> = app.seat_state.seats().collect();
     for seat in seats {
@@ -588,7 +696,10 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     report_orphaned_autosaves();
     while !app.exit {
         // Wake up periodically while a save is in flight or ants are marching.
-        let ants = app.session.as_ref().is_some_and(|s| s.engine.has_selection());
+        let ants = app
+            .session
+            .as_ref()
+            .is_some_and(|s| s.engine.has_selection());
         let timeout = if app.save_job.is_some() || app.export_job.is_some() {
             Some(Duration::from_millis(10))
         } else if ants {
@@ -599,7 +710,10 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
             None
         };
         // The interface may want a frame later (tooltips, fading messages).
-        let ui_wait = app.gui.repaint_at.map(|t| t.saturating_duration_since(Instant::now()));
+        let ui_wait = app
+            .gui
+            .repaint_at
+            .map(|t| t.saturating_duration_since(Instant::now()));
         let timeout = match (timeout, ui_wait) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -608,7 +722,10 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         app.poll_save();
         app.poll_export();
         app.maybe_autosave();
-        if ants || app.gui.repaint_at.is_some_and(|t| t <= Instant::now()) || ui::log::generation() != app.ui_log_gen {
+        if ants
+            || app.gui.repaint_at.is_some_and(|t| t <= Instant::now())
+            || ui::log::generation() != app.ui_log_gen
+        {
             app.needs_redraw = true;
         }
         if app.configured && app.needs_redraw && !app.frame_pending {
@@ -623,25 +740,35 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
 
 impl App {
     fn bind_tablet_seat(&mut self, seat: &wl_seat::WlSeat) {
-        let Some(mgr) = &self.tablet_manager else { return };
+        let Some(mgr) = &self.tablet_manager else {
+            return;
+        };
         if self.tablet_seat_ids.insert(seat.id()) {
-            self.tablet_seats.push(mgr.get_tablet_seat(seat, &self.qh, tablet::SeatData));
+            self.tablet_seats
+                .push(mgr.get_tablet_seat(seat, &self.qh, tablet::SeatData));
         }
     }
 
     fn physical_size(&self) -> (u32, u32) {
         let (w, h) = self.logical;
-        (((w as f64 * self.scale).round() as u32).max(1), ((h as f64 * self.scale).round() as u32).max(1))
+        (
+            ((w as f64 * self.scale).round() as u32).max(1),
+            ((h as f64 * self.scale).round() as u32).max(1),
+        )
     }
 
     fn reconfigure_surface(&mut self) {
         let (pw, ph) = self.physical_size();
         self.surface_config.width = pw;
         self.surface_config.height = ph;
-        self.surface.configure(&self.gpu.device, &self.surface_config);
+        self.surface
+            .configure(&self.gpu.device, &self.surface_config);
         match &self.viewport {
             Some(vp) => vp.set_destination(self.logical.0 as i32, self.logical.1 as i32),
-            None => self.window.wl_surface().set_buffer_scale(self.scale.round() as i32),
+            None => self
+                .window
+                .wl_surface()
+                .set_buffer_scale(self.scale.round() as i32),
         }
         self.view.viewport = DVec2::new(pw as f64, ph as f64);
         self.fit_if_needed();
@@ -685,7 +812,14 @@ impl App {
     fn print_layers(&self) {
         if let Some(s) = &self.session {
             let d = s.engine.doc();
-            tracing::debug!("Ebenen (oben → unten), Blend-Raum: {}\n{}", d.blend_space.name(), d.describe());
+            tracing::debug!(
+                "{}",
+                tr!(
+                    "Layers (top → bottom), blend space: {space}\n{layers}",
+                    space = d.blend_space.name(),
+                    layers = d.describe()
+                )
+            );
         }
     }
 
@@ -693,13 +827,36 @@ impl App {
 
     fn on_loader(&mut self, msg: LoaderMsg) {
         match msg {
-            LoaderMsg::Structure { doc, name, source, native_len, expected_tiles } => {
-                tracing::info!("Dokument {name}: {}×{}", doc.width, doc.height);
-                let engine = Engine::new(&self.gpu.device, &self.gpu.queue, self.surface_config.format, &doc);
+            LoaderMsg::Structure {
+                doc,
+                name,
+                source,
+                native_len,
+                expected_tiles,
+            } => {
+                tracing::info!(
+                    "{}",
+                    tr!(
+                        "Document {name}: {w}×{h}",
+                        name = name,
+                        w = doc.width,
+                        h = doc.height
+                    )
+                );
+                let engine = Engine::new(
+                    &self.gpu.device,
+                    &self.gpu.queue,
+                    self.surface_config.format,
+                    &doc,
+                );
                 if expected_tiles > engine.max_layer_tiles() {
                     tracing::warn!(
-                        "Dokument braucht {expected_tiles} Kacheln, der Ebenen-Speicher fasst {} – Rest fehlt",
-                        engine.max_layer_tiles()
+                        "{}",
+                        tr!(
+                            "Document needs {expected} tiles, the layer store holds {max} – the rest is missing",
+                            expected = expected_tiles,
+                            max = engine.max_layer_tiles()
+                        )
                     );
                 }
                 if let Some(p) = &source {
@@ -714,30 +871,46 @@ impl App {
                 self.needs_redraw = true;
             }
             LoaderMsg::Tiles { layer, tiles } => {
-                self.pending_uploads.extend(tiles.into_iter().map(|t| (layer, t)));
+                self.pending_uploads
+                    .extend(tiles.into_iter().map(|t| (layer, t)));
                 self.needs_redraw = true;
             }
             LoaderMsg::Mask(m) => {
                 if let Some(s) = &mut self.session
                     && let Err(e) = s.add_mask(m)
                 {
-                    tracing::warn!("Maske nicht geladen: {e:#}");
+                    tracing::warn!(
+                        "{}",
+                        tr!("Mask not loaded: {error}", error = format!("{e:#}"))
+                    );
                 }
                 self.needs_redraw = true;
             }
-            LoaderMsg::Done { decode_ms, total_ms } => {
-                tracing::info!("Laden fertig: Dekodieren {decode_ms:.0} ms, gesamt {total_ms:.0} ms");
+            LoaderMsg::Done {
+                decode_ms,
+                total_ms,
+            } => {
+                tracing::info!(
+                    "{}",
+                    tr!(
+                        "Loading done: decode {decode} ms, total {total} ms",
+                        decode = format!("{decode_ms:.0}"),
+                        total = format!("{total_ms:.0}")
+                    )
+                );
                 self.loading = false;
                 if std::mem::take(&mut self.fill_white_on_load)
                     && let Some(s) = &mut self.session
                 {
-                    let _ = s.engine.fill(StrokeTarget::Pixels, [1.0; 4], 1.0, "Weiß");
+                    let _ = s
+                        .engine
+                        .fill(StrokeTarget::Pixels, [1.0; 4], 1.0, tr("White"));
                     s.engine.clear_history();
                 }
                 self.needs_redraw = true;
             }
             LoaderMsg::Error(e) => {
-                tracing::error!("Laden fehlgeschlagen: {e}");
+                tracing::error!("{}", tr!("Loading failed: {error}", error = e));
                 self.loading = false;
                 self.fill_white_on_load = false;
                 if !self.ever_loaded {
@@ -753,11 +926,16 @@ impl App {
         self.cursor = Some(pos);
         self.drag = match button {
             Button::Middle => Drag::Pan { last: pos },
-            Button::Primary if self.space && self.mods.ctrl => Drag::Zoom { last: pos, anchor: pos },
+            Button::Primary if self.space && self.mods.ctrl => Drag::Zoom {
+                last: pos,
+                anchor: pos,
+            },
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
             Button::Primary if self.liquifying() => self.begin_liquify(pos, pressure),
-            Button::Primary if self.boxed.is_some() || self.tool == Tool::Crop => self.begin_box(pos),
+            Button::Primary if self.boxed.is_some() || self.tool == Tool::Crop => {
+                self.begin_box(pos)
+            }
             Button::Primary => self.begin_tool(pos, pressure, eraser_tool),
         };
         self.needs_redraw = true;
@@ -780,21 +958,56 @@ impl App {
             Tool::Clone | Tool::Heal if self.mods.alt => {
                 self.clone_source = Some(doc);
                 self.clone_offset = None;
-                tracing::info!("Stempelquelle: {:.0}, {:.0}", doc.x, doc.y);
+                tracing::info!(
+                    "{}",
+                    tr!(
+                        "Clone source: {x}, {y}",
+                        x = format!("{:.0}", doc.x),
+                        y = format!("{:.0}", doc.y)
+                    )
+                );
                 Drag::None
             }
             Tool::Clone | Tool::Heal if self.clone_source.is_none() => {
-                tracing::warn!("{}: erst mit Alt+Klick die Quelle setzen", self.tool.name());
+                tracing::warn!(
+                    "{}",
+                    tr!(
+                        "{tool}: Alt+click to set the source first",
+                        tool = self.tool.name()
+                    )
+                );
                 Drag::None
             }
-            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal | Tool::SpotHeal => {
+            Tool::Brush
+            | Tool::Eraser
+            | Tool::Smudge
+            | Tool::Clone
+            | Tool::Heal
+            | Tool::SpotHeal => {
                 self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
             }
-            Tool::Marquee { ellipse } => Drag::Marquee { start: doc, end: doc, op, ellipse },
-            Tool::Lasso => Drag::Lasso { points: vec![doc], op },
-            Tool::Gradient { .. } => Drag::Gradient { start: doc, end: doc },
-            Tool::Move => Drag::Move { start: doc, end: doc },
-            Tool::Shape { .. } => Drag::Shape { start: doc, end: doc },
+            Tool::Marquee { ellipse } => Drag::Marquee {
+                start: doc,
+                end: doc,
+                op,
+                ellipse,
+            },
+            Tool::Lasso => Drag::Lasso {
+                points: vec![doc],
+                op,
+            },
+            Tool::Gradient { .. } => Drag::Gradient {
+                start: doc,
+                end: doc,
+            },
+            Tool::Move => Drag::Move {
+                start: doc,
+                end: doc,
+            },
+            Tool::Shape { .. } => Drag::Shape {
+                start: doc,
+                end: doc,
+            },
             Tool::Pen => self.pen_press(pos, doc),
             Tool::Text => {
                 if self.text_edit.is_some() && self.text_edit_press(pos, doc) {
@@ -816,7 +1029,9 @@ impl App {
     }
 
     fn liquifying(&self) -> bool {
-        self.session.as_ref().is_some_and(|s| s.engine.liquify_active())
+        self.session
+            .as_ref()
+            .is_some_and(|s| s.engine.liquify_active())
     }
 
     /// Ctrl+Shift+X: starts liquifying the active layer.
@@ -827,15 +1042,18 @@ impl App {
         let Some(e) = self.engine() else { return };
         match e.liquify_begin() {
             Ok(()) => tracing::info!(
-                "Verflüssigen: W schieben, R rekonstruieren, C Strudel (Alt: links), S zusammenziehen, B aufblähen (Alt tauscht), [ ] Größe. Enter übernimmt, Esc bricht ab, Strg+Z nimmt den letzten Strich zurück."
+                "{}",
+                tr(
+                    "Liquify: W forward warp, R reconstruct, C twirl (Alt: counterclockwise), S pucker, B bloat (Alt swaps), [ ] size. Enter applies, Esc cancels, Ctrl+Z undoes the last stroke."
+                )
             ),
-            Err(e) => tracing::warn!("Verflüssigen nicht möglich: {e}"),
+            Err(e) => tracing::warn!("{}", tr!("Cannot liquify: {error}", error = e)),
         }
         self.needs_redraw = true;
     }
 
     fn commit_liquify(&mut self) {
-        self.engine_op(|e| e.liquify_commit("Verflüssigen"));
+        self.engine_op(|e| e.liquify_commit(tr("Liquify")));
         self.needs_redraw = true;
     }
 
@@ -843,7 +1061,7 @@ impl App {
         if let Some(e) = self.engine() {
             e.liquify_cancel();
         }
-        tracing::info!("Verflüssigen abgebrochen");
+        tracing::info!("{}", tr("Liquify cancelled"));
         self.needs_redraw = true;
     }
 
@@ -865,7 +1083,10 @@ impl App {
         }
         self.liq_tick = Instant::now();
         self.liquify_continuous(doc, pressure, 1.0);
-        Drag::Liquify { last: doc, pressure }
+        Drag::Liquify {
+            last: doc,
+            pressure,
+        }
     }
 
     /// One time-based dab of a continuous tool (twirl, pucker, …).
@@ -874,7 +1095,10 @@ impl App {
         if !tool.continuous() {
             return;
         }
-        let (r, s) = (self.liq_size as f64 * 0.5, (self.liq_strength * pressure) as f64);
+        let (r, s) = (
+            self.liq_size as f64 * 0.5,
+            (self.liq_strength * pressure) as f64,
+        );
         if let Some(e) = self.engine() {
             e.liquify_dab(tool, at, DVec2::ZERO, r, s, rate);
         }
@@ -886,7 +1110,10 @@ impl App {
         if tool.continuous() {
             return;
         }
-        let (r, s) = (self.liq_size as f64 * 0.5, (self.liq_strength * pressure) as f64);
+        let (r, s) = (
+            self.liq_size as f64 * 0.5,
+            (self.liq_strength * pressure) as f64,
+        );
         let d = to - from;
         let n = (d.length() / (r * 0.1).max(1.0)).ceil().max(1.0) as usize;
         let step = d / n as f64;
@@ -898,16 +1125,24 @@ impl App {
     }
 
     fn box_mods(&self) -> boxedit::Modifiers {
-        boxedit::Modifiers { shift: self.mods.shift, alt: self.mods.alt }
+        boxedit::Modifiers {
+            shift: self.mods.shift,
+            alt: self.mods.alt,
+        }
     }
 
     /// Grabs a handle of the transform / crop box (creating the crop box on first use).
     fn begin_box(&mut self, pos: DVec2) -> Drag {
         let doc = self.view.screen_to_doc(pos);
         if self.boxed.is_none() {
-            let Some(s) = &self.session else { return Drag::None };
+            let Some(s) = &self.session else {
+                return Drag::None;
+            };
             let (w, h) = s.engine.size();
-            self.boxed = Some((BoxKind::Crop, BoxEdit::new(DVec2::ZERO, DVec2::new(w as f64, h as f64), false)));
+            self.boxed = Some((
+                BoxKind::Crop,
+                BoxEdit::new(DVec2::ZERO, DVec2::new(w as f64, h as f64), false),
+            ));
         }
         let (view, scale) = (self.view, self.scale);
         let (_, b) = self.boxed.as_mut().unwrap();
@@ -923,43 +1158,57 @@ impl App {
         }
         let Some(s) = &mut self.session else { return };
         let e = &mut s.engine;
-        let Some(l) = e.doc().active_layer() else { return };
+        let Some(l) = e.doc().active_layer() else {
+            return;
+        };
         if l.is_group() {
-            tracing::warn!("Gruppen lassen sich noch nicht transformieren.");
+            tracing::warn!("{}", tr("Groups cannot be transformed yet."));
             return;
         }
         let id = l.id;
         match e.content_bounds(id) {
             Some((x0, y0, x1, y1)) => {
-                let b = BoxEdit::new(DVec2::new(x0 as f64, y0 as f64), DVec2::new(x1 as f64, y1 as f64), true);
+                let b = BoxEdit::new(
+                    DVec2::new(x0 as f64, y0 as f64),
+                    DVec2::new(x1 as f64, y1 as f64),
+                    true,
+                );
                 self.boxed = Some((BoxKind::Transform, b));
                 tracing::info!(
-                    "Frei transformieren: Ecken skalieren (Umschalt = frei), Kanten strecken, außerhalb drehen, Alt = um die Mitte. Enter übernimmt, Esc bricht ab."
+                    "{}",
+                    tr(
+                        "Free Transform: corners scale (Shift = free), edges stretch, outside rotates, Alt = around the center. Enter applies, Esc cancels."
+                    )
                 );
             }
-            None => tracing::warn!("Nichts zu transformieren: die Ebene (bzw. Auswahl) ist leer."),
+            None => tracing::warn!(
+                "{}",
+                tr("Nothing to transform: the layer (or selection) is empty.")
+            ),
         }
         self.needs_redraw = true;
     }
 
     /// Enter: applies the transform or crop.
     fn commit_box(&mut self) {
-        let Some((kind, b)) = self.boxed.take() else { return };
+        let Some((kind, b)) = self.boxed.take() else {
+            return;
+        };
         match kind {
             BoxKind::Transform => {
                 let fwd = b.fwd;
-                self.engine_op(|e| e.transform_active(fwd, Interp::Bicubic, "Frei transformieren"));
+                self.engine_op(|e| e.transform_active(fwd, Interp::Bicubic, tr("Free Transform")));
             }
             BoxKind::Crop => {
                 let (x, y, w, h) = b.rect();
                 if w < 1 || h < 1 {
-                    tracing::warn!("Zuschneiden: Rahmen ist leer");
+                    tracing::warn!("{}", tr("Crop: the frame is empty"));
                     return;
                 }
-                self.engine_op(|e| e.crop(x, y, w as u32, h as u32, "Zuschneiden"));
+                self.engine_op(|e| e.crop(x, y, w as u32, h as u32, tr("Crop")));
                 self.view_fitted = false;
                 self.fit_if_needed();
-                tracing::info!("Neue Bildgröße: {w}×{h}");
+                tracing::info!("{}", tr!("New image size: {w}×{h}", w = w, h = h));
             }
         }
         self.needs_redraw = true;
@@ -970,7 +1219,7 @@ impl App {
             if let Some(e) = self.engine() {
                 let _ = e.set_transform_preview(None);
             }
-            tracing::info!("Abgebrochen");
+            tracing::info!("{}", tr("Cancelled"));
             self.needs_redraw = true;
         }
     }
@@ -979,7 +1228,9 @@ impl App {
     fn preview_transform(&self) -> Option<DAffine2> {
         match (&self.boxed, &self.drag) {
             (Some((BoxKind::Transform, b)), _) => Some(b.fwd),
-            (_, Drag::Move { start, end }) => Some(DAffine2::from_translation(self.move_delta(*start, *end))),
+            (_, Drag::Move { start, end }) => {
+                Some(DAffine2::from_translation(self.move_delta(*start, *end)))
+            }
             _ => None,
         }
     }
@@ -997,8 +1248,16 @@ impl App {
     }
 
     fn stroke_target(&self) -> StrokeTarget {
-        let adjustment = self.session.as_ref().and_then(|s| s.engine.doc().active_layer()).is_some_and(|l| l.adjustment().is_some());
-        if self.mask_edit || adjustment { StrokeTarget::Mask } else { StrokeTarget::Pixels }
+        let adjustment = self
+            .session
+            .as_ref()
+            .and_then(|s| s.engine.doc().active_layer())
+            .is_some_and(|l| l.adjustment().is_some());
+        if self.mask_edit || adjustment {
+            StrokeTarget::Mask
+        } else {
+            StrokeTarget::Pixels
+        }
     }
 
     fn begin_stroke(&mut self, pos: DVec2, pressure: f32, eraser: bool) -> Drag {
@@ -1023,10 +1282,20 @@ impl App {
                 }
             };
             self.clone_offset = Some(offset);
-            imagine_gpu::CloneSource { offset, all_layers: self.clone_all, heal: self.tool == Tool::Heal, spot: false }
+            imagine_gpu::CloneSource {
+                offset,
+                all_layers: self.clone_all,
+                heal: self.tool == Tool::Heal,
+                spot: false,
+            }
         });
         let clone = clone.or_else(|| {
-            spot.then_some(imagine_gpu::CloneSource { offset: [0, 0], all_layers: self.clone_all, heal: true, spot: true })
+            spot.then_some(imagine_gpu::CloneSource {
+                offset: [0, 0],
+                all_layers: self.clone_all,
+                heal: true,
+                spot: true,
+            })
         });
         let target = self.stroke_target();
         if target == StrokeTarget::Mask {
@@ -1036,14 +1305,25 @@ impl App {
             settings.color = [lum; 3];
         }
         let doc_pos = self.view.screen_to_doc(pos);
-        let Some(engine) = self.engine() else { return Drag::None };
-        let params = StrokeParams { opacity: settings.opacity, erase: settings.eraser, target, smudge: settings.smudge.is_some(), clone };
+        let Some(engine) = self.engine() else {
+            return Drag::None;
+        };
+        let params = StrokeParams {
+            opacity: settings.opacity,
+            erase: settings.eraser,
+            target,
+            smudge: settings.smudge.is_some(),
+            clone,
+        };
         if let Err(e) = engine.begin_stroke(params) {
-            tracing::warn!("Malen nicht möglich: {e}");
+            tracing::warn!("{}", tr!("Cannot paint: {error}", error = e));
             return Drag::None;
         }
         let mut stroke = Stroke::new(settings);
-        let dabs = stroke.add(InputSample { pos: doc_pos, pressure });
+        let dabs = stroke.add(InputSample {
+            pos: doc_pos,
+            pressure,
+        });
         engine.stroke_dabs(&dabs);
         self.stroke = Some(stroke);
         Drag::Paint
@@ -1063,7 +1343,10 @@ impl App {
             Drag::Paint => {
                 let doc_pos = self.view.screen_to_doc(pos);
                 if let (Some(stroke), Some(s)) = (&mut self.stroke, &mut self.session) {
-                    s.engine.stroke_dabs(&stroke.add(InputSample { pos: doc_pos, pressure }));
+                    s.engine.stroke_dabs(&stroke.add(InputSample {
+                        pos: doc_pos,
+                        pressure,
+                    }));
                 }
             }
             Drag::TextSelect => {
@@ -1095,10 +1378,18 @@ impl App {
                 let anchor = *anchor;
                 self.view.zoom_at(anchor, f);
             }
-            Drag::Marquee { end, .. } | Drag::Gradient { end, .. } | Drag::Move { end, .. } | Drag::Shape { end, .. } => {
+            Drag::Marquee { end, .. }
+            | Drag::Gradient { end, .. }
+            | Drag::Move { end, .. }
+            | Drag::Shape { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
             }
-            Drag::BrushHud { start, size, hardness, .. } => {
+            Drag::BrushHud {
+                start,
+                size,
+                hardness,
+                ..
+            } => {
                 let d = pos - *start;
                 // 1 screen px ≈ 1 px of diameter at the current zoom; up = harder.
                 self.brush.size = (*size + (d.x / self.view.zoom) as f32 * 2.0).clamp(1.0, 5000.0);
@@ -1115,7 +1406,10 @@ impl App {
             }
             Drag::Lasso { points, .. } => {
                 let doc = self.view.screen_to_doc(pos);
-                if points.last().is_none_or(|p| p.distance(doc) * self.view.zoom >= 2.0) {
+                if points
+                    .last()
+                    .is_none_or(|p| p.distance(doc) * self.view.zoom >= 2.0)
+                {
                     points.push(doc);
                 }
             }
@@ -1146,8 +1440,15 @@ impl App {
         let result: Result<bool, &str> = match drag {
             Drag::Paint => match self.stroke.take() {
                 Some(mut stroke) => {
-                    e.stroke_dabs(&stroke.finish(InputSample { pos: doc_pos, pressure }));
-                    e.end_stroke(if stroke.settings.eraser { "Radieren" } else { "Pinselstrich" });
+                    e.stroke_dabs(&stroke.finish(InputSample {
+                        pos: doc_pos,
+                        pressure,
+                    }));
+                    e.end_stroke(if stroke.settings.eraser {
+                        tr("Erase")
+                    } else {
+                        tr("Brush Stroke")
+                    });
                     Ok(true)
                 }
                 None => Ok(false),
@@ -1161,51 +1462,104 @@ impl App {
                     let ellipse = matches!(tool, Tool::Shape { ellipse: true });
                     let geometry = if ellipse {
                         let c = (start + end) * 0.5;
-                        imagine_core::vector::Geometry::Ellipse { cx: c.x, cy: c.y, rx: size.x * 0.5, ry: size.y * 0.5 }
+                        imagine_core::vector::Geometry::Ellipse {
+                            cx: c.x,
+                            cy: c.y,
+                            rx: size.x * 0.5,
+                            ry: size.y * 0.5,
+                        }
                     } else {
-                        imagine_core::vector::Geometry::Rect { x: start.x, y: start.y, w: size.x, h: size.y, radius: 0.0 }
+                        imagine_core::vector::Geometry::Rect {
+                            x: start.x,
+                            y: start.y,
+                            w: size.x,
+                            h: size.y,
+                            radius: 0.0,
+                        }
                     };
                     let v = imagine_core::VectorLayer::shape(imagine_core::vector::ShapeSpec {
                         geometry,
                         fill: Some([color[0], color[1], color[2], 1.0]),
                         stroke: None,
                     });
-                    Ok(e.add_vector(v, if ellipse { "Ellipse" } else { "Rechteck" }).is_some())
+                    Ok(e.add_vector(
+                        v,
+                        if ellipse {
+                            tr("Ellipse")
+                        } else {
+                            tr("Rectangle")
+                        },
+                    )
+                    .is_some())
                 }
             }
-            Drag::Marquee { start, end, op, ellipse } => {
+            Drag::Marquee {
+                start,
+                end,
+                op,
+                ellipse,
+            } => {
                 let (min, max) = (start.min(end), start.max(end));
                 let size = max - min;
                 if size.min_element() * zoom < 2.0 {
                     // A click without dragging deselects (Photoshop).
-                    if op == CombineOp::Replace { e.deselect("Auswahl aufheben").map(|_| true) } else { Ok(false) }
+                    if op == CombineOp::Replace {
+                        e.deselect(tr("Deselect")).map(|_| true)
+                    } else {
+                        Ok(false)
+                    }
                 } else {
                     let shape = if ellipse {
                         let c = (min + max) * 0.5;
-                        Shape::Ellipse { cx: c.x, cy: c.y, rx: size.x * 0.5, ry: size.y * 0.5 }
+                        Shape::Ellipse {
+                            cx: c.x,
+                            cy: c.y,
+                            rx: size.x * 0.5,
+                            ry: size.y * 0.5,
+                        }
                     } else {
-                        Shape::Rect { x: min.x, y: min.y, w: size.x, h: size.y }
+                        Shape::Rect {
+                            x: min.x,
+                            y: min.y,
+                            w: size.x,
+                            h: size.y,
+                        }
                     };
-                    e.select_shape(&shape, op, "Auswahl").map(|_| true)
+                    e.select_shape(&shape, op, tr("Selection")).map(|_| true)
                 }
             }
             Drag::Lasso { points, op } => {
                 if points.len() >= 3 {
                     let poly = points.iter().map(|p| (p.x, p.y)).collect();
-                    e.select_shape(&Shape::Polygon(poly), op, "Lasso-Auswahl").map(|_| true)
+                    e.select_shape(&Shape::Polygon(poly), op, tr("Lasso Selection"))
+                        .map(|_| true)
                 } else if op == CombineOp::Replace {
-                    e.deselect("Auswahl aufheben").map(|_| true)
+                    e.deselect(tr("Deselect")).map(|_| true)
                 } else {
                     Ok(false)
                 }
             }
             Drag::Gradient { start, end } if start.distance(end) * zoom >= 2.0 => {
-                let kind = if tool == (Tool::Gradient { radial: true }) { GradientKind::Radial } else { GradientKind::Linear };
+                let kind = if tool == (Tool::Gradient { radial: true }) {
+                    GradientKind::Radial
+                } else {
+                    GradientKind::Linear
+                };
                 let (c0, c1) = match target {
                     StrokeTarget::Pixels => ([color[0], color[1], color[2], 1.0], [0.0; 4]),
                     StrokeTarget::Mask => ([1.0; 4], [0.0, 0.0, 0.0, 1.0]),
                 };
-                e.gradient(target, kind, (start.x, start.y), (end.x, end.y), c0, c1, opacity, "Verlauf").map(|_| true)
+                e.gradient(
+                    target,
+                    kind,
+                    (start.x, start.y),
+                    (end.x, end.y),
+                    c0,
+                    c1,
+                    opacity,
+                    tr("Gradient"),
+                )
+                .map(|_| true)
             }
             Drag::Move { .. } => {
                 let d = move_delta;
@@ -1213,7 +1567,8 @@ impl App {
                     let _ = e.set_transform_preview(None);
                     Ok(false)
                 } else {
-                    e.transform_active(DAffine2::from_translation(d), Interp::Nearest, "Verschieben").map(|_| true)
+                    e.transform_active(DAffine2::from_translation(d), Interp::Nearest, tr("Move"))
+                        .map(|_| true)
                 }
             }
             Drag::Box => {
@@ -1227,7 +1582,7 @@ impl App {
         match result {
             Ok(true) => self.touch(),
             Ok(false) => {}
-            Err(err) => tracing::warn!("{err}"),
+            Err(err) => tracing::warn!("{}", tr(err)),
         }
         self.needs_redraw = true;
     }
@@ -1243,7 +1598,9 @@ impl App {
         // The pen also operates the interface.
         self.gui.pointer_moved(pos, self.scale);
         self.needs_redraw = true;
-        if self.tablet_ui || (self.over_ui(pos) && !self.tablet_contact && matches!(self.drag, Drag::None)) {
+        if self.tablet_ui
+            || (self.over_ui(pos) && !self.tablet_contact && matches!(self.drag, Drag::None))
+        {
             self.cursor = None;
             match f.contact {
                 Some(true) => {
@@ -1292,7 +1649,11 @@ impl App {
     }
 
     /// Undoable document edit with terminal feedback.
-    fn edit(&mut self, label: &str, f: impl FnOnce(&mut imagine_core::Document<imagine_gpu::Tile>) -> bool) {
+    fn edit(
+        &mut self,
+        label: &str,
+        f: impl FnOnce(&mut imagine_core::Document<imagine_gpu::Tile>) -> bool,
+    ) {
         let Some(engine) = self.engine() else { return };
         if engine.edit(label, f) {
             self.touch();
@@ -1302,11 +1663,16 @@ impl App {
 
     fn request_quit(&mut self) {
         if self.save_job.is_some() || self.saving {
-            tracing::warn!("Speichern läuft noch – bitte einen Moment warten.");
+            tracing::warn!("{}", tr("Still saving – please wait a moment."));
             return;
         }
         if self.bg_running > 0 && self.quit_armed.is_none_or(|t| t.elapsed() >= QUIT_CONFIRM) {
-            tracing::warn!("Im Hintergrund läuft noch etwas (z. B. ein Export). Nochmal Strg+Q bricht es ab.");
+            tracing::warn!(
+                "{}",
+                tr(
+                    "Something is still running in the background (e.g. an export). Press Ctrl+Q again to abort it."
+                )
+            );
             self.quit_armed = Some(Instant::now());
             self.update_title();
             return;
@@ -1320,8 +1686,8 @@ impl App {
             return self.run_pending(action);
         }
         let what = match action {
-            Pending::Quit => "Beim Beenden gehen sie verloren.",
-            Pending::Open(_) | Pending::New { .. } => "Das neue Bild ersetzt es.",
+            Pending::Quit => tr("They will be lost when you quit."),
+            Pending::Open(_) | Pending::New { .. } => tr("The new image replaces it."),
         };
         self.ui_state.confirm = Some(what.into());
         self.ui_state.hidden = false;
@@ -1338,7 +1704,9 @@ impl App {
     }
 
     fn answer_unsaved(&mut self, a: ui::files::Answer) {
-        let Some(action) = self.pending.take() else { return };
+        let Some(action) = self.pending.take() else {
+            return;
+        };
         match a {
             ui::files::Answer::Discard => self.run_pending(action),
             ui::files::Answer::Save => {
@@ -1352,11 +1720,11 @@ impl App {
     /// Replaces the document (the old one stays until the new structure arrives).
     fn open_source(&mut self, source: Source, white: bool) {
         if self.loading {
-            tracing::warn!("Es wird noch geladen.");
+            tracing::warn!("{}", tr("Still loading."));
             return;
         }
         if self.saving || self.save_job.is_some() {
-            tracing::warn!("Speichern läuft noch – bitte einen Moment warten.");
+            tracing::warn!("{}", tr("Still saving – please wait a moment."));
             return;
         }
         self.drop_autosave();
@@ -1378,7 +1746,9 @@ impl App {
         let s = self.session.as_ref();
         let dir = match mode {
             ui::files::FileMode::Open => self.settings.last_dir.clone(),
-            _ => s.and_then(|s| s.default_save_path().parent().map(|p| p.to_path_buf())).filter(|p| !p.as_os_str().is_empty()),
+            _ => s
+                .and_then(|s| s.default_save_path().parent().map(|p| p.to_path_buf()))
+                .filter(|p| !p.as_os_str().is_empty()),
         }
         .or_else(|| self.settings.last_dir.clone())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
@@ -1449,7 +1819,10 @@ impl App {
         }
         .into();
         if let Err(e) = self.settings.save_to(&settings::config_path()) {
-            tracing::warn!("Einstellungen nicht gespeichert: {e:#}");
+            tracing::warn!(
+                "{}",
+                tr!("Settings not saved: {error}", error = format!("{e:#}"))
+            );
         }
     }
 
@@ -1464,7 +1837,7 @@ impl App {
 
     fn save_to(&mut self, path: Option<std::path::PathBuf>) {
         if self.save_job.is_some() || self.saving {
-            tracing::warn!("Speichern läuft noch.");
+            tracing::warn!("{}", tr("Still saving."));
             return;
         }
         let Some(s) = &mut self.session else { return };
@@ -1472,16 +1845,19 @@ impl App {
             Ok(job) => {
                 self.save_job = Some(job);
                 self.save_mark = self.edit_count;
-                tracing::info!("Speichern …");
+                tracing::info!("{}", tr("Saving …"));
             }
-            Err(e) => tracing::error!("Speichern fehlgeschlagen: {e:#}"),
+            Err(e) => tracing::error!("{}", tr!("Save failed: {error}", error = format!("{e:#}"))),
         }
         self.update_title();
     }
 
     /// Hands a finished readback to a worker thread (compress + write).
     fn poll_save(&mut self) {
-        let ready = self.save_job.as_ref().is_some_and(|j| j.ready(&self.gpu.device));
+        let ready = self
+            .save_job
+            .as_ref()
+            .is_some_and(|j| j.ready(&self.gpu.device));
         if ready {
             let writer = self.save_job.take().unwrap().into_writer();
             let tx = self.save_tx.clone();
@@ -1507,16 +1883,23 @@ impl App {
                 }
                 self.settings.add_recent(&r.path);
                 tracing::info!(
-                    "Gespeichert: {} ({} Kacheln geschrieben, {}, {:.1} MB, {:.0} ms im Hintergrund)",
-                    r.path.display(),
-                    r.tiles_written,
-                    if r.incremental { "inkrementell" } else { "komplett" },
-                    r.bytes as f64 / 1e6,
-                    r.ms
+                    "{}",
+                    tr!(
+                        "Saved: {path} ({tiles} tiles written, {kind}, {mb} MB, {ms} ms in the background)",
+                        path = r.path.display(),
+                        tiles = r.tiles_written,
+                        kind = if r.incremental {
+                            tr("incremental")
+                        } else {
+                            tr("full")
+                        },
+                        mb = format!("{:.1}", r.bytes as f64 / 1e6),
+                        ms = format!("{:.0}", r.ms)
+                    )
                 );
             }
             Err(e) => {
-                tracing::error!("Speichern fehlgeschlagen: {e:#}");
+                tracing::error!("{}", tr!("Save failed: {error}", error = format!("{e:#}")));
                 self.after_save = None;
             }
         }
@@ -1536,10 +1919,17 @@ impl App {
         }
         let Some(s) = &mut self.session else { return };
         if self.export_job.is_some() {
-            tracing::warn!("Export läuft noch.");
+            tracing::warn!("{}", tr("Export still running."));
             return;
         }
-        tracing::info!("Exportiere {} ({}) im Hintergrund …", path.display(), opts.space.name());
+        tracing::info!(
+            "{}",
+            tr!(
+                "Exporting {path} ({space}) in the background …",
+                path = path.display(),
+                space = opts.space.name()
+            )
+        );
         self.export_job = Some(s.start_export(&path, &opts));
         self.bg_running += 1;
     }
@@ -1547,12 +1937,19 @@ impl App {
     fn export(&mut self) {
         let Some(s) = &mut self.session else { return };
         if self.export_job.is_some() {
-            tracing::warn!("Export läuft noch.");
+            tracing::warn!("{}", tr("Export still running."));
             return;
         }
         let path = s.default_export_path();
         let opts = self.settings.export;
-        tracing::info!("Exportiere {} ({}) im Hintergrund …", path.display(), opts.space.name());
+        tracing::info!(
+            "{}",
+            tr!(
+                "Exporting {path} ({space}) in the background …",
+                path = path.display(),
+                space = opts.space.name()
+            )
+        );
         self.export_job = Some(s.start_export(&path, &opts));
         self.bg_running += 1;
     }
@@ -1564,7 +1961,10 @@ impl App {
             if job.ready(&self.gpu.device) {
                 let (path, job) = self.autosave_job.take().unwrap();
                 let work = job.into_writer();
-                self.spawn_bg("autosave", move || BgDone::Autosaved { path, result: work().map(|_| ()) });
+                self.spawn_bg("autosave", move || BgDone::Autosaved {
+                    path,
+                    result: work().map(|_| ()),
+                });
             }
             return;
         }
@@ -1579,15 +1979,29 @@ impl App {
         let Some(s) = &mut self.session else { return };
         let dir = autosave_dir();
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            tracing::warn!("Automatisches Sichern: {}: {e}", dir.display());
+            tracing::warn!(
+                "{}",
+                tr!("Autosave: {path}: {error}", path = dir.display(), error = e)
+            );
             self.autosave_at = Instant::now();
             return;
         }
-        let stem = std::path::Path::new(&s.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let path = dir.join(format!("{}-{}.imagine", if stem.is_empty() { "Unbenannt" } else { &stem }, std::process::id()));
+        let stem = std::path::Path::new(&s.name)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let path = dir.join(format!(
+            "{}-{}.imagine",
+            if stem.is_empty() {
+                tr("Untitled")
+            } else {
+                &stem
+            },
+            std::process::id()
+        ));
         match s.start_save_copy(&path) {
             Ok(job) => self.autosave_job = Some((path, job)),
-            Err(e) => tracing::warn!("Automatisches Sichern: {e:#}"),
+            Err(e) => tracing::warn!("{}", tr!("Autosave: {error}", error = format!("{e:#}"))),
         }
         self.autosave_mark = self.edit_count;
         self.autosave_at = Instant::now();
@@ -1595,7 +2009,10 @@ impl App {
 
     /// Removes the recovery copy (after a real save or a clean exit).
     fn drop_autosave(&mut self) {
-        let paths = [self.autosave_path.take(), self.autosave_job.take().map(|(p, _)| p)];
+        let paths = [
+            self.autosave_path.take(),
+            self.autosave_job.take().map(|(p, _)| p),
+        ];
         for p in paths.into_iter().flatten() {
             let _ = std::fs::remove_file(p);
         }
@@ -1603,12 +2020,19 @@ impl App {
 
     /// Hands a finished export readback to a worker thread.
     fn poll_export(&mut self) {
-        if self.export_job.as_ref().is_some_and(|j| j.ready(&self.gpu.device)) {
+        if self
+            .export_job
+            .as_ref()
+            .is_some_and(|j| j.ready(&self.gpu.device))
+        {
             let job = self.export_job.take().unwrap();
             let path = job.path.clone();
             let work = job.into_writer();
             self.bg_running -= 1; // spawn_bg counts it again
-            self.spawn_bg("export", move || BgDone::Exported { path, result: work() });
+            self.spawn_bg("export", move || BgDone::Exported {
+                path,
+                result: work(),
+            });
         }
     }
 
@@ -1635,7 +2059,12 @@ impl App {
         let base = e.selection_id();
         let current = e.selection_cpu();
         let started = Instant::now();
-        self.spawn_bg("selection", move || BgDone::Selection { label, base, mask: f(current), started });
+        self.spawn_bg("selection", move || BgDone::Selection {
+            label,
+            base,
+            mask: f(current),
+            started,
+        });
     }
 
     fn on_background_done(&mut self, done: BgDone) {
@@ -1643,35 +2072,75 @@ impl App {
         match done {
             BgDone::Autosaved { path, result } => match result {
                 Ok(()) => {
-                    tracing::info!("Wiederherstellungskopie gesichert: {}", path.display());
+                    tracing::info!(
+                        "{}",
+                        tr!("Recovery copy saved: {path}", path = path.display())
+                    );
                     self.autosave_path = Some(path);
                 }
-                Err(e) => tracing::warn!("Automatisches Sichern fehlgeschlagen: {e:#}"),
+                Err(e) => tracing::warn!(
+                    "{}",
+                    tr!("Autosave failed: {error}", error = format!("{e:#}"))
+                ),
             },
             BgDone::Exported { path, result } => match result {
-                Ok(ms) => tracing::info!("Exportiert: {} ({ms:.0} ms)", path.display()),
-                Err(e) => tracing::error!("Export fehlgeschlagen: {e:#}"),
+                Ok(ms) => tracing::info!(
+                    "{}",
+                    tr!(
+                        "Exported: {path} ({ms} ms)",
+                        path = path.display(),
+                        ms = format!("{ms:.0}")
+                    )
+                ),
+                Err(e) => tracing::error!(
+                    "{}",
+                    tr!("Export failed: {error}", error = format!("{e:#}"))
+                ),
             },
             BgDone::Pasted(result) => self.on_pasted(result),
             BgDone::Filled { result, started } => match result {
                 Ok(r) => {
                     let ms = r.ms;
-                    if self.engine().is_some_and(|e| e.apply_fill(r, "Inhaltsbasiert füllen")) {
+                    if self
+                        .engine()
+                        .is_some_and(|e| e.apply_fill(r, tr("Content-Aware Fill")))
+                    {
                         self.touch();
-                        tracing::info!("Inhaltsbasiert gefüllt: {:.0} ms (Rechnung {ms:.0} ms)", started.elapsed().as_secs_f64() * 1e3);
+                        tracing::info!(
+                            "{}",
+                            tr!(
+                                "Content-aware fill done: {total} ms (computation {ms} ms)",
+                                total = format!("{:.0}", started.elapsed().as_secs_f64() * 1e3),
+                                ms = format!("{ms:.0}")
+                            )
+                        );
                     }
                 }
-                Err(e) => tracing::warn!("Inhaltsbasiert füllen: {e}"),
+                Err(e) => tracing::warn!("{}", tr!("Content-Aware Fill: {error}", error = tr(e))),
             },
-            BgDone::Selection { label, base, mask, started } => {
+            BgDone::Selection {
+                label,
+                base,
+                mask,
+                started,
+            } => {
                 let Some(e) = self.engine() else { return };
                 if e.selection_id() != base {
-                    tracing::warn!("{label}: verworfen, die Auswahl hat sich inzwischen geändert");
+                    tracing::warn!(
+                        "{}",
+                        tr!(
+                            "{label}: discarded, the selection has changed in the meantime",
+                            label = label
+                        )
+                    );
                 } else {
                     match mask {
                         Ok(m) => {
                             self.engine_op(|e| e.set_selection(Some(m), label));
-                            tracing::info!("{label}: {:.0} ms", started.elapsed().as_secs_f64() * 1e3);
+                            tracing::info!(
+                                "{label}: {:.0} ms",
+                                started.elapsed().as_secs_f64() * 1e3
+                            );
                         }
                         Err(err) => tracing::warn!("{label}: {err:#}"),
                     }
@@ -1687,7 +2156,14 @@ impl App {
         if self.fonts.is_empty() {
             let t0 = Instant::now();
             self.fonts = std::sync::Arc::new(imagine_vector::font_groups());
-            tracing::debug!("{} Schriftfamilien in {:.0} ms", self.fonts.len(), t0.elapsed().as_secs_f64() * 1e3);
+            tracing::debug!(
+                "{}",
+                tr!(
+                    "{n} font families in {ms} ms",
+                    n = self.fonts.len(),
+                    ms = format!("{:.0}", t0.elapsed().as_secs_f64() * 1e3)
+                )
+            );
         }
     }
 
@@ -1702,16 +2178,27 @@ impl App {
         let hit = doc.panel_rows().into_iter().map(|(id, _)| id).find(|&id| {
             doc.find(id).is_some_and(|l| {
                 l.visible
-                    && matches!(l.vector().map(|v| &v.kind), Some(imagine_core::vector::VectorKind::Text(_)))
-                    && imagine_vector::bounds(l.vector().unwrap()).is_some_and(|b| at.x >= b[0] && at.x <= b[2] && at.y >= b[1] && at.y <= b[3])
+                    && matches!(
+                        l.vector().map(|v| &v.kind),
+                        Some(imagine_core::vector::VectorKind::Text(_))
+                    )
+                    && imagine_vector::bounds(l.vector().unwrap()).is_some_and(|b| {
+                        at.x >= b[0] && at.x <= b[2] && at.y >= b[1] && at.y <= b[3]
+                    })
             })
         });
         match hit {
             Some(id) => self.begin_text_edit(id, Some(at)),
             None => {
                 // A new, empty text with the caret at the click (removed again if left empty).
-                let spec = imagine_core::vector::TextSpec::new("", at.x, at.y - size as f64 * 0.6, size, [color[0], color[1], color[2], 1.0]);
-                if let Some(id) = e.add_vector(imagine_core::VectorLayer::text(spec), "Text") {
+                let spec = imagine_core::vector::TextSpec::new(
+                    "",
+                    at.x,
+                    at.y - size as f64 * 0.6,
+                    size,
+                    [color[0], color[1], color[2], 1.0],
+                );
+                if let Some(id) = e.add_vector(imagine_core::VectorLayer::text(spec), tr("Text")) {
                     self.begin_text_edit(id, None);
                 }
             }
@@ -1724,7 +2211,7 @@ impl App {
     fn rasterize_active(&mut self) {
         self.engine_op(|e| {
             let id = e.doc().active;
-            e.rasterize(id, "Rastern")
+            e.rasterize(id, tr("Rasterize"))
         });
     }
 
@@ -1734,10 +2221,23 @@ impl App {
         let started = Instant::now();
         match e.fill_job(all_layers) {
             Ok(job) => {
-                tracing::info!("Inhaltsbasiert füllen{} …", if all_layers { " (alle Ebenen)" } else { "" });
-                self.spawn_bg("content fill", move || BgDone::Filled { result: job.run(), started });
+                tracing::info!(
+                    "{}",
+                    if all_layers {
+                        tr("Content-Aware Fill (all layers) …")
+                    } else {
+                        tr("Content-Aware Fill …")
+                    }
+                );
+                self.spawn_bg("content fill", move || BgDone::Filled {
+                    result: job.run(),
+                    started,
+                });
             }
-            Err(err) => tracing::warn!("Inhaltsbasiert füllen: {err}"),
+            Err(err) => tracing::warn!(
+                "{}",
+                tr!("Content-Aware Fill: {error}", error = tr(err))
+            ),
         }
     }
 
@@ -1748,13 +2248,19 @@ impl App {
         let (w, h) = e.size();
         let map = e
             .sample_straight(x, y, SampleFrom::Image)
-            .and_then(|reference| e.similarity_map(reference, tol, (tol * 0.5).max(12.0), SampleFrom::Image));
+            .and_then(|reference| {
+                e.similarity_map(reference, tol, (tol * 0.5).max(12.0), SampleFrom::Image)
+            });
         let map = match map {
             Ok(m) => m,
-            Err(err) => return tracing::warn!("Zauberstab: {err}"),
+            Err(err) => return tracing::warn!("{}", tr!("Magic Wand: {error}", error = err)),
         };
-        self.selection_job("Zauberstab", move |old| {
-            let region = if contiguous { imagine_core::mask::flood(&map, x, y, w, h) } else { map };
+        self.selection_job(tr("Magic Wand"), move |old| {
+            let region = if contiguous {
+                imagine_core::mask::flood(&map, x, y, w, h)
+            } else {
+                map
+            };
             Ok(match old {
                 Some(old) => imagine_core::mask::combine(&old, &region, op),
                 None if op == CombineOp::Subtract => CpuMask::filled(0),
@@ -1765,7 +2271,7 @@ impl App {
 
     fn key(&mut self, ev: &KeyEvent, pressed: bool) {
         let sym = ev.keysym;
-        tracing::debug!(?sym, raw = ev.raw_code, pressed, "Taste");
+        tracing::debug!(?sym, raw = ev.raw_code, pressed, "key");
         // Text fields and the command palette take the keyboard.
         if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() {
             // Clipboard in text fields.
@@ -1819,7 +2325,12 @@ impl App {
         self.mods.ctrl = c.ctrl;
         self.mods.shift = c.shift;
         self.mods.alt = c.alt;
-        self.hotkey(&KeyEvent { time: 0, raw_code: 0, keysym: c.key, utf8: None });
+        self.hotkey(&KeyEvent {
+            time: 0,
+            raw_code: 0,
+            keysym: c.key,
+            utf8: None,
+        });
         self.mods = saved;
         self.needs_redraw = true;
     }
@@ -1832,9 +2343,13 @@ impl App {
 
         // Digit row by physical key, so Shift+digit works on every layout.
         if (KEY_1..=KEY_0).contains(&ev.raw_code) && !ctrl && !alt {
-            let pct = if ev.raw_code == KEY_0 { 1.0 } else { (ev.raw_code - KEY_1 + 1) as f32 / 10.0 };
+            let pct = if ev.raw_code == KEY_0 {
+                1.0
+            } else {
+                (ev.raw_code - KEY_1 + 1) as f32 / 10.0
+            };
             if shift {
-                self.edit("Deckkraft", |d| {
+                self.edit(tr("Opacity"), |d| {
                     let id = d.active;
                     let l = d.find_mut(id).unwrap();
                     let changed = l.opacity != pct;
@@ -1843,10 +2358,19 @@ impl App {
                 });
             } else if self.tool == Tool::Smudge {
                 self.smudge_strength = pct;
-                tracing::info!("Wischfinger-Stärke {:.0} %", pct * 100.0);
+                tracing::info!(
+                    "{}",
+                    tr!(
+                        "Smudge strength {pct} %",
+                        pct = format!("{:.0}", pct * 100.0)
+                    )
+                );
             } else {
                 self.brush.opacity = pct;
-                tracing::info!("Pinsel-Deckkraft {:.0} %", pct * 100.0);
+                tracing::info!(
+                    "{}",
+                    tr!("Brush opacity {pct} %", pct = format!("{:.0}", pct * 100.0))
+                );
             }
             self.needs_redraw = true;
             return;
@@ -1861,7 +2385,7 @@ impl App {
             Keysym::Return | Keysym::KP_Enter if self.liquifying() => self.commit_liquify(),
             Keysym::z | Keysym::Z if ctrl && !shift && self.liquifying() => {
                 if !self.engine().is_some_and(|e| e.liquify_undo()) {
-                    tracing::info!("Verflüssigen: nichts mehr zurückzunehmen");
+                    tracing::info!("{}", tr("Liquify: nothing left to undo"));
                 }
             }
             Keysym::x | Keysym::X if ctrl && shift => self.begin_liquify_mode(),
@@ -1888,11 +2412,11 @@ impl App {
                 };
                 if let Some(t) = tool {
                     self.liq_tool = t;
-                    tracing::info!("Verflüssigen: {}", t.name());
+                    tracing::info!("{}", tr!("Liquify: {tool}", tool = t.name()));
                 }
             }
             // Other edits wait until liquify is applied or cancelled.
-            _ if self.liquifying() => tracing::info!("Erst Verflüssigen übernehmen (Enter) oder abbrechen (Esc)"),
+            _ if self.liquifying() => tracing::info!("{}", tr("Apply (Enter) or cancel (Esc) Liquify first")),
             Keysym::Escape => self.cancel_box(),
             Keysym::Return | Keysym::KP_Enter => self.commit_box(),
             Keysym::t if ctrl => self.begin_transform(),
@@ -1910,13 +2434,13 @@ impl App {
                 self.ui_state.new_doc = Some(Default::default());
                 self.ui_state.hidden = false;
             }
-            Keysym::n | Keysym::N if ctrl && shift => self.edit("Neue Ebene", |d| {
+            Keysym::n | Keysym::N if ctrl && shift => self.edit(tr("New Layer"), |d| {
                 d.add_pixel_layer();
                 true
             }),
-            Keysym::j if ctrl => self.edit("Ebene duplizieren", |d| d.duplicate_active().is_some()),
-            Keysym::g | Keysym::G if ctrl && shift => self.edit("Gruppierung aufheben", |d| d.ungroup_active()),
-            Keysym::g if ctrl => self.edit("Gruppieren", |d| d.group_active().is_some()),
+            Keysym::j if ctrl => self.edit(tr("Duplicate Layer"), |d| d.duplicate_active().is_some()),
+            Keysym::g | Keysym::G if ctrl && shift => self.edit(tr("Ungroup Layers"), |d| d.ungroup_active()),
+            Keysym::g if ctrl => self.edit(tr("Group Layers"), |d| d.group_active().is_some()),
             // Shift+Rücktaste: content-aware fill (Strg: learn from all layers).
             Keysym::BackSpace if shift && !alt => self.content_fill(ctrl),
             // Photoshop: Entf and Rücktaste both clear the selection.
@@ -1924,17 +2448,20 @@ impl App {
                 if !alt && self.session.as_ref().is_some_and(|s| s.engine.has_selection()) =>
             {
                 self.engine_op(|e| {
-                    let n = e.clear_selected("Löschen")?;
+                    let n = e.clear_selected(tr("Delete"))?;
                     let name = e.doc().active_layer().map(|l| l.name.clone()).unwrap_or_default();
                     if n == 0 {
-                        tracing::warn!("Nichts gelöscht: die Auswahl enthält auf Ebene „{name}“ keine Pixel. Andere Ebene aktiv?");
+                        tracing::warn!(
+                            "{}",
+                            tr!("Nothing deleted: the selection contains no pixels on layer “{name}”. Is another layer active?", name = name)
+                        );
                     } else {
-                        tracing::info!("Auswahl auf Ebene „{name}“ gelöscht ({n} Kacheln)");
+                        tracing::info!("{}", tr!("Selection deleted on layer “{name}” ({n} tiles)", name = name, n = n));
                     }
                     Ok(())
                 })
             }
-            Keysym::Delete => self.edit("Ebene löschen", |d| d.remove_active()),
+            Keysym::Delete => self.edit(tr("Delete Layer"), |d| d.remove_active()),
             Keysym::BackSpace if alt => {
                 let [r, g, b] = self.brush.color;
                 let (target, opacity) = (self.stroke_target(), self.brush.opacity);
@@ -1944,40 +2471,40 @@ impl App {
                 } else {
                     [r, g, b, 1.0]
                 };
-                self.engine_op(|e| e.fill(target, color, opacity, "Füllen").map(|_| ()))
+                self.engine_op(|e| e.fill(target, color, opacity, tr("Fill")).map(|_| ()))
             }
-            Keysym::a if ctrl => self.engine_op(|e| e.select_all("Alles auswählen")),
-            Keysym::d if ctrl => self.engine_op(|e| e.deselect("Auswahl aufheben")),
-            Keysym::i | Keysym::I if ctrl && shift => self.engine_op(|e| e.invert_selection("Auswahl umkehren")),
+            Keysym::a if ctrl => self.engine_op(|e| e.select_all(tr("Select All"))),
+            Keysym::d if ctrl => self.engine_op(|e| e.deselect(tr("Deselect"))),
+            Keysym::i | Keysym::I if ctrl && shift => self.engine_op(|e| e.invert_selection(tr("Inverse"))),
             Keysym::F6 if shift => {
                 let Some((w, h)) = self.session.as_ref().map(|s| s.engine.size()) else { return };
                 if self.session.as_ref().is_some_and(|s| !s.engine.has_selection()) {
-                    tracing::warn!("keine Auswahl");
+                    tracing::warn!("{}", tr("no selection"));
                 } else {
-                    self.selection_job("Weiche Auswahlkante (10 px)", move |sel| {
-                        let sel = sel.context("keine Auswahl")?;
+                    self.selection_job(tr("Feather Selection (10 px)"), move |sel| {
+                        let sel = sel.context(tr("no selection"))?;
                         Ok(imagine_core::mask::feather(&sel, 10.0, w, h))
                     });
                 }
             }
             Keysym::m | Keysym::M if ctrl && alt && shift => {
                 self.mask_edit = false;
-                self.engine_op(|e| e.apply_layer_mask("Ebenenmaske anwenden"))
+                self.engine_op(|e| e.apply_layer_mask(tr("Apply Layer Mask")))
             }
-            Keysym::m | Keysym::M if ctrl && alt => self.edit("Ebenenmaske ein/aus", |d| {
+            Keysym::m | Keysym::M if ctrl && alt => self.edit(tr("Toggle Layer Mask"), |d| {
                 let id = d.active;
                 let l = d.find_mut(id).unwrap();
                 l.mask_enabled = !l.mask_enabled;
                 l.mask.is_some()
             }),
-            Keysym::m | Keysym::M if ctrl && shift => self.engine_op(|e| e.add_layer_mask("Ebenenmaske")),
+            Keysym::m | Keysym::M if ctrl && shift => self.engine_op(|e| e.add_layer_mask(tr("Layer Mask"))),
             Keysym::backslash => {
                 let has_mask = self.session.as_ref().and_then(|s| s.engine.doc().active_layer()).is_some_and(|l| l.mask.is_some());
                 if self.mask_edit || has_mask {
                     self.mask_edit = !self.mask_edit;
-                    tracing::info!("Ziel: {}", if self.mask_edit { "Ebenenmaske" } else { "Pixel" });
+                    tracing::info!("{}", tr!("Target: {target}", target = if self.mask_edit { tr("Layer Mask") } else { tr("Pixels") }));
                 } else {
-                    tracing::warn!("Die Ebene hat keine Maske (Strg+Umschalt+M legt eine an).");
+                    tracing::warn!("{}", tr("The layer has no mask (Ctrl+Shift+M adds one)."));
                 }
             }
             // Rotate / mirror: Strg+Alt (layer) or Strg+Alt+Umschalt (image) with arrows, H, V.
@@ -1989,21 +2516,24 @@ impl App {
                     Keysym::h | Keysym::H => (0, true, false),
                     _ => (0, false, true),
                 };
-                let label = match (turn, fx) {
-                    (0, true) => "horizontal spiegeln",
-                    (0, false) => "vertikal spiegeln",
-                    (2, _) => "um 180° drehen",
-                    (1, _) => "90° im Uhrzeigersinn drehen",
-                    _ => "90° gegen den Uhrzeigersinn drehen",
+                let label = match (shift, turn, fx) {
+                    (true, 0, true) => tr("Flip Image Horizontal"),
+                    (true, 0, false) => tr("Flip Image Vertical"),
+                    (true, 2, _) => tr("Rotate Image 180°"),
+                    (true, 1, _) => tr("Rotate Image 90° Clockwise"),
+                    (true, _, _) => tr("Rotate Image 90° Counterclockwise"),
+                    (false, 0, true) => tr("Flip Layer Horizontal"),
+                    (false, 0, false) => tr("Flip Layer Vertical"),
+                    (false, 2, _) => tr("Rotate Layer 180°"),
+                    (false, 1, _) => tr("Rotate Layer 90° Clockwise"),
+                    (false, _, _) => tr("Rotate Layer 90° Counterclockwise"),
                 };
                 if shift {
-                    let label = format!("Bild {label}");
-                    self.engine_op(|e| e.rotate_image(turn, fx, fy, &label));
+                    self.engine_op(|e| e.rotate_image(turn, fx, fy, label));
                     self.view_fitted = false;
                     self.fit_if_needed();
                 } else {
-                    let label = format!("Ebene {label}");
-                    self.engine_op(|e| e.rotate_layer(turn as f64 * 90.0, fx, fy, &label));
+                    self.engine_op(|e| e.rotate_layer(turn as f64 * 90.0, fx, fy, label));
                 }
             }
             Keysym::Left | Keysym::Right | Keysym::Up | Keysym::Down if self.tool == Tool::Move => {
@@ -2015,9 +2545,9 @@ impl App {
                     _ => (0, step),
                 };
                 let fwd = DAffine2::from_translation(DVec2::new(dx as f64, dy as f64));
-                self.engine_op(|e| e.transform_active(fwd, Interp::Nearest, "Verschieben"))
+                self.engine_op(|e| e.transform_active(fwd, Interp::Nearest, tr("Move")))
             }
-            Keysym::comma if ctrl => self.edit("Sichtbarkeit", |d| {
+            Keysym::comma if ctrl => self.edit(tr("Visibility"), |d| {
                 let id = d.active;
                 let l = d.find_mut(id).unwrap();
                 l.visible = !l.visible;
@@ -2025,13 +2555,13 @@ impl App {
             }),
             Keysym::bracketleft if alt => self.select_layer(1),
             Keysym::bracketright if alt => self.select_layer(-1),
-            Keysym::bracketleft if ctrl => self.edit("Ebene nach unten", |d| d.move_active(-1)),
-            Keysym::bracketright if ctrl => self.edit("Ebene nach oben", |d| d.move_active(1)),
+            Keysym::bracketleft if ctrl => self.edit(tr("Move Layer Down"), |d| d.move_active(-1)),
+            Keysym::bracketright if ctrl => self.edit(tr("Move Layer Up"), |d| d.move_active(1)),
             Keysym::plus | Keysym::asterisk | Keysym::KP_Add if shift || sym == Keysym::KP_Add => self.cycle_blend(1),
             Keysym::minus | Keysym::underscore | Keysym::KP_Subtract if shift || sym == Keysym::KP_Subtract => {
                 self.cycle_blend(-1)
             }
-            Keysym::F7 => self.edit("Blend-Farbraum", |d| {
+            Keysym::F7 => self.edit(tr("Blend Color Space"), |d| {
                 d.blend_space = match d.blend_space {
                     BlendSpace::Srgb => BlendSpace::Linear,
                     BlendSpace::Linear => BlendSpace::Srgb,
@@ -2050,7 +2580,7 @@ impl App {
             Keysym::bracketleft | Keysym::bracketright if self.tool == Tool::Wand => {
                 let step = if sym == Keysym::bracketleft { -8.0 } else { 8.0 };
                 self.wand_tolerance = (self.wand_tolerance + step).clamp(0.0, 255.0);
-                tracing::info!("Toleranz {:.0}", self.wand_tolerance);
+                tracing::info!("{}", tr!("Tolerance {tol}", tol = format!("{:.0}", self.wand_tolerance)));
             }
             Keysym::bracketleft => self.brush.size = (self.brush.size / 1.2).max(1.0),
             Keysym::bracketright => self.brush.size = (self.brush.size * 1.2).min(5000.0),
@@ -2058,7 +2588,7 @@ impl App {
             Keysym::b => self.set_tool(Tool::Brush),
             Keysym::B => {
                 self.brush.tip = (self.brush.tip + 1) % imagine_core::TIP_NAMES.len() as u32;
-                tracing::info!("Pinselspitze: {}", imagine_core::TIP_NAMES[self.brush.tip as usize]);
+                tracing::info!("{}", tr!("Brush tip: {tip}", tip = tr(imagine_core::TIP_NAMES[self.brush.tip as usize])));
             }
             Keysym::u => self.set_tool(Tool::Smudge),
             Keysym::U if shift => {
@@ -2075,7 +2605,14 @@ impl App {
                 let b = &mut self.brush;
                 (b.size_jitter, b.angle_jitter, b.scatter, b.flow_jitter) =
                     if on { (0.3, 30.0, 0.25, 0.3) } else { (0.0, 0.0, 0.0, 0.0) };
-                tracing::info!("Pinsel-Dynamik (Größe, Winkel, Streuung, Fluss zufällig) {}", if on { "an" } else { "aus" });
+                tracing::info!(
+                    "{}",
+                    if on {
+                        tr("Brush dynamics (random size, angle, scatter, flow) on")
+                    } else {
+                        tr("Brush dynamics (random size, angle, scatter, flow) off")
+                    }
+                );
             }
             Keysym::m => {
                 let ellipse = matches!(self.tool, Tool::Marquee { ellipse: false });
@@ -2089,13 +2626,13 @@ impl App {
             Keysym::v => self.set_tool(Tool::Move),
             Keysym::q => {
                 self.quick_mask = !self.quick_mask;
-                tracing::info!("Maskierungsmodus-Ansicht {}", if self.quick_mask { "an" } else { "aus" });
+                tracing::info!("{}", if self.quick_mask { tr("Quick Mask view on") } else { tr("Quick Mask view off") });
             }
             Keysym::x => {
                 let [r, g, b] = self.brush.color;
                 let dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.2;
                 self.brush.color = if dark { [1.0; 3] } else { [0.0; 3] };
-                tracing::info!("Farbe: {}", if dark { "Weiß" } else { "Schwarz" });
+                tracing::info!("{}", if dark { tr("Color: White") } else { tr("Color: Black") });
             }
             Keysym::c => self.set_tool(Tool::Crop),
             Keysym::w => {
@@ -2104,9 +2641,12 @@ impl App {
                 }
                 self.set_tool(Tool::Wand);
                 tracing::info!(
-                    "Zauberstab: Toleranz {:.0} ([ / ]), {} (W wechselt), nimmt alle Ebenen auf",
-                    self.wand_tolerance,
-                    if self.wand_contiguous { "nur zusammenhängend" } else { "überall im Bild" }
+                    "{}",
+                    tr!(
+                        "Magic Wand: Tolerance {tol} ([ / ]), {mode} (W toggles), samples all layers",
+                        tol = format!("{:.0}", self.wand_tolerance),
+                        mode = if self.wand_contiguous { tr("contiguous only") } else { tr("anywhere in the image") }
+                    )
                 );
             }
             Keysym::p if !ctrl => self.set_tool(Tool::Pen),
@@ -2118,15 +2658,15 @@ impl App {
                 let steps = [0.0, 0.5, 0.8, 1.0];
                 let i = steps.iter().position(|&h| h >= self.brush.hardness - 1e-3).unwrap_or(0);
                 self.brush.hardness = steps[(i + 1) % steps.len()];
-                tracing::info!("Härte {:.0} %", self.brush.hardness * 100.0);
+                tracing::info!("{}", tr!("Hardness {pct} %", pct = format!("{:.0}", self.brush.hardness * 100.0)));
             }
             Keysym::S if shift => {
                 let steps = [0.0, 0.4, 0.7, 0.85];
                 let i = steps.iter().position(|&s| s >= self.brush.smoothing - 1e-3).unwrap_or(0);
                 self.brush.smoothing = steps[(i + 1) % steps.len()];
-                tracing::info!("Glättung {:.0} %", self.brush.smoothing * 100.0);
+                tracing::info!("{}", tr!("Smoothing {pct} %", pct = format!("{:.0}", self.brush.smoothing * 100.0)));
             }
-            Keysym::F1 => print!("{}", crate::HELP),
+            Keysym::F1 => print!("{}", tr(crate::HELP)),
             Keysym::F12 => self.start_bench(false),
             _ => return,
         }
@@ -2146,11 +2686,16 @@ impl App {
             _ => {}
         }
         if tool == Tool::Crop {
-            tracing::info!("Zuschneiden: Rahmen ziehen oder Anfasser verschieben (über den Rand hinaus vergrößert die Arbeitsfläche), Enter übernimmt, Esc bricht ab.");
+            tracing::info!(
+                "{}",
+                tr(
+                    "Crop: drag a frame or move the handles (beyond the edge enlarges the canvas), Enter applies, Esc cancels."
+                )
+            );
         }
         self.tool = tool;
         self.brush.eraser = tool == Tool::Eraser;
-        tracing::info!("Werkzeug: {}", tool.name());
+        tracing::info!("{}", tr!("Tool: {tool}", tool = tool.name()));
         self.update_title();
     }
 
@@ -2162,13 +2707,13 @@ impl App {
                 self.touch();
                 self.print_layers();
             }
-            Err(err) => tracing::warn!("{err}"),
+            Err(err) => tracing::warn!("{}", tr(err)),
         }
     }
 
     fn undo(&mut self) {
         if let Some(label) = self.engine().and_then(|e| e.undo()) {
-            tracing::info!("Rückgängig: {label}");
+            tracing::info!("{}", tr!("Undo: {label}", label = label));
             self.touch();
             self.print_layers();
         }
@@ -2176,7 +2721,7 @@ impl App {
 
     fn redo(&mut self) {
         if let Some(label) = self.engine().and_then(|e| e.redo()) {
-            tracing::info!("Wiederholen: {label}");
+            tracing::info!("{}", tr!("Redo: {label}", label = label));
             self.touch();
             self.print_layers();
         }
@@ -2190,7 +2735,7 @@ impl App {
     }
 
     fn cycle_blend(&mut self, step: i32) {
-        self.edit("Füllmethode", |d| {
+        self.edit(tr("Blend Mode"), |d| {
             let id = d.active;
             let l = d.find_mut(id).unwrap();
             l.blend = l.blend.cycle(step);
@@ -2201,7 +2746,11 @@ impl App {
     // ---- agents -----------------------------------------------------------
 
     /// Reads from an agent connection and answers every complete line.
-    fn agent_io(&mut self, stream: &std::os::unix::net::UnixStream, buf: &mut Vec<u8>) -> PostAction {
+    fn agent_io(
+        &mut self,
+        stream: &std::os::unix::net::UnixStream,
+        buf: &mut Vec<u8>,
+    ) -> PostAction {
         use std::io::{Read, Write};
         let mut chunk = [0u8; 64 << 10];
         loop {
@@ -2229,7 +2778,12 @@ impl App {
     fn agent_line(&mut self, line: &[u8]) -> String {
         let req: serde_json::Value = match serde_json::from_slice(line) {
             Ok(v) => v,
-            Err(e) => return ipc::response(serde_json::Value::Null, Err(anyhow::anyhow!("invalid JSON: {e}"))),
+            Err(e) => {
+                return ipc::response(
+                    serde_json::Value::Null,
+                    Err(anyhow::anyhow!("invalid JSON: {e}")),
+                );
+            }
         };
         let id = req.get("id").cloned().unwrap_or(serde_json::Value::Null);
         let mut cmd_json = req;
@@ -2241,11 +2795,20 @@ impl App {
             Err(e) => return ipc::response(id, Err(e)),
         };
         if self.stroke.is_some() && cmd.mutates() {
-            return ipc::response(id, Err(anyhow::anyhow!("the user is painting right now – retry in a moment")));
+            return ipc::response(
+                id,
+                Err(anyhow::anyhow!(
+                    "the user is painting right now – retry in a moment"
+                )),
+            );
         }
         let (name, mutates) = (cmd.name(), cmd.mutates());
         tracing::info!("Agent: {name}");
-        let mut ctx = command::Ctx { gpu: &self.gpu, format: self.surface_config.format, session: &mut self.session };
+        let mut ctx = command::Ctx {
+            gpu: &self.gpu,
+            format: self.surface_config.format,
+            session: &mut self.session,
+        };
         let result = command::execute(&mut ctx, cmd);
         if let Ok(out) = &result {
             if out.replaced_document {
@@ -2272,7 +2835,13 @@ impl App {
         if self.session.is_none() {
             return;
         }
-        tracing::info!("Benchmark: {BENCH_FRAMES} Frames Zoom/Rotation/Pan …");
+        tracing::info!(
+            "{}",
+            tr!(
+                "Benchmark: {n} frames zoom/rotation/pan …",
+                n = BENCH_FRAMES
+            )
+        );
         self.view_fitted = false;
         self.fit_if_needed();
         self.bench = Some(Bench {
@@ -2296,29 +2865,41 @@ impl App {
         let stat = |v: &mut Vec<f64>| {
             v.sort_by(f64::total_cmp);
             let avg = v.iter().sum::<f64>() / v.len().max(1) as f64;
-            let pct = |p: f64| v.get(((v.len() as f64 - 1.0) * p) as usize).copied().unwrap_or(0.0);
+            let pct = |p: f64| {
+                v.get(((v.len() as f64 - 1.0) * p) as usize)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
             (avg, pct(0.5), pct(0.99), v.last().copied().unwrap_or(0.0))
         };
         let (mut cpu, mut iv) = (b.cpu_ms, b.interval_ms);
         let c = stat(&mut cpu);
         let i = stat(&mut iv);
-        let tiles = self.session.as_ref().map_or(0, |s| s.engine.composite_tiles_live());
+        let tiles = self
+            .session
+            .as_ref()
+            .map_or(0, |s| s.engine.composite_tiles_live());
+        let f2 = |x: f64| format!("{x:.2}");
         println!(
-            "\n=== Benchmark ({} Frames, {}×{} px, {tiles} Kacheln) ===\n\
-             CPU pro Frame:    Ø {:.2} ms   p50 {:.2}   p99 {:.2}   max {:.2}\n\
-             Frame-Abstand:    Ø {:.2} ms   p50 {:.2}   p99 {:.2}   max {:.2}   (≈ {:.0} fps)\n",
-            cpu.len(),
-            self.surface_config.width,
-            self.surface_config.height,
-            c.0,
-            c.1,
-            c.2,
-            c.3,
-            i.0,
-            i.1,
-            i.2,
-            i.3,
-            1000.0 / i.0.max(1e-6),
+            "{}",
+            tr!(
+                "\n=== Benchmark ({frames} frames, {w}×{h} px, {tiles} tiles) ===\n\
+                 CPU per frame:    Ø {c0} ms   p50 {c1}   p99 {c2}   max {c3}\n\
+                 Frame interval:   Ø {i0} ms   p50 {i1}   p99 {i2}   max {i3}   (≈ {fps} fps)\n",
+                frames = cpu.len(),
+                w = self.surface_config.width,
+                h = self.surface_config.height,
+                tiles = tiles,
+                c0 = f2(c.0),
+                c1 = f2(c.1),
+                c2 = f2(c.2),
+                c3 = f2(c.3),
+                i0 = f2(i.0),
+                i1 = f2(i.1),
+                i2 = f2(i.2),
+                i3 = f2(i.3),
+                fps = format!("{:.0}", 1000.0 / i.0.max(1e-6)),
+            )
         );
         self.view = b.base;
         if b.exit_after {
@@ -2329,9 +2910,14 @@ impl App {
     /// Whether a screen position (physical px) is covered by the interface.
     fn over_ui(&self, pos: DVec2) -> bool {
         let (a, b) = self.canvas_rect;
-        let outside = b != DVec2::ZERO && (pos.x < a.x || pos.y < a.y || pos.x >= b.x || pos.y >= b.y);
+        let outside =
+            b != DVec2::ZERO && (pos.x < a.x || pos.y < a.y || pos.x >= b.x || pos.y >= b.y);
         let p = egui::pos2((pos.x / self.scale) as f32, (pos.y / self.scale) as f32);
-        let floating = self.gui.ctx.layer_id_at(p).is_some_and(|l| l.order != egui::Order::Background);
+        let floating = self
+            .gui
+            .ctx
+            .layer_id_at(p)
+            .is_some_and(|l| l.order != egui::Order::Background);
         outside || floating
     }
 
@@ -2372,10 +2958,13 @@ impl App {
             zoom: self.view.zoom / self.scale,
             rotation_deg: self.view.rotation.to_degrees(),
             // Not while dragging: the panels need not be rebuilt for every stroke frame.
-            cursor_doc: self.cursor.filter(|_| matches!(self.drag, Drag::None)).map(|c| {
-                let d = self.view.screen_to_doc(c);
-                (d.x, d.y)
-            }),
+            cursor_doc: self
+                .cursor
+                .filter(|_| matches!(self.drag, Drag::None))
+                .map(|c| {
+                    let d = self.view.screen_to_doc(c);
+                    (d.x, d.y)
+                }),
             tool: self.tool_id(),
             color: b.color,
             brush: ui::panels::BrushModel {
@@ -2401,17 +2990,23 @@ impl App {
             wand_tolerance: self.wand_tolerance,
             wand_contiguous: self.wand_contiguous,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
-                BoxKind::Transform => "Frei transformieren",
-                BoxKind::Crop => "Zuschneiden",
+                BoxKind::Transform => tr("Free Transform"),
+                BoxKind::Crop => tr("Crop"),
             }),
             mask_edit: self.mask_edit,
             box_angle: match &self.boxed {
                 Some((BoxKind::Transform, b)) => Some(b.angle()),
                 _ => None,
             },
-            liquify: e.liquify_active().then_some((self.liq_tool, self.liq_size, self.liq_strength)),
+            liquify: e.liquify_active().then_some((
+                self.liq_tool,
+                self.liq_size,
+                self.liq_strength,
+            )),
             text_overlay: self.text_overlay(),
-            path_overlay: (self.tool == Tool::Pen).then(|| self.path_overlay()).flatten(),
+            path_overlay: (self.tool == Tool::Pen)
+                .then(|| self.path_overlay())
+                .flatten(),
             layers: ui::panels::layer_rows(doc),
             active: doc.active,
             active_opacity: active.map_or(1.0, |l| l.opacity),
@@ -2424,7 +3019,9 @@ impl App {
             recent: self.settings.recent.clone(),
             active_adjustment: active.and_then(|l| l.adjustment().cloned()),
             active_vector: active.and_then(|l| l.vector().cloned()),
-            active_effects: active.filter(|l| l.is_pixels() || l.vector().is_some()).map(|l| l.effects.clone()),
+            active_effects: active
+                .filter(|l| l.is_pixels() || l.vector().is_some())
+                .map(|l| l.effects.clone()),
             fonts: self.fonts.clone(),
             favourite_fonts: self.settings.favourite_fonts.clone(),
             recent_fonts: self.settings.recent_fonts.clone(),
@@ -2438,7 +3035,14 @@ impl App {
             self.needs_redraw = true;
             // Like Photoshop: changing anything else confirms an open free transform.
             if matches!(self.boxed, Some((BoxKind::Transform, _)))
-                && !matches!(a, Action::CommitBox | Action::CancelBox | Action::BoxRotate(_) | Action::BoxAngle(_) | Action::BoxFlip { .. })
+                && !matches!(
+                    a,
+                    Action::CommitBox
+                        | Action::CancelBox
+                        | Action::BoxRotate(_)
+                        | Action::BoxAngle(_)
+                        | Action::BoxFlip { .. }
+                )
             {
                 self.commit_box();
             }
@@ -2469,9 +3073,23 @@ impl App {
                 Action::Color(c) => self.brush.color = c,
                 Action::Brush(m) => {
                     let b = &mut self.brush;
-                    (b.size, b.hardness, b.flow, b.opacity, b.spacing, b.smoothing) =
-                        (m.size, m.hardness, m.flow, m.opacity, m.spacing, m.smoothing);
-                    (b.tip, b.angle, b.roundness, b.follow_direction) = (m.tip, m.angle, m.roundness, m.follow_direction);
+                    (
+                        b.size,
+                        b.hardness,
+                        b.flow,
+                        b.opacity,
+                        b.spacing,
+                        b.smoothing,
+                    ) = (
+                        m.size,
+                        m.hardness,
+                        m.flow,
+                        m.opacity,
+                        m.spacing,
+                        m.smoothing,
+                    );
+                    (b.tip, b.angle, b.roundness, b.follow_direction) =
+                        (m.tip, m.angle, m.roundness, m.follow_direction);
                     (b.size_jitter, b.angle_jitter, b.scatter, b.flow_jitter) =
                         (m.size_jitter, m.angle_jitter, m.scatter, m.flow_jitter);
                 }
@@ -2497,7 +3115,7 @@ impl App {
                 Action::SetEffects { effects, done } => {
                     if let Some(e) = self.engine() {
                         let id = e.doc().active;
-                        e.edit_merged("Ebenenstil", &format!("fx-{id}"), |d| {
+                        e.edit_merged(tr("Layer Style"), &format!("fx-{id}"), |d| {
                             let l = d.find_mut(id).unwrap();
                             let changed = l.effects != effects;
                             l.effects = effects;
@@ -2512,7 +3130,11 @@ impl App {
                 Action::SetVector { v, done } => {
                     if let Some(e) = self.engine() {
                         let id = e.doc().active;
-                        let label = if matches!(v.kind, imagine_core::vector::VectorKind::Text(_)) { "Text ändern" } else { "Form ändern" };
+                        let label = if matches!(v.kind, imagine_core::vector::VectorKind::Text(_)) {
+                            tr("Edit Text")
+                        } else {
+                            tr("Edit Shape")
+                        };
                         let _ = e.set_vector(id, v, label, Some(&format!("vector-{id}")));
                         if done {
                             e.end_merge();
@@ -2533,12 +3155,14 @@ impl App {
                     if let Some(e) = self.engine() {
                         e.select(|d| d.active = id);
                     }
-                    let has_mask = self.engine().and_then(|e| e.doc().find(id).map(|l| l.mask.is_some()));
+                    let has_mask = self
+                        .engine()
+                        .and_then(|e| e.doc().find(id).map(|l| l.mask.is_some()));
                     if has_mask == Some(false) {
                         self.mask_edit = false;
                     }
                 }
-                Action::ToggleVisible(id) => self.edit("Sichtbarkeit", |d| {
+                Action::ToggleVisible(id) => self.edit(tr("Visibility"), |d| {
                     let l = d.find_mut(id).unwrap();
                     l.visible = !l.visible;
                     true
@@ -2549,20 +3173,33 @@ impl App {
                         e.select(|d| d.active = id);
                     }
                     self.mask_edit = !(was_active && self.mask_edit);
-                    tracing::info!("Ziel: {}", if self.mask_edit { "Ebenenmaske" } else { "Pixel" });
+                    tracing::info!(
+                        "{}",
+                        tr!(
+                            "Target: {target}",
+                            target = if self.mask_edit {
+                                tr("Layer Mask")
+                            } else {
+                                tr("Pixels")
+                            }
+                        )
+                    );
                 }
-                Action::RenameLayer(id, name) => self.edit("Umbenennen", |d| {
+                Action::RenameLayer(id, name) => self.edit(tr("Rename"), |d| {
                     let l = d.find_mut(id).unwrap();
                     let changed = l.name != name;
                     l.name = name;
                     changed
                 }),
-                Action::MoveLayer { id, target, above, into } => {
-                    self.edit("Ebene verschieben", |d| d.move_layer(id, target, above, into))
-                }
+                Action::MoveLayer {
+                    id,
+                    target,
+                    above,
+                    into,
+                } => self.edit(tr("Move Layer"), |d| d.move_layer(id, target, above, into)),
                 Action::LayerOpacity { value, done } => {
                     if let Some(e) = self.engine() {
-                        let changed = e.edit_merged("Deckkraft", "layer-opacity", |d| {
+                        let changed = e.edit_merged(tr("Opacity"), "layer-opacity", |d| {
                             let id = d.active;
                             let l = d.find_mut(id).unwrap();
                             let c = l.opacity != value;
@@ -2577,20 +3214,24 @@ impl App {
                         }
                     }
                 }
-                Action::LayerBlend(b) => self.edit("Füllmethode", |d| {
+                Action::LayerBlend(b) => self.edit(tr("Blend Mode"), |d| {
                     let id = d.active;
                     let l = d.find_mut(id).unwrap();
                     let c = l.blend != b;
                     l.blend = b;
                     c
                 }),
-                Action::DeleteLayer => self.edit("Ebene löschen", |d| d.remove_active()),
+                Action::DeleteLayer => self.edit(tr("Delete Layer"), |d| d.remove_active()),
                 Action::HistoryJump(n) => {
                     if self.engine().is_some_and(|e| e.jump_history(n)) {
                         self.touch();
                     }
                 }
-                Action::Liquify { tool, size, strength } => {
+                Action::Liquify {
+                    tool,
+                    size,
+                    strength,
+                } => {
                     self.liq_tool = tool;
                     self.liq_size = size;
                     self.liq_strength = strength;
@@ -2610,7 +3251,11 @@ impl App {
                 Action::BoxAngle(deg) => {
                     if let Some((BoxKind::Transform, b)) = &mut self.boxed {
                         let now = b.angle();
-                        b.rotate_by(if b.fwd.matrix2.determinant() < 0.0 { now - deg } else { deg - now });
+                        b.rotate_by(if b.fwd.matrix2.determinant() < 0.0 {
+                            now - deg
+                        } else {
+                            deg - now
+                        });
                     }
                 }
                 Action::BoxFlip { x, y } => {
@@ -2621,27 +3266,34 @@ impl App {
                 Action::CommitBox => self.commit_box(),
                 Action::CancelBox => self.cancel_box(),
                 Action::CanvasSize { w, h, anchor } => {
-                    let Some((ow, oh)) = self.session.as_ref().map(|s| s.engine.size()) else { continue };
+                    let Some((ow, oh)) = self.session.as_ref().map(|s| s.engine.size()) else {
+                        continue;
+                    };
                     let x = ((ow as f64 - w as f64) * anchor.0).round() as i64;
                     let y = ((oh as f64 - h as f64) * anchor.1).round() as i64;
-                    self.engine_op(|e| e.crop(x, y, w, h, "Arbeitsfläche"));
+                    self.engine_op(|e| e.crop(x, y, w, h, tr("Canvas Size")));
                     self.view_fitted = false;
                 }
                 Action::AddAdjustment(adj) => {
-                    let label = format!("Einstellungsebene {}", adj.name());
-                    if self.engine().and_then(|e| e.add_adjustment(adj, &label)).is_some() {
+                    let label = tr!("Adjustment Layer {name}", name = adj.name());
+                    if self
+                        .engine()
+                        .and_then(|e| e.add_adjustment(adj, &label))
+                        .is_some()
+                    {
                         self.touch();
                     }
                 }
                 Action::SetAdjustment { adj, done } => {
                     if let Some(e) = self.engine() {
                         let id = e.doc().active;
-                        let changed = e.edit_merged("Einstellung ändern", &format!("adjust-{id}"), |d| {
-                            let l = d.find_mut(id).unwrap();
-                            let c = l.adjustment() != Some(&adj);
-                            l.content = imagine_core::Content::Adjustment(adj);
-                            c
-                        });
+                        let changed =
+                            e.edit_merged(tr("Edit Adjustment"), &format!("adjust-{id}"), |d| {
+                                let l = d.find_mut(id).unwrap();
+                                let c = l.adjustment() != Some(&adj);
+                                l.content = imagine_core::Content::Adjustment(adj);
+                                c
+                            });
                         if done {
                             e.end_merge();
                         }
@@ -2660,23 +3312,43 @@ impl App {
                     let label = f.name();
                     self.engine_op(|e| e.add_smart_filter(&f, label));
                 }
-                Action::SetSmartFilter { layer, index, filter } => {
-                    self.engine_op(|e| e.set_smart_filter(layer, index, &filter, "Smart-Filter ändern"));
+                Action::SetSmartFilter {
+                    layer,
+                    index,
+                    filter,
+                } => {
+                    self.engine_op(|e| {
+                        e.set_smart_filter(layer, index, &filter, tr("Edit Smart Filter"))
+                    });
                 }
-                Action::ToggleSmartFilter { layer, index } => self.edit("Smart-Filter ein/aus", |d| {
-                    d.find_mut(layer).and_then(|l| l.filters.get_mut(index)).map(|f| f.enabled = !f.enabled).is_some()
-                }),
-                Action::RemoveSmartFilter { layer, index } => self.edit("Smart-Filter entfernen", |d| {
-                    d.find_mut(layer).filter(|l| index < l.filters.len()).map(|l| l.filters.remove(index)).is_some()
-                }),
-                Action::BakeSmartFilters(layer) => self.engine_op(|e| e.bake_smart_filters(layer, "Smart-Filter anwenden")),
+                Action::ToggleSmartFilter { layer, index } => {
+                    self.edit(tr("Toggle Smart Filter"), |d| {
+                        d.find_mut(layer)
+                            .and_then(|l| l.filters.get_mut(index))
+                            .map(|f| f.enabled = !f.enabled)
+                            .is_some()
+                    })
+                }
+                Action::RemoveSmartFilter { layer, index } => {
+                    self.edit(tr("Remove Smart Filter"), |d| {
+                        d.find_mut(layer)
+                            .filter(|l| index < l.filters.len())
+                            .map(|l| l.filters.remove(index))
+                            .is_some()
+                    })
+                }
+                Action::BakeSmartFilters(layer) => {
+                    self.engine_op(|e| e.bake_smart_filters(layer, tr("Apply Smart Filters")))
+                }
                 Action::OpenFile(p) => self.guard_unsaved(Pending::Open(p)),
-                Action::NewDocument { w, h, white } => self.guard_unsaved(Pending::New { w, h, white }),
+                Action::NewDocument { w, h, white } => {
+                    self.guard_unsaved(Pending::New { w, h, white })
+                }
                 Action::SaveAs(p) => self.save_to(Some(p)),
                 Action::ExportAs(p, opts) => self.export_to(p, opts),
                 Action::Unsaved(a) => self.answer_unsaved(a),
                 Action::ImageSize { w, h } => {
-                    self.engine_op(|e| e.resize_image(w, h, Interp::Bicubic, "Bildgröße"));
+                    self.engine_op(|e| e.resize_image(w, h, Interp::Bicubic, tr("Image Size")));
                     self.view_fitted = false;
                 }
             }
@@ -2686,9 +3358,16 @@ impl App {
     /// Builds the interface for this frame and applies what the user did.
     fn run_ui(&mut self) {
         // The font window belongs to the active text layer.
-        let text_active = self.session.as_ref().and_then(|s| s.engine.doc().active_layer()).is_some_and(|l| {
-            matches!(l.vector().map(|v| &v.kind), Some(imagine_core::vector::VectorKind::Text(_)))
-        });
+        let text_active = self
+            .session
+            .as_ref()
+            .and_then(|s| s.engine.doc().active_layer())
+            .is_some_and(|l| {
+                matches!(
+                    l.vector().map(|v| &v.kind),
+                    Some(imagine_core::vector::VectorKind::Text(_))
+                )
+            });
         if !text_active {
             self.ui_state.vec_editor.fonts.open = false;
         }
@@ -2697,7 +3376,9 @@ impl App {
         }
         // Editing ends when its layer is no longer the active one.
         if let Some(te) = &self.text_edit
-            && self.session.as_ref().is_none_or(|s| s.engine.doc().active != te.layer || s.engine.doc().find(te.layer).is_none())
+            && self.session.as_ref().is_none_or(|s| {
+                s.engine.doc().active != te.layer || s.engine.doc().find(te.layer).is_none()
+            })
         {
             self.text_edit = None;
         }
@@ -2709,11 +3390,18 @@ impl App {
             self.needs_redraw = true;
         }
         if self.fonts.is_empty()
-            && self.session.as_ref().is_some_and(|s| s.engine.doc().active_layer().is_some_and(|l| l.vector().is_some()))
+            && self.session.as_ref().is_some_and(|s| {
+                s.engine
+                    .doc()
+                    .active_layer()
+                    .is_some_and(|l| l.vector().is_some())
+            })
         {
             self.ensure_fonts();
         }
-        let Some(mut model) = self.ui_model() else { return };
+        let Some(mut model) = self.ui_model() else {
+            return;
+        };
         if let Some(s) = &mut self.session {
             if ui::adjust_ui::wants_histogram(model.active_adjustment.as_ref()) {
                 model.histogram = Some(s.engine.histogram(Some(model.active)));
@@ -2729,16 +3417,22 @@ impl App {
             }
         }
         let size = (self.surface_config.width, self.surface_config.height);
-        let changed = self.last_model.as_ref() != Some(&model) || ui::log::generation() != self.ui_log_gen;
+        let changed =
+            self.last_model.as_ref() != Some(&model) || ui::log::generation() != self.ui_log_gen;
         if !self.gui.needs_pass(size, self.scale, changed) {
             return;
         }
         let mut actions = Vec::new();
         let state = &mut self.ui_state;
-        self.gui.run(size, self.scale, |ctx| actions = ui::panels::build(ctx, &model, state));
+        self.gui.run(size, self.scale, |ctx| {
+            actions = ui::panels::build(ctx, &model, state)
+        });
         let s = self.scale;
         let rect = match self.ui_state.canvas {
-            Some(r) => (DVec2::new(r.min.x as f64 * s, r.min.y as f64 * s), DVec2::new(r.max.x as f64 * s, r.max.y as f64 * s)),
+            Some(r) => (
+                DVec2::new(r.min.x as f64 * s, r.min.y as f64 * s),
+                DVec2::new(r.max.x as f64 * s, r.max.y as f64 * s),
+            ),
             None => (DVec2::ZERO, DVec2::new(size.0 as f64, size.1 as f64)),
         };
         if rect != self.canvas_rect {
@@ -2770,7 +3464,8 @@ impl App {
         self.step_bench();
 
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.reconfigure_surface();
                 return;
@@ -2780,9 +3475,7 @@ impl App {
         let target = frame.texture.create_view(&Default::default());
 
         let liquifying = self.liquifying();
-        if liquifying
-            && let Drag::Liquify { last, pressure } = self.drag
-        {
+        if liquifying && let Drag::Liquify { last, pressure } = self.drag {
             let dt = self.liq_tick.elapsed().as_secs_f64();
             self.liq_tick = Instant::now();
             if self.liq_effective().continuous() {
@@ -2791,14 +3484,21 @@ impl App {
             }
         }
         let show_ring = (self.tool.paints() || liquifying)
-            && !matches!(self.drag, Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. })
+            && !matches!(
+                self.drag,
+                Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. }
+            )
             && !self.space
             && self.bench.is_none();
         let ring_at = match self.drag {
             Drag::BrushHud { origin, .. } => Some(origin),
             _ => self.cursor.filter(|_| show_ring),
         };
-        let ring_size = if liquifying { self.liq_size } else { self.brush.size };
+        let ring_size = if liquifying {
+            self.liq_size
+        } else {
+            self.brush.size
+        };
         let overlay = Overlay {
             cursor: ring_at.map(|p| (p, ring_size * 0.5 * self.view.zoom as f32)),
             checker_px: (8.0 * self.scale) as f32,
@@ -2822,28 +3522,46 @@ impl App {
                 self.upload_failures += s.add_tiles(layer, &tiles);
             }
             if self.pending_uploads.is_empty() && !self.loading && self.upload_failures > 0 {
-                tracing::warn!("{} Kacheln passten nicht in den GPU-Speicher", self.upload_failures);
+                tracing::warn!(
+                    "{}",
+                    tr!(
+                        "{n} tiles did not fit into GPU memory",
+                        n = self.upload_failures
+                    )
+                );
                 self.upload_failures = 0;
             }
             let result = match &self.ui_state.filter_preview {
                 _ if s.engine.liquify_active() => s.engine.liquify_tick(),
                 None if self.ui_state.vec_editor.fonts.preview.is_some() => {
                     let id = s.engine.doc().active;
-                    s.engine.set_vector_preview(self.ui_state.vec_editor.fonts.preview.as_ref().map(|v| (id, v)))
+                    s.engine.set_vector_preview(
+                        self.ui_state
+                            .vec_editor
+                            .fonts
+                            .preview
+                            .as_ref()
+                            .map(|v| (id, v)),
+                    )
                 }
                 Some(ui::panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
-                Some(ui::panels::FilterPreview::Smart(i, f)) => s.engine.set_smart_filter_preview(Some((*i, f))),
-                None => s.engine.set_transform_preview(preview.map(|f| (f, Interp::Bicubic))),
+                Some(ui::panels::FilterPreview::Smart(i, f)) => {
+                    s.engine.set_smart_filter_preview(Some((*i, f)))
+                }
+                None => s
+                    .engine
+                    .set_transform_preview(preview.map(|f| (f, Interp::Bicubic))),
             };
             if let Err(e) = result {
-                tracing::warn!("Vorschau: {e}");
+                tracing::warn!("{}", tr!("Preview: {error}", error = e));
             }
             s.engine.render(&target, &self.view, &overlay);
         } else {
             clear(&self.gpu, &target);
         }
         let size = (self.surface_config.width, self.surface_config.height);
-        self.gui.paint(&self.gpu.device, &self.gpu.queue, &target, size);
+        self.gui
+            .paint(&self.gpu.device, &self.gpu.queue, &target, size);
 
         let surface = self.window.wl_surface();
         surface.frame(&self.qh, FrameCallbackData(surface.clone()));
@@ -2864,7 +3582,10 @@ impl App {
             }
         }
 
-        self.needs_redraw = self.gui.repaint_at.is_some_and(|t| t <= Instant::now() + Duration::from_millis(4))
+        self.needs_redraw = self
+            .gui
+            .repaint_at
+            .is_some_and(|t| t <= Instant::now() + Duration::from_millis(4))
             || self.gui.has_events()
             || ui::log::generation() != self.ui_log_gen
             || !self.pending_uploads.is_empty()
@@ -2876,11 +3597,11 @@ impl App {
             self.update_title();
             if let Some(s) = &self.session {
                 let e = &s.engine;
-                self.ui_status = format!(
-                    "{} Kacheln · {:.0} MB GPU · {:.2} ms",
-                    e.layer_tiles_live(),
-                    e.gpu_bytes() as f64 / 1e6,
-                    self.frame_cpu_ms
+                self.ui_status = tr!(
+                    "{tiles} tiles · {mb} MB GPU · {ms} ms",
+                    tiles = e.layer_tiles_live(),
+                    mb = format!("{:.0}", e.gpu_bytes() as f64 / 1e6),
+                    ms = format!("{:.2}", self.frame_cpu_ms)
                 );
             }
         }
@@ -2891,11 +3612,26 @@ impl App {
         let v = &self.view;
         let rect = |a: DVec2, b: DVec2| {
             let (min, max) = (a.min(b), a.max(b));
-            [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)].map(|p| v.doc_to_screen(p)).to_vec()
+            [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)]
+                .map(|p| v.doc_to_screen(p))
+                .to_vec()
         };
         match &self.drag {
-            Drag::Marquee { start, end, ellipse: false, .. } => vec![OverlayLine { points: rect(*start, *end), closed: true }],
-            Drag::Marquee { start, end, ellipse: true, .. } => {
+            Drag::Marquee {
+                start,
+                end,
+                ellipse: false,
+                ..
+            } => vec![OverlayLine {
+                points: rect(*start, *end),
+                closed: true,
+            }],
+            Drag::Marquee {
+                start,
+                end,
+                ellipse: true,
+                ..
+            } => {
                 let (c, r) = ((*start + *end) * 0.5, (*end - *start).abs() * 0.5);
                 let points = (0..96)
                     .map(|i| {
@@ -2903,10 +3639,16 @@ impl App {
                         v.doc_to_screen(c + DVec2::new(r.x * t.cos(), r.y * t.sin()))
                     })
                     .collect();
-                vec![OverlayLine { points, closed: true }]
+                vec![OverlayLine {
+                    points,
+                    closed: true,
+                }]
             }
             Drag::Lasso { points, .. } => {
-                vec![OverlayLine { points: points.iter().map(|p| v.doc_to_screen(*p)).collect(), closed: true }]
+                vec![OverlayLine {
+                    points: points.iter().map(|p| v.doc_to_screen(*p)).collect(),
+                    closed: true,
+                }]
             }
             Drag::Shape { start, end } => {
                 let (a, b) = shape_rect(*start, *end, self.mods.shift, self.mods.alt);
@@ -2918,13 +3660,22 @@ impl App {
                             v.doc_to_screen(c + DVec2::new(r.x * t.cos(), r.y * t.sin()))
                         })
                         .collect();
-                    vec![OverlayLine { points, closed: true }]
+                    vec![OverlayLine {
+                        points,
+                        closed: true,
+                    }]
                 } else {
-                    vec![OverlayLine { points: rect(a, b), closed: true }]
+                    vec![OverlayLine {
+                        points: rect(a, b),
+                        closed: true,
+                    }]
                 }
             }
             Drag::Gradient { start, end } => {
-                vec![OverlayLine { points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)], closed: false }]
+                vec![OverlayLine {
+                    points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)],
+                    closed: false,
+                }]
             }
             _ => match &self.boxed {
                 Some((_, b)) => b.lines(v, self.scale),
@@ -2938,16 +3689,28 @@ impl App {
         if !matches!(self.tool, Tool::Clone | Tool::Heal) || self.space {
             return Vec::new();
         }
-        let at = match (self.clone_offset.filter(|_| self.clone_aligned), self.cursor, self.clone_source) {
-            (Some([ox, oy]), Some(c), _) => self.view.screen_to_doc(c) + DVec2::new(ox as f64, oy as f64),
+        let at = match (
+            self.clone_offset.filter(|_| self.clone_aligned),
+            self.cursor,
+            self.clone_source,
+        ) {
+            (Some([ox, oy]), Some(c), _) => {
+                self.view.screen_to_doc(c) + DVec2::new(ox as f64, oy as f64)
+            }
             (_, _, Some(src)) => src,
             _ => return Vec::new(),
         };
         let s = self.view.doc_to_screen(at);
         let k = 7.0 * self.scale;
         vec![
-            OverlayLine { points: vec![s - DVec2::new(k, 0.0), s + DVec2::new(k, 0.0)], closed: false },
-            OverlayLine { points: vec![s - DVec2::new(0.0, k), s + DVec2::new(0.0, k)], closed: false },
+            OverlayLine {
+                points: vec![s - DVec2::new(k, 0.0), s + DVec2::new(k, 0.0)],
+                closed: false,
+            },
+            OverlayLine {
+                points: vec![s - DVec2::new(0.0, k), s + DVec2::new(0.0, k)],
+                closed: false,
+            },
         ]
     }
 
@@ -2955,43 +3718,62 @@ impl App {
         let Some(s) = &self.session else { return };
         let e = &s.engine;
         let (w, h) = e.size();
-        let tool = format!("{}{}", self.tool.name(), if self.mask_edit { " → Maske" } else { "" });
+        let tool = if self.mask_edit {
+            tr!("{tool} → Mask", tool = self.tool.name())
+        } else {
+            self.tool.name().to_string()
+        };
         let layer = e
             .doc()
             .active_layer()
             .map(|l| {
-                format!(
-                    "„{}“ {} {:.0} %{}",
-                    l.name,
-                    l.blend.name(),
-                    l.opacity * 100.0,
-                    if l.visible { "" } else { " (aus)" }
-                )
+                let (name, blend, opacity) =
+                    (&l.name, l.blend.name(), format!("{:.0}", l.opacity * 100.0));
+                if l.visible {
+                    tr!(
+                        "“{name}” {blend} {opacity} %",
+                        name = name,
+                        blend = blend,
+                        opacity = opacity
+                    )
+                } else {
+                    tr!(
+                        "“{name}” {blend} {opacity} % (hidden)",
+                        name = name,
+                        blend = blend,
+                        opacity = opacity
+                    )
+                }
             })
             .unwrap_or_default();
         let status = if self.quit_armed.is_some_and(|t| t.elapsed() < QUIT_CONFIRM) {
-            " – NOCHMAL Strg+Q ZUM VERWERFEN"
+            format!(" – {}", tr("PRESS Ctrl+Q AGAIN TO DISCARD"))
         } else if self.save_job.is_some() || self.saving {
-            " – speichert …"
+            format!(" – {}", tr("saving …"))
         } else if self.loading || !self.pending_uploads.is_empty() {
-            " – lädt …"
+            format!(" – {}", tr("loading …"))
         } else if self.bg_running > 0 {
-            " – rechnet …"
+            format!(" – {}", tr("computing …"))
         } else {
-            ""
+            String::new()
         };
-        self.window.set_title(format!(
-            "{}{} – {w}×{h} – {:.1} % – {:.0}° – {layer} – {tool} {:.0} px {:.0} % – {}+{} Kacheln ({:.0} MB) – {:.2} ms{status}",
-            if self.modified { "• " } else { "" },
-            s.name,
-            self.view.zoom * 100.0 / self.scale,
-            self.view.rotation.to_degrees(),
-            self.brush.size,
-            self.brush.opacity * 100.0,
-            e.layer_tiles_live(),
-            e.composite_tiles_live(),
-            e.gpu_bytes() as f64 / 1e6,
-            self.frame_cpu_ms,
+        self.window.set_title(tr!(
+            "{modified}{name} – {w}×{h} – {zoom} % – {angle}° – {layer} – {tool} {size} px {opacity} % – {layer_tiles}+{composite_tiles} tiles ({mb} MB) – {ms} ms{status}",
+            modified = if self.modified { "• " } else { "" },
+            name = s.name,
+            w = w,
+            h = h,
+            zoom = format!("{:.1}", self.view.zoom * 100.0 / self.scale),
+            angle = format!("{:.0}", self.view.rotation.to_degrees()),
+            layer = layer,
+            tool = tool,
+            size = format!("{:.0}", self.brush.size),
+            opacity = format!("{:.0}", self.brush.opacity * 100.0),
+            layer_tiles = e.layer_tiles_live(),
+            composite_tiles = e.composite_tiles_live(),
+            mb = format!("{:.0}", e.gpu_bytes() as f64 / 1e6),
+            ms = format!("{:.2}", self.frame_cpu_ms),
+            status = status,
         ));
     }
 }
@@ -3002,7 +3784,8 @@ pub fn bench_view(base: &View, frame: u32, frames: u32) -> View {
     let mut v = *base;
     v.zoom = base.zoom * 2f64.powf((1.0 - t.cos()) * 3.5);
     v.rotation = t * 0.5;
-    v.center = base.center + DVec2::new(t.sin(), (2.0 * t).sin() * 0.5) * base.viewport / base.zoom * 0.25;
+    v.center =
+        base.center + DVec2::new(t.sin(), (2.0 * t).sin() * 0.5) * base.viewport / base.zoom * 0.25;
     v
 }
 
@@ -3015,7 +3798,12 @@ fn clear(gpu: &GpuContext, target: &wgpu::TextureView) {
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.035, g: 0.037, b: 0.042, a: 1.0 }),
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    r: 0.035,
+                    g: 0.037,
+                    b: 0.042,
+                    a: 1.0,
+                }),
                 store: wgpu::StoreOp::Store,
             },
         })],
@@ -3044,10 +3832,26 @@ impl Dispatch2<WpFractionalScaleV1, App> for FractionalData {
 }
 
 impl Dispatch2<WpViewporter, App> for tablet::Ignore {
-    fn event(&self, _: &mut App, _: &WpViewporter, _: <WpViewporter as Proxy>::Event, _: &Connection, _: &QueueHandle<App>) {}
+    fn event(
+        &self,
+        _: &mut App,
+        _: &WpViewporter,
+        _: <WpViewporter as Proxy>::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
 }
 impl Dispatch2<WpViewport, App> for tablet::Ignore {
-    fn event(&self, _: &mut App, _: &WpViewport, _: <WpViewport as Proxy>::Event, _: &Connection, _: &QueueHandle<App>) {}
+    fn event(
+        &self,
+        _: &mut App,
+        _: &WpViewport,
+        _: <WpViewport as Proxy>::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
 }
 impl Dispatch2<WpFractionalScaleManagerV1, App> for tablet::Ignore {
     fn event(
@@ -3064,21 +3868,48 @@ impl Dispatch2<WpFractionalScaleManagerV1, App> for tablet::Ignore {
 // ---- SCTK handlers ----------------------------------------------------------
 
 impl CompositorHandler for App {
-    fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, factor: i32) {
+    fn scale_factor_changed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        factor: i32,
+    ) {
         if self.viewport.is_none() {
             self.set_scale(factor as f64);
         }
     }
 
-    fn transform_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: wl_output::Transform) {}
+    fn transform_changed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: wl_output::Transform,
+    ) {
+    }
 
     fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
         self.frame_pending = false;
     }
 
-    fn surface_enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+    fn surface_enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: &wl_output::WlOutput,
+    ) {
+    }
 
-    fn surface_leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+    fn surface_leave(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: &wl_output::WlOutput,
+    ) {
+    }
 }
 
 impl OutputHandler for App {
@@ -3095,7 +3926,14 @@ impl WindowHandler for App {
         self.request_quit();
     }
 
-    fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window, configure: WindowConfigure, _: u32) {
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &Window,
+        configure: WindowConfigure,
+        _: u32,
+    ) {
         let (w, h) = configure.new_size;
         let w = w.map_or(self.logical.0, |v| v.get());
         let h = h.map_or(self.logical.1, |v| v.get());
@@ -3122,7 +3960,13 @@ impl SeatHandler for App {
         self.bind_tablet_seat(&seat);
     }
 
-    fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, cap: Capability) {
+    fn new_capability(
+        &mut self,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        cap: Capability,
+    ) {
         if cap == Capability::Keyboard && self.keyboard.is_none() {
             self.keyboard = self.seat_state.get_keyboard(qh, &seat, None).ok();
             if self.clipboard.device.is_none()
@@ -3135,20 +3979,34 @@ impl SeatHandler for App {
             let cursor_surface = self.compositor.create_surface(qh);
             self.pointer = self
                 .seat_state
-                .get_pointer_with_theme::<_, ()>(qh, &seat, self.shm.wl_shm(), cursor_surface, ThemeSpec::default())
+                .get_pointer_with_theme::<_, ()>(
+                    qh,
+                    &seat,
+                    self.shm.wl_shm(),
+                    cursor_surface,
+                    ThemeSpec::default(),
+                )
                 .ok();
         }
     }
 
-    fn remove_capability(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat, cap: Capability) {
+    fn remove_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        cap: Capability,
+    ) {
         if cap == Capability::Keyboard
-            && let Some(k) = self.keyboard.take() {
-                k.release();
-            }
+            && let Some(k) = self.keyboard.take()
+        {
+            k.release();
+        }
         if cap == Capability::Pointer
-            && let Some(p) = self.pointer.take() {
-                p.pointer().release();
-            }
+            && let Some(p) = self.pointer.take()
+        {
+            p.pointer().release();
+        }
     }
 
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
@@ -3167,24 +4025,55 @@ impl KeyboardHandler for App {
     ) {
     }
 
-    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: &wl_surface::WlSurface, _: u32) {
+    fn leave(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _: &wl_surface::WlSurface,
+        _: u32,
+    ) {
         // Keys released while unfocused never reach us.
         self.space = false;
         self.r_key = false;
     }
 
-    fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, serial: u32, ev: KeyEvent) {
+    fn press_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        serial: u32,
+        ev: KeyEvent,
+    ) {
         self.clipboard.serial = serial;
         self.key(&ev, true);
     }
 
-    fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
-        if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() || self.text_edit.is_some() {
+    fn repeat_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _: u32,
+        ev: KeyEvent,
+    ) {
+        if self.ui_state.captures_keyboard()
+            || self.gui.wants_keyboard()
+            || self.text_edit.is_some()
+        {
             self.key(&ev, true);
         }
     }
 
-    fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
+    fn release_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _: u32,
+        ev: KeyEvent,
+    ) {
         self.key(&ev, false);
     }
 
@@ -3204,7 +4093,13 @@ impl KeyboardHandler for App {
 }
 
 impl PointerHandler for App {
-    fn pointer_frame(&mut self, conn: &Connection, _: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
+    fn pointer_frame(
+        &mut self,
+        conn: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
         for ev in events {
             if &ev.surface != self.window.wl_surface() {
                 continue;
@@ -3213,26 +4108,34 @@ impl PointerHandler for App {
             let scale = self.scale;
             self.needs_redraw = true;
             match &ev.kind {
-                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => self.gui.pointer_moved(pos, scale),
+                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                    self.gui.pointer_moved(pos, scale)
+                }
                 PointerEventKind::Leave { .. } => self.gui.pointer_gone(),
                 _ => {}
             }
             let canvas_busy = !matches!(self.drag, Drag::None);
             let over_ui = self.over_ui(pos);
             match &ev.kind {
-                PointerEventKind::Press { button, .. } | PointerEventKind::Release { button, .. }
-                    if !matches!(*button, BTN_LEFT | BTN_MIDDLE) && (over_ui || self.ui_pointer) =>
+                PointerEventKind::Press { button, .. }
+                | PointerEventKind::Release { button, .. }
+                    if !matches!(*button, BTN_LEFT | BTN_MIDDLE)
+                        && (over_ui || self.ui_pointer) =>
                 {
                     continue; // other buttons do nothing on the interface
                 }
-                PointerEventKind::Press { button, .. } if !self.tablet_contact && (over_ui || self.ui_pointer) && !canvas_busy => {
+                PointerEventKind::Press { button, .. }
+                    if !self.tablet_contact && (over_ui || self.ui_pointer) && !canvas_busy =>
+                {
                     self.ui_pointer = true;
-                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, true);
+                    self.gui
+                        .pointer_button(pos, scale, *button == BTN_MIDDLE, true);
                     continue;
                 }
                 PointerEventKind::Release { button, .. } if self.ui_pointer => {
                     self.ui_pointer = false;
-                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, false);
+                    self.gui
+                        .pointer_button(pos, scale, *button == BTN_MIDDLE, false);
                     continue;
                 }
                 PointerEventKind::Motion { .. } if (over_ui || self.ui_pointer) && !canvas_busy => {
@@ -3251,11 +4154,17 @@ impl PointerHandler for App {
                     continue;
                 }
                 // Canvas clicks also reach egui (closes open menus and popups).
-                PointerEventKind::Press { button, .. } if !self.tablet_contact && matches!(*button, BTN_LEFT | BTN_MIDDLE) => {
-                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, true);
+                PointerEventKind::Press { button, .. }
+                    if !self.tablet_contact && matches!(*button, BTN_LEFT | BTN_MIDDLE) =>
+                {
+                    self.gui
+                        .pointer_button(pos, scale, *button == BTN_MIDDLE, true);
                 }
-                PointerEventKind::Release { button, .. } if !self.tablet_contact && matches!(*button, BTN_LEFT | BTN_MIDDLE) => {
-                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, false);
+                PointerEventKind::Release { button, .. }
+                    if !self.tablet_contact && matches!(*button, BTN_LEFT | BTN_MIDDLE) =>
+                {
+                    self.gui
+                        .pointer_button(pos, scale, *button == BTN_MIDDLE, false);
                 }
                 _ => {}
             }
@@ -3310,7 +4219,8 @@ impl PointerHandler for App {
                         continue;
                     }
                     if self.mods.ctrl {
-                        self.brush.size = (self.brush.size * 1.1f32.powf(-steps as f32)).clamp(1.0, 5000.0);
+                        self.brush.size =
+                            (self.brush.size * 1.1f32.powf(-steps as f32)).clamp(1.0, 5000.0);
                     } else if self.mods.shift {
                         self.view.rotate_at(pos, (steps * 7.5).to_radians());
                     } else {

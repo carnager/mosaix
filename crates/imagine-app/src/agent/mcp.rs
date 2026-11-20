@@ -54,7 +54,13 @@ fn rect_props() -> Map<String, Value> {
     m
 }
 
-fn tool(name: &str, description: &str, properties: Value, required: &[&str], read_only: bool) -> Value {
+fn tool(
+    name: &str,
+    description: &str,
+    properties: Value,
+    required: &[&str],
+    read_only: bool,
+) -> Value {
     json!({
         "name": name,
         "description": description,
@@ -70,11 +76,20 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str], rea
 
 /// Tool catalogue. Names equal the command names of [`super::command::Command`].
 pub fn tools() -> Vec<Value> {
-    let blend_keys: Vec<&str> = imagine_core::BlendMode::ALL.iter().map(|m| m.key()).collect();
+    let blend_keys: Vec<&str> = imagine_core::BlendMode::ALL
+        .iter()
+        .map(|m| m.key())
+        .collect();
     let mut fill = rect_props();
     fill.insert("layer".into(), layer_param());
-    fill.insert("color".into(), color_param("Fill colour (alpha component = coverage)"));
-    fill.insert("opacity".into(), json!({ "type": "number", "minimum": 0, "maximum": 1 }));
+    fill.insert(
+        "color".into(),
+        color_param("Fill colour (alpha component = coverage)"),
+    );
+    fill.insert(
+        "opacity".into(),
+        json!({ "type": "number", "minimum": 0, "maximum": 1 }),
+    );
     let mut clear = rect_props();
     clear.insert("layer".into(), layer_param());
     let mut prev = rect_props();
@@ -90,36 +105,103 @@ pub fn tools() -> Vec<Value> {
         let _ = what;
         Value::Object(m)
     };
-    prev.insert("output".into(), json!({ "type": "string", "description": "Optional path to also write the PNG to" }));
+    prev.insert(
+        "output".into(),
+        json!({ "type": "string", "description": "Optional path to also write the PNG to" }),
+    );
     vec![
-        tool("document_new", "Create a new empty document (replaces the open one).",
+        tool(
+            "document_new",
+            "Create a new empty document (replaces the open one).",
             json!({ "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }),
-            &["width", "height"], false),
-        tool("document_open", "Open an image (png, jpg, webp, tiff, exr) or .imagine file (replaces the open document).",
-            json!({ "path": { "type": "string" } }), &["path"], false),
-        tool("document_info", "Size, blend space, layer tree (top to bottom, with ids, blend modes, opacity, visibility, coarse tile bounds) and undo history.",
-            json!({}), &[], true),
-        tool("layer_add", "Add an empty pixel layer above the active layer and make it active. Returns its id.",
-            json!({ "name": { "type": "string" } }), &[], false),
-        tool("layer_duplicate", "Duplicate a layer (instant, shares pixel data). Returns the new id.",
-            json!({ "layer": layer_param() }), &[], false),
-        tool("layer_delete", "Delete a layer or group (the last layer cannot be deleted).",
-            json!({ "layer": layer_param() }), &[], false),
-        tool("layer_set", "Change layer properties.", json!({
-            "layer": layer_param(),
-            "name": { "type": "string" },
-            "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
-            "blend": { "type": "string", "enum": blend_keys, "description": "Blend mode (Photoshop semantics)" },
-            "visible": { "type": "boolean" }
-        }), &[], false),
-        tool("layer_select", "Make a layer active.", json!({ "layer": { "type": "integer" } }), &["layer"], false),
-        tool("layer_move", "Move a layer up (positive steps) or down (negative) within its group.",
-            json!({ "layer": layer_param(), "steps": { "type": "integer" } }), &["steps"], false),
-        tool("layer_group", "Wrap a layer in a new group. Returns the group id.", json!({ "layer": layer_param() }), &[], false),
-        tool("layer_ungroup", "Dissolve a group into its parent.", json!({ "layer": layer_param() }), &[], false),
-        tool("set_blend_space", "Colour space for blend modes: \"srgb\" (Photoshop-like, default) or \"linear\".",
-            json!({ "space": { "type": "string", "enum": ["srgb", "linear"] } }), &["space"], false),
-        tool("paint_stroke",
+            &["width", "height"],
+            false,
+        ),
+        tool(
+            "document_open",
+            "Open an image (png, jpg, webp, tiff, exr) or .imagine file (replaces the open document).",
+            json!({ "path": { "type": "string" } }),
+            &["path"],
+            false,
+        ),
+        tool(
+            "document_info",
+            "Size, blend space, layer tree (top to bottom, with ids, blend modes, opacity, visibility, coarse tile bounds) and undo history.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "layer_add",
+            "Add an empty pixel layer above the active layer and make it active. Returns its id.",
+            json!({ "name": { "type": "string" } }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_duplicate",
+            "Duplicate a layer (instant, shares pixel data). Returns the new id.",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_delete",
+            "Delete a layer or group (the last layer cannot be deleted).",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_set",
+            "Change layer properties.",
+            json!({
+                "layer": layer_param(),
+                "name": { "type": "string" },
+                "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+                "blend": { "type": "string", "enum": blend_keys, "description": "Blend mode (Photoshop semantics)" },
+                "visible": { "type": "boolean" }
+            }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_select",
+            "Make a layer active.",
+            json!({ "layer": { "type": "integer" } }),
+            &["layer"],
+            false,
+        ),
+        tool(
+            "layer_move",
+            "Move a layer up (positive steps) or down (negative) within its group.",
+            json!({ "layer": layer_param(), "steps": { "type": "integer" } }),
+            &["steps"],
+            false,
+        ),
+        tool(
+            "layer_group",
+            "Wrap a layer in a new group. Returns the group id.",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_ungroup",
+            "Dissolve a group into its parent.",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "set_blend_space",
+            "Colour space for blend modes: \"srgb\" (Photoshop-like, default) or \"linear\".",
+            json!({ "space": { "type": "string", "enum": ["srgb", "linear"] } }),
+            &["space"],
+            false,
+        ),
+        tool(
+            "paint_stroke",
             "Paint (or erase) one brush stroke along a polyline on a pixel layer. Dabs are spaced evenly along the path, \
              so a few points suffice for straight segments; use many points for curves.",
             json!({
@@ -150,13 +232,27 @@ pub fn tools() -> Vec<Value> {
                 "clone_all_layers": { "type": "boolean", "description": "Clone from the flattened image instead of the layer (stamp onto an empty layer)" },
                 "heal": { "type": "boolean", "description": "With clone_offset: healing brush – texture from the source, colour and brightness matched to the surroundings when the stroke ends" },
                 "spot_heal": { "type": "boolean", "description": "Spot healing brush: paint over a blemish, a matching source is found automatically (no clone_offset, no colour)" }
-            }), &["points", "size"], false),
-        tool("fill", "Fill the selection (or the whole layer if nothing is selected) with a colour; respects soft selection edges.",
+            }),
+            &["points", "size"],
+            false,
+        ),
+        tool(
+            "fill",
+            "Fill the selection (or the whole layer if nothing is selected) with a colour; respects soft selection edges.",
             json!({ "layer": layer_param(), "color": color_param("Fill colour"), "opacity": { "type": "number", "minimum": 0, "maximum": 1 }, "target": target_param() }),
-            &["color"], false),
-        tool("clear", "Make the selected pixels (or the whole layer if nothing is selected) transparent.",
-            json!({ "layer": layer_param() }), &[], false),
-        tool("gradient", "Draw a linear or radial gradient from (x0, y0) to (x1, y1) into the selection (or whole layer). color1 defaults to transparent.",
+            &["color"],
+            false,
+        ),
+        tool(
+            "clear",
+            "Make the selected pixels (or the whole layer if nothing is selected) transparent.",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "gradient",
+            "Draw a linear or radial gradient from (x0, y0) to (x1, y1) into the selection (or whole layer). color1 defaults to transparent.",
             json!({
                 "layer": layer_param(),
                 "kind": { "type": "string", "enum": ["linear", "radial"] },
@@ -164,19 +260,61 @@ pub fn tools() -> Vec<Value> {
                 "color0": color_param("Start colour"), "color1": color_param("End colour (default transparent)"),
                 "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
                 "target": target_param()
-            }), &["x0", "y0", "x1", "y1", "color0"], false),
-        tool("select_rect", "Select a rectangle (anti-aliased). Painting, fill, clear and gradient only affect the selection.",
-            sel_rect("rect"), &["x", "y", "width", "height"], false),
-        tool("select_ellipse", "Select the ellipse inscribed in the given rectangle.", sel_rect("ellipse"), &["x", "y", "width", "height"], false),
-        tool("select_polygon", "Select a closed polygon (lasso), even-odd fill.",
+            }),
+            &["x0", "y0", "x1", "y1", "color0"],
+            false,
+        ),
+        tool(
+            "select_rect",
+            "Select a rectangle (anti-aliased). Painting, fill, clear and gradient only affect the selection.",
+            sel_rect("rect"),
+            &["x", "y", "width", "height"],
+            false,
+        ),
+        tool(
+            "select_ellipse",
+            "Select the ellipse inscribed in the given rectangle.",
+            sel_rect("ellipse"),
+            &["x", "y", "width", "height"],
+            false,
+        ),
+        tool(
+            "select_polygon",
+            "Select a closed polygon (lasso), even-odd fill.",
             json!({ "points": { "type": "array", "minItems": 3, "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 } }, "mode": mode_param() }),
-            &["points"], false),
-        tool("select_all", "Select the whole document.", json!({}), &[], false),
-        tool("select_none", "Remove the selection (everything becomes editable).", json!({}), &[], false),
-        tool("select_invert", "Invert the selection.", json!({}), &[], false),
-        tool("select_feather", "Soften the selection edge by a radius in px.",
-            json!({ "radius": { "type": "number", "minimum": 0, "maximum": 1000 } }), &["radius"], false),
-        tool("select_magic_wand",
+            &["points"],
+            false,
+        ),
+        tool(
+            "select_all",
+            "Select the whole document.",
+            json!({}),
+            &[],
+            false,
+        ),
+        tool(
+            "select_none",
+            "Remove the selection (everything becomes editable).",
+            json!({}),
+            &[],
+            false,
+        ),
+        tool(
+            "select_invert",
+            "Invert the selection.",
+            json!({}),
+            &[],
+            false,
+        ),
+        tool(
+            "select_feather",
+            "Soften the selection edge by a radius in px.",
+            json!({ "radius": { "type": "number", "minimum": 0, "maximum": 1000 } }),
+            &["radius"],
+            false,
+        ),
+        tool(
+            "select_magic_wand",
             "Magic wand: select pixels similar in colour to the one at (x, y). tolerance 0–255 (default 32) is the largest \
              allowed channel difference in 8-bit sRGB; contiguous (default true) keeps only the connected region; \
              sample \"layer\" (default, active layer) or \"image\" (all layers).",
@@ -184,23 +322,56 @@ pub fn tools() -> Vec<Value> {
                     "tolerance": { "type": "number", "minimum": 0, "maximum": 255 },
                     "contiguous": { "type": "boolean" }, "antialias": { "type": "boolean" },
                     "sample": { "type": "string", "enum": ["layer", "image"] }, "mode": mode_param() }),
-            &["x", "y"], false),
-        tool("select_color_range",
+            &["x", "y"],
+            false,
+        ),
+        tool(
+            "select_color_range",
             "Select all pixels of a colour anywhere in the image (soft edges), given as color or picked at (x, y). \
              fuzziness 0–200 (default 40) widens the range.",
             json!({ "color": color_param("colour to select (alternative to x/y)"), "x": { "type": "integer" }, "y": { "type": "integer" },
                     "fuzziness": { "type": "number", "minimum": 0, "maximum": 200 },
                     "sample": { "type": "string", "enum": ["layer", "image"] }, "mode": mode_param() }),
-            &[], false),
-        tool("layer_mask_add", "Add a mask to a layer or group: from the selection (default when one exists) or revealing everything.",
-            json!({ "layer": layer_param(), "from_selection": { "type": "boolean" } }), &[], false),
-        tool("layer_mask_delete", "Remove a layer's mask.", json!({ "layer": layer_param() }), &[], false),
-        tool("layer_mask_set", "Enable or disable a layer's mask.",
-            json!({ "layer": layer_param(), "enabled": { "type": "boolean" } }), &["enabled"], false),
-        tool("layer_mask_apply", "Bake a layer's mask into its pixels and remove the mask.", json!({ "layer": layer_param() }), &[], false),
-        tool("layer_translate", "Move a whole layer (pixels and mask) by whole pixels, ignoring the selection. Content outside the canvas is kept.",
-            json!({ "layer": layer_param(), "dx": { "type": "integer" }, "dy": { "type": "integer" } }), &["dx", "dy"], false),
-        tool("layer_transform",
+            &[],
+            false,
+        ),
+        tool(
+            "layer_mask_add",
+            "Add a mask to a layer or group: from the selection (default when one exists) or revealing everything.",
+            json!({ "layer": layer_param(), "from_selection": { "type": "boolean" } }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_mask_delete",
+            "Remove a layer's mask.",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_mask_set",
+            "Enable or disable a layer's mask.",
+            json!({ "layer": layer_param(), "enabled": { "type": "boolean" } }),
+            &["enabled"],
+            false,
+        ),
+        tool(
+            "layer_mask_apply",
+            "Bake a layer's mask into its pixels and remove the mask.",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "layer_translate",
+            "Move a whole layer (pixels and mask) by whole pixels, ignoring the selection. Content outside the canvas is kept.",
+            json!({ "layer": layer_param(), "dx": { "type": "integer" }, "dy": { "type": "integer" } }),
+            &["dx", "dy"],
+            false,
+        ),
+        tool(
+            "layer_transform",
             "Scale, rotate and/or move a layer (with its mask) around a pivot (default: centre of its content). With a selection, \
              only the selected pixels move and the selection follows (like Photoshop's free transform); set use_selection=false \
              to transform the whole layer anyway. Order: scale, rotate, then move by dx/dy. Returns the new content bounds.",
@@ -213,8 +384,12 @@ pub fn tools() -> Vec<Value> {
                 "pivot_x": { "type": "number" }, "pivot_y": { "type": "number" },
                 "interp": { "type": "string", "enum": ["bicubic", "bilinear", "nearest"], "description": "default bicubic; nearest for pixel art" },
                 "use_selection": { "type": "boolean" }
-            }), &[], false),
-        tool("adjustment_add",
+            }),
+            &[],
+            false,
+        ),
+        tool(
+            "adjustment_add",
             "Add a non-destructive adjustment layer above the active layer; it changes everything below it (within its group). \
              With a selection, the selection becomes its mask. \
              and can be edited later with adjustment_set, masked (layer_mask_add, paint_stroke target mask) and faded with layer_set opacity. \
@@ -223,15 +398,23 @@ pub fn tools() -> Vec<Value> {
              curves {master/red/green/blue: [[x,y],…] 0…1}; exposure {exposure stops, offset, gamma}; vibrance {vibrance, saturation −100…100}; \
              hue_saturation {hue −180…180, saturation, lightness −100…100, colorize}; black_white {weights: 6 percentages for red, yellow, green, cyan, blue, magenta}; \
              invert; posterize {levels}; threshold {level 1…255}. Omitted parameters are neutral.",
-            json!({ "adjustment": { "type": "object" }, "name": { "type": "string" } }), &["adjustment"], false),
-        tool("filter_apply",
+            json!({ "adjustment": { "type": "object" }, "name": { "type": "string" } }),
+            &["adjustment"],
+            false,
+        ),
+        tool(
+            "filter_apply",
             "Apply a pixel filter to a layer (within the selection, if any). filter is an object with \"kind\": \
              gaussian_blur {radius px}; unsharp_mask {amount % 1…500, radius px, threshold 0…255}; \
              high_pass {radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}. \
              With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
              listed under smart_filters in document_info and editable with smart_filter_set.",
-            json!({ "layer": layer_param(), "filter": { "type": "object" }, "smart": { "type": "boolean" } }), &["filter"], false),
-        tool("text_add",
+            json!({ "layer": layer_param(), "filter": { "type": "object" }, "smart": { "type": "boolean" } }),
+            &["filter"],
+            false,
+        ),
+        tool(
+            "text_add",
             "Add a text layer (stays editable; system fonts). (x, y) is the top-left of the text box; '\\n' starts a new line; \
              width wraps lines (paragraph text). Returns the layer id and its bounds.",
             json!({ "text": { "type": "string" }, "x": { "type": "number" }, "y": { "type": "number" },
@@ -239,8 +422,12 @@ pub fn tools() -> Vec<Value> {
                     "color": color_param("Text colour (default black)"), "weight": { "type": "number", "description": "100–900, 700 = bold" },
                     "italic": { "type": "boolean" }, "align": { "type": "string", "enum": ["left", "center", "right", "justify"] },
                     "line_height": { "type": "number", "description": "multiple of the size (1.2)" }, "letter_spacing": { "type": "number" },
-                    "width": { "type": "number" }, "name": { "type": "string" } }), &["text", "x", "y", "size"], false),
-        tool("shape_add",
+                    "width": { "type": "number" }, "name": { "type": "string" } }),
+            &["text", "x", "y", "size"],
+            false,
+        ),
+        tool(
+            "shape_add",
             "Add a shape layer (stays sharp and editable): rect / ellipse (x, y, width, height; rect radius), polygon (points), \
              path (SVG path data d). Fill defaults to black; no_fill for outlines; stroke_color / stroke_width for a contour.",
             json!({ "shape": { "type": "string", "enum": ["rect", "ellipse", "polygon", "path"] },
@@ -248,28 +435,48 @@ pub fn tools() -> Vec<Value> {
                     "radius": { "type": "number" }, "points": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
                     "d": { "type": "string" }, "fill": color_param("Fill colour"), "no_fill": { "type": "boolean" },
                     "stroke_color": color_param("Contour colour"), "stroke_width": { "type": "number" }, "name": { "type": "string" } }),
-            &["shape"], false),
-        tool("vector_set",
+            &["shape"],
+            false,
+        ),
+        tool(
+            "vector_set",
             "Change a text or shape layer: `changes` is merged into its description as shown by document_info \
              (e.g. {\"text\": \"New\", \"size\": 64, \"color\": \"#ff0000\"} or {\"fill\": \"#00ff00\", \"radius\": 12}; \
              \"transform\": [a, b, c, d, e, f] places it).",
-            json!({ "layer": layer_param(), "changes": { "type": "object" } }), &["changes"], false),
-        tool("layer_effects_set",
+            json!({ "layer": layer_param(), "changes": { "type": "object" } }),
+            &["changes"],
+            false,
+        ),
+        tool(
+            "layer_effects_set",
             "Set a layer's styles (replaces the list; [] removes all). Each effect: {\"effect\": kind, \"enabled\": true, …}. \
              Kinds and fields (colours linear [r, g, b] 0…1, opacity 0…1, angle = light direction in degrees, 90 = from the top): \
              stroke {size, position: outside|inside|center, color, opacity}; drop_shadow {color, opacity, angle, distance, size, spread}; \
              inner_shadow {color, opacity, angle, distance, size}; outer_glow {color, opacity, size, spread}; inner_glow {color, opacity, size}; \
              color_overlay {color, opacity}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
              highlight_opacity, shadow, shadow_opacity}.",
-            json!({ "layer": layer_param(), "effects": { "type": "array", "items": { "type": "object" } } }), &["effects"], false),
-        tool("layer_rasterize", "Turn a text or shape layer into ordinary pixels (needed before painting or pixel filters).",
-            json!({ "layer": layer_param() }), &[], false),
-        tool("content_aware_fill",
+            json!({ "layer": layer_param(), "effects": { "type": "array", "items": { "type": "object" } } }),
+            &["effects"],
+            false,
+        ),
+        tool(
+            "layer_rasterize",
+            "Turn a text or shape layer into ordinary pixels (needed before painting or pixel filters).",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "content_aware_fill",
             "Fill the selection on a pixel layer with texture from around it so the hole continues the surroundings \
              (remove objects, extend backgrounds). Select a bit more than the object. all_layers: learn from the \
              flattened image (fill on an empty layer). One undo step.",
-            json!({ "layer": layer_param(), "all_layers": { "type": "boolean" } }), &[], false),
-        tool("liquify",
+            json!({ "layer": layer_param(), "all_layers": { "type": "boolean" } }),
+            &[],
+            false,
+        ),
+        tool(
+            "liquify",
             "Liquify a pixel layer (one undo step). Each stroke: tool push (moves pixels along the path of `points`), \
              reconstruct, twirl_cw, twirl_ccw, pucker (shrink towards the point), bloat (grow); radius px; strength 0…1; \
              for the non-push tools `steps` dabs per point (default 10, ≈ how long the brush is held).",
@@ -277,49 +484,123 @@ pub fn tools() -> Vec<Value> {
                 "tool": { "type": "string", "enum": ["push", "reconstruct", "twirl_cw", "twirl_ccw", "pucker", "bloat"] },
                 "points": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
                 "radius": { "type": "number" }, "strength": { "type": "number" }, "steps": { "type": "integer" } },
-                "required": ["points", "radius"] } } }), &["strokes"], false),
-        tool("smart_filter_set",
+                "required": ["points", "radius"] } } }),
+            &["strokes"],
+            false,
+        ),
+        tool(
+            "smart_filter_set",
             "Change a layer's smart filter number `index` (0 = applied first): new parameters (`filter`, same kind), \
              switch it on/off (`enabled`) or `remove` it. `apply`=true instead writes all smart filters into the pixels and removes them.",
             json!({ "layer": layer_param(), "index": { "type": "integer" }, "filter": { "type": "object" },
-                    "enabled": { "type": "boolean" }, "remove": { "type": "boolean" }, "apply": { "type": "boolean" } }), &[], false),
-        tool("adjustment_set", "Change the parameters of an adjustment layer (same kind; see adjustment_add).",
-            json!({ "layer": layer_param(), "adjustment": { "type": "object" } }), &["adjustment"], false),
-        tool("layer_bounds", "Pixel-exact bounding box of a layer's visible content (within the selection, if any); null if empty.",
-            json!({ "layer": layer_param() }), &[], true),
-        tool("histogram", "Tonal histogram per channel (rgb, red, green, blue) with mean, median, 1st/99th percentile and clipping. With `below`, of the image underneath that layer (the input of an adjustment layer); otherwise of the whole image.",
-            json!({ "below": layer_param(), "bins": { "type": "integer", "description": "number of bins, a divisor of 256 (default 32)" } }), &[], true),
-        tool("crop", "Crop the canvas to a rectangle (may extend beyond the canvas to enlarge it). Pixels outside are kept, not deleted. Drops the selection.",
+                    "enabled": { "type": "boolean" }, "remove": { "type": "boolean" }, "apply": { "type": "boolean" } }),
+            &[],
+            false,
+        ),
+        tool(
+            "adjustment_set",
+            "Change the parameters of an adjustment layer (same kind; see adjustment_add).",
+            json!({ "layer": layer_param(), "adjustment": { "type": "object" } }),
+            &["adjustment"],
+            false,
+        ),
+        tool(
+            "layer_bounds",
+            "Pixel-exact bounding box of a layer's visible content (within the selection, if any); null if empty.",
+            json!({ "layer": layer_param() }),
+            &[],
+            true,
+        ),
+        tool(
+            "histogram",
+            "Tonal histogram per channel (rgb, red, green, blue) with mean, median, 1st/99th percentile and clipping. With `below`, of the image underneath that layer (the input of an adjustment layer); otherwise of the whole image.",
+            json!({ "below": layer_param(), "bins": { "type": "integer", "description": "number of bins, a divisor of 256 (default 32)" } }),
+            &[],
+            true,
+        ),
+        tool(
+            "crop",
+            "Crop the canvas to a rectangle (may extend beyond the canvas to enlarge it). Pixels outside are kept, not deleted. Drops the selection.",
             json!({ "x": { "type": "integer" }, "y": { "type": "integer" }, "width": { "type": "integer" }, "height": { "type": "integer" } }),
-            &["x", "y", "width", "height"], false),
-        tool("canvas_size", "Change the canvas size without scaling; anchor decides where the existing image stays (default center).",
+            &["x", "y", "width", "height"],
+            false,
+        ),
+        tool(
+            "canvas_size",
+            "Change the canvas size without scaling; anchor decides where the existing image stays (default center).",
             json!({ "width": { "type": "integer" }, "height": { "type": "integer" },
                     "anchor": { "type": "string", "enum": ["center", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"] } }),
-            &["width", "height"], false),
-        tool("image_resize", "Scale the whole image (all layers and masks). Give width and/or height; a missing one keeps the aspect ratio.",
+            &["width", "height"],
+            false,
+        ),
+        tool(
+            "image_resize",
+            "Scale the whole image (all layers and masks). Give width and/or height; a missing one keeps the aspect ratio.",
             json!({ "width": { "type": "integer" }, "height": { "type": "integer" },
-                    "interp": { "type": "string", "enum": ["bicubic", "bilinear", "nearest"] } }), &[], false),
-        tool("fill_rect", "Fill a rectangle on a pixel layer with a colour (normal blending onto existing pixels).",
-            Value::Object(fill), &["x", "y", "width", "height", "color"], false),
-        tool("clear_rect", "Make a rectangle on a pixel layer fully transparent.",
-            Value::Object(clear), &["x", "y", "width", "height"], false),
-        tool("place_image", "Load an image file into a new layer, top-left corner at (x, y). Returns the layer id.",
+                    "interp": { "type": "string", "enum": ["bicubic", "bilinear", "nearest"] } }),
+            &[],
+            false,
+        ),
+        tool(
+            "fill_rect",
+            "Fill a rectangle on a pixel layer with a colour (normal blending onto existing pixels).",
+            Value::Object(fill),
+            &["x", "y", "width", "height", "color"],
+            false,
+        ),
+        tool(
+            "clear_rect",
+            "Make a rectangle on a pixel layer fully transparent.",
+            Value::Object(clear),
+            &["x", "y", "width", "height"],
+            false,
+        ),
+        tool(
+            "place_image",
+            "Load an image file into a new layer, top-left corner at (x, y). Returns the layer id.",
             json!({ "path": { "type": "string" }, "x": { "type": "integer" }, "y": { "type": "integer" }, "name": { "type": "string" } }),
-            &["path"], false),
-        tool("sample_color", "Colour of the flattened image at a document pixel (sRGB hex + alpha).",
-            json!({ "x": { "type": "number" }, "y": { "type": "number" } }), &["x", "y"], true),
-        tool("render_preview",
+            &["path"],
+            false,
+        ),
+        tool(
+            "sample_color",
+            "Colour of the flattened image at a document pixel (sRGB hex + alpha).",
+            json!({ "x": { "type": "number" }, "y": { "type": "number" } }),
+            &["x", "y"],
+            true,
+        ),
+        tool(
+            "render_preview",
             "Render the flattened image (or the region x/y/width/height) as a PNG you can look at. Use it to check your work.",
-            Value::Object(prev), &[], true),
-        tool("undo", "Undo the last edit (yours or the user's). Returns its label.", json!({}), &[], false),
+            Value::Object(prev),
+            &[],
+            true,
+        ),
+        tool(
+            "undo",
+            "Undo the last edit (yours or the user's). Returns its label.",
+            json!({}),
+            &[],
+            false,
+        ),
         tool("redo", "Redo the last undone edit.", json!({}), &[], false),
-        tool("save", "Save as .imagine (keeps layers; incremental when saving to the same file again).",
-            json!({ "path": { "type": "string", "description": "Default: next to the source file" } }), &[], false),
-        tool("export", "Export the flattened image; format by extension: png, jpg, webp, tif. Wide-gamut colour spaces embed their ICC profile; 16 bit works for png and tif.",
+        tool(
+            "save",
+            "Save as .imagine (keeps layers; incremental when saving to the same file again).",
+            json!({ "path": { "type": "string", "description": "Default: next to the source file" } }),
+            &[],
+            false,
+        ),
+        tool(
+            "export",
+            "Export the flattened image; format by extension: png, jpg, webp, tif. Wide-gamut colour spaces embed their ICC profile; 16 bit works for png and tif.",
             json!({ "path": { "type": "string" },
                     "color_space": { "type": "string", "enum": ["srgb", "display_p3", "adobe_rgb", "rec2020"], "description": "default srgb" },
                     "bit_depth": { "type": "integer", "enum": [8, 16] },
-                    "quality": { "type": "integer", "description": "JPEG quality 1–100 (default 92)" } }), &["path"], false),
+                    "quality": { "type": "integer", "description": "JPEG quality 1–100 (default 92)" } }),
+            &["path"],
+            false,
+        ),
     ]
 }
 
@@ -330,8 +611,14 @@ pub fn handle(backend: &mut dyn Backend, msg: &Value) -> Option<Value> {
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
     let result: Result<Value, (i64, String)> = match method {
         "initialize" => {
-            let requested = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
-            let version = PROTOCOL_VERSIONS.iter().find(|v| **v == requested).unwrap_or(&PROTOCOL_VERSIONS[0]);
+            let requested = params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let version = PROTOCOL_VERSIONS
+                .iter()
+                .find(|v| **v == requested)
+                .unwrap_or(&PROTOCOL_VERSIONS[0]);
             Ok(json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": { "listChanged": false } },
@@ -353,8 +640,9 @@ pub fn handle(backend: &mut dyn Backend, msg: &Value) -> Option<Value> {
                 cmd.insert("cmd".into(), name.into());
                 Ok(match backend.call(Value::Object(cmd)) {
                     Ok(out) => {
-                        let mut content =
-                            vec![json!({ "type": "text", "text": serde_json::to_string_pretty(&out.result).unwrap() })];
+                        let mut content = vec![
+                            json!({ "type": "text", "text": serde_json::to_string_pretty(&out.result).unwrap() }),
+                        ];
                         if let Some(png) = out.image_png {
                             content.push(json!({
                                 "type": "image",
@@ -364,7 +652,9 @@ pub fn handle(backend: &mut dyn Backend, msg: &Value) -> Option<Value> {
                         }
                         json!({ "content": content })
                     }
-                    Err(e) => json!({ "content": [{ "type": "text", "text": format!("{e:#}") }], "isError": true }),
+                    Err(e) => {
+                        json!({ "content": [{ "type": "text", "text": format!("{e:#}") }], "isError": true })
+                    }
                 })
             }
         }
@@ -374,7 +664,9 @@ pub fn handle(backend: &mut dyn Backend, msg: &Value) -> Option<Value> {
     let id = id?;
     Some(match result {
         Ok(r) => json!({ "jsonrpc": "2.0", "id": id, "result": r }),
-        Err((code, message)) => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }),
+        Err((code, message)) => {
+            json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+        }
     })
 }
 
@@ -389,7 +681,9 @@ pub fn serve(backend: &mut dyn Backend) -> anyhow::Result<()> {
         }
         let response = match serde_json::from_str::<Value>(&line) {
             Ok(msg) => handle(backend, &msg),
-            Err(e) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": e.to_string() } })),
+            Err(e) => Some(
+                json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": e.to_string() } }),
+            ),
         };
         if let Some(r) = response {
             serde_json::to_writer(&mut stdout, &r)?;
@@ -414,7 +708,10 @@ mod tests {
             if cmd["cmd"] == "undo" {
                 anyhow::bail!("nothing to undo");
             }
-            Ok(CallOutput { result: json!({ "ok": true }), image_png: Some(vec![1, 2, 3]) })
+            Ok(CallOutput {
+                result: json!({ "ok": true }),
+                image_png: Some(vec![1, 2, 3]),
+            })
         }
     }
 
@@ -423,9 +720,19 @@ mod tests {
         let mut b = Echo(Vec::new());
         let init = handle(&mut b, &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}})).unwrap();
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
-        assert!(handle(&mut b, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).is_none());
+        assert!(
+            handle(
+                &mut b,
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+            )
+            .is_none()
+        );
 
-        let list = handle(&mut b, &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).unwrap();
+        let list = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+        )
+        .unwrap();
         let tools = list["result"]["tools"].as_array().unwrap();
         assert!(tools.len() >= 37);
         // Every tool schema parses as a command when given its required fields? At least: names are unique.
@@ -440,9 +747,17 @@ mod tests {
         assert_eq!(content[1]["type"], "image");
         assert_eq!(content[1]["data"], "AQID");
 
-        let r = handle(&mut b, &json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"undo"}})).unwrap();
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"undo"}}),
+        )
+        .unwrap();
         assert_eq!(r["result"]["isError"], true);
-        let r = handle(&mut b, &json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"rm_rf"}})).unwrap();
+        let r = handle(
+            &mut b,
+            &json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"rm_rf"}}),
+        )
+        .unwrap();
         assert_eq!(r["error"]["code"], -32602);
         let r = handle(&mut b, &json!({"jsonrpc":"2.0","id":6,"method":"bogus"})).unwrap();
         assert_eq!(r["error"]["code"], -32601);
@@ -473,10 +788,16 @@ mod tests {
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
             "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
-        samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
+        samples
+            .as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
         for t in tools() {
             let name = t["name"].as_str().unwrap();
-            let mut args = samples[name].as_object().unwrap_or_else(|| panic!("no sample for {name}")).clone();
+            let mut args = samples[name]
+                .as_object()
+                .unwrap_or_else(|| panic!("no sample for {name}"))
+                .clone();
             args.insert("cmd".into(), name.into());
             let cmd = Command::parse(Value::Object(args)).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(cmd.name(), name);

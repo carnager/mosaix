@@ -24,7 +24,11 @@ impl Thumbs {
     pub fn new(device: &wgpu::Device) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("layer thumbnails"),
-            size: wgpu::Extent3d { width: THUMB, height: THUMB, depth_or_array_layers: SLOTS },
+            size: wgpu::Extent3d {
+                width: THUMB,
+                height: THUMB,
+                depth_or_array_layers: SLOTS,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -32,7 +36,11 @@ impl Thumbs {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        Self { texture, entries: HashMap::new(), free: (0..SLOTS).rev().collect() }
+        Self {
+            texture,
+            entries: HashMap::new(),
+            free: (0..SLOTS).rev().collect(),
+        }
     }
 }
 
@@ -48,25 +56,38 @@ impl Engine {
         let mut want: Vec<(LayerId, usize)> = Vec::new();
         doc.for_each(&mut |l, _| {
             if let Some(t) = l.tiles() {
-                want.push((l.id, Arc::as_ptr(t) as usize ^ ((w as usize) << 20) ^ h as usize));
+                want.push((
+                    l.id,
+                    Arc::as_ptr(t) as usize ^ ((w as usize) << 20) ^ h as usize,
+                ));
             }
         });
         let thumbs = self.thumbs.get_or_insert_with(|| Thumbs::new(&self.device));
         // Forget removed layers.
-        let gone: Vec<LayerId> = thumbs.entries.keys().copied().filter(|id| !want.iter().any(|(w, _)| w == id)).collect();
+        let gone: Vec<LayerId> = thumbs
+            .entries
+            .keys()
+            .copied()
+            .filter(|id| !want.iter().any(|(w, _)| w == id))
+            .collect();
         for id in gone {
             let (slot, _) = thumbs.entries.remove(&id).unwrap();
             thumbs.free.push(slot);
         }
-        let stale: Vec<(LayerId, usize)> =
-            want.into_iter().filter(|(id, key)| thumbs.entries.get(id).is_none_or(|e| e.1 != *key)).take(max).collect();
+        let stale: Vec<(LayerId, usize)> = want
+            .into_iter()
+            .filter(|(id, key)| thumbs.entries.get(id).is_none_or(|e| e.1 != *key))
+            .take(max)
+            .collect();
         if stale.is_empty() {
             return false;
         }
         let scale = THUMB as f64 / w.max(h) as f64;
         let samples = ((1.0 / scale).ceil() as u32).clamp(1, 8);
         for (id, key) in stale {
-            let Some(tile) = self.downscaled_tile(id, scale, samples) else { continue };
+            let Some(tile) = self.downscaled_tile(id, scale, samples) else {
+                continue;
+            };
             let thumbs = self.thumbs.as_mut().unwrap();
             let slot = match thumbs.entries.get(&id) {
                 Some((slot, _)) => *slot,
@@ -81,7 +102,11 @@ impl Engine {
             enc.copy_texture_to_texture(
                 texel_copy(&self.layer_pool.chunk(s).texture, 0, s.layer as u32),
                 texel_copy(&thumbs.texture, 0, slot),
-                wgpu::Extent3d { width: THUMB.min(TILE_SIZE), height: THUMB.min(TILE_SIZE), depth_or_array_layers: 1 },
+                wgpu::Extent3d {
+                    width: THUMB.min(TILE_SIZE),
+                    height: THUMB.min(TILE_SIZE),
+                    depth_or_array_layers: 1,
+                },
             );
             self.queue.submit([enc.finish()]);
         }

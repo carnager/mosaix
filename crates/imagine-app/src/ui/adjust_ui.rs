@@ -3,8 +3,8 @@
 //! is finished (slider released), so a drag becomes one undo step.
 
 use egui::{Color32, Pos2, RichText, Sense, Stroke, Vec2, pos2};
-use imagine_core::Adjustment;
 use imagine_core::adjust::{Levels, eval_curve};
+use imagine_core::{Adjustment, tr};
 use imagine_gpu::Histogram;
 
 #[derive(Default)]
@@ -14,7 +14,7 @@ pub struct EditorState {
     dragging: Option<usize>,
 }
 
-const CHANNELS: [&str; 4] = ["RGB", "Rot", "Grün", "Blau"];
+const CHANNELS: [&str; 4] = ["RGB", "Red", "Green", "Blue"];
 const CHANNEL_COLORS: [Color32; 4] = [
     Color32::from_gray(230),
     Color32::from_rgb(240, 90, 80),
@@ -45,20 +45,28 @@ impl Track {
 
 fn row<'a>(ui: &mut egui::Ui, label: &str, w: impl egui::Widget + 'a, t: &mut Track) {
     ui.horizontal(|ui| {
-        ui.add_sized([96.0, 18.0], egui::Label::new(label).truncate());
+        ui.add_sized([96.0, 18.0], egui::Label::new(tr(label)).truncate());
         let r = ui.add(w);
         t.add(&r);
     });
 }
 
 fn slider(v: &mut f32, range: std::ops::RangeInclusive<f32>) -> egui::Slider<'_> {
-    egui::Slider::new(v, range).clamping(egui::SliderClamping::Always).max_decimals(1)
+    egui::Slider::new(v, range)
+        .clamping(egui::SliderClamping::Always)
+        .max_decimals(1)
 }
 
 fn channel_pick(ui: &mut egui::Ui, st: &mut EditorState) {
     ui.horizontal(|ui| {
         for (i, n) in CHANNELS.iter().enumerate() {
-            if ui.selectable_label(st.channel == i, RichText::new(*n).color(CHANNEL_COLORS[i])).clicked() {
+            if ui
+                .selectable_label(
+                    st.channel == i,
+                    RichText::new(tr(n)).color(CHANNEL_COLORS[i]),
+                )
+                .clicked()
+            {
                 st.channel = i;
                 st.dragging = None;
             }
@@ -67,16 +75,29 @@ fn channel_pick(ui: &mut egui::Ui, st: &mut EditorState) {
 }
 
 /// Shows the editor; `Some((new, done))` when something changed or finished.
-pub fn editor(ui: &mut egui::Ui, adj: &Adjustment, st: &mut EditorState, hist: Option<&Histogram>) -> Option<(Adjustment, bool)> {
+pub fn editor(
+    ui: &mut egui::Ui,
+    adj: &Adjustment,
+    st: &mut EditorState,
+    hist: Option<&Histogram>,
+) -> Option<(Adjustment, bool)> {
     let mut a = adj.clone();
     let mut t = Track::default();
     ui.label(RichText::new(adj.name()).strong());
     match &mut a {
-        Adjustment::BrightnessContrast { brightness, contrast } => {
-            row(ui, "Helligkeit", slider(brightness, -150.0..=150.0), &mut t);
-            row(ui, "Kontrast", slider(contrast, -50.0..=100.0), &mut t);
+        Adjustment::BrightnessContrast {
+            brightness,
+            contrast,
+        } => {
+            row(ui, "Brightness", slider(brightness, -150.0..=150.0), &mut t);
+            row(ui, "Contrast", slider(contrast, -50.0..=100.0), &mut t);
         }
-        Adjustment::Levels { master, red, green, blue } => {
+        Adjustment::Levels {
+            master,
+            red,
+            green,
+            blue,
+        } => {
             channel_pick(ui, st);
             let l: &mut Levels = match st.channel {
                 1 => red,
@@ -85,18 +106,55 @@ pub fn editor(ui: &mut egui::Ui, adj: &Adjustment, st: &mut EditorState, hist: O
                 _ => master,
             };
             levels_graph(ui, l, hist, st, &mut t);
-            let mut v = [l.in_black * 255.0, l.in_white * 255.0, l.out_black * 255.0, l.out_white * 255.0];
-            row(ui, "Tiefen", slider(&mut v[0], 0.0..=253.0).max_decimals(0), &mut t);
-            row(ui, "Gamma", slider(&mut l.gamma, 0.1..=9.99).logarithmic(true).max_decimals(2), &mut t);
-            row(ui, "Lichter", slider(&mut v[1], 2.0..=255.0).max_decimals(0), &mut t);
-            row(ui, "Ausgabe Tiefen", slider(&mut v[2], 0.0..=255.0).max_decimals(0), &mut t);
-            row(ui, "Ausgabe Lichter", slider(&mut v[3], 0.0..=255.0).max_decimals(0), &mut t);
+            let mut v = [
+                l.in_black * 255.0,
+                l.in_white * 255.0,
+                l.out_black * 255.0,
+                l.out_white * 255.0,
+            ];
+            row(
+                ui,
+                "Shadows",
+                slider(&mut v[0], 0.0..=253.0).max_decimals(0),
+                &mut t,
+            );
+            row(
+                ui,
+                "Gamma",
+                slider(&mut l.gamma, 0.1..=9.99)
+                    .logarithmic(true)
+                    .max_decimals(2),
+                &mut t,
+            );
+            row(
+                ui,
+                "Highlights",
+                slider(&mut v[1], 2.0..=255.0).max_decimals(0),
+                &mut t,
+            );
+            row(
+                ui,
+                "Output Shadows",
+                slider(&mut v[2], 0.0..=255.0).max_decimals(0),
+                &mut t,
+            );
+            row(
+                ui,
+                "Output Highlights",
+                slider(&mut v[3], 0.0..=255.0).max_decimals(0),
+                &mut t,
+            );
             l.in_black = v[0] / 255.0;
             l.in_white = (v[1] / 255.0).max(l.in_black + 2.0 / 255.0);
             l.out_black = v[2] / 255.0;
             l.out_white = v[3] / 255.0;
         }
-        Adjustment::Curves { master, red, green, blue } => {
+        Adjustment::Curves {
+            master,
+            red,
+            green,
+            blue,
+        } => {
             channel_pick(ui, st);
             let ch = st.channel;
             let curve = match ch {
@@ -106,37 +164,90 @@ pub fn editor(ui: &mut egui::Ui, adj: &Adjustment, st: &mut EditorState, hist: O
                 _ => master,
             };
             curve_graph(ui, curve, hist, st, &mut t);
-            ui.label(RichText::new("Klick setzt einen Punkt, Ziehen verschiebt ihn, aus dem Feld ziehen entfernt ihn.").weak().small());
+            ui.label(
+                RichText::new(tr(
+                    "Click adds a point, drag moves it, drag it out of the graph to remove it.",
+                ))
+                .weak()
+                .small(),
+            );
         }
-        Adjustment::HueSaturation { hue, saturation, lightness, colorize } => {
-            let r = ui.checkbox(colorize, "Färben");
+        Adjustment::HueSaturation {
+            hue,
+            saturation,
+            lightness,
+            colorize,
+        } => {
+            let r = ui.checkbox(colorize, tr("Colorize"));
             t.add(&r);
-            row(ui, "Farbton", slider(hue, -180.0..=180.0).suffix("°"), &mut t);
-            row(ui, "Sättigung", slider(saturation, -100.0..=100.0), &mut t);
-            row(ui, "Helligkeit", slider(lightness, -100.0..=100.0), &mut t);
+            row(ui, "Hue", slider(hue, -180.0..=180.0).suffix("°"), &mut t);
+            row(ui, "Saturation", slider(saturation, -100.0..=100.0), &mut t);
+            row(ui, "Lightness", slider(lightness, -100.0..=100.0), &mut t);
         }
-        Adjustment::Vibrance { vibrance, saturation } => {
-            row(ui, "Dynamik", slider(vibrance, -100.0..=100.0), &mut t);
-            row(ui, "Sättigung", slider(saturation, -100.0..=100.0), &mut t);
+        Adjustment::Vibrance {
+            vibrance,
+            saturation,
+        } => {
+            row(ui, "Vibrance", slider(vibrance, -100.0..=100.0), &mut t);
+            row(ui, "Saturation", slider(saturation, -100.0..=100.0), &mut t);
         }
         Adjustment::BlackWhite { weights } => {
-            for (w, n) in weights.iter_mut().zip(["Rottöne", "Gelbtöne", "Grüntöne", "Cyantöne", "Blautöne", "Magentatöne"]) {
-                row(ui, n, slider(w, -200.0..=300.0).suffix(" %").max_decimals(0), &mut t);
+            for (w, n) in weights
+                .iter_mut()
+                .zip(["Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas"])
+            {
+                row(
+                    ui,
+                    n,
+                    slider(w, -200.0..=300.0).suffix(" %").max_decimals(0),
+                    &mut t,
+                );
             }
         }
-        Adjustment::Exposure { exposure, offset, gamma } => {
-            row(ui, "Belichtung", slider(exposure, -10.0..=10.0).max_decimals(2), &mut t);
-            row(ui, "Versatz", slider(offset, -0.5..=0.5).max_decimals(3), &mut t);
-            row(ui, "Gamma", slider(gamma, 0.1..=9.99).logarithmic(true).max_decimals(2), &mut t);
+        Adjustment::Exposure {
+            exposure,
+            offset,
+            gamma,
+        } => {
+            row(
+                ui,
+                "Exposure",
+                slider(exposure, -10.0..=10.0).max_decimals(2),
+                &mut t,
+            );
+            row(
+                ui,
+                "Offset",
+                slider(offset, -0.5..=0.5).max_decimals(3),
+                &mut t,
+            );
+            row(
+                ui,
+                "Gamma",
+                slider(gamma, 0.1..=9.99).logarithmic(true).max_decimals(2),
+                &mut t,
+            );
         }
         Adjustment::Invert => {
-            ui.label(RichText::new("Keine Einstellungen").weak());
+            ui.label(RichText::new(tr("No settings")).weak());
         }
-        Adjustment::Threshold { level } => row(ui, "Schwellenwert", slider(level, 1.0..=255.0).max_decimals(0), &mut t),
-        Adjustment::Posterize { levels } => row(ui, "Stufen", slider(levels, 2.0..=255.0).max_decimals(0), &mut t),
+        Adjustment::Threshold { level } => row(
+            ui,
+            "Threshold",
+            slider(level, 1.0..=255.0).max_decimals(0),
+            &mut t,
+        ),
+        Adjustment::Posterize { levels } => row(
+            ui,
+            "Steps",
+            slider(levels, 2.0..=255.0).max_decimals(0),
+            &mut t,
+        ),
     }
-    if ui.small_button("Zurücksetzen").clicked()
-        && let Some(d) = Adjustment::defaults().into_iter().find(|d| d.key() == adj.key())
+    if ui.small_button(tr("Reset")).clicked()
+        && let Some(d) = Adjustment::defaults()
+            .into_iter()
+            .find(|d| d.key() == adj.key())
     {
         return Some((d, true));
     }
@@ -144,12 +255,28 @@ pub fn editor(ui: &mut egui::Ui, adj: &Adjustment, st: &mut EditorState, hist: O
 }
 
 /// Interactive curve: points in 0…1, drawn in a square graph.
-fn curve_graph(ui: &mut egui::Ui, curve: &mut Vec<[f32; 2]>, hist: Option<&Histogram>, st: &mut EditorState, t: &mut Track) {
+fn curve_graph(
+    ui: &mut egui::Ui,
+    curve: &mut Vec<[f32; 2]>,
+    hist: Option<&Histogram>,
+    st: &mut EditorState,
+    t: &mut Track,
+) {
     let color = CHANNEL_COLORS[st.channel];
     let side = ui.available_width().min(260.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(side), Sense::click_and_drag());
-    let to_screen = |p: [f32; 2]| pos2(rect.min.x + p[0] * rect.width(), rect.max.y - p[1] * rect.height());
-    let to_curve = |s: Pos2| [((s.x - rect.min.x) / rect.width()), ((rect.max.y - s.y) / rect.height())];
+    let to_screen = |p: [f32; 2]| {
+        pos2(
+            rect.min.x + p[0] * rect.width(),
+            rect.max.y - p[1] * rect.height(),
+        )
+    };
+    let to_curve = |s: Pos2| {
+        [
+            ((s.x - rect.min.x) / rect.width()),
+            ((rect.max.y - s.y) / rect.height()),
+        ]
+    };
     let painter = ui.painter_at(rect.expand(6.0));
     painter.rect_filled(rect, 2.0, Color32::from_gray(22));
     if let Some(h) = hist {
@@ -158,10 +285,25 @@ fn curve_graph(ui: &mut egui::Ui, curve: &mut Vec<[f32; 2]>, hist: Option<&Histo
     for i in 1..4 {
         let f = i as f32 / 4.0;
         let g = Stroke::new(1.0, Color32::from_gray(50));
-        painter.line_segment([pos2(rect.min.x + f * rect.width(), rect.min.y), pos2(rect.min.x + f * rect.width(), rect.max.y)], g);
-        painter.line_segment([pos2(rect.min.x, rect.min.y + f * rect.height()), pos2(rect.max.x, rect.min.y + f * rect.height())], g);
+        painter.line_segment(
+            [
+                pos2(rect.min.x + f * rect.width(), rect.min.y),
+                pos2(rect.min.x + f * rect.width(), rect.max.y),
+            ],
+            g,
+        );
+        painter.line_segment(
+            [
+                pos2(rect.min.x, rect.min.y + f * rect.height()),
+                pos2(rect.max.x, rect.min.y + f * rect.height()),
+            ],
+            g,
+        );
     }
-    painter.line_segment([rect.left_bottom(), rect.right_top()], Stroke::new(1.0, Color32::from_gray(70)));
+    painter.line_segment(
+        [rect.left_bottom(), rect.right_top()],
+        Stroke::new(1.0, Color32::from_gray(70)),
+    );
 
     // Interaction.
     curve.sort_by(|a, b| a[0].total_cmp(&b[0]));
@@ -169,7 +311,11 @@ fn curve_graph(ui: &mut egui::Ui, curve: &mut Vec<[f32; 2]>, hist: Option<&Histo
     if resp.drag_started()
         && let Some(p) = resp.interact_pointer_pos()
     {
-        let near = curve.iter().enumerate().map(|(i, c)| (i, to_screen(*c).distance(p))).min_by(|a, b| a.1.total_cmp(&b.1));
+        let near = curve
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i, to_screen(*c).distance(p)))
+            .min_by(|a, b| a.1.total_cmp(&b.1));
         st.dragging = match near {
             Some((i, d)) if d <= grab => Some(i),
             _ => {
@@ -204,7 +350,11 @@ fn curve_graph(ui: &mut egui::Ui, curve: &mut Vec<[f32; 2]>, hist: Option<&Histo
         } else {
             // Keep the order: a point cannot pass its neighbours.
             let lo = if i > 0 { curve[i - 1][0] + 0.01 } else { 0.0 };
-            let hi = if i + 1 < curve.len() { curve[i + 1][0] - 0.01 } else { 1.0 };
+            let hi = if i + 1 < curve.len() {
+                curve[i + 1][0] - 0.01
+            } else {
+                1.0
+            };
             curve[i] = [c[0].clamp(lo, hi.max(lo)), c[1].clamp(0.0, 1.0)];
         }
         t.changed = true;
@@ -215,19 +365,35 @@ fn curve_graph(ui: &mut egui::Ui, curve: &mut Vec<[f32; 2]>, hist: Option<&Histo
     }
 
     // Curve and points.
-    let pts: Vec<Pos2> = (0..=128).map(|i| i as f32 / 128.0).map(|x| to_screen([x, eval_curve(curve, x)])).collect();
+    let pts: Vec<Pos2> = (0..=128)
+        .map(|i| i as f32 / 128.0)
+        .map(|x| to_screen([x, eval_curve(curve, x)]))
+        .collect();
     painter.add(egui::Shape::line(pts, Stroke::new(2.0, color)));
     for (i, c) in curve.iter().enumerate() {
         let p = to_screen(*c);
         let active = st.dragging == Some(i);
-        painter.circle(p, if active { 5.0 } else { 4.0 }, if active { color } else { Color32::from_gray(22) }, Stroke::new(1.5, color));
+        painter.circle(
+            p,
+            if active { 5.0 } else { 4.0 },
+            if active {
+                color
+            } else {
+                Color32::from_gray(22)
+            },
+            Stroke::new(1.5, color),
+        );
     }
     if let Some(p) = resp.hover_pos() {
         let c = to_curve(p);
         painter.text(
             rect.left_top() + Vec2::new(4.0, 2.0),
             egui::Align2::LEFT_TOP,
-            format!("ein {:.0}  aus {:.0}", c[0].clamp(0.0, 1.0) * 255.0, eval_curve(curve, c[0].clamp(0.0, 1.0)) * 255.0),
+            tr!(
+                "in {input}  out {output}",
+                input = format!("{:.0}", c[0].clamp(0.0, 1.0) * 255.0),
+                output = format!("{:.0}", eval_curve(curve, c[0].clamp(0.0, 1.0)) * 255.0)
+            ),
             egui::FontId::monospace(11.0),
             Color32::from_gray(160),
         );
@@ -235,7 +401,13 @@ fn curve_graph(ui: &mut egui::Ui, curve: &mut Vec<[f32; 2]>, hist: Option<&Histo
 }
 
 /// Filled histogram of one channel, scaled to its peak.
-fn histogram_plot(painter: &egui::Painter, rect: egui::Rect, h: &Histogram, ch: usize, color: Color32) {
+fn histogram_plot(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    h: &Histogram,
+    ch: usize,
+    color: Color32,
+) {
     let peak = h.peak(ch);
     let w = rect.width() / 256.0;
     for (i, v) in h.bins[ch].iter().enumerate() {
@@ -245,7 +417,10 @@ fn histogram_plot(painter: &egui::Painter, rect: egui::Rect, h: &Histogram, ch: 
         }
         let x = rect.min.x + i as f32 * w;
         painter.rect_filled(
-            egui::Rect::from_min_max(pos2(x, rect.max.y - f * rect.height()), pos2(x + w + 0.5, rect.max.y)),
+            egui::Rect::from_min_max(
+                pos2(x, rect.max.y - f * rect.height()),
+                pos2(x + w + 0.5, rect.max.y),
+            ),
             0.0,
             color,
         );
@@ -258,16 +433,34 @@ fn gamma_pos(l: &Levels) -> f32 {
 }
 
 /// Histogram with draggable black, gamma and white input markers.
-fn levels_graph(ui: &mut egui::Ui, l: &mut Levels, hist: Option<&Histogram>, st: &mut EditorState, t: &mut Track) {
+fn levels_graph(
+    ui: &mut egui::Ui,
+    l: &mut Levels,
+    hist: Option<&Histogram>,
+    st: &mut EditorState,
+    t: &mut Track,
+) {
     let width = ui.available_width().min(260.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 104.0), Sense::drag());
     let plot = egui::Rect::from_min_max(rect.min, pos2(rect.max.x, rect.max.y - 14.0));
     let painter = ui.painter_at(rect.expand(6.0));
     painter.rect_filled(plot, 2.0, Color32::from_gray(22));
     match hist {
-        Some(h) => histogram_plot(&painter, plot, h, st.channel, Color32::from_gray(22).lerp_to_gamma(CHANNEL_COLORS[st.channel], 0.7)),
+        Some(h) => histogram_plot(
+            &painter,
+            plot,
+            h,
+            st.channel,
+            Color32::from_gray(22).lerp_to_gamma(CHANNEL_COLORS[st.channel], 0.7),
+        ),
         None => {
-            painter.text(plot.center(), egui::Align2::CENTER_CENTER, "kein Histogramm", egui::FontId::proportional(11.0), Color32::from_gray(90));
+            painter.text(
+                plot.center(),
+                egui::Align2::CENTER_CENTER,
+                tr("no histogram"),
+                egui::FontId::proportional(11.0),
+                Color32::from_gray(90),
+            );
         }
     }
     let to_x = |v: f32| plot.min.x + v.clamp(0.0, 1.0) * plot.width();
@@ -312,7 +505,14 @@ fn levels_graph(ui: &mut egui::Ui, l: &mut Levels, hist: Option<&Histogram>, st:
         painter.add(egui::Shape::convex_polygon(
             vec![pos2(x, y), pos2(x + 6.0, y + 11.0), pos2(x - 6.0, y + 11.0)],
             fills[i],
-            Stroke::new(1.0, if active { Color32::from_rgb(90, 140, 250) } else { Color32::from_gray(150) }),
+            Stroke::new(
+                1.0,
+                if active {
+                    Color32::from_rgb(90, 140, 250)
+                } else {
+                    Color32::from_gray(150)
+                },
+            ),
         ));
     }
     if resp.hovered() || resp.dragged() {
@@ -322,5 +522,8 @@ fn levels_graph(ui: &mut egui::Ui, l: &mut Levels, hist: Option<&Histogram>, st:
 
 /// Whether the editor for this adjustment shows a histogram.
 pub fn wants_histogram(adj: Option<&Adjustment>) -> bool {
-    matches!(adj, Some(Adjustment::Levels { .. } | Adjustment::Curves { .. }))
+    matches!(
+        adj,
+        Some(Adjustment::Levels { .. } | Adjustment::Curves { .. })
+    )
 }

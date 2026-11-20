@@ -33,8 +33,16 @@ impl Engine {
                 MaskTile::Pixels(_) => None,
             })
             .collect();
-        tiles.extend(pixel_tiles.into_iter().map(|(c, _)| c).zip(data.into_iter().map(MaskData::Pixels)));
-        CpuMask { tiles, default: m.default }
+        tiles.extend(
+            pixel_tiles
+                .into_iter()
+                .map(|(c, _)| c)
+                .zip(data.into_iter().map(MaskData::Pixels)),
+        );
+        CpuMask {
+            tiles,
+            default: m.default,
+        }
     }
 
     /// Uploads a CPU mask (compacted first). `None` if GPU memory ran out.
@@ -48,13 +56,19 @@ impl Engine {
             };
             tiles.insert(c, t);
         }
-        Some(Mask { tiles: Arc::new(tiles), default: m.default })
+        Some(Mask {
+            tiles: Arc::new(tiles),
+            default: m.default,
+        })
     }
 
     /// Identity of the current selection (changes whenever it is replaced);
     /// used to discard background results computed from an older one.
     pub fn selection_id(&self) -> usize {
-        self.doc.selection.as_ref().map_or(0, |s| Arc::as_ptr(&s.tiles) as usize)
+        self.doc
+            .selection
+            .as_ref()
+            .map_or(0, |s| Arc::as_ptr(&s.tiles) as usize)
     }
 
     pub fn has_selection(&self) -> bool {
@@ -67,12 +81,19 @@ impl Engine {
     }
 
     /// Replaces the selection as one undo step. An empty mask deselects.
-    pub fn set_selection(&mut self, mask: Option<CpuMask>, label: &str) -> Result<(), &'static str> {
+    pub fn set_selection(
+        &mut self,
+        mask: Option<CpuMask>,
+        label: &str,
+    ) -> Result<(), &'static str> {
         if self.stroke.is_some() {
-            return Err("während eines Pinselstrichs nicht möglich");
+            return Err(imagine_core::tr("not possible during a brush stroke"));
         }
         let gpu = match mask.filter(|m| !m.is_empty()) {
-            Some(m) => Some(self.mask_to_gpu(m).ok_or("GPU-Speicher voll")?),
+            Some(m) => Some(
+                self.mask_to_gpu(m)
+                    .ok_or(imagine_core::tr("GPU memory full"))?,
+            ),
             None => None,
         };
         let had = self.doc.selection.is_some();
@@ -87,7 +108,12 @@ impl Engine {
     }
 
     /// Adds/subtracts/intersects a shape with the selection.
-    pub fn select_shape(&mut self, shape: &Shape, op: CombineOp, label: &str) -> Result<(), &'static str> {
+    pub fn select_shape(
+        &mut self,
+        shape: &Shape,
+        op: CombineOp,
+        label: &str,
+    ) -> Result<(), &'static str> {
         let (w, h) = self.size();
         let new = rasterize(shape, w, h);
         let result = match self.selection_cpu() {
@@ -113,7 +139,9 @@ impl Engine {
     }
 
     pub fn feather_selection(&mut self, radius: f64, label: &str) -> Result<(), &'static str> {
-        let Some(sel) = self.selection_cpu() else { return Err("keine Auswahl") };
+        let Some(sel) = self.selection_cpu() else {
+            return Err(imagine_core::tr("no selection"));
+        };
         let (w, h) = self.size();
         self.set_selection(Some(feather(&sel, radius, w, h)), label)
     }
@@ -126,15 +154,23 @@ impl Engine {
     }
 
     /// Sets (or removes) a layer's mask as one undo step.
-    pub fn set_layer_mask(&mut self, layer: LayerId, mask: Option<CpuMask>, label: &str) -> Result<(), &'static str> {
+    pub fn set_layer_mask(
+        &mut self,
+        layer: LayerId,
+        mask: Option<CpuMask>,
+        label: &str,
+    ) -> Result<(), &'static str> {
         if self.stroke.is_some() {
-            return Err("während eines Pinselstrichs nicht möglich");
+            return Err(imagine_core::tr("not possible during a brush stroke"));
         }
         if self.doc.find(layer).is_none() {
-            return Err("Ebene existiert nicht");
+            return Err(imagine_core::tr("layer does not exist"));
         }
         let gpu = match mask {
-            Some(m) => Some(self.mask_to_gpu(m).ok_or("GPU-Speicher voll")?),
+            Some(m) => Some(
+                self.mask_to_gpu(m)
+                    .ok_or(imagine_core::tr("GPU memory full"))?,
+            ),
             None => None,
         };
         self.edit(label, |d| {
@@ -148,12 +184,19 @@ impl Engine {
 
     /// Adds an adjustment layer above the active one; with a selection, the
     /// selection becomes its mask (shared tiles, no copy).
-    pub fn add_adjustment(&mut self, adj: imagine_core::Adjustment, label: &str) -> Option<LayerId> {
+    pub fn add_adjustment(
+        &mut self,
+        adj: imagine_core::Adjustment,
+        label: &str,
+    ) -> Option<LayerId> {
         let mut id = None;
         self.edit(label, |d| {
             let new = d.add_adjustment(adj);
             // Like Photoshop: always a mask to paint into (free while uniform).
-            let mask = d.selection.clone().unwrap_or_else(|| Mask { tiles: Arc::new(HashMap::new()), default: 255 });
+            let mask = d.selection.clone().unwrap_or_else(|| Mask {
+                tiles: Arc::new(HashMap::new()),
+                default: 255,
+            });
             let l = d.find_mut(new).unwrap();
             l.mask = Some(mask);
             l.mask_enabled = true;
@@ -167,14 +210,19 @@ impl Engine {
     pub fn add_layer_mask(&mut self, label: &str) -> Result<(), &'static str> {
         let layer = self.doc.active;
         if self.doc.find(layer).is_some_and(|l| l.mask.is_some()) {
-            return Err("die Ebene hat bereits eine Maske");
+            return Err(imagine_core::tr("the layer already has a mask"));
         }
         let mask = self.selection_cpu().unwrap_or(CpuMask::filled(255));
         self.set_layer_mask(layer, Some(mask), label)
     }
 
     /// Loads a mask from a file without creating an undo step.
-    pub fn load_mask(&mut self, layer: Option<LayerId>, mask: CpuMask, enabled: bool) -> Option<Vec<(TileCoord, Tile)>> {
+    pub fn load_mask(
+        &mut self,
+        layer: Option<LayerId>,
+        mask: CpuMask,
+        enabled: bool,
+    ) -> Option<Vec<(TileCoord, Tile)>> {
         let gpu = self.mask_to_gpu(mask)?;
         let uploaded: Vec<(TileCoord, Tile)> = gpu
             .tiles

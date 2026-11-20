@@ -61,7 +61,8 @@ fn in_rect(c: &TileCoord, rect: Option<(DVec2, DVec2)>) -> bool {
 
 impl Engine {
     fn filter_jobs(&mut self, jobs: &[FilterJob], grid: &[u32]) -> Option<Vec<Tile>> {
-        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(grid));
+        self.grid_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(grid));
         self.run_filter(jobs)
     }
 
@@ -90,12 +91,21 @@ impl Engine {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        let pass = |eng: &mut Engine, src: &TileSet, coords: &[TileCoord], dir: [i32; 2]| -> Option<TileSet> {
+        let pass = |eng: &mut Engine,
+                    src: &TileSet,
+                    coords: &[TileCoord],
+                    dir: [i32; 2]|
+         -> Option<TileSet> {
             let mut grids = Grids::default();
             let g = grids.layer(src);
             let jobs: Vec<FilterJob> = coords
                 .iter()
-                .map(|&c| FilterJob { dir, radius: r, p: [sigma, 0.0, 0.0, 0.0], ..Self::fjob(c, g, BLUR) })
+                .map(|&c| FilterJob {
+                    dir,
+                    radius: r,
+                    p: [sigma, 0.0, 0.0, 0.0],
+                    ..Self::fjob(c, g, BLUR)
+                })
                 .collect();
             let tiles = eng.filter_jobs(&jobs, &grids.data)?;
             Some(coords.iter().copied().zip(tiles).collect())
@@ -110,50 +120,95 @@ impl Engine {
         if sigma <= DIRECT_SIGMA {
             return self.blur_direct(src, sigma, dest);
         }
-        let k = 2f64.powi((sigma / (DIRECT_SIGMA / 2.0)).log2().floor() as i32).max(2.0);
+        let k = 2f64
+            .powi((sigma / (DIRECT_SIGMA / 2.0)).log2().floor() as i32)
+            .max(2.0);
         let down = DAffine2::from_scale(DVec2::splat(1.0 / k));
-        let small_dest: Vec<TileCoord> = dilate(footprint(src.keys().copied(), down, 1.0), 1).into_iter().collect();
+        let small_dest: Vec<TileCoord> = dilate(footprint(src.keys().copied(), down, 1.0), 1)
+            .into_iter()
+            .collect();
         let small = self.warp_map(src, down, Interp::Bilinear, (k as u32).min(8), &small_dest)?;
-        let small_out: Vec<TileCoord> = dilate(footprint(dest.iter().copied(), down, 2.0), 1).into_iter().collect();
+        let small_out: Vec<TileCoord> = dilate(footprint(dest.iter().copied(), down, 2.0), 1)
+            .into_iter()
+            .collect();
         let blurred = self.blur_direct(&small, sigma / k as f32, &small_out)?;
-        self.warp_map(&blurred, DAffine2::from_scale(DVec2::splat(k)), Interp::Bilinear, 1, dest)
+        self.warp_map(
+            &blurred,
+            DAffine2::from_scale(DVec2::splat(k)),
+            Interp::Bilinear,
+            1,
+            dest,
+        )
     }
 
     /// Destination tiles of a filter on `src` (blur spreads beyond the source).
     fn filter_dest(src: &TileSet, f: &Filter) -> BTreeSet<TileCoord> {
         let spread = (3.0 * f.radius()).ceil() as i32;
-        let reach = if matches!(f, Filter::GaussianBlur { .. }) { (spread + TILE_SIZE as i32 - 1) / TILE_SIZE as i32 } else { 0 };
+        let reach = if matches!(f, Filter::GaussianBlur { .. }) {
+            (spread + TILE_SIZE as i32 - 1) / TILE_SIZE as i32
+        } else {
+            0
+        };
         dilate(src.keys().copied(), reach)
     }
 
     /// Runs a filter on `src` for the tiles `dest` (no selection involved).
-    fn run_filter_tiles(&mut self, src: &TileSet, f: &Filter, dest: Vec<TileCoord>) -> Result<TileSet, &'static str> {
-        const FULL: &str = "GPU-Speicher voll";
+    fn run_filter_tiles(
+        &mut self,
+        src: &TileSet,
+        f: &Filter,
+        dest: Vec<TileCoord>,
+    ) -> Result<TileSet, &'static str> {
+        let full = imagine_core::tr("GPU memory full");
         Ok(match f {
-            Filter::GaussianBlur { .. } => self.blur(src, f.radius(), &dest).ok_or(FULL)?,
+            Filter::GaussianBlur { .. } => self.blur(src, f.radius(), &dest).ok_or(full)?,
             Filter::UnsharpMask { .. } | Filter::HighPass { .. } if !src.is_empty() => {
                 let (kind, p) = match f {
-                    Filter::UnsharpMask { amount, threshold, .. } => (UNSHARP, [amount / 100.0, *threshold, 0.0, 0.0]),
+                    Filter::UnsharpMask {
+                        amount, threshold, ..
+                    } => (UNSHARP, [amount / 100.0, *threshold, 0.0, 0.0]),
                     _ => (HIGH_PASS, [0.0; 4]),
                 };
-                let dest: Vec<TileCoord> = dest.into_iter().filter(|c| src.contains_key(c)).collect();
-                let blurred = self.blur(src, f.radius(), &dest).ok_or(FULL)?;
+                let dest: Vec<TileCoord> =
+                    dest.into_iter().filter(|c| src.contains_key(c)).collect();
+                let blurred = self.blur(src, f.radius(), &dest).ok_or(full)?;
                 let mut grids = Grids::default();
                 let g = grids.layer(src);
                 let jobs: Vec<FilterJob> = dest
                     .iter()
-                    .map(|&c| FilterJob { blur_slot: blurred[&c].slot().packed(), p, ..Self::fjob(c, g, kind) })
+                    .map(|&c| FilterJob {
+                        blur_slot: blurred[&c].slot().packed(),
+                        p,
+                        ..Self::fjob(c, g, kind)
+                    })
                     .collect();
-                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(FULL)?;
+                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
                 dest.into_iter().zip(tiles).collect()
             }
-            Filter::AddNoise { amount, monochrome, gaussian, seed } => {
-                let dest: Vec<TileCoord> = dest.into_iter().filter(|c| src.contains_key(c)).collect();
+            Filter::AddNoise {
+                amount,
+                monochrome,
+                gaussian,
+                seed,
+            } => {
+                let dest: Vec<TileCoord> =
+                    dest.into_iter().filter(|c| src.contains_key(c)).collect();
                 let mut grids = Grids::default();
                 let g = grids.layer(src);
-                let p = [amount / 100.0, *monochrome as u8 as f32, *gaussian as u8 as f32, *seed as f32];
-                let jobs: Vec<FilterJob> = dest.iter().map(|&c| FilterJob { p, ..Self::fjob(c, g, NOISE) }).collect();
-                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(FULL)?;
+                let p = [
+                    amount / 100.0,
+                    *monochrome as u8 as f32,
+                    *gaussian as u8 as f32,
+                    *seed as f32,
+                ];
+                let jobs: Vec<FilterJob> = dest
+                    .iter()
+                    .map(|&c| FilterJob {
+                        p,
+                        ..Self::fjob(c, g, NOISE)
+                    })
+                    .collect();
+                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
                 dest.into_iter().zip(tiles).collect()
             }
             _ => TileSet::new(),
@@ -161,7 +216,11 @@ impl Engine {
     }
 
     /// The whole tile map with a filter applied (smart filters).
-    pub(super) fn filter_tiles(&mut self, src: &TileSet, f: &Filter) -> Result<TileSet, &'static str> {
+    pub(super) fn filter_tiles(
+        &mut self,
+        src: &TileSet,
+        f: &Filter,
+    ) -> Result<TileSet, &'static str> {
         let dest = Self::filter_dest(src, f).into_iter().collect();
         let out = self.run_filter_tiles(src, f, dest)?;
         let mut map = src.clone();
@@ -171,14 +230,26 @@ impl Engine {
 
     /// Filters the active layer's pixels for the tiles in `rect` (all if
     /// `None`) and returns the resulting document (selection respected).
-    pub(super) fn filtered_doc(&mut self, f: &Filter, rect: Option<(DVec2, DVec2)>) -> Result<Document<Tile>, &'static str> {
+    pub(super) fn filtered_doc(
+        &mut self,
+        f: &Filter,
+        rect: Option<(DVec2, DVec2)>,
+    ) -> Result<Document<Tile>, &'static str> {
         let layer = self.check_target(StrokeTarget::Pixels)?;
-        let src: TileSet = self.doc.find(layer).and_then(|l| l.tiles()).map(|t| (**t).clone()).unwrap_or_default();
+        let src: TileSet = self
+            .doc
+            .find(layer)
+            .and_then(|l| l.tiles())
+            .map(|t| (**t).clone())
+            .unwrap_or_default();
         let sel = self.doc.selection.clone();
         let dest: Vec<TileCoord> = Self::filter_dest(&src, f)
             .into_iter()
             .filter(|c| in_rect(c, rect))
-            .filter(|c| sel.as_ref().is_none_or(|s| !matches!(s.at(*c), MaskRef::Solid(0))))
+            .filter(|c| {
+                sel.as_ref()
+                    .is_none_or(|s| !matches!(s.at(*c), MaskRef::Solid(0)))
+            })
             .collect();
         let out = self.run_filter_tiles(&src, f, dest)?;
         // Through the selection: mix the old and the filtered tile.
@@ -186,8 +257,13 @@ impl Engine {
             None => out,
             Some(_) => {
                 let coords: Vec<TileCoord> = out.keys().copied().collect();
-                let jobs = coords.iter().map(|&c| self.replace_job(layer, c, out[&c].slot().packed())).collect::<Vec<_>>();
-                let tiles = self.run_mix(&jobs).ok_or("GPU-Speicher voll")?;
+                let jobs = coords
+                    .iter()
+                    .map(|&c| self.replace_job(layer, c, out[&c].slot().packed()))
+                    .collect::<Vec<_>>();
+                let tiles = self
+                    .run_mix(&jobs)
+                    .ok_or(imagine_core::tr("GPU memory full"))?;
                 coords.into_iter().zip(tiles).collect()
             }
         };
@@ -219,7 +295,10 @@ impl Engine {
         }
         let layer = self.check_target(StrokeTarget::Pixels)?;
         self.edit(label, |d| {
-            d.find_mut(layer).unwrap().filters.push(imagine_core::SmartFilter::new(f.clone()));
+            d.find_mut(layer)
+                .unwrap()
+                .filters
+                .push(imagine_core::SmartFilter::new(f.clone()));
             true
         });
         Ok(())
@@ -230,9 +309,12 @@ impl Engine {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
-        let l = self.doc.find(layer).ok_or("Ebene nicht gefunden")?;
+        let l = self
+            .doc
+            .find(layer)
+            .ok_or(imagine_core::tr("layer not found"))?;
         if l.filters.is_empty() {
-            return Err("die Ebene hat keine Smart-Filter");
+            return Err(imagine_core::tr("the layer has no smart filters"));
         }
         self.refresh_smart();
         let tiles = self.smart.get(&layer).map(|e| e.tiles.clone());
@@ -248,12 +330,22 @@ impl Engine {
     }
 
     /// Changes the parameters of a layer's smart filter (one undo step).
-    pub fn set_smart_filter(&mut self, layer: LayerId, index: usize, f: &Filter, label: &str) -> Result<(), &'static str> {
+    pub fn set_smart_filter(
+        &mut self,
+        layer: LayerId,
+        index: usize,
+        f: &Filter,
+        label: &str,
+    ) -> Result<(), &'static str> {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
-        if self.doc.find(layer).is_none_or(|l| index >= l.filters.len()) {
-            return Err("Smart-Filter nicht gefunden");
+        if self
+            .doc
+            .find(layer)
+            .is_none_or(|l| index >= l.filters.len())
+        {
+            return Err(imagine_core::tr("smart filter not found"));
         }
         self.edit(label, |d| {
             let sf = &mut d.find_mut(layer).unwrap().filters[index];
@@ -266,7 +358,10 @@ impl Engine {
 
     /// Live preview of the active layer with smart filter `index` replaced
     /// (or, with `None`, one added); `None` ends it.
-    pub fn set_smart_filter_preview(&mut self, f: Option<(Option<usize>, &Filter)>) -> Result<(), &'static str> {
+    pub fn set_smart_filter_preview(
+        &mut self,
+        f: Option<(Option<usize>, &Filter)>,
+    ) -> Result<(), &'static str> {
         match f {
             None => self.set_filter_preview(None),
             Some((index, f)) => {
@@ -364,18 +459,40 @@ impl Engine {
                 match self.filter_tiles(&cur, f) {
                     Ok(t) => cur = t,
                     Err(e) => {
-                        tracing::warn!("Smart-Filter {}: {e}", f.name());
+                        tracing::warn!(
+                            "{}",
+                            imagine_core::tr!(
+                                "Smart filter {name}: {err}",
+                                name = f.name(),
+                                err = e
+                            )
+                        );
                         break;
                     }
                 }
             }
-            tracing::debug!("Smart-Filter für Ebene {id}: {:.1} ms", t0.elapsed().as_secs_f64() * 1e3);
-            self.smart.insert(id, SmartEntry { key, _src: src, tiles: Arc::new(cur) });
+            tracing::debug!(
+                "{}",
+                imagine_core::tr!(
+                    "Smart filters for layer {id}: {ms} ms",
+                    id = id,
+                    ms = format!("{:.1}", t0.elapsed().as_secs_f64() * 1e3)
+                )
+            );
+            self.smart.insert(
+                id,
+                SmartEntry {
+                    key,
+                    _src: src,
+                    tiles: Arc::new(cur),
+                },
+            );
             changed = true;
         }
         // Layer styles, computed from what the layer shows (after filters).
         let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
-        let mut style_src: Vec<(LayerId, Arc<TileSet>, Vec<imagine_core::style::Effect>)> = Vec::new();
+        let mut style_src: Vec<(LayerId, Arc<TileSet>, Vec<imagine_core::style::Effect>)> =
+            Vec::new();
         base.for_each(&mut |l, _| {
             let fx = l.active_effects();
             if fx.is_empty() {
@@ -408,7 +525,9 @@ impl Engine {
                             }
                         }
                         Content::Vector(_) => {
-                            let tiles = filtered.or_else(|| vectors.get(&l.id).map(|(_, t)| t.clone())).unwrap_or_default();
+                            let tiles = filtered
+                                .or_else(|| vectors.get(&l.id).map(|(_, t)| t.clone()))
+                                .unwrap_or_default();
                             l.content = Content::Pixels(tiles);
                         }
                         Content::Group(c) => substitute(c, smart, vectors, styles),
@@ -419,12 +538,18 @@ impl Engine {
                     }
                 }
                 // Effect layers go right under their layer (same opacity, mask, visibility).
-                if ls.iter().any(|l| styles.get(&l.id).is_some_and(|s| !s.below.is_empty())) {
+                if ls
+                    .iter()
+                    .any(|l| styles.get(&l.id).is_some_and(|s| !s.below.is_empty()))
+                {
                     let old = std::mem::take(ls);
                     for l in old {
                         if let Some(st) = styles.get(&l.id) {
                             for (k, (mode, tiles)) in st.below.iter().enumerate() {
-                                let mut fx = imagine_core::Layer::pixels(effect_layer_id(l.id, k), "Effekt");
+                                let mut fx = imagine_core::Layer::pixels(
+                                    effect_layer_id(l.id, k),
+                                    imagine_core::tr("Effect"),
+                                );
                                 fx.content = Content::Pixels(tiles.clone());
                                 fx.blend = *mode;
                                 fx.opacity = l.opacity;
@@ -461,7 +586,11 @@ impl Engine {
         });
         let before = self.vectors.len();
         self.vectors.retain(|id, _| want.iter().any(|w| w.0 == *id));
-        let live: std::collections::HashSet<usize> = self.vectors.values().map(|(_, t)| Arc::as_ptr(t) as usize).collect();
+        let live: std::collections::HashSet<usize> = self
+            .vectors
+            .values()
+            .map(|(_, t)| Arc::as_ptr(t) as usize)
+            .collect();
         self.vector_cpu.retain(|p, _| live.contains(p));
         let mut changed = self.vectors.len() != before;
         for (id, key, v) in want {
@@ -472,27 +601,36 @@ impl Engine {
             let rendered = imagine_vector::render(&v);
             let mut map = TileSet::new();
             // Small results are kept on the CPU too (layer styles read them without a GPU round trip).
-            let cpu: Option<HashMap<TileCoord, Vec<half::f16>>> = (rendered.len() <= 96).then(|| rendered.iter().cloned().collect());
+            let cpu: Option<HashMap<TileCoord, Vec<half::f16>>> =
+                (rendered.len() <= 96).then(|| rendered.iter().cloned().collect());
             for (c, px) in rendered {
                 match self.write_new_tile(&px) {
                     Some(t) => {
                         map.insert(c, t);
                     }
                     None => {
-                        tracing::warn!("Ebenen-Speicher voll");
+                        tracing::warn!("{}", imagine_core::tr("Layer memory full"));
                         break;
                     }
                 }
             }
-            tracing::debug!("Vektorebene {id}: {} Kacheln, {:.1} ms", map.len(), t0.elapsed().as_secs_f64() * 1e3);
+            tracing::debug!(
+                "{}",
+                imagine_core::tr!(
+                    "Vector layer {id}: {n} tiles, {ms} ms",
+                    id = id,
+                    n = map.len(),
+                    ms = format!("{:.1}", t0.elapsed().as_secs_f64() * 1e3)
+                )
+            );
             let map = Arc::new(map);
             if let Some(cpu) = cpu {
-                self.vector_cpu.insert(Arc::as_ptr(&map) as usize, Arc::new(cpu));
+                self.vector_cpu
+                    .insert(Arc::as_ptr(&map) as usize, Arc::new(cpu));
             }
             self.vectors.insert(id, (key, map));
             changed = true;
         }
         changed
     }
-
 }

@@ -25,7 +25,10 @@ impl TileCoord {
 
     /// Top-left document pixel of this tile.
     pub fn origin(self) -> (i64, i64) {
-        (self.x as i64 * TILE_SIZE as i64, self.y as i64 * TILE_SIZE as i64)
+        (
+            self.x as i64 * TILE_SIZE as i64,
+            self.y as i64 * TILE_SIZE as i64,
+        )
     }
 }
 
@@ -45,10 +48,7 @@ pub fn tiles_in_rect(
     let (gw, gh) = grid_size(doc_w, doc_h);
     let a = TileCoord::containing(min.0, min.1);
     // `max` is exclusive: a rect ending exactly on a tile edge does not touch the next tile.
-    let b = TileCoord::containing(
-        (max.0 - 1e-9).max(min.0),
-        (max.1 - 1e-9).max(min.1),
-    );
+    let b = TileCoord::containing((max.0 - 1e-9).max(min.0), (max.1 - 1e-9).max(min.1));
     let x0 = a.x.max(0);
     let y0 = a.y.max(0);
     let x1 = b.x.min(gw as i32 - 1);
@@ -77,6 +77,9 @@ mod tests {
         assert_eq!(v, vec![TileCoord::new(0, 0), TileCoord::new(1, 0)]);
         let v: Vec<_> = tiles_in_rect((0.0, 0.0), (256.0, 256.0), 1000, 1000).collect();
         assert_eq!(v, vec![TileCoord::new(0, 0)]);
-        assert_eq!(tiles_in_rect((800.0, 0.0), (900.0, 10.0), 600, 600).count(), 0);
+        assert_eq!(
+            tiles_in_rect((800.0, 0.0), (900.0, 10.0), 600, 600).count(),
+            0
+        );
     }
 }

@@ -3,91 +3,94 @@
 mod agent;
 mod app;
 mod boxedit;
-mod ui;
 mod loader;
 mod session;
 mod settings;
 mod tablet;
+mod ui;
 
 use std::path::PathBuf;
 
 use anyhow::{Context, bail};
+use imagine_core::tr;
 use loader::Source;
 
 const HELP: &str = "\
-imagine – GPU-Bildeditor (Phase 2: Auswahl, Masken, Transformieren)
+imagine – GPU image editor (Phase 2: selections, masks, transform)
 
-Aufruf:
-  imagine [DATEI]               Bild öffnen (PNG, JPEG, WebP, TIFF, EXR, .imagine)
-  imagine --new BxH             leeres Dokument, z. B. --new 30000x30000
-  imagine --demo BxH            prozedurales Testbild, z. B. --demo 10000x10000
-  imagine ... --bench           nach dem Laden Pan/Zoom/Rotate-Benchmark fahren und beenden
-  imagine ... --bench-offscreen derselbe Benchmark ohne Fenster, misst echte GPU-Zeit pro Frame
-  imagine DATEI --save A.imagine --export B.png
-                                ohne Fenster konvertieren (beides optional kombinierbar)
+Usage:
+  imagine [FILE]                open an image (PNG, JPEG, WebP, TIFF, EXR, .imagine)
+  imagine --new WxH             empty document, e.g. --new 30000x30000
+  imagine --demo WxH            procedural test image, e.g. --demo 10000x10000
+  imagine ... --bench           run a pan/zoom/rotate benchmark after loading, then quit
+  imagine ... --bench-offscreen the same benchmark without a window, measures real GPU time per frame
+  imagine FILE --save A.imagine --export B.png
+                                convert without a window (both optional, can be combined)
 
-Für Agenten (siehe docs/agenten.md):
-  imagine mcp [DATEI]           MCP-Server über stdio mit eigener Engine
-  imagine mcp --attach          MCP-Server, der das laufende Fenster live steuert
-  imagine run SKRIPT.jsonl      JSON-Befehle zeilenweise ausführen (`-` = stdin)
-  imagine run --attach SKRIPT   … im laufenden Fenster
+For agents (see docs/agenten.md):
+  imagine mcp [FILE]            MCP server over stdio with its own engine
+  imagine mcp --attach          MCP server that controls the running window live
+  imagine run SCRIPT.jsonl      run JSON commands line by line (`-` = stdin)
+  imagine run --attach SCRIPT   … in the running window
 
-Ansicht:
-  Schwenken       Leertaste + Ziehen, mittlere Maustaste, Stifttaste 1
-  Zoomen          Mausrad (zum Cursor), Strg + Leertaste + Ziehen
-  Drehen          R halten + Ziehen, Umschalt + Mausrad, Stifttaste 2; Umschalt+R zurücksetzen
-  Einpassen/100 % Strg+0 / Strg+1
+View:
+  Pan             Space + drag, middle mouse button, pen button 1
+  Zoom            mouse wheel (towards the cursor), Ctrl + Space + drag
+  Rotate          hold R + drag, Shift + mouse wheel, pen button 2; Shift+R resets
+  Fit/100 %       Ctrl+0 / Ctrl+1
 
-Werkzeuge:
-  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   U Wischfinger
-  P Zeichenstift   S Kopierstempel (Alt+Klick: Quelle)   J Bereichsreparatur (nochmal: Reparaturpinsel, Alt+Klick: Quelle)
-  E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
-  G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
-  W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)
-  C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)
-  Mit Auswahl verschieben/transformieren V und Strg+T nur die ausgewählten Pixel.
+Tools:
+  B Brush (Shift+B: tip round/chalk/bristle/spray/rough/charcoal; Shift+J: dynamics)   U Smudge
+  P Pen   S Clone Stamp (Alt+click: source)   J Spot Healing (again: Healing Brush, Alt+click: source)
+  E Eraser   M Rectangular Marquee (again: ellipse)   L Lasso
+  G Gradient (again: radial)   V Move (arrow keys: 1 px, with Shift 10 px)
+  W Magic Wand (click; Shift/Alt combine; [ / ] tolerance; W again: contiguous ↔ anywhere)
+  C Crop (drag a frame, beyond the edge = enlarge the canvas; Enter / Esc)
+  With a selection, V and Ctrl+T move/transform only the selected pixels.
 
-Frei transformieren (Strg+T):
-  Ecken skalieren (proportional, Umschalt = frei), Kanten strecken, Alt = um die Mitte,
-  außerhalb ziehen = drehen (Umschalt = 15°-Schritte), innen = verschieben.
-  Enter übernimmt, Esc oder Strg+Z bricht ab. Inhalt außerhalb des Bildes bleibt erhalten.
+Free Transform (Ctrl+T):
+  corners scale (proportional, Shift = free), edges stretch, Alt = around the center,
+  drag outside = rotate (Shift = 15° steps), inside = move.
+  Enter applies, Esc or Ctrl+Z cancels. Content outside the image is kept.
 
-Malen:
-  Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts
-  Größe           [ / ], Strg + Mausrad
-  Deckkraft       Ziffern 1…9, 0 (10 … 100 %; beim Wischfinger: Stärke)
-  Härte/Glättung  H / Umschalt+S   Farbe  Umschalt+P (Palette), X (Schwarz ↔ Weiß)
-  Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)
+Painting:
+  Paint           left mouse button / pen (pressure = size & flow), eraser end of the pen
+  Size            [ / ], Ctrl + mouse wheel
+  Opacity         digits 1…9, 0 (10 … 100 %; with Smudge: strength)
+  Hardness/Smoothing  H / Shift+S   Color  Shift+P (palette), X (black ↔ white)
+  Fill            Alt+Backspace (selection or whole layer)
 
-Auswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):
-  Alles / nichts  Strg+A / Strg+D        Umkehren   Strg+Umschalt+I
-  Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf oder Rücktaste (Pixel in der Auswahl)
-  Maskierungsmodus-Ansicht  Q (rot = nicht ausgewählt)
+Selection (while dragging: Shift = add, Alt = subtract, both = intersect):
+  All / none      Ctrl+A / Ctrl+D        Inverse    Ctrl+Shift+I
+  Feather         Shift+F6 (10 px)       Delete     Del or Backspace (pixels in the selection)
+  Quick Mask view  Q (red = not selected)
 
-Ebenenmasken:
-  Neue Maske      Strg+Umschalt+M (aus der Auswahl, sonst alles sichtbar)
-  Maske bemalen   \\ (umschalten Pixel ↔ Maske; Weiß zeigt, Schwarz verbirgt)
-  Ein/Aus         Strg+Alt+M             Anwenden   Strg+Alt+Umschalt+M
+Layer masks:
+  New mask        Ctrl+Shift+M (from the selection, otherwise reveal all)
+  Paint mask      \\ (toggle pixels ↔ mask; white reveals, black hides)
+  On/Off          Ctrl+Alt+M             Apply      Ctrl+Alt+Shift+M
 
-Ebenen (Photoshop-Tastenkürzel):
-  Neue Ebene      Strg+Umschalt+N      Duplizieren   Strg+J      Löschen  Entf (ohne Auswahl)
-  Auswählen       Alt+[ / Alt+]        Verschieben   Strg+[ / Strg+]
-  Gruppieren      Strg+G               Aufheben      Strg+Umschalt+G
-  Deckkraft       Umschalt + Ziffer    Füllmethode   Umschalt + Plus/Minus
-  Ein/Aus         Strg+,               Blend-Raum    F7 (sRGB ↔ linear)
+Layers (Photoshop shortcuts):
+  New layer       Ctrl+Shift+N         Duplicate     Ctrl+J      Delete  Del (without selection)
+  Select          Alt+[ / Alt+]        Move          Ctrl+[ / Ctrl+]
+  Group           Ctrl+G               Ungroup       Ctrl+Shift+G
+  Opacity         Shift + digit        Blend mode    Shift + Plus/Minus
+  On/Off          Ctrl+,               Blend space   F7 (sRGB ↔ linear)
 
-Datei & Verlauf:
-  Rückgängig      Strg+Z               Wiederholen   Strg+Umschalt+Z / Strg+Y
-  Speichern       Strg+S (.imagine, inkrementell, im Hintergrund)
-  Exportieren     Strg+Umschalt+E (PNG neben der Datei)
-  Sonstiges       F12 Benchmark, F1 Hilfe, Strg+Q beenden
+File & History:
+  Undo            Ctrl+Z               Redo          Ctrl+Shift+Z / Ctrl+Y
+  Save            Ctrl+S (.imagine, incremental, in the background)
+  Export          Ctrl+Shift+E (PNG next to the file)
+  Other           F12 benchmark, F1 help, Ctrl+Q quit
 ";
 
 fn parse_size(s: &str) -> anyhow::Result<(u32, u32)> {
-    let (w, h) = s.split_once(['x', 'X', '×']).context("Größe als BREITExHÖHE angeben")?;
+    let (w, h) = s
+        .split_once(['x', 'X', '×'])
+        .context(tr("give the size as WIDTHxHEIGHT"))?;
     let (w, h): (u32, u32) = (w.parse()?, h.parse()?);
     if w == 0 || h == 0 {
-        bail!("Größe muss > 0 sein");
+        bail!("{}", tr("size must be > 0"));
     }
     Ok((w, h))
 }
@@ -113,23 +116,31 @@ fn main() -> anyhow::Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
-                print!("{HELP}");
+                print!("{}", tr(HELP));
                 return Ok(());
             }
             "--new" => {
-                let (w, h) = parse_size(&args.next().context("--new braucht eine Größe")?)?;
+                let (w, h) = parse_size(&args.next().context(tr("--new needs a size"))?)?;
                 source = Source::Blank(w, h);
             }
             "--demo" => {
-                let (w, h) = parse_size(&args.next().context("--demo braucht eine Größe")?)?;
+                let (w, h) = parse_size(&args.next().context(tr("--demo needs a size"))?)?;
                 source = Source::Demo(w, h);
             }
             "--bench" => bench = true,
             "--bench-offscreen" => offscreen = true,
-            "--save" => save = Some(args.next().context("--save braucht einen Pfad")?.into()),
-            "--export" => export = Some(args.next().context("--export braucht einen Pfad")?.into()),
-            "--ui-snapshot" => snapshot = Some(PathBuf::from(args.next().context("--ui-snapshot braucht einen Pfad")?)),
-            s if s.starts_with('-') => bail!("unbekannte Option {s}\n\n{HELP}"),
+            "--save" => save = Some(args.next().context(tr("--save needs a path"))?.into()),
+            "--export" => export = Some(args.next().context(tr("--export needs a path"))?.into()),
+            "--ui-snapshot" => {
+                snapshot = Some(PathBuf::from(
+                    args.next().context(tr("--ui-snapshot needs a path"))?,
+                ))
+            }
+            s if s.starts_with('-') => bail!(
+                "{}\n\n{}",
+                tr!("unknown option {option}", option = s),
+                tr(HELP)
+            ),
             path => source = Source::File(PathBuf::from(path)),
         }
     }
@@ -153,26 +164,32 @@ fn agent_cmd(mcp: bool, args: &[String]) -> anyhow::Result<()> {
             "--attach" => attach = true,
             "--socket" => {
                 attach = true;
-                socket = Some(it.next().context("--socket braucht einen Pfad")?.into());
+                socket = Some(it.next().context(tr("--socket needs a path"))?.into());
             }
             "-h" | "--help" => {
-                print!("{HELP}");
+                print!("{}", tr(HELP));
                 return Ok(());
             }
-            s if s.starts_with("--") => bail!("unbekannte Option {s}"),
+            s if s.starts_with("--") => bail!("{}", tr!("unknown option {option}", option = s)),
             p => positional.push(PathBuf::from(p)),
         }
     }
     let mut backend: Box<dyn agent::Backend> = if attach {
         Box::new(agent::ipc::Client::connect(socket.as_deref())?)
     } else {
-        let open = if mcp { positional.first().map(PathBuf::as_path) } else { None };
+        let open = if mcp {
+            positional.first().map(PathBuf::as_path)
+        } else {
+            None
+        };
         Box::new(agent::Local::new(open)?)
     };
     if mcp {
         agent::mcp::serve(backend.as_mut())
     } else {
-        let script = positional.last().context("imagine run braucht ein Skript (oder - für stdin)")?;
+        let script = positional
+            .last()
+            .context(tr("imagine run needs a script (or - for stdin)"))?;
         if !agent::run_script(backend.as_mut(), script)? {
             std::process::exit(1);
         }
@@ -181,16 +198,40 @@ fn agent_cmd(mcp: bool, args: &[String]) -> anyhow::Result<()> {
 }
 
 /// Loads, optionally saves and exports, without opening a window.
-fn headless(source: Source, save: Option<PathBuf>, export: Option<PathBuf>, bench: bool) -> anyhow::Result<()> {
-    let gpu = pollster::block_on(imagine_gpu::GpuContext::new(imagine_gpu::GpuContext::create_instance(), None))?;
+fn headless(
+    source: Source,
+    save: Option<PathBuf>,
+    export: Option<PathBuf>,
+    bench: bool,
+) -> anyhow::Result<()> {
+    let gpu = pollster::block_on(imagine_gpu::GpuContext::new(
+        imagine_gpu::GpuContext::create_instance(),
+        None,
+    ))?;
     let mut s = session::load(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb, source)?;
     if let Some(p) = save {
         let r = s.save(Some(&p))?;
-        tracing::info!("gespeichert: {} ({} Kacheln, {:.1} MB, {:.0} ms)", r.path.display(), r.tiles_written, r.bytes as f64 / 1e6, r.ms);
+        tracing::info!(
+            "{}",
+            tr!(
+                "saved: {path} ({tiles} tiles, {mb} MB, {ms} ms)",
+                path = r.path.display(),
+                tiles = r.tiles_written,
+                mb = format!("{:.1}", r.bytes as f64 / 1e6),
+                ms = format!("{:.0}", r.ms)
+            )
+        );
     }
     if let Some(p) = export {
         let ms = s.export(&p, &Default::default())?;
-        tracing::info!("exportiert: {} ({ms:.0} ms)", p.display());
+        tracing::info!(
+            "{}",
+            tr!(
+                "exported: {path} ({ms} ms)",
+                path = p.display(),
+                ms = format!("{ms:.0}")
+            )
+        );
     }
     if bench {
         offscreen_bench(&gpu, &mut s.engine);
@@ -206,7 +247,11 @@ fn offscreen_bench(gpu: &imagine_gpu::GpuContext, engine: &mut imagine_gpu::Engi
     let (w, h) = (2560u32, 1440u32);
     let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("bench target"),
-        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -216,12 +261,22 @@ fn offscreen_bench(gpu: &imagine_gpu::GpuContext, engine: &mut imagine_gpu::Engi
     });
     let tv = target.create_view(&Default::default());
     engine.flush();
-    let wait = || gpu.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+    let wait = || {
+        gpu.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("poll")
+    };
     wait();
-    let mut base = imagine_core::View { viewport: glam::DVec2::new(w as f64, h as f64), ..Default::default() };
+    let mut base = imagine_core::View {
+        viewport: glam::DVec2::new(w as f64, h as f64),
+        ..Default::default()
+    };
     let (dw, dh) = engine.size();
     base.fit(dw, dh);
-    let overlay = imagine_gpu::Overlay { checker_px: 8.0, ..Default::default() };
+    let overlay = imagine_gpu::Overlay {
+        checker_px: 8.0,
+        ..Default::default()
+    };
     let mut times = Vec::with_capacity(FRAMES as usize);
     for f in 0..FRAMES {
         let t0 = Instant::now();
@@ -233,22 +288,34 @@ fn offscreen_bench(gpu: &imagine_gpu::GpuContext, engine: &mut imagine_gpu::Engi
     let avg = times.iter().sum::<f64>() / times.len() as f64;
     let pct = |p: f64| times[((times.len() - 1) as f64 * p) as usize];
     println!(
-        "\n=== Offscreen-Benchmark ({FRAMES} Frames, {w}×{h}, {dw}×{dh} px Dokument, {} Kacheln) ===\n\
-         Frame inkl. GPU:  Ø {avg:.2} ms   p50 {:.2}   p99 {:.2}   max {:.2}   (≈ {:.0} fps möglich)\n",
-        engine.composite_tiles_live(),
-        pct(0.5),
-        pct(0.99),
-        times[times.len() - 1],
-        1000.0 / avg
+        "{}",
+        tr!(
+            "\n=== Offscreen benchmark ({frames} frames, {w}×{h}, {dw}×{dh} px document, {tiles} tiles) ===\n\
+             Frame incl. GPU:  Ø {avg} ms   p50 {p50}   p99 {p99}   max {max}   (≈ {fps} fps possible)\n",
+            frames = FRAMES,
+            w = w,
+            h = h,
+            dw = dw,
+            dh = dh,
+            tiles = engine.composite_tiles_live(),
+            avg = format!("{avg:.2}"),
+            p50 = format!("{:.2}", pct(0.5)),
+            p99 = format!("{:.2}", pct(0.99)),
+            max = format!("{:.2}", times[times.len() - 1]),
+            fps = format!("{:.0}", 1000.0 / avg)
+        )
     );
 
     // Worst case for the compositor: a layer property change re-flattens every tile.
-    engine.edit("Duplizieren", |d| d.duplicate_active().is_some());
+    engine.edit(tr("Duplicate"), |d| d.duplicate_active().is_some());
     engine.flush();
     wait();
-    for (label, mode) in [("Multiplizieren", imagine_core::BlendMode::Multiply), ("Weiches Licht", imagine_core::BlendMode::SoftLight)] {
+    for (label, mode) in [
+        (tr("Multiply"), imagine_core::BlendMode::Multiply),
+        (tr("Soft Light"), imagine_core::BlendMode::SoftLight),
+    ] {
         let t0 = Instant::now();
-        engine.edit("Füllmethode", |d| {
+        engine.edit(tr("Blend Mode"), |d| {
             let id = d.active;
             d.find_mut(id).unwrap().blend = mode;
             true
@@ -256,9 +323,13 @@ fn offscreen_bench(gpu: &imagine_gpu::GpuContext, engine: &mut imagine_gpu::Engi
         let stats = engine.flush();
         wait();
         println!(
-            "Füllmethode → {label}: {} Kacheln (2 Ebenen) komplett neu zusammengesetzt in {:.1} ms",
-            stats.flattened,
-            t0.elapsed().as_secs_f64() * 1e3
+            "{}",
+            tr!(
+                "Blend mode → {label}: {tiles} tiles (2 layers) fully recomposited in {ms} ms",
+                label = label,
+                tiles = stats.flattened,
+                ms = format!("{:.1}", t0.elapsed().as_secs_f64() * 1e3)
+            )
         );
     }
 }
@@ -269,7 +340,11 @@ fn init_tracing() {
         .unwrap_or_else(|_| EnvFilter::new("info,wgpu_core=warn,wgpu_hal=warn,naga=warn"));
     // Logs go to stderr: stdout belongs to MCP / script results.
     let registry = tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(std::io::stderr).with_filter(filter))
+        .with(
+            fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(filter),
+        )
         .with(ui::log::UiLog);
     #[cfg(feature = "profile")]
     let registry = registry.with(tracing_tracy::TracyLayer::default());

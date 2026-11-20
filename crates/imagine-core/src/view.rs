@@ -24,7 +24,12 @@ pub struct View {
 
 impl Default for View {
     fn default() -> Self {
-        Self { center: DVec2::ZERO, zoom: 1.0, rotation: 0.0, viewport: DVec2::new(1.0, 1.0) }
+        Self {
+            center: DVec2::ZERO,
+            zoom: 1.0,
+            rotation: 0.0,
+            viewport: DVec2::new(1.0, 1.0),
+        }
     }
 }
 
@@ -104,9 +109,15 @@ impl View {
     pub fn doc_to_clip(&self) -> Mat3 {
         let vp = self.viewport.max(DVec2::ONE);
         let to_clip = DMat3::from_cols_array(&[
-            2.0 / vp.x, 0.0, 0.0, //
-            0.0, -2.0 / vp.y, 0.0, //
-            -1.0, 1.0, 1.0,
+            2.0 / vp.x,
+            0.0,
+            0.0, //
+            0.0,
+            -2.0 / vp.y,
+            0.0, //
+            -1.0,
+            1.0,
+            1.0,
         ]);
         let m = to_clip
             * DMat3::from_translation(self.half_viewport())
@@ -137,7 +148,10 @@ mod tests {
 
     #[test]
     fn fit_in_centres_the_document_in_the_area() {
-        let mut v = View { viewport: DVec2::new(1000.0, 800.0), ..Default::default() };
+        let mut v = View {
+            viewport: DVec2::new(1000.0, 800.0),
+            ..Default::default()
+        };
         v.fit_in(400, 400, DVec2::new(100.0, 0.0), DVec2::new(700.0, 800.0));
         let c = v.doc_to_screen(DVec2::new(200.0, 200.0));
         assert!((c - DVec2::new(400.0, 400.0)).length() < 1e-9, "{c}");
@@ -197,7 +211,10 @@ mod tests {
         let p = DVec2::new(77.0, 412.0);
         let s = v.doc_to_screen(p);
         let c = m * p.extend(1.0);
-        let expected = DVec2::new(s.x / v.viewport.x * 2.0 - 1.0, 1.0 - s.y / v.viewport.y * 2.0);
+        let expected = DVec2::new(
+            s.x / v.viewport.x * 2.0 - 1.0,
+            1.0 - s.y / v.viewport.y * 2.0,
+        );
         assert!((c.truncate() - expected).length() < 1e-4);
     }
 

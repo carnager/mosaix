@@ -10,7 +10,8 @@ pub const TIP_MIPS: u32 = 9;
 /// Smooth value noise in [0, 1] with integer lattice spacing `cell`.
 fn value_noise(x: f32, y: f32, cell: f32, seed: u32) -> f32 {
     let hash = |ix: i32, iy: i32| {
-        let mut h = (ix as u32).wrapping_mul(0x27d4_eb2d) ^ (iy as u32).wrapping_mul(0x1656_67b1) ^ seed;
+        let mut h =
+            (ix as u32).wrapping_mul(0x27d4_eb2d) ^ (iy as u32).wrapping_mul(0x1656_67b1) ^ seed;
         h ^= h >> 15;
         h = h.wrapping_mul(0x85eb_ca6b);
         h ^= h >> 13;
@@ -27,7 +28,9 @@ fn value_noise(x: f32, y: f32, cell: f32, seed: u32) -> f32 {
 }
 
 fn fbm(x: f32, y: f32, cell: f32, seed: u32) -> f32 {
-    (value_noise(x, y, cell, seed) * 0.6 + value_noise(x, y, cell * 0.5, seed ^ 0xabc) * 0.3 + value_noise(x, y, cell * 0.25, seed ^ 0x123) * 0.1)
+    (value_noise(x, y, cell, seed) * 0.6
+        + value_noise(x, y, cell * 0.5, seed ^ 0xabc) * 0.3
+        + value_noise(x, y, cell * 0.25, seed ^ 0x123) * 0.1)
         .clamp(0.0, 1.0)
 }
 
@@ -45,7 +48,10 @@ fn rng(state: &mut u32) -> f32 {
 
 /// Coverage (0…1) of one tip at pixel (x, y) with centre-relative coordinates in [-1, 1].
 fn tip(index: usize, dots: &[(f32, f32, f32, f32)], x: f32, y: f32) -> f32 {
-    let (u, v) = ((x + 0.5) / TIP_SIZE as f32 * 2.0 - 1.0, (y + 0.5) / TIP_SIZE as f32 * 2.0 - 1.0);
+    let (u, v) = (
+        (x + 0.5) / TIP_SIZE as f32 * 2.0 - 1.0,
+        (y + 0.5) / TIP_SIZE as f32 * 2.0 - 1.0,
+    );
     let r = (u * u + v * v).sqrt();
     match index {
         // Chalk: grainy disc.
@@ -85,14 +91,24 @@ pub fn generate() -> Vec<Vec<Vec<u8>>> {
     for i in 0..24 {
         let a = i as f32 / 24.0 * std::f32::consts::TAU + rng(&mut seed) * 0.3;
         let d = 0.25 + 0.55 * rng(&mut seed);
-        bristles.push((a.cos() * d, a.sin() * d * 0.7, 0.07 + 0.06 * rng(&mut seed), 0.6 + 0.4 * rng(&mut seed)));
+        bristles.push((
+            a.cos() * d,
+            a.sin() * d * 0.7,
+            0.07 + 0.06 * rng(&mut seed),
+            0.6 + 0.4 * rng(&mut seed),
+        ));
     }
     let mut spray = Vec::new();
     while spray.len() < 140 {
         let (x, y) = (rng(&mut seed) * 2.0 - 1.0, rng(&mut seed) * 2.0 - 1.0);
         let r = (x * x + y * y).sqrt();
         if r < 0.95 && rng(&mut seed) > r * 0.8 {
-            spray.push((x, y, 0.035 + 0.04 * rng(&mut seed), 0.6 + 0.4 * rng(&mut seed)));
+            spray.push((
+                x,
+                y,
+                0.035 + 0.04 * rng(&mut seed),
+                0.6 + 0.4 * rng(&mut seed),
+            ));
         }
     }
     let base: Vec<Vec<u8>> = (1..=n)
@@ -121,7 +137,10 @@ pub fn generate() -> Vec<Vec<Vec<u8>>> {
                 (0..size * size)
                     .map(|k| {
                         let (x, y) = (k % size * 2, k / size * 2);
-                        let sum = p[y * ps + x] as u32 + p[y * ps + x + 1] as u32 + p[(y + 1) * ps + x] as u32 + p[(y + 1) * ps + x + 1] as u32;
+                        let sum = p[y * ps + x] as u32
+                            + p[y * ps + x + 1] as u32
+                            + p[(y + 1) * ps + x] as u32
+                            + p[(y + 1) * ps + x + 1] as u32;
                         ((sum + 2) / 4) as u8
                     })
                     .collect()
@@ -144,7 +163,8 @@ mod tests {
             let sum: u64 = t.iter().map(|&v| v as u64).sum();
             let avg = sum as f64 / t.len() as f64;
             assert!(avg > 5.0, "tip {} nearly empty: {avg}", i + 1);
-            let corner = t[0] as u32 + t[255] as u32 + t[255 * 256] as u32 + t[256 * 256 - 1] as u32;
+            let corner =
+                t[0] as u32 + t[255] as u32 + t[255 * 256] as u32 + t[256 * 256 - 1] as u32;
             assert_eq!(corner, 0, "tip {} touches the corners", i + 1);
         }
         assert_eq!(levels[8][0].len(), 1);

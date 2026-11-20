@@ -11,21 +11,40 @@ use std::sync::Arc;
 
 use smithay_client_toolkit::data_device_manager::data_device::{DataDevice, DataDeviceHandler};
 use smithay_client_toolkit::data_device_manager::data_offer::{DataOfferHandler, DragOffer};
-use smithay_client_toolkit::data_device_manager::data_source::{CopyPasteSource, DataSourceHandler};
+use smithay_client_toolkit::data_device_manager::data_source::{
+    CopyPasteSource, DataSourceHandler,
+};
 use smithay_client_toolkit::data_device_manager::{DataDeviceManagerState, WritePipe};
-use smithay_client_toolkit::reexports::client::protocol::{wl_data_device::WlDataDevice, wl_data_device_manager::DndAction, wl_data_source::WlDataSource, wl_surface::WlSurface};
+use smithay_client_toolkit::reexports::client::protocol::{
+    wl_data_device::WlDataDevice, wl_data_device_manager::DndAction, wl_data_source::WlDataSource,
+    wl_surface::WlSurface,
+};
 use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
+
+use imagine_core::tr;
 
 use super::{App, BgDone};
 
-const TEXT_MIMES: [&str; 6] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT", "text/plain;charset=UTF-8"];
+const TEXT_MIMES: [&str; 6] = [
+    "text/plain;charset=utf-8",
+    "UTF8_STRING",
+    "text/plain",
+    "STRING",
+    "TEXT",
+    "text/plain;charset=UTF-8",
+];
 const PNG: &str = "image/png";
 
 #[derive(Clone)]
 pub(super) enum Clip {
     Text(String),
     /// An image and where it came from (pasting in imagine puts it back there).
-    Image { png: Arc<Vec<u8>>, img: Arc<image::RgbaImage>, x: i64, y: i64 },
+    Image {
+        png: Arc<Vec<u8>>,
+        img: Arc<image::RgbaImage>,
+        x: i64,
+        y: i64,
+    },
 }
 
 #[derive(Default)]
@@ -56,7 +75,9 @@ fn to_rgba8(w: usize, h: usize, px: &[[f32; 4]]) -> image::RgbaImage {
     for (o, p) in img.pixels_mut().zip(px) {
         let a = p[3].clamp(0.0, 1.0);
         if a > 0.0 {
-            let c = |v: f32| (imagine_core::color::linear_to_srgb((v / a).clamp(0.0, 1.0)) * 255.0).round() as u8;
+            let c = |v: f32| {
+                (imagine_core::color::linear_to_srgb((v / a).clamp(0.0, 1.0)) * 255.0).round() as u8
+            };
             *o = image::Rgba([c(p[0]), c(p[1]), c(p[2]), (a * 255.0).round() as u8]);
         }
     }
@@ -65,7 +86,10 @@ fn to_rgba8(w: usize, h: usize, px: &[[f32; 4]]) -> image::RgbaImage {
 
 impl Clipboard {
     pub fn new(manager: Option<DataDeviceManagerState>) -> Self {
-        Self { manager, ..Default::default() }
+        Self {
+            manager,
+            ..Default::default()
+        }
     }
 }
 
@@ -74,7 +98,7 @@ impl App {
     pub(super) fn clip_set(&mut self, clip: Clip) {
         let cb = &mut self.clipboard;
         let (Some(manager), Some(device)) = (&cb.manager, &cb.device) else {
-            tracing::warn!("Zwischenablage nicht verfügbar");
+            tracing::warn!("{}", tr("Clipboard not available"));
             return;
         };
         let mimes: Vec<&str> = match &clip {
@@ -102,70 +126,122 @@ impl App {
         let Some(e) = self.engine() else { return };
         let copied = match e.copy_pixels(merged) {
             Ok(c) => c,
-            Err(err) => return tracing::warn!("Kopieren: {err}"),
+            Err(err) => return tracing::warn!("{}", tr!("Copy: {error}", error = tr(err))),
         };
         let img = to_rgba8(copied.w, copied.h, &copied.px);
         let mut png = Vec::new();
-        if let Err(err) = image::codecs::png::PngEncoder::new_with_quality(&mut png, image::codecs::png::CompressionType::Fast, image::codecs::png::FilterType::Adaptive)
-            .write_image(img.as_raw(), img.width(), img.height(), image::ExtendedColorType::Rgba8)
-        {
-            return tracing::warn!("Kopieren: {err}");
+        if let Err(err) = image::codecs::png::PngEncoder::new_with_quality(
+            &mut png,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::Adaptive,
+        )
+        .write_image(
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgba8,
+        ) {
+            return tracing::warn!("{}", tr!("Copy: {error}", error = err));
         }
-        tracing::info!("{} {}×{} px", if cut { "Ausgeschnitten:" } else { "Kopiert:" }, copied.w, copied.h);
-        self.clip_set(Clip::Image { png: Arc::new(png), img: Arc::new(img), x: copied.x, y: copied.y });
+        tracing::info!(
+            "{}",
+            if cut {
+                tr!("Cut: {w}×{h} px", w = copied.w, h = copied.h)
+            } else {
+                tr!("Copied: {w}×{h} px", w = copied.w, h = copied.h)
+            }
+        );
+        self.clip_set(Clip::Image {
+            png: Arc::new(png),
+            img: Arc::new(img),
+            x: copied.x,
+            y: copied.y,
+        });
         if cut && !merged {
-            self.engine_op(|e| e.clear_selected("Ausschneiden").map(|_| ()));
+            self.engine_op(|e| e.clear_selected(tr("Cut")).map(|_| ()));
         }
     }
 
     /// Pastes into `target`: our own content directly, else read from the
     /// clipboard owner on a worker thread.
     pub(super) fn paste(&mut self, target: PasteTarget) {
-        if let Some(clip) = self.clipboard.source.as_ref().and(self.clipboard.content.clone()) {
+        if let Some(clip) = self
+            .clipboard
+            .source
+            .as_ref()
+            .and(self.clipboard.content.clone())
+        {
             self.paste_clip(clip, target);
             return;
         }
-        let Some(offer) = self.clipboard.device.as_ref().and_then(|d| d.data().selection_offer()) else {
-            return tracing::info!("Die Zwischenablage ist leer");
+        let Some(offer) = self
+            .clipboard
+            .device
+            .as_ref()
+            .and_then(|d| d.data().selection_offer())
+        else {
+            return tracing::info!("{}", tr("The clipboard is empty"));
         };
         let want_image = target == PasteTarget::Document;
         let mime = offer.with_mime_types(|m| {
             let png = m.iter().find(|t| t.as_str() == PNG).cloned();
-            let text = TEXT_MIMES.iter().find_map(|t| m.iter().find(|x| x.as_str() == *t).cloned());
+            let text = TEXT_MIMES
+                .iter()
+                .find_map(|t| m.iter().find(|x| x.as_str() == *t).cloned());
             if want_image { png.or(text) } else { text }
         });
         let Some(mime) = mime else {
-            return tracing::info!("Nichts Einfügbares in der Zwischenablage");
+            return tracing::info!("{}", tr("Nothing pasteable in the clipboard"));
         };
         let pipe = match offer.receive(mime.clone()) {
             Ok(p) => p,
-            Err(err) => return tracing::warn!("Einfügen: {err:?}"),
+            Err(err) => {
+                return tracing::warn!("{}", tr!("Paste: {error}", error = format!("{err:?}")));
+            }
         };
         self.clipboard.pending = Some(target);
         self.spawn_bg("paste", move || {
             let mut f = std::fs::File::from(OwnedFd::from(pipe));
             let mut data = Vec::new();
-            let result = f.read_to_end(&mut data).map(|_| (mime, data)).map_err(|e| e.to_string());
+            let result = f
+                .read_to_end(&mut data)
+                .map(|_| (mime, data))
+                .map_err(|e| e.to_string());
             BgDone::Pasted(result)
         });
     }
 
     /// The data from another program has arrived.
     pub(super) fn on_pasted(&mut self, result: Result<(String, Vec<u8>), String>) {
-        let Some(target) = self.clipboard.pending.take() else { return };
+        let Some(target) = self.clipboard.pending.take() else {
+            return;
+        };
         let clip = match result {
             Ok((mime, data)) if mime == PNG => match image::load_from_memory(&data) {
                 Ok(img) => {
                     let img = img.into_rgba8();
                     // From elsewhere: centred in the view.
                     let c = self.view.screen_to_doc(self.view.viewport * 0.5);
-                    let (x, y) = ((c.x - img.width() as f64 / 2.0).round() as i64, (c.y - img.height() as f64 / 2.0).round() as i64);
-                    Clip::Image { png: Arc::new(data), img: Arc::new(img), x, y }
+                    let (x, y) = (
+                        (c.x - img.width() as f64 / 2.0).round() as i64,
+                        (c.y - img.height() as f64 / 2.0).round() as i64,
+                    );
+                    Clip::Image {
+                        png: Arc::new(data),
+                        img: Arc::new(img),
+                        x,
+                        y,
+                    }
                 }
-                Err(err) => return tracing::warn!("Einfügen: Bild unlesbar ({err})"),
+                Err(err) => {
+                    return tracing::warn!(
+                        "{}",
+                        tr!("Paste: image unreadable ({error})", error = err)
+                    );
+                }
             },
             Ok((_, data)) => Clip::Text(String::from_utf8_lossy(&data).replace("\r\n", "\n")),
-            Err(err) => return tracing::warn!("Einfügen: {err}"),
+            Err(err) => return tracing::warn!("{}", tr!("Paste: {error}", error = err)),
         };
         self.paste_clip(clip, target);
     }
@@ -182,24 +258,42 @@ impl App {
                 let c = self.view.screen_to_doc(self.view.viewport * 0.5);
                 let size = (24.0 / self.view.zoom as f32).clamp(8.0, 2000.0).round();
                 let color = self.brush.color;
-                let spec = imagine_core::vector::TextSpec::new(&t, c.x, c.y, size, [color[0], color[1], color[2], 1.0]);
+                let spec = imagine_core::vector::TextSpec::new(
+                    &t,
+                    c.x,
+                    c.y,
+                    size,
+                    [color[0], color[1], color[2], 1.0],
+                );
                 if let Some(e) = self.engine()
-                    && e.add_vector(imagine_core::VectorLayer::text(spec), "Text einfügen").is_some()
+                    && e.add_vector(imagine_core::VectorLayer::text(spec), tr("Paste Text"))
+                        .is_some()
                 {
                     self.touch();
                 }
             }
             (Clip::Image { img, x, y, .. }, PasteTarget::Document) => {
                 let Some(s) = &mut self.session else { return };
-                match crate::agent::command::place_rgba(s, &img, x, y, "Eingefügt", "Einfügen") {
+                match crate::agent::command::place_rgba(s, &img, x, y, tr("Pasted"), tr("Paste")) {
                     Ok(_) => {
-                        tracing::info!("Eingefügt als neue Ebene ({}×{} px)", img.width(), img.height());
+                        tracing::info!(
+                            "{}",
+                            tr!(
+                                "Pasted as a new layer ({w}×{h} px)",
+                                w = img.width(),
+                                h = img.height()
+                            )
+                        );
                         self.touch();
                     }
-                    Err(err) => tracing::warn!("Einfügen: {err:#}"),
+                    Err(err) => {
+                        tracing::warn!("{}", tr!("Paste: {error}", error = format!("{err:#}")))
+                    }
                 }
             }
-            (Clip::Image { .. }, _) => tracing::info!("Ein Bild lässt sich nicht in Text einfügen"),
+            (Clip::Image { .. }, _) => {
+                tracing::info!("{}", tr("An image cannot be pasted into text"))
+            }
         }
         self.needs_redraw = true;
     }
@@ -213,7 +307,16 @@ impl App {
 }
 
 impl DataDeviceHandler for App {
-    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64, _: &WlSurface) {}
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataDevice,
+        _: f64,
+        _: f64,
+        _: &WlSurface,
+    ) {
+    }
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
     fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64) {}
     fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
@@ -221,17 +324,51 @@ impl DataDeviceHandler for App {
 }
 
 impl DataOfferHandler for App {
-    fn source_actions(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
-    fn selected_action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
+    fn source_actions(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
+    fn selected_action(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
 }
 
 impl DataSourceHandler for App {
-    fn accept_mime(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: Option<String>) {}
+    fn accept_mime(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataSource,
+        _: Option<String>,
+    ) {
+    }
 
-    fn send_request(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource, mime: String, fd: WritePipe) {
-        let ours = self.clipboard.source.as_ref().is_some_and(|s| s.inner() == source);
+    fn send_request(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        source: &WlDataSource,
+        mime: String,
+        fd: WritePipe,
+    ) {
+        let ours = self
+            .clipboard
+            .source
+            .as_ref()
+            .is_some_and(|s| s.inner() == source);
         let data: Option<Arc<Vec<u8>>> = match (&self.clipboard.content, ours) {
-            (Some(Clip::Text(t)), true) if TEXT_MIMES.contains(&mime.as_str()) => Some(Arc::new(t.clone().into_bytes())),
+            (Some(Clip::Text(t)), true) if TEXT_MIMES.contains(&mime.as_str()) => {
+                Some(Arc::new(t.clone().into_bytes()))
+            }
             (Some(Clip::Image { png, .. }), true) if mime == PNG => Some(png.clone()),
             _ => None,
         };
@@ -245,7 +382,12 @@ impl DataSourceHandler for App {
 
     fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource) {
         // Another program owns the clipboard now.
-        if self.clipboard.source.as_ref().is_some_and(|s| s.inner() == source) {
+        if self
+            .clipboard
+            .source
+            .as_ref()
+            .is_some_and(|s| s.inner() == source)
+        {
             self.clipboard.source = None;
             self.clipboard.content = None;
         }

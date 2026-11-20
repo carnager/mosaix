@@ -6,15 +6,15 @@
 //! UI pass (no borrowing of the engine from inside the UI code).
 
 pub mod adjust_ui;
-pub mod vector_ui;
-pub mod font_ui;
-pub mod style_ui;
 pub mod files;
+pub mod font_ui;
 pub mod icons;
 pub mod log;
 pub mod palette;
 pub mod panels;
 pub mod snapshot;
+pub mod style_ui;
+pub mod vector_ui;
 
 use std::time::{Duration, Instant};
 
@@ -46,7 +46,8 @@ impl Gui {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let ctx = egui::Context::default();
         panels::style(&ctx);
-        let renderer = egui_wgpu::Renderer::new(device, format, egui_wgpu::RendererOptions::default());
+        let renderer =
+            egui_wgpu::Renderer::new(device, format, egui_wgpu::RendererOptions::default());
         Self {
             ctx,
             renderer,
@@ -65,8 +66,15 @@ impl Gui {
     // ---- input (physical px) --------------------------------------------------
 
     pub fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
-        self.modifiers = Modifiers { alt, ctrl, shift, mac_cmd: false, command: ctrl };
-        self.events.push(egui::Event::ModifiersChanged(self.modifiers));
+        self.modifiers = Modifiers {
+            alt,
+            ctrl,
+            shift,
+            mac_cmd: false,
+            command: ctrl,
+        };
+        self.events
+            .push(egui::Event::ModifiersChanged(self.modifiers));
     }
 
     pub fn pointer_moved(&mut self, phys: DVec2, ppp: f64) {
@@ -74,8 +82,17 @@ impl Gui {
     }
 
     pub fn pointer_button(&mut self, phys: DVec2, ppp: f64, middle: bool, pressed: bool) {
-        let button = if middle { PointerButton::Middle } else { PointerButton::Primary };
-        self.events.push(egui::Event::PointerButton { pos: pos(phys, ppp), button, pressed, modifiers: self.modifiers });
+        let button = if middle {
+            PointerButton::Middle
+        } else {
+            PointerButton::Primary
+        };
+        self.events.push(egui::Event::PointerButton {
+            pos: pos(phys, ppp),
+            button,
+            pressed,
+            modifiers: self.modifiers,
+        });
     }
 
     pub fn pointer_gone(&mut self) {
@@ -94,12 +111,22 @@ impl Gui {
     }
 
     pub fn key(&mut self, key: egui::Key, pressed: bool) {
-        self.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: self.modifiers });
+        self.events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: self.modifiers,
+        });
     }
 
     /// Copy (or cut) in the focused text field.
     pub fn copy_event(&mut self, cut: bool) {
-        self.events.push(if cut { egui::Event::Cut } else { egui::Event::Copy });
+        self.events.push(if cut {
+            egui::Event::Cut
+        } else {
+            egui::Event::Copy
+        });
     }
 
     /// Pastes text into the focused text field.
@@ -119,8 +146,13 @@ impl Gui {
     }
 
     /// Makes a wgpu texture (premultiplied linear RGBA) usable in egui.
-    pub fn register_texture(&mut self, device: &wgpu::Device, view: &wgpu::TextureView) -> egui::TextureId {
-        self.renderer.register_native_texture(device, view, wgpu::FilterMode::Linear)
+    pub fn register_texture(
+        &mut self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+    ) -> egui::TextureId {
+        self.renderer
+            .register_native_texture(device, view, wgpu::FilterMode::Linear)
     }
 
     pub fn has_events(&self) -> bool {
@@ -152,10 +184,16 @@ impl Gui {
             max_texture_side: Some(8192),
             ..Default::default()
         };
-        raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp as f32);
+        raw.viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .native_pixels_per_point = Some(ppp as f32);
         let mut build = build;
         let out = self.ctx.run_pass(raw, |ctx| build(ctx));
-        let delay = out.viewport_output.get(&egui::ViewportId::ROOT).map_or(Duration::MAX, |v| v.repaint_delay);
+        let delay = out
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(Duration::MAX, |v| v.repaint_delay);
         self.repaint_at = (delay < Duration::from_secs(3600)).then(|| Instant::now() + delay);
         self.prims = self.ctx.tessellate(out.shapes, out.pixels_per_point);
         self.ppp = out.pixels_per_point;
@@ -168,7 +206,13 @@ impl Gui {
     }
 
     /// Draws the last UI pass on top of `target`.
-    pub fn paint(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::TextureView, size: (u32, u32)) {
+    pub fn paint(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target: &wgpu::TextureView,
+        size: (u32, u32),
+    ) {
         let textures = std::mem::take(&mut self.textures);
         let (prims, ppp) = (&self.prims, self.ppp);
         if prims.is_empty() {
@@ -179,9 +223,14 @@ impl Gui {
                 self.renderer.update_texture(device, queue, *id, delta);
             }
         }
-        let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [size.0, size.1], pixels_per_point: ppp };
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [size.0, size.1],
+            pixels_per_point: ppp,
+        };
         let mut enc = device.create_command_encoder(&Default::default());
-        let extra = self.renderer.update_buffers(device, queue, &mut enc, prims, &screen);
+        let extra = self
+            .renderer
+            .update_buffers(device, queue, &mut enc, prims, &screen);
         {
             let rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui"),
@@ -189,11 +238,15 @@ impl Gui {
                     view: target,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 ..Default::default()
             });
-            self.renderer.render(&mut rp.forget_lifetime(), prims, &screen);
+            self.renderer
+                .render(&mut rp.forget_lifetime(), prims, &screen);
         }
         queue.submit(extra.into_iter().chain([enc.finish()]));
         for id in &textures.free {
@@ -204,8 +257,8 @@ impl Gui {
 
 /// egui key for a keysym, for text fields and widget navigation.
 pub fn egui_key(sym: smithay_client_toolkit::seat::keyboard::Keysym) -> Option<egui::Key> {
-    use smithay_client_toolkit::seat::keyboard::Keysym as K;
     use egui::Key;
+    use smithay_client_toolkit::seat::keyboard::Keysym as K;
     Some(match sym {
         K::BackSpace => Key::Backspace,
         K::Delete => Key::Delete,

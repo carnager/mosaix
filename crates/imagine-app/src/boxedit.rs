@@ -11,7 +11,10 @@ pub enum Handle {
     Move,
     Rotate,
     /// Side per axis: -1 = min edge, 1 = max edge, 0 = this axis is not dragged.
-    Scale { sx: i8, sy: i8 },
+    Scale {
+        sx: i8,
+        sy: i8,
+    },
     /// Draw a new rectangle (crop: click outside the box).
     Create,
 }
@@ -48,7 +51,12 @@ const HIT_PX: f64 = 12.0;
 
 impl BoxEdit {
     pub fn new(min: DVec2, max: DVec2, free: bool) -> Self {
-        Self { base: (min, max), fwd: DAffine2::IDENTITY, free, drag: None }
+        Self {
+            base: (min, max),
+            fwd: DAffine2::IDENTITY,
+            free,
+            drag: None,
+        }
     }
 
     fn local_point(&self, sx: i8, sy: i8) -> DVec2 {
@@ -71,7 +79,11 @@ impl BoxEdit {
         let x = self.fwd.matrix2.x_axis;
         let a = x.y.atan2(x.x).to_degrees();
         // Mirrored boxes: report the angle of the unmirrored axis.
-        if self.fwd.matrix2.determinant() < 0.0 { -a } else { a }
+        if self.fwd.matrix2.determinant() < 0.0 {
+            -a
+        } else {
+            a
+        }
     }
 
     /// Turns the box (and its content) about its centre.
@@ -84,13 +96,17 @@ impl BoxEdit {
     /// Mirrors the box about its centre (horizontally and/or vertically).
     pub fn flip(&mut self, x: bool, y: bool) {
         let c = self.centre();
-        let f = DAffine2::from_scale(DVec2::new(if x { -1.0 } else { 1.0 }, if y { -1.0 } else { 1.0 }));
+        let f = DAffine2::from_scale(DVec2::new(
+            if x { -1.0 } else { 1.0 },
+            if y { -1.0 } else { 1.0 },
+        ));
         self.fwd = DAffine2::from_translation(c) * f * DAffine2::from_translation(-c) * self.fwd;
     }
 
     /// Corners in document space, clockwise from the top left.
     pub fn corners(&self) -> [DVec2; 4] {
-        [(-1, -1), (1, -1), (1, 1), (-1, 1)].map(|(x, y)| self.fwd.transform_point2(self.local_point(x, y)))
+        [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+            .map(|(x, y)| self.fwd.transform_point2(self.local_point(x, y)))
     }
 
     /// The axis-aligned rectangle (crop), rounded to whole pixels: (x, y, w, h).
@@ -98,7 +114,12 @@ impl BoxEdit {
         let c = self.corners();
         let min = c.iter().fold(DVec2::INFINITY, |a, p| a.min(*p)).round();
         let max = c.iter().fold(DVec2::NEG_INFINITY, |a, p| a.max(*p)).round();
-        (min.x as i64, min.y as i64, (max.x - min.x) as i64, (max.y - min.y) as i64)
+        (
+            min.x as i64,
+            min.y as i64,
+            (max.x - min.x) as i64,
+            (max.y - min.y) as i64,
+        )
     }
 
     fn handles(&self) -> Vec<(Handle, DVec2)> {
@@ -106,7 +127,10 @@ impl BoxEdit {
         for sy in -1..=1i8 {
             for sx in -1..=1i8 {
                 if sx != 0 || sy != 0 {
-                    v.push((Handle::Scale { sx, sy }, self.fwd.transform_point2(self.local_point(sx, sy))));
+                    v.push((
+                        Handle::Scale { sx, sy },
+                        self.fwd.transform_point2(self.local_point(sx, sy)),
+                    ));
                 }
             }
         }
@@ -146,7 +170,11 @@ impl BoxEdit {
             self.base = (doc, doc);
             self.fwd = DAffine2::IDENTITY;
         }
-        self.drag = Some(Drag { handle, start: doc, start_fwd: self.fwd });
+        self.drag = Some(Drag {
+            handle,
+            start: doc,
+            start_fwd: self.fwd,
+        });
     }
 
     pub fn update(&mut self, doc: DVec2, m: Modifiers) {
@@ -182,16 +210,31 @@ impl BoxEdit {
                     let step = 15f64.to_radians();
                     angle = (angle / step).round() * step;
                 }
-                DAffine2::from_translation(c) * DAffine2::from_angle(angle) * DAffine2::from_translation(-c) * d.start_fwd
+                DAffine2::from_translation(c)
+                    * DAffine2::from_angle(angle)
+                    * DAffine2::from_translation(-c)
+                    * d.start_fwd
             }
             Handle::Scale { sx, sy } => {
                 let u = d.start_fwd.inverse().transform_point2(doc);
                 let h = self.local_point(sx, sy);
-                let anchor = if m.alt { self.local_point(0, 0) } else { self.local_point(-sx, -sy) };
+                let anchor = if m.alt {
+                    self.local_point(0, 0)
+                } else {
+                    self.local_point(-sx, -sy)
+                };
                 let ratio = |num: f64, den: f64| if den.abs() < 1e-9 { 1.0 } else { num / den };
                 let mut k = DVec2::new(
-                    if sx != 0 { ratio(u.x - anchor.x, h.x - anchor.x) } else { 1.0 },
-                    if sy != 0 { ratio(u.y - anchor.y, h.y - anchor.y) } else { 1.0 },
+                    if sx != 0 {
+                        ratio(u.x - anchor.x, h.x - anchor.x)
+                    } else {
+                        1.0
+                    },
+                    if sy != 0 {
+                        ratio(u.y - anchor.y, h.y - anchor.y)
+                    } else {
+                        1.0
+                    },
                 );
                 // Corners keep the aspect ratio in free transform; Shift toggles.
                 let proportional = sx != 0 && sy != 0 && (self.free != m.shift);
@@ -215,26 +258,41 @@ impl BoxEdit {
 
     /// Outline and handles in screen px.
     pub fn lines(&self, view: &View, scale: f64) -> Vec<OverlayLine> {
-        let mut out = vec![OverlayLine { points: self.corners().map(|p| view.doc_to_screen(p)).to_vec(), closed: true }];
+        let mut out = vec![OverlayLine {
+            points: self.corners().map(|p| view.doc_to_screen(p)).to_vec(),
+            closed: true,
+        }];
         let r = HANDLE_PX * scale;
         for (_, p) in self.handles() {
             let s = view.doc_to_screen(p);
-            let points = [(-r, -r), (r, -r), (r, r), (-r, r)].map(|(x, y)| s + DVec2::new(x, y)).to_vec();
-            out.push(OverlayLine { points, closed: true });
+            let points = [(-r, -r), (r, -r), (r, r), (-r, r)]
+                .map(|(x, y)| s + DVec2::new(x, y))
+                .to_vec();
+            out.push(OverlayLine {
+                points,
+                closed: true,
+            });
         }
         out
     }
 }
 
 fn nonzero(v: f64) -> f64 {
-    if v.abs() < 1e-3 { 1e-3f64.copysign(v) } else { v }
+    if v.abs() < 1e-3 {
+        1e-3f64.copysign(v)
+    } else {
+        v
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const NONE: Modifiers = Modifiers { shift: false, alt: false };
+    const NONE: Modifiers = Modifiers {
+        shift: false,
+        alt: false,
+    };
 
     fn edit() -> BoxEdit {
         BoxEdit::new(DVec2::new(100.0, 100.0), DVec2::new(300.0, 200.0), true)
@@ -246,12 +304,21 @@ mod tests {
         b.begin(Handle::Scale { sx: 1, sy: 1 }, DVec2::new(300.0, 200.0));
         b.update(DVec2::new(500.0, 230.0), NONE);
         let c = b.corners();
-        assert!(c[0].distance(DVec2::new(100.0, 100.0)) < 1e-9, "anchor stays");
+        assert!(
+            c[0].distance(DVec2::new(100.0, 100.0)) < 1e-9,
+            "anchor stays"
+        );
         // Projection onto the diagonal: (400, 130)·(200, 100) / |(200, 100)|² = 1.86
         let k = (400.0 * 200.0 + 130.0 * 100.0) / (200.0f64 * 200.0 + 100.0 * 100.0);
         assert!(c[2].distance(DVec2::new(100.0 + 200.0 * k, 100.0 + 100.0 * k)) < 1e-9);
         // Shift: free aspect ratio.
-        b.update(DVec2::new(500.0, 230.0), Modifiers { shift: true, alt: false });
+        b.update(
+            DVec2::new(500.0, 230.0),
+            Modifiers {
+                shift: true,
+                alt: false,
+            },
+        );
         assert!(b.corners()[2].distance(DVec2::new(500.0, 230.0)) < 1e-9);
     }
 
@@ -259,7 +326,13 @@ mod tests {
     fn edge_scales_one_axis_and_alt_scales_around_centre() {
         let mut b = edit();
         b.begin(Handle::Scale { sx: 1, sy: 0 }, DVec2::new(300.0, 150.0));
-        b.update(DVec2::new(400.0, 999.0), Modifiers { shift: false, alt: true });
+        b.update(
+            DVec2::new(400.0, 999.0),
+            Modifiers {
+                shift: false,
+                alt: true,
+            },
+        );
         let c = b.corners();
         assert!(c[0].distance(DVec2::new(0.0, 100.0)) < 1e-9, "{c:?}");
         assert!(c[2].distance(DVec2::new(400.0, 200.0)) < 1e-9, "{c:?}");
@@ -270,24 +343,52 @@ mod tests {
         let mut b = edit();
         let centre = DVec2::new(200.0, 150.0);
         b.begin(Handle::Rotate, centre + DVec2::new(200.0, 0.0));
-        b.update(centre + DVec2::new(200.0, 210.0), Modifiers { shift: true, alt: false });
+        b.update(
+            centre + DVec2::new(200.0, 210.0),
+            Modifiers {
+                shift: true,
+                alt: false,
+            },
+        );
         // atan(210/200) ≈ 46.4° → 45°.
-        let angle = b.fwd.matrix2.x_axis.y.atan2(b.fwd.matrix2.x_axis.x).to_degrees();
+        let angle = b
+            .fwd
+            .matrix2
+            .x_axis
+            .y
+            .atan2(b.fwd.matrix2.x_axis.x)
+            .to_degrees();
         assert!((angle - 45.0).abs() < 1e-9, "{angle}");
-        assert!(b.fwd.transform_point2(centre).distance(centre) < 1e-9, "rotates around the centre");
+        assert!(
+            b.fwd.transform_point2(centre).distance(centre) < 1e-9,
+            "rotates around the centre"
+        );
         b.end();
 
         let mut b = edit();
         b.begin(Handle::Move, DVec2::new(150.0, 150.0));
-        b.update(DVec2::new(250.0, 160.0), Modifiers { shift: true, alt: false });
+        b.update(
+            DVec2::new(250.0, 160.0),
+            Modifiers {
+                shift: true,
+                alt: false,
+            },
+        );
         assert!(b.fwd.translation.distance(DVec2::new(100.0, 0.0)) < 1e-9);
     }
 
     #[test]
     fn crop_box_is_created_and_hit_tested() {
         let mut b = BoxEdit::new(DVec2::ZERO, DVec2::new(1000.0, 800.0), false);
-        let view = View { viewport: DVec2::new(1000.0, 800.0), center: DVec2::new(500.0, 400.0), ..Default::default() };
-        assert_eq!(b.hit(&view, DVec2::new(1000.0, 800.0), 1.0), Handle::Scale { sx: 1, sy: 1 });
+        let view = View {
+            viewport: DVec2::new(1000.0, 800.0),
+            center: DVec2::new(500.0, 400.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            b.hit(&view, DVec2::new(1000.0, 800.0), 1.0),
+            Handle::Scale { sx: 1, sy: 1 }
+        );
         assert_eq!(b.hit(&view, DVec2::new(500.0, 400.0), 1.0), Handle::Move);
         assert_eq!(b.hit(&view, DVec2::new(1200.0, 400.0), 1.0), Handle::Create);
         b.begin(Handle::Create, DVec2::new(300.0, 200.0));

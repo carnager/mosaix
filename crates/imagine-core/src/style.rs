@@ -140,25 +140,55 @@ fn black() -> [f32; 3] {
 impl EffectKind {
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Stroke { .. } => "Kontur",
-            Self::DropShadow { .. } => "Schlagschatten",
-            Self::InnerShadow { .. } => "Schatten nach innen",
-            Self::OuterGlow { .. } => "Schein nach außen",
-            Self::InnerGlow { .. } => "Schein nach innen",
-            Self::ColorOverlay { .. } => "Farbüberlagerung",
-            Self::Bevel { .. } => "Abgeflachte Kante & Relief",
+            Self::Stroke { .. } => crate::tr("Stroke"),
+            Self::DropShadow { .. } => crate::tr("Drop Shadow"),
+            Self::InnerShadow { .. } => crate::tr("Inner Shadow"),
+            Self::OuterGlow { .. } => crate::tr("Outer Glow"),
+            Self::InnerGlow { .. } => crate::tr("Inner Glow"),
+            Self::ColorOverlay { .. } => crate::tr("Color Overlay"),
+            Self::Bevel { .. } => crate::tr("Bevel & Emboss"),
         }
     }
 
     /// One of each, with sensible settings (for menus).
     pub fn defaults() -> Vec<EffectKind> {
         vec![
-            Self::Stroke { size: 3.0, position: StrokePosition::Outside, color: [0.0; 3], opacity: 1.0 },
-            Self::DropShadow { color: [0.0; 3], opacity: 0.6, angle: 120.0, distance: 6.0, size: 8.0, spread: 0.0 },
-            Self::InnerShadow { color: [0.0; 3], opacity: 0.6, angle: 120.0, distance: 4.0, size: 6.0 },
-            Self::OuterGlow { color: [1.0, 0.85, 0.4], opacity: 0.75, size: 12.0, spread: 0.0 },
-            Self::InnerGlow { color: [1.0, 0.85, 0.4], opacity: 0.75, size: 8.0 },
-            Self::ColorOverlay { color: [0.8, 0.1, 0.1], opacity: 1.0 },
+            Self::Stroke {
+                size: 3.0,
+                position: StrokePosition::Outside,
+                color: [0.0; 3],
+                opacity: 1.0,
+            },
+            Self::DropShadow {
+                color: [0.0; 3],
+                opacity: 0.6,
+                angle: 120.0,
+                distance: 6.0,
+                size: 8.0,
+                spread: 0.0,
+            },
+            Self::InnerShadow {
+                color: [0.0; 3],
+                opacity: 0.6,
+                angle: 120.0,
+                distance: 4.0,
+                size: 6.0,
+            },
+            Self::OuterGlow {
+                color: [1.0, 0.85, 0.4],
+                opacity: 0.75,
+                size: 12.0,
+                spread: 0.0,
+            },
+            Self::InnerGlow {
+                color: [1.0, 0.85, 0.4],
+                opacity: 0.75,
+                size: 8.0,
+            },
+            Self::ColorOverlay {
+                color: [0.8, 0.1, 0.1],
+                opacity: 1.0,
+            },
             Self::Bevel {
                 style: BevelStyle::Inner,
                 size: 6.0,
@@ -177,11 +207,29 @@ impl EffectKind {
     /// How far the effect can reach outside the shape (px).
     pub fn reach(&self) -> f32 {
         match self {
-            Self::Stroke { size, position: StrokePosition::Outside, .. } => *size + 1.0,
-            Self::Stroke { size, position: StrokePosition::Center, .. } => *size * 0.5 + 1.0,
-            Self::DropShadow { distance, size, spread, .. } => distance + size * 1.5 + spread + 2.0,
+            Self::Stroke {
+                size,
+                position: StrokePosition::Outside,
+                ..
+            } => *size + 1.0,
+            Self::Stroke {
+                size,
+                position: StrokePosition::Center,
+                ..
+            } => *size * 0.5 + 1.0,
+            Self::DropShadow {
+                distance,
+                size,
+                spread,
+                ..
+            } => distance + size * 1.5 + spread + 2.0,
             Self::OuterGlow { size, spread, .. } => size * 1.5 + spread + 2.0,
-            Self::Bevel { style: BevelStyle::Emboss | BevelStyle::Pillow, size, soften, .. } => size + soften * 1.5 + 2.0,
+            Self::Bevel {
+                style: BevelStyle::Emboss | BevelStyle::Pillow,
+                size,
+                soften,
+                ..
+            } => size + soften * 1.5 + 2.0,
             _ => 0.0,
         }
     }
@@ -189,7 +237,11 @@ impl EffectKind {
 
 /// How far a list of effects reaches outside the shape (px).
 pub fn reach(effects: &[Effect]) -> f32 {
-    effects.iter().filter(|e| e.enabled).map(|e| e.kind.reach()).fold(0.0, f32::max)
+    effects
+        .iter()
+        .filter(|e| e.enabled)
+        .map(|e| e.kind.reach())
+        .fold(0.0, f32::max)
 }
 
 /// A rectangle of premultiplied linear RGBA pixels.
@@ -202,7 +254,11 @@ pub struct Region {
 
 impl Region {
     pub fn new(w: usize, h: usize) -> Self {
-        Self { w, h, px: vec![[0.0; 4]; w * h] }
+        Self {
+            w,
+            h,
+            px: vec![[0.0; 4]; w * h],
+        }
     }
 
     fn alpha(&self) -> Vec<f32> {
@@ -228,7 +284,8 @@ fn edt_1d(f: &[f32], d: &mut [f32], v: &mut [usize], z: &mut [f32]) {
     for q in 1..n {
         loop {
             let p = v[k];
-            let s = ((f[q] + (q * q) as f32) - (f[p] + (p * p) as f32)) / (2.0 * (q as f32 - p as f32));
+            let s =
+                ((f[q] + (q * q) as f32) - (f[p] + (p * p) as f32)) / (2.0 * (q as f32 - p as f32));
             // z[0] = −∞, so k never drops below 0.
             if s <= z[k] {
                 k -= 1;
@@ -291,7 +348,11 @@ fn signed_distance(w: usize, h: usize, alpha: &[f32]) -> Vec<f32> {
     // edge point (two-pass propagation of the point, Danielsson-style), so
     // antialiased edges stay smooth instead of following pixel steps.
     let at = |x: isize, y: isize| -> f32 {
-        if x < 0 || y < 0 || x >= w as isize || y >= h as isize { 0.0 } else { alpha[y as usize * w + x as usize].clamp(0.0, 1.0) }
+        if x < 0 || y < 0 || x >= w as isize || y >= h as isize {
+            0.0
+        } else {
+            alpha[y as usize * w + x as usize].clamp(0.0, 1.0)
+        }
     };
     const NONE: (f32, f32) = (f32::NAN, f32::NAN);
     let mut seed: Vec<(f32, f32)> = (0..w * h)
@@ -312,8 +373,10 @@ fn signed_distance(w: usize, h: usize, alpha: &[f32]) -> Vec<f32> {
                 return NONE;
             }
             // Gradient (Sobel) points into the shape.
-            let gx = (at(x + 1, y - 1) + 2.0 * at(x + 1, y) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0 * at(x - 1, y) + at(x - 1, y + 1));
-            let gy = (at(x - 1, y + 1) + 2.0 * at(x, y + 1) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0 * at(x, y - 1) + at(x + 1, y - 1));
+            let gx = (at(x + 1, y - 1) + 2.0 * at(x + 1, y) + at(x + 1, y + 1))
+                - (at(x - 1, y - 1) + 2.0 * at(x - 1, y) + at(x - 1, y + 1));
+            let gy = (at(x - 1, y + 1) + 2.0 * at(x, y + 1) + at(x + 1, y + 1))
+                - (at(x - 1, y - 1) + 2.0 * at(x, y - 1) + at(x + 1, y - 1));
             let len = (gx * gx + gy * gy).sqrt();
             let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
             if len < 1e-6 {
@@ -327,7 +390,17 @@ fn signed_distance(w: usize, h: usize, alpha: &[f32]) -> Vec<f32> {
         let (px, py) = ((i % w) as f32 + 0.5, (i / w) as f32 + 0.5);
         (px - s.0).powi(2) + (py - s.1).powi(2)
     };
-    let mut best: Vec<f32> = seed.iter().enumerate().map(|(i, s)| if s.0.is_nan() { f32::INFINITY } else { d2(i, *s) }).collect();
+    let mut best: Vec<f32> = seed
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if s.0.is_nan() {
+                f32::INFINITY
+            } else {
+                d2(i, *s)
+            }
+        })
+        .collect();
     let relax = |i: usize, j: usize, seed: &mut [(f32, f32)], best: &mut [f32]| {
         let s = seed[j];
         if s.0.is_nan() {
@@ -402,7 +475,13 @@ fn box_blur(w: usize, h: usize, src: &[f32], r: usize) -> Vec<f32> {
     let mut tmp = vec![0.0f32; w * h];
     tmp.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
         let row = &src[y * w..(y + 1) * w];
-        let get = |i: isize| if i < 0 || i >= w as isize { 0.0 } else { row[i as usize] };
+        let get = |i: isize| {
+            if i < 0 || i >= w as isize {
+                0.0
+            } else {
+                row[i as usize]
+            }
+        };
         let mut acc: f32 = (-(r as isize)..=r as isize).map(get).sum();
         for (x, o) in out.iter_mut().enumerate() {
             *o = acc * norm;
@@ -413,7 +492,13 @@ fn box_blur(w: usize, h: usize, src: &[f32], r: usize) -> Vec<f32> {
     let cols: Vec<Vec<f32>> = (0..w)
         .into_par_iter()
         .map(|x| {
-            let get = |i: isize| if i < 0 || i >= h as isize { 0.0 } else { tmp[i as usize * w + x] };
+            let get = |i: isize| {
+                if i < 0 || i >= h as isize {
+                    0.0
+                } else {
+                    tmp[i as usize * w + x]
+                }
+            };
             let mut acc: f32 = (-(r as isize)..=r as isize).map(get).sum();
             (0..h)
                 .map(|y| {
@@ -439,7 +524,9 @@ fn blur(w: usize, h: usize, src: &[f32], size: f32) -> Vec<f32> {
         return src.to_vec();
     }
     // Box radius for three passes with the same variance.
-    let r = (((12.0 * sigma * sigma / 3.0 + 1.0).sqrt() - 1.0) * 0.5).round().max(1.0) as usize;
+    let r = (((12.0 * sigma * sigma / 3.0 + 1.0).sqrt() - 1.0) * 0.5)
+        .round()
+        .max(1.0) as usize;
     let a = box_blur(w, h, src, r);
     let b = box_blur(w, h, &a, r);
     box_blur(w, h, &b, r)
@@ -452,7 +539,11 @@ fn shift(w: usize, h: usize, src: &[f32], dx: f32, dy: f32, fill: f32) -> Vec<f3
         .into_par_iter()
         .map(|i| {
             let (x, y) = ((i % w) as isize - sx, (i / w) as isize - sy);
-            if x < 0 || y < 0 || x >= w as isize || y >= h as isize { fill } else { src[y as usize * w + x as usize] }
+            if x < 0 || y < 0 || x >= w as isize || y >= h as isize {
+                fill
+            } else {
+                src[y as usize * w + x as usize]
+            }
         })
         .collect()
 }
@@ -465,20 +556,30 @@ fn away(angle: f32, distance: f32) -> (f32, f32) {
 }
 
 fn solid(alpha: &[f32], color: [f32; 3], opacity: f32, w: usize, h: usize) -> Region {
-    Region { w, h, px: alpha.iter().map(|&a| a.clamp(0.0, 1.0) * opacity).map(|a| [color[0] * a, color[1] * a, color[2] * a, a]).collect() }
+    Region {
+        w,
+        h,
+        px: alpha
+            .iter()
+            .map(|&a| a.clamp(0.0, 1.0) * opacity)
+            .map(|a| [color[0] * a, color[1] * a, color[2] * a, a])
+            .collect(),
+    }
 }
 
 /// `src` over `dst` with a blend mode, both premultiplied linear (simple
 /// per-pixel version of the compositor, for effects inside the shape).
 fn blend_into(dst: &mut [Px], src_rgb: [f32; 3], src_alpha: &[f32], mode: BlendMode) {
-    dst.par_iter_mut().zip(src_alpha.par_iter()).for_each(|(d, &sa)| {
-        let sa = sa.clamp(0.0, 1.0);
-        if sa <= 0.0 {
-            return;
-        }
-        let s = [src_rgb[0] * sa, src_rgb[1] * sa, src_rgb[2] * sa, sa];
-        *d = crate::blend::composite(*d, s, mode, crate::blend::BlendSpace::Srgb);
-    });
+    dst.par_iter_mut()
+        .zip(src_alpha.par_iter())
+        .for_each(|(d, &sa)| {
+            let sa = sa.clamp(0.0, 1.0);
+            if sa <= 0.0 {
+                return;
+            }
+            let s = [src_rgb[0] * sa, src_rgb[1] * sa, src_rgb[2] * sa, sa];
+            *d = crate::blend::composite(*d, s, mode, crate::blend::BlendSpace::Srgb);
+        });
 }
 
 // ---- the effects ----------------------------------------------------------------
@@ -488,17 +589,27 @@ fn blend_into(dst: &mut [Px], src_rgb: [f32; 3], src_alpha: &[f32], mode: BlendM
 pub fn apply(effects: &[Effect], content: &Region) -> Styled {
     let (w, h) = (content.w, content.h);
     let alpha = content.alpha();
-    let active: Vec<&EffectKind> = effects.iter().filter(|e| e.enabled).map(|e| &e.kind).collect();
+    let active: Vec<&EffectKind> = effects
+        .iter()
+        .filter(|e| e.enabled)
+        .map(|e| &e.kind)
+        .collect();
     let needs_sdf = active.iter().any(|k| match k {
         EffectKind::Stroke { .. } | EffectKind::Bevel { .. } => true,
-        EffectKind::OuterGlow { spread, .. } | EffectKind::DropShadow { spread, .. } => *spread > 0.0,
+        EffectKind::OuterGlow { spread, .. } | EffectKind::DropShadow { spread, .. } => {
+            *spread > 0.0
+        }
         _ => false,
     });
     let sdf = needs_sdf.then(|| signed_distance(w, h, &alpha));
     // Shape grown by `spread` px (for shadows and glows).
     let grown = |spread: f32| -> Vec<f32> {
         match (&sdf, spread > 0.0) {
-            (Some(d), true) => d.iter().zip(&alpha).map(|(&d, &a)| a.max((spread + 0.5 - d).clamp(0.0, 1.0))).collect(),
+            (Some(d), true) => d
+                .iter()
+                .zip(&alpha)
+                .map(|(&d, &a)| a.max((spread + 0.5 - d).clamp(0.0, 1.0)))
+                .collect(),
             _ => alpha.clone(),
         }
     };
@@ -508,12 +619,24 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
     // Underneath (in Photoshop's order, bottom first): drop shadow, outer glow, outside stroke.
     for k in &active {
         match **k {
-            EffectKind::DropShadow { color, opacity, angle, distance, size, spread } => {
+            EffectKind::DropShadow {
+                color,
+                opacity,
+                angle,
+                distance,
+                size,
+                spread,
+            } => {
                 let (dx, dy) = away(angle, distance);
                 let a = blur(w, h, &shift(w, h, &grown(spread), dx, dy, 0.0), size);
                 below.push((BlendMode::Multiply, solid(&a, color, opacity, w, h)));
             }
-            EffectKind::OuterGlow { color, opacity, size, spread } => {
+            EffectKind::OuterGlow {
+                color,
+                opacity,
+                size,
+                spread,
+            } => {
                 let a = blur(w, h, &grown(spread), size);
                 below.push((BlendMode::Screen, solid(&a, color, opacity, w, h)));
             }
@@ -531,14 +654,28 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                     }
                 });
             }
-            EffectKind::InnerGlow { color, opacity, size } => {
+            EffectKind::InnerGlow {
+                color,
+                opacity,
+                size,
+            } => {
                 // Bright at the edge, fading inwards.
                 let inv: Vec<f32> = alpha.iter().map(|a| 1.0 - a).collect();
                 let b = blur(w, h, &inv, size * 2.0);
-                let a: Vec<f32> = b.iter().zip(&alpha).map(|(g, a)| (g * 2.0).min(1.0) * a * opacity).collect();
+                let a: Vec<f32> = b
+                    .iter()
+                    .zip(&alpha)
+                    .map(|(g, a)| (g * 2.0).min(1.0) * a * opacity)
+                    .collect();
                 blend_into(&mut out.px, color, &a, BlendMode::Screen);
             }
-            EffectKind::InnerShadow { color, opacity, angle, distance, size } => {
+            EffectKind::InnerShadow {
+                color,
+                opacity,
+                angle,
+                distance,
+                size,
+            } => {
                 let (dx, dy) = away(angle, distance);
                 let inv: Vec<f32> = alpha.iter().map(|a| 1.0 - a).collect();
                 let b = blur(w, h, &shift(w, h, &inv, dx, dy, 1.0), size);
@@ -549,7 +686,19 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
         }
     }
     for k in &active {
-        if let EffectKind::Bevel { style, size, depth, soften, angle, altitude, highlight, highlight_opacity, shadow, shadow_opacity } = **k {
+        if let EffectKind::Bevel {
+            style,
+            size,
+            depth,
+            soften,
+            angle,
+            altitude,
+            highlight,
+            highlight_opacity,
+            shadow,
+            shadow_opacity,
+        } = **k
+        {
             let d = sdf.as_ref().unwrap();
             let size = size.max(0.5);
             // Height: 0 at the edge rising to 1 at `size` inside (emboss: also falling outside).
@@ -575,20 +724,23 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
             let mut hi = vec![0.0f32; w * h];
             let mut lo = vec![0.0f32; w * h];
             let reach_out = !matches!(style, BevelStyle::Inner);
-            hi.par_iter_mut().zip(lo.par_iter_mut()).enumerate().for_each(|(i, (hv, lv))| {
-                let (x, y) = (i % w, i / w);
-                let hx = |xx: usize| height[y * w + xx];
-                let hy = |yy: usize| height[yy * w + x];
-                let gx = (hx((x + 1).min(w - 1)) - hx(x.saturating_sub(1))) * 0.5;
-                let gy = (hy((y + 1).min(h - 1)) - hy(y.saturating_sub(1))) * 0.5;
-                let n = [-gx * k * size * 0.5, -gy * k * size * 0.5, 1.0];
-                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-                let s = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / len;
-                // Where the relief is visible: inside the shape, or around it for emboss.
-                let cover = if reach_out { 1.0 } else { alpha[i] };
-                *hv = ((s - flat).max(0.0) / (1.0 - flat).max(1e-3)).min(1.0) * cover;
-                *lv = ((flat - s).max(0.0) / flat.max(1e-3)).min(1.0) * cover;
-            });
+            hi.par_iter_mut()
+                .zip(lo.par_iter_mut())
+                .enumerate()
+                .for_each(|(i, (hv, lv))| {
+                    let (x, y) = (i % w, i / w);
+                    let hx = |xx: usize| height[y * w + xx];
+                    let hy = |yy: usize| height[yy * w + x];
+                    let gx = (hx((x + 1).min(w - 1)) - hx(x.saturating_sub(1))) * 0.5;
+                    let gy = (hy((y + 1).min(h - 1)) - hy(y.saturating_sub(1))) * 0.5;
+                    let n = [-gx * k * size * 0.5, -gy * k * size * 0.5, 1.0];
+                    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+                    let s = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / len;
+                    // Where the relief is visible: inside the shape, or around it for emboss.
+                    let cover = if reach_out { 1.0 } else { alpha[i] };
+                    *hv = ((s - flat).max(0.0) / (1.0 - flat).max(1e-3)).min(1.0) * cover;
+                    *lv = ((flat - s).max(0.0) / flat.max(1e-3)).min(1.0) * cover;
+                });
             if reach_out {
                 // Outside the shape the relief shades what is below: separate layers.
                 let mut outer_hi = vec![0.0; w * h];
@@ -610,7 +762,13 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
         }
     }
     for k in &active {
-        if let EffectKind::Stroke { size, position, color, opacity } = **k {
+        if let EffectKind::Stroke {
+            size,
+            position,
+            color,
+            opacity,
+        } = **k
+        {
             let d = sdf.as_ref().unwrap();
             let (inner, outer) = match position {
                 StrokePosition::Outside => (0.0, size),
@@ -618,7 +776,13 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 StrokePosition::Center => (-size * 0.5, size * 0.5),
             };
             // Coverage of the band inner < d < outer (antialiased).
-            let band: Vec<f32> = d.iter().map(|&d| ((outer - d + 0.5).clamp(0.0, 1.0) * (d - inner + 0.5).clamp(0.0, 1.0)) * opacity).collect();
+            let band: Vec<f32> = d
+                .iter()
+                .map(|&d| {
+                    ((outer - d + 0.5).clamp(0.0, 1.0) * (d - inner + 0.5).clamp(0.0, 1.0))
+                        * opacity
+                })
+                .collect();
             if position == StrokePosition::Outside {
                 below.push((BlendMode::Normal, solid(&band, color, 1.0, w, h)));
             } else {
@@ -626,13 +790,20 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 let inside: Vec<f32> = band.iter().zip(&alpha).map(|(b, a)| b * a).collect();
                 blend_into(&mut out.px, color, &inside, BlendMode::Normal);
                 if position == StrokePosition::Center {
-                    let outside: Vec<f32> = band.iter().zip(&alpha).map(|(b, a)| b * (1.0 - a)).collect();
+                    let outside: Vec<f32> = band
+                        .iter()
+                        .zip(&alpha)
+                        .map(|(b, a)| b * (1.0 - a))
+                        .collect();
                     below.push((BlendMode::Normal, solid(&outside, color, 1.0, w, h)));
                 }
             }
         }
     }
-    Styled { below, content: out }
+    Styled {
+        below,
+        content: out,
+    }
 }
 
 #[cfg(test)]
@@ -652,7 +823,10 @@ mod tests {
     }
 
     fn fx(kind: EffectKind) -> Vec<Effect> {
-        vec![Effect { enabled: true, kind }]
+        vec![Effect {
+            enabled: true,
+            kind,
+        }]
     }
 
     #[test]
@@ -668,7 +842,15 @@ mod tests {
     #[test]
     fn outside_stroke_is_a_ring_of_the_right_width() {
         let reg = disc(100, 20.0);
-        let s = apply(&fx(EffectKind::Stroke { size: 5.0, position: StrokePosition::Outside, color: [1.0, 0.0, 0.0], opacity: 1.0 }), &reg);
+        let s = apply(
+            &fx(EffectKind::Stroke {
+                size: 5.0,
+                position: StrokePosition::Outside,
+                color: [1.0, 0.0, 0.0],
+                opacity: 1.0,
+            }),
+            &reg,
+        );
         assert_eq!(s.below.len(), 1);
         let ring = &s.below[0].1;
         let at = |x: usize| ring.px[50 * 100 + x];
@@ -683,14 +865,40 @@ mod tests {
     fn drop_shadow_moves_away_from_the_light_and_glow_spreads() {
         let reg = disc(120, 20.0);
         // Light from the top-left (135°) → shadow to the bottom-right.
-        let s = apply(&fx(EffectKind::DropShadow { color: [0.0; 3], opacity: 1.0, angle: 135.0, distance: 10.0, size: 4.0, spread: 0.0 }), &reg);
+        let s = apply(
+            &fx(EffectKind::DropShadow {
+                color: [0.0; 3],
+                opacity: 1.0,
+                angle: 135.0,
+                distance: 10.0,
+                size: 4.0,
+                spread: 0.0,
+            }),
+            &reg,
+        );
         let sh = &s.below[0];
         assert_eq!(sh.0, BlendMode::Multiply);
         let a = |x: usize, y: usize| sh.1.px[y * 120 + x][3];
-        assert!(a(60 + 18, 60 + 18) > a(60 - 18, 60 - 18) + 0.3, "{} vs {}", a(78, 78), a(42, 42));
-        let g = apply(&fx(EffectKind::OuterGlow { color: [1.0; 3], opacity: 1.0, size: 10.0, spread: 0.0 }), &reg);
+        assert!(
+            a(60 + 18, 60 + 18) > a(60 - 18, 60 - 18) + 0.3,
+            "{} vs {}",
+            a(78, 78),
+            a(42, 42)
+        );
+        let g = apply(
+            &fx(EffectKind::OuterGlow {
+                color: [1.0; 3],
+                opacity: 1.0,
+                size: 10.0,
+                spread: 0.0,
+            }),
+            &reg,
+        );
         let glow = &g.below[0].1;
-        assert!(glow.px[60 * 120 + 60 + 24][3] > 0.05, "glow outside the edge");
+        assert!(
+            glow.px[60 * 120 + 60 + 24][3] > 0.05,
+            "glow outside the edge"
+        );
     }
 
     #[test]
@@ -723,11 +931,23 @@ mod tests {
     #[test]
     fn overlay_and_reach() {
         let reg = disc(60, 10.0);
-        let s = apply(&fx(EffectKind::ColorOverlay { color: [0.0, 1.0, 0.0], opacity: 1.0 }), &reg);
+        let s = apply(
+            &fx(EffectKind::ColorOverlay {
+                color: [0.0, 1.0, 0.0],
+                opacity: 1.0,
+            }),
+            &reg,
+        );
         let p = s.content.px[30 * 60 + 30];
         assert!(p[1] > 0.99 && p[0] < 0.01 && (p[3] - 1.0).abs() < 1e-6);
         assert_eq!(s.content.px[0], [0.0; 4]);
-        let all: Vec<Effect> = EffectKind::defaults().into_iter().map(|kind| Effect { enabled: true, kind }).collect();
+        let all: Vec<Effect> = EffectKind::defaults()
+            .into_iter()
+            .map(|kind| Effect {
+                enabled: true,
+                kind,
+            })
+            .collect();
         assert!(reach(&all) > 15.0);
         let json = serde_json::to_string(&all).unwrap();
         assert_eq!(serde_json::from_str::<Vec<Effect>>(&json).unwrap(), all);
@@ -739,7 +959,15 @@ mod tests {
         // the circle 36.3 to within a fraction of a pixel everywhere.
         let n = 120;
         let r = 30.3;
-        let s = apply(&fx(EffectKind::Stroke { size: 6.0, position: StrokePosition::Outside, color: [1.0; 3], opacity: 1.0 }), &disc(n, r));
+        let s = apply(
+            &fx(EffectKind::Stroke {
+                size: 6.0,
+                position: StrokePosition::Outside,
+                color: [1.0; 3],
+                opacity: 1.0,
+            }),
+            &disc(n, r),
+        );
         let ring = &s.below[0].1;
         let c = n as f32 / 2.0;
         let mut worst = 0.0f32;
@@ -750,6 +978,9 @@ mod tests {
                 worst = worst.max((p[3] - want).abs());
             }
         }
-        assert!(worst < 0.1, "largest coverage error at the outer edge {worst}");
+        assert!(
+            worst < 0.1,
+            "largest coverage error at the outer edge {worst}"
+        );
     }
 }

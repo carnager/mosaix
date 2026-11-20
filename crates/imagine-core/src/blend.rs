@@ -54,28 +54,28 @@ impl BlendMode {
         Self::Luminosity,
     ];
 
-    /// Display name (Photoshop's German terms).
+    /// Display name (Photoshop's terms, translated).
     pub fn name(self) -> &'static str {
         match self {
             Self::Normal => "Normal",
-            Self::Multiply => "Multiplizieren",
-            Self::Screen => "Negativ multiplizieren",
-            Self::Overlay => "Ineinanderkopieren",
-            Self::Darken => "Abdunkeln",
-            Self::Lighten => "Aufhellen",
-            Self::ColorDodge => "Farbig abwedeln",
-            Self::ColorBurn => "Farbig nachbelichten",
-            Self::HardLight => "Hartes Licht",
-            Self::SoftLight => "Weiches Licht",
-            Self::Difference => "Differenz",
-            Self::Exclusion => "Ausschluss",
-            Self::Add => "Linear abwedeln (Addieren)",
-            Self::Subtract => "Subtrahieren",
-            Self::Divide => "Dividieren",
-            Self::Hue => "Farbton",
-            Self::Saturation => "Sättigung",
-            Self::Color => "Farbe",
-            Self::Luminosity => "Luminanz",
+            Self::Multiply => crate::tr("Multiply"),
+            Self::Screen => crate::tr("Screen"),
+            Self::Overlay => crate::tr("Overlay"),
+            Self::Darken => crate::tr("Darken"),
+            Self::Lighten => crate::tr("Lighten"),
+            Self::ColorDodge => crate::tr("Color Dodge"),
+            Self::ColorBurn => crate::tr("Color Burn"),
+            Self::HardLight => crate::tr("Hard Light"),
+            Self::SoftLight => crate::tr("Soft Light"),
+            Self::Difference => crate::tr("Difference"),
+            Self::Exclusion => crate::tr("Exclusion"),
+            Self::Add => crate::tr("Linear Dodge (Add)"),
+            Self::Subtract => crate::tr("Subtract"),
+            Self::Divide => crate::tr("Divide"),
+            Self::Hue => crate::tr("Hue"),
+            Self::Saturation => crate::tr("Saturation"),
+            Self::Color => crate::tr("Color"),
+            Self::Luminosity => crate::tr("Luminosity"),
         }
     }
 
@@ -127,7 +127,7 @@ pub enum BlendSpace {
 impl BlendSpace {
     pub fn name(self) -> &'static str {
         match self {
-            Self::Srgb => "sRGB (Photoshop-kompatibel)",
+            Self::Srgb => crate::tr("sRGB (Photoshop-compatible)"),
             Self::Linear => "linear",
         }
     }
@@ -180,13 +180,22 @@ fn sat(c: Rgb) -> f32 {
 fn set_sat(c: Rgb, s: f32) -> Rgb {
     let n = c[0].min(c[1]).min(c[2]);
     let x = c[0].max(c[1]).max(c[2]);
-    if x > n { c.map(|v| (v - n) * s / (x - n)) } else { [0.0; 3] }
+    if x > n {
+        c.map(|v| (v - n) * s / (x - n))
+    } else {
+        [0.0; 3]
+    }
 }
 
 fn separable(b: f32, s: f32, mode: BlendMode) -> f32 {
     use BlendMode::*;
     let hard_light = |b: f32, s: f32| {
-        if s <= 0.5 { b * 2.0 * s } else { let s2 = 2.0 * s - 1.0; b + s2 - b * s2 }
+        if s <= 0.5 {
+            b * 2.0 * s
+        } else {
+            let s2 = 2.0 * s - 1.0;
+            b + s2 - b * s2
+        }
     };
     match mode {
         Normal => s,
@@ -196,17 +205,33 @@ fn separable(b: f32, s: f32, mode: BlendMode) -> f32 {
         Darken => b.min(s),
         Lighten => b.max(s),
         ColorDodge => {
-            if b <= 0.0 { 0.0 } else if s >= 1.0 { 1.0 } else { (b / (1.0 - s)).min(1.0) }
+            if b <= 0.0 {
+                0.0
+            } else if s >= 1.0 {
+                1.0
+            } else {
+                (b / (1.0 - s)).min(1.0)
+            }
         }
         ColorBurn => {
-            if b >= 1.0 { 1.0 } else if s <= 0.0 { 0.0 } else { 1.0 - ((1.0 - b) / s).min(1.0) }
+            if b >= 1.0 {
+                1.0
+            } else if s <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - b) / s).min(1.0)
+            }
         }
         HardLight => hard_light(b, s),
         SoftLight => {
             if s <= 0.5 {
                 b - (1.0 - 2.0 * s) * b * (1.0 - b)
             } else {
-                let d = if b <= 0.25 { ((16.0 * b - 12.0) * b + 4.0) * b } else { b.max(0.0).sqrt() };
+                let d = if b <= 0.25 {
+                    ((16.0 * b - 12.0) * b + 4.0) * b
+                } else {
+                    b.max(0.0).sqrt()
+                };
                 b + (2.0 * s - 1.0) * (d - b)
             }
         }
@@ -254,16 +279,23 @@ pub fn composite(dst: [f32; 4], src: [f32; 4], mode: BlendMode, space: BlendSpac
     }
     let ao = a_s + ab * (1.0 - a_s);
     if mode == BlendMode::Normal && space == BlendSpace::Linear {
-        return [0, 1, 2].map(|i| src[i] + dst[i] * (1.0 - a_s)).into_rgba(ao);
+        return [0, 1, 2]
+            .map(|i| src[i] + dst[i] * (1.0 - a_s))
+            .into_rgba(ao);
     }
     let unpre = |c: [f32; 4], a: f32| -> Rgb {
-        if a > 0.0 { [0, 1, 2].map(|i| encode(c[i] / a, space)) } else { [0.0; 3] }
+        if a > 0.0 {
+            [0, 1, 2].map(|i| encode(c[i] / a, space))
+        } else {
+            [0.0; 3]
+        }
     };
     let cb = unpre(dst, ab);
     let cs = unpre(src, a_s);
     let mixed = blend_rgb(cb, cs, mode);
     // Porter-Duff source-over with the blend result, in the blend space.
-    let co: Rgb = [0, 1, 2].map(|i| cs[i] * a_s * (1.0 - ab) + cb[i] * ab * (1.0 - a_s) + a_s * ab * mixed[i]);
+    let co: Rgb = [0, 1, 2]
+        .map(|i| cs[i] * a_s * (1.0 - ab) + cb[i] * ab * (1.0 - a_s) + a_s * ab * mixed[i]);
     let rgb = [0, 1, 2].map(|i| decode(co[i] / ao, space) * ao);
     rgb.into_rgba(ao)
 }
@@ -303,7 +335,10 @@ mod tests {
         assert!(close(lin, [0.35, 0.15, 0.2, 1.0]));
         // Fully opaque source replaces the destination in any space.
         let opaque = [0.7, 0.1, 0.05, 1.0];
-        assert!(close(composite(dst, opaque, BlendMode::Normal, BlendSpace::Srgb), opaque));
+        assert!(close(
+            composite(dst, opaque, BlendMode::Normal, BlendSpace::Srgb),
+            opaque
+        ));
     }
 
     #[test]

@@ -13,10 +13,10 @@ use std::time::Instant;
 
 use anyhow::{Context, bail};
 use imagine_core::mask::CpuMask;
-use imagine_core::{Document, LayerId, MaskTile, TileCoord};
+use imagine_core::{Document, LayerId, MaskTile, TileCoord, tr};
 use imagine_gpu::{Engine, PoolKind, Readback, Tile};
-use imagine_io::native::{Writer, compress_mask, compress_tile, live_bytes};
 use imagine_io::export::ExportOptions;
+use imagine_io::native::{Writer, compress_mask, compress_tile, live_bytes};
 use imagine_io::{BlobRef, export};
 use rayon::prelude::*;
 
@@ -54,7 +54,8 @@ pub struct SaveJob {
 impl SaveJob {
     /// True once all tile data has arrived (non-blocking).
     pub fn ready(&self, device: &wgpu::Device) -> bool {
-        self.layer_rb.as_ref().is_none_or(|r| r.poll(device)) && self.mask_rb.as_ref().is_none_or(|r| r.poll(device))
+        self.layer_rb.as_ref().is_none_or(|r| r.poll(device))
+            && self.mask_rb.as_ref().is_none_or(|r| r.poll(device))
     }
 
     /// Takes the data and returns the CPU part (compress + write) as a closure
@@ -64,26 +65,46 @@ impl SaveJob {
         let mask_data = self.mask_rb.map(Readback::take).unwrap_or_default();
         let layer_serials: Vec<u64> = self.layer_tiles.iter().map(Tile::serial).collect();
         let mask_serials: Vec<u64> = self.mask_tiles.iter().map(Tile::serial).collect();
-        let (path, t0, incremental, file_len, doc, mut refs) =
-            (self.path, self.t0, self.incremental, self.file_len, self.doc, self.refs);
+        let (path, t0, incremental, file_len, doc, mut refs) = (
+            self.path,
+            self.t0,
+            self.incremental,
+            self.file_len,
+            self.doc,
+            self.refs,
+        );
         move || {
             let mut writer = if incremental {
                 Writer::append(&path, file_len.expect("incremental save has a length"))?
             } else {
                 Writer::create(&path)?
             };
-            let layer_blobs: Vec<Vec<u8>> =
-                layer_data.par_iter().map(|raw| compress_tile(&bytemuck::pod_collect_to_vec(raw))).collect();
-            let mask_blobs: Vec<Vec<u8>> = mask_data.par_iter().map(|raw| compress_mask(raw)).collect();
+            let layer_blobs: Vec<Vec<u8>> = layer_data
+                .par_iter()
+                .map(|raw| compress_tile(&bytemuck::pod_collect_to_vec(raw)))
+                .collect();
+            let mask_blobs: Vec<Vec<u8>> =
+                mask_data.par_iter().map(|raw| compress_mask(raw)).collect();
             let tiles_written = layer_blobs.len() + mask_blobs.len();
-            for (serial, blob) in layer_serials.iter().zip(layer_blobs).chain(mask_serials.iter().zip(mask_blobs)) {
+            for (serial, blob) in layer_serials
+                .iter()
+                .zip(layer_blobs)
+                .chain(mask_serials.iter().zip(mask_blobs))
+            {
                 refs.insert(*serial, writer.write_blob(&blob)?);
             }
             let doc_blobs = doc.map_tiles(&mut |s| refs[s]);
-            let len = writer.finish(&doc_blobs).with_context(|| format!("{} speichern", path.display()))?;
+            let len = writer
+                .finish(&doc_blobs)
+                .with_context(|| tr!("saving {path}", path = path.display()))?;
             debug_assert!(live_bytes(&doc_blobs) <= len);
-            let report =
-                SaveReport { path, tiles_written, bytes: len, incremental, ms: t0.elapsed().as_secs_f64() * 1e3 };
+            let report = SaveReport {
+                path,
+                tiles_written,
+                bytes: len,
+                incremental,
+                ms: t0.elapsed().as_secs_f64() * 1e3,
+            };
             Ok(SaveDone { report, refs })
         }
     }
@@ -102,40 +123,69 @@ pub struct Session {
 }
 
 /// Loads a document synchronously (headless use and agent commands).
-pub fn load(gpu: &imagine_gpu::GpuContext, format: wgpu::TextureFormat, source: Source) -> anyhow::Result<Session> {
+pub fn load(
+    gpu: &imagine_gpu::GpuContext,
+    format: wgpu::TextureFormat,
+    source: Source,
+) -> anyhow::Result<Session> {
     let (tx, rx) = std::sync::mpsc::channel();
     loader::spawn(source, tx);
     let mut session: Option<Session> = None;
     for msg in rx {
         match msg {
-            LoaderMsg::Structure { doc, name, source, native_len, .. } => {
+            LoaderMsg::Structure {
+                doc,
+                name,
+                source,
+                native_len,
+                ..
+            } => {
                 let engine = imagine_gpu::Engine::new(&gpu.device, &gpu.queue, format, &doc);
                 session = Some(Session::new(engine, name, source, native_len));
             }
             LoaderMsg::Tiles { layer, tiles } => {
-                let s = session.as_mut().context("Kacheln vor Dokumentstruktur")?;
+                let s = session
+                    .as_mut()
+                    .context(tr("tiles before document structure"))?;
                 let failed = s.add_tiles(layer, &tiles);
                 if failed > 0 {
-                    bail!("{failed} Kacheln passen nicht in den GPU-Speicher");
+                    bail!(
+                        "{}",
+                        tr!("{n} tiles do not fit into GPU memory", n = failed)
+                    );
                 }
             }
             LoaderMsg::Mask(m) => {
-                let s = session.as_mut().context("Maske vor Dokumentstruktur")?;
+                let s = session
+                    .as_mut()
+                    .context(tr("mask before document structure"))?;
                 s.add_mask(m)?;
             }
             LoaderMsg::Done { .. } => break,
-            LoaderMsg::Error(e) => bail!("Laden fehlgeschlagen: {e}"),
+            LoaderMsg::Error(e) => bail!("{}", tr!("Loading failed: {error}", error = e)),
         }
     }
-    let mut s = session.context("kein Dokument geladen")?;
+    let mut s = session.context(tr("no document loaded"))?;
     s.engine.clear_history();
     Ok(s)
 }
 
 impl Session {
-    pub fn new(engine: Engine, name: String, source: Option<PathBuf>, native_len: Option<u64>) -> Self {
+    pub fn new(
+        engine: Engine,
+        name: String,
+        source: Option<PathBuf>,
+        native_len: Option<u64>,
+    ) -> Self {
         let save_path = native_len.and(source.clone());
-        Self { engine, name, source, save_path, file_len: native_len, saved: HashMap::new() }
+        Self {
+            engine,
+            name,
+            source,
+            save_path,
+            file_len: native_len,
+            saved: HashMap::new(),
+        }
     }
 
     /// Uploads loaded tiles; tiles from a native file remember their blob.
@@ -156,8 +206,14 @@ impl Session {
 
     /// Installs a loaded layer mask or selection.
     pub fn add_mask(&mut self, m: MaskLoad) -> anyhow::Result<()> {
-        let cpu = CpuMask { tiles: m.tiles, default: m.default };
-        let uploaded = self.engine.load_mask(m.layer, cpu, m.enabled).context("GPU-Speicher voll")?;
+        let cpu = CpuMask {
+            tiles: m.tiles,
+            default: m.default,
+        };
+        let uploaded = self
+            .engine
+            .load_mask(m.layer, cpu, m.enabled)
+            .context(tr("GPU memory full"))?;
         for (c, t) in uploaded {
             if let Some(b) = m.blobs.get(&c) {
                 self.saved.insert(t.serial(), *b);
@@ -177,13 +233,20 @@ impl Session {
         }
         match &self.source {
             Some(src) => src.with_extension("imagine"),
-            None => PathBuf::from("Unbenannt.imagine"),
+            None => PathBuf::from(format!("{}.imagine", tr("Untitled"))),
         }
     }
 
     pub fn default_export_path(&self) -> PathBuf {
-        let base = self.save_path.clone().or_else(|| self.source.clone()).unwrap_or_else(|| "Unbenannt".into());
-        let stem = base.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let base = self
+            .save_path
+            .clone()
+            .or_else(|| self.source.clone())
+            .unwrap_or_else(|| tr("Untitled").into());
+        let stem = base
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         base.with_file_name(format!("{stem}-export.png"))
     }
 
@@ -192,10 +255,12 @@ impl Session {
     /// much dead data.
     pub fn start_save(&mut self, path: Option<&Path>) -> anyhow::Result<SaveJob> {
         if self.engine.stroke_active() {
-            bail!("während eines Pinselstrichs kann nicht gespeichert werden");
+            bail!("{}", tr("cannot save during a brush stroke"));
         }
         let t0 = Instant::now();
-        let path = path.map(Path::to_path_buf).unwrap_or_else(|| self.default_save_path());
+        let path = path
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.default_save_path());
         let doc = self.engine.doc().clone();
 
         // All referenced tiles, by pool.
@@ -204,13 +269,17 @@ impl Session {
         doc.for_each(&mut |l, _| {
             if let Some(t) = l.tiles() {
                 for tile in t.values() {
-                    layer_tiles.entry(tile.serial()).or_insert_with(|| tile.clone());
+                    layer_tiles
+                        .entry(tile.serial())
+                        .or_insert_with(|| tile.clone());
                 }
             }
             if let Some(m) = &l.mask {
                 for t in m.tiles.values() {
                     if let MaskTile::Pixels(tile) = t {
-                        mask_tiles.entry(tile.serial()).or_insert_with(|| tile.clone());
+                        mask_tiles
+                            .entry(tile.serial())
+                            .or_insert_with(|| tile.clone());
                     }
                 }
             }
@@ -218,7 +287,9 @@ impl Session {
         if let Some(sel) = &doc.selection {
             for t in sel.tiles.values() {
                 if let MaskTile::Pixels(tile) = t {
-                    mask_tiles.entry(tile.serial()).or_insert_with(|| tile.clone());
+                    mask_tiles
+                        .entry(tile.serial())
+                        .or_insert_with(|| tile.clone());
                 }
             }
         }
@@ -226,22 +297,36 @@ impl Session {
         let same_file = self.save_path.as_deref() == Some(path.as_path())
             && self.file_len.is_some()
             && std::fs::metadata(&path).ok().map(|m| m.len()) == self.file_len;
-        let reusable: u64 = layer_tiles.keys().chain(mask_tiles.keys()).filter_map(|s| self.saved.get(s)).map(|b| b.len).sum();
+        let reusable: u64 = layer_tiles
+            .keys()
+            .chain(mask_tiles.keys())
+            .filter_map(|s| self.saved.get(s))
+            .map(|b| b.len)
+            .sum();
         let compact = same_file && self.file_len.unwrap_or(0) > 2 * reusable + (64 << 20);
         let incremental = same_file && !compact;
         let refs: HashMap<u64, BlobRef> = if incremental {
-            layer_tiles.keys().chain(mask_tiles.keys()).filter_map(|s| self.saved.get(s).map(|b| (*s, *b))).collect()
+            layer_tiles
+                .keys()
+                .chain(mask_tiles.keys())
+                .filter_map(|s| self.saved.get(s).map(|b| (*s, *b)))
+                .collect()
         } else {
             HashMap::new()
         };
         let missing = |m: HashMap<u64, Tile>| {
-            let mut v: Vec<Tile> = m.into_values().filter(|t| !refs.contains_key(&t.serial())).collect();
+            let mut v: Vec<Tile> = m
+                .into_values()
+                .filter(|t| !refs.contains_key(&t.serial()))
+                .collect();
             v.sort_by_key(Tile::serial);
             v
         };
         let layer_missing = missing(layer_tiles);
         let mask_missing = missing(mask_tiles);
-        let start = |kind, tiles: &[Tile]| (!tiles.is_empty()).then(|| self.engine.begin_readback(kind, tiles));
+        let start = |kind, tiles: &[Tile]| {
+            (!tiles.is_empty()).then(|| self.engine.begin_readback(kind, tiles))
+        };
         let layer_rb = start(PoolKind::Layer, &layer_missing);
         let mask_rb = start(PoolKind::Mask, &mask_missing);
         Ok(SaveJob {
@@ -281,7 +366,10 @@ impl Session {
     pub fn save(&mut self, path: Option<&Path>) -> anyhow::Result<SaveReport> {
         let job = self.start_save(path)?;
         while !job.ready(self.engine.device()) {
-            let _ = self.engine.device().poll(wgpu::PollType::wait_indefinitely());
+            let _ = self
+                .engine
+                .device()
+                .poll(wgpu::PollType::wait_indefinitely());
         }
         let done = job.into_writer()()?;
         Ok(self.complete_save(done))
@@ -291,7 +379,10 @@ impl Session {
     pub fn export(&mut self, path: &Path, opts: &ExportOptions) -> anyhow::Result<f64> {
         let job = self.start_export(path, opts);
         while !job.ready(self.engine.device()) {
-            let _ = self.engine.device().poll(wgpu::PollType::wait_indefinitely());
+            let _ = self
+                .engine
+                .device()
+                .poll(wgpu::PollType::wait_indefinitely());
         }
         job.into_writer()()
     }
@@ -304,8 +395,16 @@ impl Session {
         let size = self.engine.size();
         let tiles = self.engine.composite_tiles();
         let handles: Vec<Tile> = tiles.iter().map(|(_, t)| t.clone()).collect();
-        let readback = (!handles.is_empty()).then(|| self.engine.begin_readback(PoolKind::Composite, &handles));
-        ExportJob { path: path.to_path_buf(), opts: *opts, t0, size, coords: tiles.into_iter().map(|(c, _)| c).collect(), readback }
+        let readback = (!handles.is_empty())
+            .then(|| self.engine.begin_readback(PoolKind::Composite, &handles));
+        ExportJob {
+            path: path.to_path_buf(),
+            opts: *opts,
+            t0,
+            size,
+            coords: tiles.into_iter().map(|(c, _)| c).collect(),
+            readback,
+        }
     }
 }
 
@@ -327,11 +426,18 @@ impl ExportJob {
     /// Conversion, encoding and writing (any thread). Returns the total time in ms.
     pub fn into_writer(self) -> impl FnOnce() -> anyhow::Result<f64> + Send + 'static {
         let data = self.readback.map(Readback::take).unwrap_or_default();
-        let (path, opts, t0, size, coords) = (self.path, self.opts, self.t0, self.size, self.coords);
+        let (path, opts, t0, size, coords) =
+            (self.path, self.opts, self.t0, self.size, self.coords);
         move || {
-            let tiles: Vec<(TileCoord, Vec<half::f16>)> =
-                coords.into_iter().zip(data.into_iter().map(|raw| bytemuck::pod_collect_to_vec(&raw))).collect();
-            export::write(&path, size, &tiles, &opts).with_context(|| format!("{} exportieren", path.display()))?;
+            let tiles: Vec<(TileCoord, Vec<half::f16>)> = coords
+                .into_iter()
+                .zip(
+                    data.into_iter()
+                        .map(|raw| bytemuck::pod_collect_to_vec(&raw)),
+                )
+                .collect();
+            export::write(&path, size, &tiles, &opts)
+                .with_context(|| tr!("exporting {path}", path = path.display()))?;
             Ok(t0.elapsed().as_secs_f64() * 1e3)
         }
     }
@@ -354,7 +460,12 @@ mod tests {
         };
         let doc = Document::<()>::new(TILE_SIZE, TILE_SIZE);
         let layer = doc.active;
-        let engine = Engine::new(&g.device, &g.queue, wgpu::TextureFormat::Rgba8UnormSrgb, &doc);
+        let engine = Engine::new(
+            &g.device,
+            &g.queue,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            &doc,
+        );
         let mut s = Session::new(engine, "t".into(), None, None);
         let px = vec![f16::from_f32(0.5); (TILE_SIZE * TILE_SIZE * 4) as usize];
         s.add_tiles(layer, &[(TileCoord::new(0, 0), px, None)]);
@@ -382,11 +493,17 @@ mod tests {
         };
         let doc = Document::<()>::new(TILE_SIZE * 4, TILE_SIZE * 4);
         let layer = doc.active;
-        let engine = Engine::new(&g.device, &g.queue, wgpu::TextureFormat::Rgba8UnormSrgb, &doc);
+        let engine = Engine::new(
+            &g.device,
+            &g.queue,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            &doc,
+        );
         let mut s = Session::new(engine, "t".into(), None, None);
         let px = vec![f16::from_f32(0.5); (TILE_SIZE * TILE_SIZE * 4) as usize];
-        let tiles: Vec<_> =
-            (0..16).map(|i| (TileCoord::new(i % 4, i / 4), px.clone(), None)).collect();
+        let tiles: Vec<_> = (0..16)
+            .map(|i| (TileCoord::new(i % 4, i / 4), px.clone(), None))
+            .collect();
         assert_eq!(s.add_tiles(layer, &tiles), 0);
 
         let dir = tempfile::tempdir().unwrap();
@@ -397,9 +514,16 @@ mod tests {
 
         // One small stroke inside tile (1,1).
         s.engine.begin_stroke(StrokeParams::default()).unwrap();
-        let mut st = Stroke::new(BrushSettings { size: 10.0, smoothing: 0.0, ..Default::default() });
-        s.engine.stroke_dabs(&st.add(InputSample { pos: DVec2::new(380.0, 380.0), pressure: 1.0 }));
-        s.engine.end_stroke("Pinselstrich");
+        let mut st = Stroke::new(BrushSettings {
+            size: 10.0,
+            smoothing: 0.0,
+            ..Default::default()
+        });
+        s.engine.stroke_dabs(&st.add(InputSample {
+            pos: DVec2::new(380.0, 380.0),
+            pressure: 1.0,
+        }));
+        s.engine.end_stroke("Brush Stroke");
 
         let r2 = s.save(None).unwrap();
         assert!(r2.incremental);
@@ -426,31 +550,66 @@ mod tests {
             return;
         };
         let doc = Document::<()>::new(TILE_SIZE * 2, TILE_SIZE * 2);
-        let engine = Engine::new(&g.device, &g.queue, wgpu::TextureFormat::Rgba8UnormSrgb, &doc);
+        let engine = Engine::new(
+            &g.device,
+            &g.queue,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            &doc,
+        );
         let mut s = Session::new(engine, "t".into(), None, None);
-        s.engine.fill(imagine_gpu::StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Füllen").unwrap();
         s.engine
-            .select_shape(&imagine_core::mask::Shape::Rect { x: 10.0, y: 10.0, w: 100.0, h: 50.0 }, imagine_core::mask::CombineOp::Replace, "Auswahl")
+            .fill(
+                imagine_gpu::StrokeTarget::Pixels,
+                [1.0, 0.0, 0.0, 1.0],
+                1.0,
+                "Fill",
+            )
+            .unwrap();
+        s.engine
+            .select_shape(
+                &imagine_core::mask::Shape::Rect {
+                    x: 10.0,
+                    y: 10.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                imagine_core::mask::CombineOp::Replace,
+                "Selection",
+            )
             .unwrap();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bg.imagine");
 
         let job = s.start_save(Some(&path)).unwrap();
         // Keep editing while the save is in flight: the snapshot must not change.
-        s.engine.clear_selected("Löschen").unwrap();
-        s.engine.deselect("Auswahl aufheben").unwrap();
+        s.engine.clear_selected("Delete").unwrap();
+        s.engine.deselect("Deselect").unwrap();
         while !job.ready(s.engine.device()) {
             std::thread::yield_now();
         }
-        let done = std::thread::spawn(job.into_writer()).join().unwrap().unwrap();
+        let done = std::thread::spawn(job.into_writer())
+            .join()
+            .unwrap()
+            .unwrap();
         let r = s.complete_save(done);
-        assert_eq!(r.tiles_written, 4 + 1, "4 layer tiles + 1 selection edge tile");
+        assert_eq!(
+            r.tiles_written,
+            4 + 1,
+            "4 layer tiles + 1 selection edge tile"
+        );
 
         let (reader, loaded) = Reader::open(&path).unwrap();
         assert!(loaded.selection.is_some(), "snapshot had a selection");
         let layer = loaded.layers[0].tiles().unwrap().clone();
-        let t = imagine_io::native::decompress_tile(&reader.read_blob(layer[&TileCoord::new(0, 0)]).unwrap()).unwrap();
+        let t = imagine_io::native::decompress_tile(
+            &reader.read_blob(layer[&TileCoord::new(0, 0)]).unwrap(),
+        )
+        .unwrap();
         let i = (20 * TILE_SIZE as usize + 20) * 4 + 3;
-        assert_eq!(t[i].to_f32(), 1.0, "pixel cleared after the snapshot is still there in the file");
+        assert_eq!(
+            t[i].to_f32(),
+            1.0,
+            "pixel cleared after the snapshot is still there in the file"
+        );
     }
 }

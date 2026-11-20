@@ -126,7 +126,12 @@ impl Settings {
     pub fn load_from(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-                tracing::warn!("Einstellungen {} unlesbar ({e}), nehme Standardwerte", path.display());
+                // Plain English, no tr(): this runs before the language is initialised
+                // (tr() would lock the catalog to English).
+                tracing::warn!(
+                    "Settings {} unreadable ({e}), using defaults",
+                    path.display()
+                );
                 Self::default()
             }),
             Err(_) => Self::default(),
@@ -183,7 +188,13 @@ mod tests {
         assert_eq!(Settings::load_from(&path), Settings::default());
 
         let mut b = BrushSettings::default();
-        Brush { size: 1e9, hardness: -3.0, tip: 99, ..Brush::default() }.apply(&mut b);
+        Brush {
+            size: 1e9,
+            hardness: -3.0,
+            tip: 99,
+            ..Brush::default()
+        }
+        .apply(&mut b);
         assert_eq!((b.size, b.hardness), (5000.0, 0.0));
         assert!(b.tip < imagine_core::TIP_NAMES.len() as u32);
     }

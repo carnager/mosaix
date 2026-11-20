@@ -35,10 +35,24 @@ macro_rules! ignore_events {
         }
     )*};
 }
-ignore_events!(ZwpTabletManagerV2, ZwpTabletV2, ZwpTabletPadRingV2, ZwpTabletPadStripV2, ZwpTabletPadDialV2);
+ignore_events!(
+    ZwpTabletManagerV2,
+    ZwpTabletV2,
+    ZwpTabletPadRingV2,
+    ZwpTabletPadStripV2,
+    ZwpTabletPadDialV2
+);
 
 impl Dispatch2<ZwpTabletPadV2, App> for Ignore {
-    fn event(&self, _: &mut App, _: &ZwpTabletPadV2, _: zwp_tablet_pad_v2::Event, _: &Connection, _: &QueueHandle<App>) {}
+    fn event(
+        &self,
+        _: &mut App,
+        _: &ZwpTabletPadV2,
+        _: zwp_tablet_pad_v2::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
 
     fn event_created_child(opcode: u16, qh: &QueueHandle<App>) -> Arc<dyn ObjectData> {
         match opcode {
@@ -49,13 +63,27 @@ impl Dispatch2<ZwpTabletPadV2, App> for Ignore {
 }
 
 impl Dispatch2<ZwpTabletPadGroupV2, App> for Ignore {
-    fn event(&self, _: &mut App, _: &ZwpTabletPadGroupV2, _: zwp_tablet_pad_group_v2::Event, _: &Connection, _: &QueueHandle<App>) {}
+    fn event(
+        &self,
+        _: &mut App,
+        _: &ZwpTabletPadGroupV2,
+        _: zwp_tablet_pad_group_v2::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
 
     fn event_created_child(opcode: u16, qh: &QueueHandle<App>) -> Arc<dyn ObjectData> {
         match opcode {
-            zwp_tablet_pad_group_v2::EVT_RING_OPCODE => qh.make_data::<ZwpTabletPadRingV2, _>(Ignore),
-            zwp_tablet_pad_group_v2::EVT_STRIP_OPCODE => qh.make_data::<ZwpTabletPadStripV2, _>(Ignore),
-            zwp_tablet_pad_group_v2::EVT_DIAL_OPCODE => qh.make_data::<ZwpTabletPadDialV2, _>(Ignore),
+            zwp_tablet_pad_group_v2::EVT_RING_OPCODE => {
+                qh.make_data::<ZwpTabletPadRingV2, _>(Ignore)
+            }
+            zwp_tablet_pad_group_v2::EVT_STRIP_OPCODE => {
+                qh.make_data::<ZwpTabletPadStripV2, _>(Ignore)
+            }
+            zwp_tablet_pad_group_v2::EVT_DIAL_OPCODE => {
+                qh.make_data::<ZwpTabletPadDialV2, _>(Ignore)
+            }
             _ => panic!("unexpected child of zwp_tablet_pad_group_v2: opcode {opcode}"),
         }
     }
@@ -65,7 +93,15 @@ impl Dispatch2<ZwpTabletPadGroupV2, App> for Ignore {
 pub struct SeatData;
 
 impl Dispatch2<ZwpTabletSeatV2, App> for SeatData {
-    fn event(&self, _: &mut App, _: &ZwpTabletSeatV2, _: zwp_tablet_seat_v2::Event, _: &Connection, _: &QueueHandle<App>) {}
+    fn event(
+        &self,
+        _: &mut App,
+        _: &ZwpTabletSeatV2,
+        _: zwp_tablet_seat_v2::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
 
     fn event_created_child(opcode: u16, qh: &QueueHandle<App>) -> Arc<dyn ObjectData> {
         match opcode {
@@ -126,8 +162,10 @@ impl Dispatch2<ZwpTabletToolV2, App> for ToolData {
             Event::Pressure { pressure } => s.pressure = pressure as f32 / 65535.0,
             Event::Tilt { tilt_x, tilt_y } => s.tilt = (tilt_x, tilt_y),
             Event::Button { button, state, .. } => {
-                let pressed =
-                    matches!(state, WEnum::Value(zwp_tablet_tool_v2::ButtonState::Pressed));
+                let pressed = matches!(
+                    state,
+                    WEnum::Value(zwp_tablet_tool_v2::ButtonState::Pressed)
+                );
                 s.buttons.push((button, pressed));
             }
             Event::Frame { .. } => {

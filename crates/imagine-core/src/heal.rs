@@ -56,7 +56,9 @@ pub fn membrane(w: usize, h: usize, inside: &[bool], v: &mut [Px]) {
         }
         membrane(cw, ch, &cin, &mut cv);
         // Bilinear upsampling of the coarse solution as the starting guess.
-        let at = |x: isize, y: isize| cv[(y.clamp(0, ch as isize - 1) as usize) * cw + x.clamp(0, cw as isize - 1) as usize];
+        let at = |x: isize, y: isize| {
+            cv[(y.clamp(0, ch as isize - 1) as usize) * cw + x.clamp(0, cw as isize - 1) as usize]
+        };
         for y in 0..h {
             for x in 0..w {
                 let i = y * w + x;
@@ -67,7 +69,12 @@ pub fn membrane(w: usize, h: usize, inside: &[bool], v: &mut [Px]) {
                 let (fx, fy) = (gx.floor(), gy.floor());
                 let (tx, ty) = (gx - fx, gy - fy);
                 let (x0, y0) = (fx as isize, fy as isize);
-                let (a, b, c, d) = (at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1));
+                let (a, b, c, d) = (
+                    at(x0, y0),
+                    at(x0 + 1, y0),
+                    at(x0, y0 + 1),
+                    at(x0 + 1, y0 + 1),
+                );
                 for k in 0..4 {
                     let top = a[k] + (b[k] - a[k]) * tx;
                     let bot = c[k] + (d[k] - c[k]) * tx;
@@ -107,7 +114,9 @@ fn relax(w: usize, h: usize, inside: &[bool], v: &mut [Px], sweeps: usize) {
     struct Grid(*mut Px);
     unsafe impl Send for Grid {}
     unsafe impl Sync for Grid {}
-    let rows: Vec<usize> = (0..h).filter(|&y| inside[y * w..(y + 1) * w].iter().any(|&b| b)).collect();
+    let rows: Vec<usize> = (0..h)
+        .filter(|&y| inside[y * w..(y + 1) * w].iter().any(|&b| b))
+        .collect();
     let grid = Grid(v.as_mut_ptr());
     for _ in 0..sweeps {
         for colour in 0..2 {
@@ -148,7 +157,9 @@ mod tests {
     /// A disc in the middle of a w × h grid.
     fn disc(w: usize, h: usize, r: f32) -> Vec<bool> {
         let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
-        (0..w * h).map(|i| ((i % w) as f32 - cx).hypot((i / w) as f32 - cy) < r).collect()
+        (0..w * h)
+            .map(|i| ((i % w) as f32 - cx).hypot((i / w) as f32 - cy) < r)
+            .collect()
     }
 
     #[test]
@@ -157,12 +168,24 @@ mod tests {
         let (w, h) = (300, 200);
         let inside = disc(w, h, 80.0);
         let plane = |x: usize, y: usize| [x as f32 * 0.01, y as f32 * 0.02, 0.5, 1.0];
-        let mut v: Vec<Px> = (0..w * h).map(|i| if inside[i] { [9.0; 4] } else { plane(i % w, i / w) }).collect();
+        let mut v: Vec<Px> = (0..w * h)
+            .map(|i| {
+                if inside[i] {
+                    [9.0; 4]
+                } else {
+                    plane(i % w, i / w)
+                }
+            })
+            .collect();
         let t = std::time::Instant::now();
         membrane(w, h, &inside, &mut v);
         let worst = (0..w * h)
             .filter(|&i| inside[i])
-            .map(|i| (0..4).map(|c| (v[i][c] - plane(i % w, i / w)[c]).abs()).fold(0.0, f32::max))
+            .map(|i| {
+                (0..4)
+                    .map(|c| (v[i][c] - plane(i % w, i / w)[c]).abs())
+                    .fold(0.0, f32::max)
+            })
             .fold(0.0, f32::max);
         assert!(worst < 0.01, "max error {worst} ({:?})", t.elapsed());
     }
@@ -189,12 +212,24 @@ mod tests {
         for n in [500usize, 2000] {
             let inside = disc(n, n, n as f32 * 0.45);
             let plane = |x: usize, y: usize| [x as f32 * 0.001, y as f32 * 0.002, 0.5, 1.0];
-            let mut v: Vec<Px> = (0..n * n).map(|i| if inside[i] { [0.0; 4] } else { plane(i % n, i / n) }).collect();
+            let mut v: Vec<Px> = (0..n * n)
+                .map(|i| {
+                    if inside[i] {
+                        [0.0; 4]
+                    } else {
+                        plane(i % n, i / n)
+                    }
+                })
+                .collect();
             let t = std::time::Instant::now();
             membrane(n, n, &inside, &mut v);
             let worst = (0..n * n)
                 .filter(|&i| inside[i])
-                .map(|i| (0..4).map(|c| (v[i][c] - plane(i % n, i / n)[c]).abs()).fold(0.0, f32::max))
+                .map(|i| {
+                    (0..4)
+                        .map(|c| (v[i][c] - plane(i % n, i / n)[c]).abs())
+                        .fold(0.0, f32::max)
+                })
                 .fold(0.0, f32::max);
             eprintln!("{n}²: {:?}, max error {worst}", t.elapsed());
         }

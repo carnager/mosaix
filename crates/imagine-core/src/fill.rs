@@ -73,7 +73,13 @@ impl Level {
                 }
             }
         }
-        Level { w, h, img, hole, src }
+        Level {
+            w,
+            h,
+            img,
+            hole,
+            src,
+        }
     }
 }
 
@@ -162,8 +168,15 @@ fn valid_centres(w: usize, h: usize, src: &[bool]) -> Vec<bool> {
             if x < R || y < R || x >= w as i32 - R || y >= h as i32 - R {
                 return false;
             }
-            let (x0, y0, x1, y1) = ((x - R) as usize, (y - R) as usize, (x + R + 1) as usize, (y + R + 1) as usize);
-            let s = sum[y1 * (w + 1) + x1] + sum[y0 * (w + 1) + x0] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0];
+            let (x0, y0, x1, y1) = (
+                (x - R) as usize,
+                (y - R) as usize,
+                (x + R + 1) as usize,
+                (y + R + 1) as usize,
+            );
+            let s = sum[y1 * (w + 1) + x1] + sum[y0 * (w + 1) + x0]
+                - sum[y0 * (w + 1) + x1]
+                - sum[y1 * (w + 1) + x0];
             s == full
         })
         .collect()
@@ -172,7 +185,14 @@ fn valid_centres(w: usize, h: usize, src: &[bool]) -> Vec<bool> {
 /// Fills the `hole` pixels of `img` (row-major `w` × `h`) from patches made
 /// only of `allowed` non-hole pixels. Values are compared directly, so pass
 /// perceptual (e.g. sRGB-encoded) values. Returns false if there is no source.
-pub fn content_aware_fill(w: usize, h: usize, img: &mut [Px], hole: &[bool], allowed: &[bool], seed: u64) -> bool {
+pub fn content_aware_fill(
+    w: usize,
+    h: usize,
+    img: &mut [Px],
+    hole: &[bool],
+    allowed: &[bool],
+    seed: u64,
+) -> bool {
     content_aware_fill_with(w, h, img, hole, allowed, seed, None)
 }
 
@@ -188,7 +208,13 @@ pub fn content_aware_fill_with(
 ) -> bool {
     assert!(img.len() == w * h && hole.len() == w * h && allowed.len() == w * h);
     let src: Vec<bool> = hole.iter().zip(allowed).map(|(&h, &a)| a && !h).collect();
-    let mut levels = vec![Level { w, h, img: img.to_vec(), hole: hole.to_vec(), src }];
+    let mut levels = vec![Level {
+        w,
+        h,
+        img: img.to_vec(),
+        hole: hole.to_vec(),
+        src,
+    }];
     // Coarsen until the hole is small (but keep enough source patches).
     loop {
         let l = levels.last().unwrap();
@@ -226,7 +252,10 @@ pub fn content_aware_fill_with(
     for li in (0..n).rev() {
         let l = &mut levels[li];
         let valid = valid_centres(l.w, l.h, &l.src);
-        let sources: Vec<(i32, i32)> = (0..l.w * l.h).filter(|&i| valid[i]).map(|i| ((i % l.w) as i32, (i / l.w) as i32)).collect();
+        let sources: Vec<(i32, i32)> = (0..l.w * l.h)
+            .filter(|&i| valid[i])
+            .map(|i| ((i % l.w) as i32, (i / l.w) as i32))
+            .collect();
         if sources.is_empty() {
             return false;
         }
@@ -259,8 +288,10 @@ pub fn content_aware_fill_with(
                 *o = (y0..y1).any(|yy| rows[yy * lw + x]);
             }
         });
-        let targets: Vec<(i32, i32)> =
-            (0..l.h as i32).flat_map(|y| (0..l.w as i32).map(move |x| (x, y))).filter(|&(x, y)| near[y as usize * l.w + x as usize]).collect();
+        let targets: Vec<(i32, i32)> = (0..l.h as i32)
+            .flat_map(|y| (0..l.w as i32).map(move |x| (x, y)))
+            .filter(|&(x, y)| near[y as usize * l.w + x as usize])
+            .collect();
         // Initial field: upsampled from the coarser level, or random.
         let mut field: Vec<(i32, i32)> = vec![(-1, -1); l.w * l.h];
         for (k, &(x, y)) in targets.iter().enumerate() {
@@ -271,7 +302,13 @@ pub fn content_aware_fill_with(
                 }
                 let c = f[cy * pw + cx];
                 let s = (c.0 * 2 + x % 2, c.1 * 2 + y % 2);
-                (c.0 >= 0 && s.0 >= 0 && s.1 >= 0 && (s.0 as usize) < l.w && (s.1 as usize) < l.h && valid[l.idx(s.0, s.1)]).then_some(s)
+                (c.0 >= 0
+                    && s.0 >= 0
+                    && s.1 >= 0
+                    && (s.0 as usize) < l.w
+                    && (s.1 as usize) < l.h
+                    && valid[l.idx(s.0, s.1)])
+                .then_some(s)
             });
             let r = rand(seed ^ ((k as u64) << 1) ^ li as u64);
             field[l.idx(x, y)] = up.unwrap_or(sources[(r % sources.len() as u64) as usize]);
@@ -281,10 +318,15 @@ pub fn content_aware_fill_with(
         let conf = confidence(l);
         let em = if li == 0 { 4 } else { 5 };
         let level_seed = seed ^ ((li as u64) << 32);
-        let on_solver = solver.as_ref().is_some_and(|s| targets.len() >= s.min_targets());
+        let on_solver = solver
+            .as_ref()
+            .is_some_and(|s| targets.len() >= s.min_targets());
         let mut solved = false;
         if on_solver {
-            let anchor: Vec<bool> = (0..l.w * l.h).into_par_iter().map(|i| near[i] && anchored(l, ((i % l.w) as i32, (i / l.w) as i32))).collect();
+            let anchor: Vec<bool> = (0..l.w * l.h)
+                .into_par_iter()
+                .map(|i| near[i] && anchored(l, ((i % l.w) as i32, (i / l.w) as i32)))
+                .collect();
             let (lw, lh) = (l.w, l.h);
             let view = LevelView {
                 w: lw,
@@ -302,7 +344,15 @@ pub fn content_aware_fill_with(
         }
         if !solved {
             for it in 0..em {
-                let d = patchmatch(l, &targets, &sources, &mut field, level_seed ^ ((it as u64) << 16), 4, it == 0);
+                let d = patchmatch(
+                    l,
+                    &targets,
+                    &sources,
+                    &mut field,
+                    level_seed ^ ((it as u64) << 16),
+                    4,
+                    it == 0,
+                );
                 vote(l, &targets, &field, &d, &conf);
             }
         }
@@ -374,7 +424,15 @@ fn confidence(l: &Level) -> Vec<f32> {
             visit(i + l.w);
         }
     }
-    dist.iter().map(|&d| if d == u32::MAX { 1e-3 } else { 1.3f32.powi(-(d.min(60) as i32)) }).collect()
+    dist.iter()
+        .map(|&d| {
+            if d == u32::MAX {
+                1e-3
+            } else {
+                1.3f32.powi(-(d.min(60) as i32))
+            }
+        })
+        .collect()
 }
 
 /// Fills the hole of the (small) coarsest level from the outside in: each
@@ -392,7 +450,9 @@ fn onion_peel(l: &mut Level, seed: u64) -> bool {
     const MAX_SOURCES: usize = 6000;
     if sources.len() > MAX_SOURCES {
         let n = sources.len();
-        sources = (0..MAX_SOURCES).map(|k| sources[(rand(seed ^ k as u64 ^ 0x5eed) % n as u64) as usize]).collect();
+        sources = (0..MAX_SOURCES)
+            .map(|k| sources[(rand(seed ^ k as u64 ^ 0x5eed) % n as u64) as usize])
+            .collect();
     }
     let mut known: Vec<bool> = l.hole.iter().map(|&h| !h).collect();
     loop {
@@ -403,7 +463,11 @@ fn onion_peel(l: &mut Level, seed: u64) -> bool {
                 !known[i]
                     && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| {
                         let (nx, ny) = (x + dx, y + dy);
-                        nx >= 0 && ny >= 0 && nx < l.w as i32 && ny < l.h as i32 && known[l.idx(nx, ny)]
+                        nx >= 0
+                            && ny >= 0
+                            && nx < l.w as i32
+                            && ny < l.h as i32
+                            && known[l.idx(nx, ny)]
                     })
             })
             .collect();
@@ -440,7 +504,7 @@ fn onion_peel(l: &mut Level, seed: u64) -> bool {
                         best = (d, s);
                     }
                 }
-                l.img[l.idx(best.1 .0, best.1 .1)]
+                l.img[l.idx(best.1.0, best.1.1)]
             })
             .collect();
         for (&t, v) in front.iter().zip(picks) {
@@ -455,12 +519,31 @@ fn onion_peel(l: &mut Level, seed: u64) -> bool {
 /// PatchMatch iterations: propagation from the neighbours' matches and a
 /// random search around the current match (parallel, Jacobi style).
 /// Returns the patch distance of every target's match.
-fn patchmatch(l: &Level, targets: &[(i32, i32)], sources: &[(i32, i32)], field: &mut [(i32, i32)], seed: u64, iters: usize, anchor: bool) -> Vec<f32> {
+fn patchmatch(
+    l: &Level,
+    targets: &[(i32, i32)],
+    sources: &[(i32, i32)],
+    field: &mut [(i32, i32)],
+    seed: u64,
+    iters: usize,
+    anchor: bool,
+) -> Vec<f32> {
     let w = l.w;
     // Anchoring: targets that see enough of the known border compare only that.
     let known_only: Vec<bool> = targets.iter().map(|&t| anchor && anchored(l, t)).collect();
-    let mut best: Vec<f32> =
-        targets.par_iter().enumerate().map(|(k, &t)| dist(l, t, field[t.1 as usize * w + t.0 as usize], f32::MAX, known_only[k])).collect();
+    let mut best: Vec<f32> = targets
+        .par_iter()
+        .enumerate()
+        .map(|(k, &t)| {
+            dist(
+                l,
+                t,
+                field[t.1 as usize * w + t.0 as usize],
+                f32::MAX,
+                known_only[k],
+            )
+        })
+        .collect();
     let max_r = l.w.max(l.h) as f32;
     for it in 0..iters {
         let step: i32 = if it % 2 == 0 { 1 } else { -1 };
@@ -497,12 +580,20 @@ fn patchmatch(l: &Level, targets: &[(i32, i32)], sources: &[(i32, i32)], field: 
                     let z = rand(seed ^ ((k as u64) << 20) ^ ((it as u64) << 8) ^ n);
                     let ox = ((z & 0xffff) as f32 / 65535.0 * 2.0 - 1.0) * r;
                     let oy = (((z >> 16) & 0xffff) as f32 / 65535.0 * 2.0 - 1.0) * r;
-                    try_s((bs.0 + ox.round() as i32, bs.1 + oy.round() as i32), &mut bs, &mut bd);
+                    try_s(
+                        (bs.0 + ox.round() as i32, bs.1 + oy.round() as i32),
+                        &mut bs,
+                        &mut bd,
+                    );
                     r *= 0.5;
                     n += 1;
                 }
                 let z = rand(seed ^ ((k as u64) << 20) ^ ((it as u64) << 8) ^ 0xabcd);
-                try_s(sources[(z % sources.len() as u64) as usize], &mut bs, &mut bd);
+                try_s(
+                    sources[(z % sources.len() as u64) as usize],
+                    &mut bs,
+                    &mut bd,
+                );
                 (bs, bd)
             })
             .collect();
@@ -522,7 +613,11 @@ fn vote(l: &mut Level, targets: &[(i32, i32)], field: &[(i32, i32)], dists: &[f3
     let w = l.w;
     let mut sorted = dists.to_vec();
     sorted.sort_by(f32::total_cmp);
-    let sigma2 = sorted.get(sorted.len() * 3 / 4).copied().unwrap_or(1.0).max(1e-6);
+    let sigma2 = sorted
+        .get(sorted.len() * 3 / 4)
+        .copied()
+        .unwrap_or(1.0)
+        .max(1e-6);
     let weights: Vec<f32> = dists
         .iter()
         .zip(targets)
@@ -575,11 +670,21 @@ mod tests {
     use super::*;
 
     fn stripes(w: usize, h: usize) -> Vec<Px> {
-        (0..w * h).map(|i| if (i % w / 8).is_multiple_of(2) { [0.8, 0.3, 0.2, 1.0] } else { [0.2, 0.3, 0.8, 1.0] }).collect()
+        (0..w * h)
+            .map(|i| {
+                if (i % w / 8).is_multiple_of(2) {
+                    [0.8, 0.3, 0.2, 1.0]
+                } else {
+                    [0.2, 0.3, 0.8, 1.0]
+                }
+            })
+            .collect()
     }
 
     fn disc(w: usize, h: usize, cx: f32, cy: f32, r: f32) -> Vec<bool> {
-        (0..w * h).map(|i| ((i % w) as f32 + 0.5 - cx).hypot((i / w) as f32 + 0.5 - cy) < r).collect()
+        (0..w * h)
+            .map(|i| ((i % w) as f32 + 0.5 - cx).hypot((i / w) as f32 + 0.5 - cy) < r)
+            .collect()
     }
 
     #[test]
@@ -587,8 +692,19 @@ mod tests {
         let (w, h) = (240, 200);
         let truth = stripes(w, h);
         let hole = disc(w, h, 120.0, 100.0, 30.0);
-        let mut img: Vec<Px> = truth.iter().zip(&hole).map(|(p, &hh)| if hh { [1.0, 1.0, 1.0, 1.0] } else { *p }).collect();
-        assert!(content_aware_fill(w, h, &mut img, &hole, &vec![true; w * h], 7));
+        let mut img: Vec<Px> = truth
+            .iter()
+            .zip(&hole)
+            .map(|(p, &hh)| if hh { [1.0, 1.0, 1.0, 1.0] } else { *p })
+            .collect();
+        assert!(content_aware_fill(
+            w,
+            h,
+            &mut img,
+            &hole,
+            &vec![true; w * h],
+            7
+        ));
         let (mut err, mut n) = (0.0, 0);
         for i in 0..w * h {
             if hole[i] {
@@ -611,7 +727,10 @@ mod tests {
         let allowed = disc(w, h, 20.0, 20.0, 12.0);
         assert!(!content_aware_fill(w, h, &mut img, &hole, &allowed, 1));
         let none = vec![false; w * h];
-        assert!(content_aware_fill(w, h, &mut img, &none, &allowed, 1), "empty hole is trivially done");
+        assert!(
+            content_aware_fill(w, h, &mut img, &none, &allowed, 1),
+            "empty hole is trivially done"
+        );
     }
 
     #[test]

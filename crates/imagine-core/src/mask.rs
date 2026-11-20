@@ -55,11 +55,17 @@ pub struct CpuMask {
 
 impl CpuMask {
     pub fn filled(v: u8) -> Self {
-        Self { tiles: HashMap::new(), default: v }
+        Self {
+            tiles: HashMap::new(),
+            default: v,
+        }
     }
 
     pub fn tile(&self, c: TileCoord) -> MaskData {
-        self.tiles.get(&c).cloned().unwrap_or(MaskData::Solid(self.default))
+        self.tiles
+            .get(&c)
+            .cloned()
+            .unwrap_or(MaskData::Solid(self.default))
     }
 
     pub fn value_at(&self, x: i64, y: i64) -> u8 {
@@ -95,7 +101,10 @@ impl CpuMask {
                 (*c, inv)
             })
             .collect();
-        Self { tiles, default: 255 - self.default }
+        Self {
+            tiles,
+            default: 255 - self.default,
+        }
     }
 }
 
@@ -120,7 +129,9 @@ impl CombineOp {
     }
 
     pub fn from_key(k: &str) -> Option<Self> {
-        [Self::Replace, Self::Add, Self::Subtract, Self::Intersect].into_iter().find(|o| o.key() == k)
+        [Self::Replace, Self::Add, Self::Subtract, Self::Intersect]
+            .into_iter()
+            .find(|o| o.key() == k)
     }
 
     fn apply(self, old: u8, new: u8) -> u8 {
@@ -139,7 +150,13 @@ pub fn combine_tile(old: &MaskData, new: &MaskData, op: CombineOp) -> MaskData {
         return MaskData::Solid(op.apply(*a, *b));
     }
     let (a, b) = (old.pixels(), new.pixels());
-    MaskData::Pixels(a.iter().zip(b.iter()).map(|(&x, &y)| op.apply(x, y)).collect()).normalized()
+    MaskData::Pixels(
+        a.iter()
+            .zip(b.iter())
+            .map(|(&x, &y)| op.apply(x, y))
+            .collect(),
+    )
+    .normalized()
 }
 
 /// Combines whole masks. Only tiles listed in either input are computed.
@@ -151,7 +168,10 @@ pub fn combine(old: &CpuMask, new: &CpuMask, op: CombineOp) -> CpuMask {
         .into_par_iter()
         .map(|c| (c, combine_tile(&old.tile(c), &new.tile(c), op)))
         .collect();
-    let mut m = CpuMask { tiles, default: op.apply(old.default, new.default) };
+    let mut m = CpuMask {
+        tiles,
+        default: op.apply(old.default, new.default),
+    };
     m.compact();
     m
 }
@@ -159,8 +179,18 @@ pub fn combine(old: &CpuMask, new: &CpuMask, op: CombineOp) -> CpuMask {
 /// Shapes in document pixel coordinates.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
-    Rect { x: f64, y: f64, w: f64, h: f64 },
-    Ellipse { cx: f64, cy: f64, rx: f64, ry: f64 },
+    Rect {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    },
+    Ellipse {
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+    },
     /// Closed polygon, even-odd fill.
     Polygon(Vec<(f64, f64)>),
 }
@@ -192,10 +222,26 @@ pub fn rasterize(shape: &Shape, doc_w: u32, doc_h: u32) -> CpuMask {
         return mask;
     }
     let (gw, gh) = grid_size(doc_w, doc_h);
-    let min_y = poly.iter().map(|p| p.1).fold(f64::INFINITY, f64::min).max(0.0);
-    let max_y = poly.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max).min(doc_h as f64);
-    let min_x = poly.iter().map(|p| p.0).fold(f64::INFINITY, f64::min).max(0.0);
-    let max_x = poly.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max).min(doc_w as f64);
+    let min_y = poly
+        .iter()
+        .map(|p| p.1)
+        .fold(f64::INFINITY, f64::min)
+        .max(0.0);
+    let max_y = poly
+        .iter()
+        .map(|p| p.1)
+        .fold(f64::NEG_INFINITY, f64::max)
+        .min(doc_h as f64);
+    let min_x = poly
+        .iter()
+        .map(|p| p.0)
+        .fold(f64::INFINITY, f64::min)
+        .max(0.0);
+    let max_x = poly
+        .iter()
+        .map(|p| p.0)
+        .fold(f64::NEG_INFINITY, f64::max)
+        .min(doc_w as f64);
     if min_y >= max_y || min_x >= max_x {
         return mask;
     }
@@ -203,8 +249,10 @@ pub fn rasterize(shape: &Shape, doc_w: u32, doc_h: u32) -> CpuMask {
     let ty1 = ((max_y / TS as f64).ceil() as u32).min(gh);
     let tx0 = (min_x / TS as f64).floor() as u32;
     let tx1 = ((max_x / TS as f64).ceil() as u32).min(gw);
-    let edges: Vec<((f64, f64), (f64, f64))> =
-        (0..poly.len()).map(|i| (poly[i], poly[(i + 1) % poly.len()])).filter(|(a, b)| a.1 != b.1).collect();
+    let edges: Vec<((f64, f64), (f64, f64))> = (0..poly.len())
+        .map(|i| (poly[i], poly[(i + 1) % poly.len()]))
+        .filter(|(a, b)| a.1 != b.1)
+        .collect();
     let width = ((tx1 - tx0) as usize) * TS;
     let x_base = (tx0 as usize * TS) as f64;
 
@@ -237,7 +285,9 @@ pub fn rasterize(shape: &Shape, doc_w: u32, doc_h: u32) -> CpuMask {
                     let mut px = vec![0u8; TILE_PX];
                     for row in 0..TS {
                         for col in 0..TS {
-                            px[row * TS + col] = (acc[row * width + off + col].clamp(0.0, 1.0) * 255.0).round() as u8;
+                            px[row * TS + col] = (acc[row * width + off + col].clamp(0.0, 1.0)
+                                * 255.0)
+                                .round() as u8;
                         }
                     }
                     let t = MaskData::Pixels(px).normalized();
@@ -282,7 +332,9 @@ pub fn feather(mask: &CpuMask, radius: f64, doc_w: u32, doc_h: u32) -> CpuMask {
     let (gw, gh) = grid_size(doc_w, doc_h);
     // Box radius for 3 passes ≈ Gaussian with sigma = radius / 2.
     let sigma = radius / 2.0;
-    let r = (((12.0 * sigma * sigma / 3.0 + 1.0).sqrt() - 1.0) / 2.0).round().max(1.0) as usize;
+    let r = (((12.0 * sigma * sigma / 3.0 + 1.0).sqrt() - 1.0) / 2.0)
+        .round()
+        .max(1.0) as usize;
     let reach_tiles = (3 * r).div_ceil(TS) as i32;
     let tx0 = (mask.tiles.keys().map(|c| c.x).min().unwrap() - reach_tiles).max(0);
     let ty0 = (mask.tiles.keys().map(|c| c.y).min().unwrap() - reach_tiles).max(0);
@@ -292,20 +344,23 @@ pub fn feather(mask: &CpuMask, radius: f64, doc_w: u32, doc_h: u32) -> CpuMask {
 
     // Gather into one f32 image.
     let mut img = vec![mask.default as f32; w * h];
-    img.par_chunks_mut(w * TS).enumerate().for_each(|(trow, band)| {
-        for tcol in 0..(tx1 - tx0) as usize {
-            let t = mask.tile(TileCoord::new(tx0 + tcol as i32, ty0 + trow as i32));
-            if let MaskData::Solid(v) = t
-                && v == mask.default {
+    img.par_chunks_mut(w * TS)
+        .enumerate()
+        .for_each(|(trow, band)| {
+            for tcol in 0..(tx1 - tx0) as usize {
+                let t = mask.tile(TileCoord::new(tx0 + tcol as i32, ty0 + trow as i32));
+                if let MaskData::Solid(v) = t
+                    && v == mask.default
+                {
                     continue;
                 }
-            for y in 0..TS {
-                for x in 0..TS {
-                    band[y * w + tcol * TS + x] = t.get(x, y) as f32;
+                for y in 0..TS {
+                    for x in 0..TS {
+                        band[y * w + tcol * TS + x] = t.get(x, y) as f32;
+                    }
                 }
             }
-        }
-    });
+        });
     for _ in 0..3 {
         box_rows(&mut img, w, r, mask.default as f32);
         let mut t = transpose(&img, w, h);
@@ -326,7 +381,10 @@ pub fn feather(mask: &CpuMask, radius: f64, doc_w: u32, doc_h: u32) -> CpuMask {
             tiles.insert(TileCoord::new(tx, ty), MaskData::Pixels(px));
         }
     }
-    let mut out = CpuMask { tiles, default: mask.default };
+    let mut out = CpuMask {
+        tiles,
+        default: mask.default,
+    };
     out.compact();
     out
 }
@@ -336,7 +394,13 @@ fn box_rows(img: &mut [f32], w: usize, r: usize, edge: f32) {
     let n = (2 * r + 1) as f32;
     img.par_chunks_mut(w).for_each(|row| {
         let src = row.to_vec();
-        let at = |i: isize| if i < 0 || i >= w as isize { edge } else { src[i as usize] };
+        let at = |i: isize| {
+            if i < 0 || i >= w as isize {
+                edge
+            } else {
+                src[i as usize]
+            }
+        };
         let mut sum: f32 = (-(r as isize)..=r as isize).map(at).sum();
         for (x, v) in row.iter_mut().enumerate() {
             *v = sum / n;
@@ -362,47 +426,110 @@ mod tests {
     #[test]
     fn rect_is_exact_and_sparse() {
         // A big axis-aligned rect: interior tiles solid, edges anti-aliased.
-        let m = rasterize(&Shape::Rect { x: 10.0, y: 20.5, w: 1000.0, h: 600.0 }, 2000, 2000);
+        let m = rasterize(
+            &Shape::Rect {
+                x: 10.0,
+                y: 20.5,
+                w: 1000.0,
+                h: 600.0,
+            },
+            2000,
+            2000,
+        );
         assert_eq!(m.value_at(500, 300), 255);
         assert_eq!(m.value_at(9, 300), 0);
         assert_eq!(m.value_at(10, 300), 255);
         assert_eq!(m.value_at(1009, 300), 255);
         assert_eq!(m.value_at(1010, 300), 0);
         assert_eq!(m.value_at(500, 20), 128, "half-covered row");
-        let solid = m.tiles.values().filter(|t| matches!(t, MaskData::Solid(255))).count();
+        let solid = m
+            .tiles
+            .values()
+            .filter(|t| matches!(t, MaskData::Solid(255)))
+            .count();
         assert!(solid >= 2, "interior tiles are solid");
-        assert!(!m.tiles.contains_key(&TileCoord::new(5, 5)), "outside tiles absent");
+        assert!(
+            !m.tiles.contains_key(&TileCoord::new(5, 5)),
+            "outside tiles absent"
+        );
     }
 
     #[test]
     fn ellipse_and_polygon() {
-        let m = rasterize(&Shape::Ellipse { cx: 300.0, cy: 300.0, rx: 200.0, ry: 100.0 }, 1000, 1000);
+        let m = rasterize(
+            &Shape::Ellipse {
+                cx: 300.0,
+                cy: 300.0,
+                rx: 200.0,
+                ry: 100.0,
+            },
+            1000,
+            1000,
+        );
         assert_eq!(m.value_at(300, 300), 255);
         assert_eq!(m.value_at(300, 410), 0);
         assert_eq!(m.value_at(495, 300), 255);
         assert_eq!(m.value_at(505, 300), 0);
         // Triangle: even-odd fill.
-        let t = rasterize(&Shape::Polygon(vec![(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)]), 300, 300);
+        let t = rasterize(
+            &Shape::Polygon(vec![(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)]),
+            300,
+            300,
+        );
         assert_eq!(t.value_at(10, 10), 255);
         assert_eq!(t.value_at(90, 90), 0);
         // Degenerate input.
         assert!(rasterize(&Shape::Polygon(vec![(0.0, 0.0), (1.0, 1.0)]), 100, 100).is_empty());
         // Clipped to the document.
-        let c = rasterize(&Shape::Rect { x: -50.0, y: -50.0, w: 100.0, h: 100.0 }, 300, 300);
+        let c = rasterize(
+            &Shape::Rect {
+                x: -50.0,
+                y: -50.0,
+                w: 100.0,
+                h: 100.0,
+            },
+            300,
+            300,
+        );
         assert_eq!(c.value_at(0, 0), 255);
         assert!(c.tiles.keys().all(|k| k.x >= 0 && k.y >= 0));
     }
 
     #[test]
     fn combine_ops() {
-        let a = rasterize(&Shape::Rect { x: 0.0, y: 0.0, w: 300.0, h: 300.0 }, 1000, 1000);
-        let b = rasterize(&Shape::Rect { x: 200.0, y: 0.0, w: 300.0, h: 300.0 }, 1000, 1000);
+        let a = rasterize(
+            &Shape::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 300.0,
+                h: 300.0,
+            },
+            1000,
+            1000,
+        );
+        let b = rasterize(
+            &Shape::Rect {
+                x: 200.0,
+                y: 0.0,
+                w: 300.0,
+                h: 300.0,
+            },
+            1000,
+            1000,
+        );
         let add = combine(&a, &b, CombineOp::Add);
         assert_eq!((add.value_at(100, 10), add.value_at(450, 10)), (255, 255));
         let sub = combine(&a, &b, CombineOp::Subtract);
         assert_eq!((sub.value_at(100, 10), sub.value_at(250, 10)), (255, 0));
         let int = combine(&a, &b, CombineOp::Intersect);
-        assert_eq!((int.value_at(100, 10), int.value_at(250, 10), int.value_at(450, 10)), (0, 255, 0));
+        assert_eq!(
+            (
+                int.value_at(100, 10),
+                int.value_at(250, 10),
+                int.value_at(450, 10)
+            ),
+            (0, 255, 0)
+        );
         let rep = combine(&a, &b, CombineOp::Replace);
         assert_eq!(rep, b);
         // Subtracting everything leaves an empty selection.
@@ -411,7 +538,16 @@ mod tests {
 
     #[test]
     fn invert_and_compact() {
-        let a = rasterize(&Shape::Rect { x: 0.0, y: 0.0, w: 300.0, h: 300.0 }, 1000, 1000);
+        let a = rasterize(
+            &Shape::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 300.0,
+                h: 300.0,
+            },
+            1000,
+            1000,
+        );
         let inv = a.invert();
         assert_eq!(inv.default, 255);
         assert_eq!((inv.value_at(100, 100), inv.value_at(800, 800)), (0, 255));
@@ -420,7 +556,16 @@ mod tests {
 
     #[test]
     fn feather_softens_edges_symmetrically() {
-        let a = rasterize(&Shape::Rect { x: 256.0, y: 256.0, w: 512.0, h: 512.0 }, 1024, 1024);
+        let a = rasterize(
+            &Shape::Rect {
+                x: 256.0,
+                y: 256.0,
+                w: 512.0,
+                h: 512.0,
+            },
+            1024,
+            1024,
+        );
         let f = feather(&a, 20.0, 1024, 1024);
         let edge = f.value_at(256, 500);
         assert!((100..=155).contains(&edge), "edge ≈ 50 %: {edge}");
@@ -434,19 +579,25 @@ mod tests {
 fn gather(mask: &CpuMask, w: usize, h: usize) -> Vec<u8> {
     let mut img = vec![mask.default; w * h];
     let (gw, _) = grid_size(w as u32, h as u32);
-    img.par_chunks_mut(w * TS).enumerate().for_each(|(trow, band)| {
-        let rows = band.len() / w;
-        for tcol in 0..gw as usize {
-            let t = mask.tile(TileCoord::new(tcol as i32, trow as i32));
-            let x0 = tcol * TS;
-            let cols = TS.min(w - x0);
-            match &t {
-                MaskData::Solid(v) if *v == mask.default => {}
-                MaskData::Solid(v) => (0..rows).for_each(|y| band[y * w + x0..][..cols].fill(*v)),
-                MaskData::Pixels(p) => (0..rows).for_each(|y| band[y * w + x0..][..cols].copy_from_slice(&p[y * TS..][..cols])),
+    img.par_chunks_mut(w * TS)
+        .enumerate()
+        .for_each(|(trow, band)| {
+            let rows = band.len() / w;
+            for tcol in 0..gw as usize {
+                let t = mask.tile(TileCoord::new(tcol as i32, trow as i32));
+                let x0 = tcol * TS;
+                let cols = TS.min(w - x0);
+                match &t {
+                    MaskData::Solid(v) if *v == mask.default => {}
+                    MaskData::Solid(v) => {
+                        (0..rows).for_each(|y| band[y * w + x0..][..cols].fill(*v))
+                    }
+                    MaskData::Pixels(p) => (0..rows).for_each(|y| {
+                        band[y * w + x0..][..cols].copy_from_slice(&p[y * TS..][..cols])
+                    }),
+                }
             }
-        }
-    });
+        });
     img
 }
 
@@ -550,7 +701,10 @@ mod flood_tests {
     use super::*;
 
     fn from_fn(w: usize, h: usize, f: impl Fn(usize, usize) -> u8) -> CpuMask {
-        let img: Vec<u8> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| f(x, y)).collect();
+        let img: Vec<u8> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| f(x, y))
+            .collect();
         let mut m = scatter(&img, w, h);
         m.compact();
         m

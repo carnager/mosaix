@@ -46,7 +46,11 @@ impl FillGpu {
         let storage = |binding, read_only| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only }, has_dynamic_offset: false, min_binding_size: None },
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
             count: None,
         };
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -55,7 +59,11 @@ impl FillGpu {
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
                 storage(1, true),
@@ -125,12 +133,29 @@ impl LevelSolver for FillGpu {
             return false;
         }
         let d = &self.device;
-        let usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
-        let init = |label, contents: &[u8]| d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage });
+        let usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
+        let init = |label, contents: &[u8]| {
+            d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage,
+            })
+        };
         let flags: Vec<u32> = (0..n)
-            .map(|i| l.hole[i] as u32 | (l.valid[i] as u32) << 1 | (l.target[i] as u32) << 2 | (l.anchor[i] as u32) << 3)
+            .map(|i| {
+                l.hole[i] as u32
+                    | (l.valid[i] as u32) << 1
+                    | (l.target[i] as u32) << 2
+                    | (l.anchor[i] as u32) << 3
+            })
             .collect();
-        let matches: Vec<[f32; 4]> = l.field.iter().map(|&(x, y)| [x as f32, y as f32, 0.0, 0.0]).collect();
+        let matches: Vec<[f32; 4]> = l
+            .field
+            .iter()
+            .map(|&(x, y)| [x as f32, y as f32, 0.0, 0.0])
+            .collect();
         let img = init("fill img", bytemuck::cast_slice(l.img));
         let img_out = init("fill img out", bytemuck::cast_slice(l.img));
         let flags = init("fill flags", bytemuck::cast_slice(&flags));
@@ -149,14 +174,38 @@ impl LevelSolver for FillGpu {
                 label: Some("fill"),
                 layout: &self.bgl,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: img.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: img_out.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: flags.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: conf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 5, resource: m_in.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 6, resource: m_out.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 7, resource: hist.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: img.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: img_out.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: flags.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: conf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: m_in.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: m_out.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: hist.as_entire_binding(),
+                    },
                 ],
             })
         };
@@ -209,7 +258,9 @@ impl LevelSolver for FillGpu {
                 acc += v as u64;
                 acc * 4 >= total * 3
             });
-            p.sigma2 = bin.map_or(1.0, |b| ((b as f32 + 0.5 - 160.0) / 8.0).exp2()).max(1e-6);
+            p.sigma2 = bin
+                .map_or(1.0, |b| ((b as f32 + 0.5 - 160.0) / 8.0).exp2())
+                .max(1e-6);
             run(&p, &self.weights, if in_b { &ba } else { &ab });
             in_b = !in_b;
             run(&p, &self.vote, if in_b { &ba } else { &ab });

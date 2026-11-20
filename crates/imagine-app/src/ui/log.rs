@@ -52,7 +52,11 @@ impl<S: Subscriber> Layer<S> for UiLog {
             return;
         }
         let mut m = MESSAGES.lock().unwrap_or_else(|e| e.into_inner());
-        m.push_back(Message { at: Instant::now(), level: *meta.level(), text: t.0 });
+        m.push_back(Message {
+            at: Instant::now(),
+            level: *meta.level(),
+            text: t.0,
+        });
         while m.len() > KEEP {
             m.pop_front();
         }

@@ -5,8 +5,8 @@
 use std::time::Instant;
 
 use glam::{DAffine2, DVec2};
-use imagine_core::LayerId;
 use imagine_core::vector::{TextSpec, VectorKind};
+use imagine_core::{LayerId, tr};
 use imagine_vector::{ClickKind, TextMove, TextSelection};
 use smithay_client_toolkit::seat::keyboard::{KeyEvent, Keysym};
 
@@ -24,7 +24,11 @@ pub(super) struct TextEdit {
 fn valid(t: &TextSpec, sel: &TextSelection) -> TextSelection {
     let r = sel.text_range();
     let n = t.text.len();
-    if r.end > n || r.start > n || !t.text.is_char_boundary(r.start) || !t.text.is_char_boundary(r.end) {
+    if r.end > n
+        || r.start > n
+        || !t.text.is_char_boundary(r.start)
+        || !t.text.is_char_boundary(r.end)
+    {
         imagine_vector::text_range(t, n, n)
     } else {
         *sel
@@ -39,7 +43,14 @@ impl App {
     /// The text being edited and the layer transform.
     fn edit_spec(&mut self) -> Option<(TextSpec, DAffine2)> {
         let id = self.text_edit.as_ref()?.layer;
-        let v = self.session.as_ref()?.engine.doc().find(id)?.vector()?.clone();
+        let v = self
+            .session
+            .as_ref()?
+            .engine
+            .doc()
+            .find(id)?
+            .vector()?
+            .clone();
         match v.kind {
             VectorKind::Text(t) => Some((t, affine(&v.transform))),
             _ => None,
@@ -55,7 +66,14 @@ impl App {
     /// Starts editing a text layer; `at` places the caret (else all is selected).
     pub(super) fn begin_text_edit(&mut self, layer: LayerId, at: Option<DVec2>) {
         self.end_text_edit();
-        let Some(v) = self.session.as_ref().and_then(|s| s.engine.doc().find(layer)).and_then(|l| l.vector().cloned()) else { return };
+        let Some(v) = self
+            .session
+            .as_ref()
+            .and_then(|s| s.engine.doc().find(layer))
+            .and_then(|l| l.vector().cloned())
+        else {
+            return;
+        };
         let VectorKind::Text(t) = &v.kind else { return };
         let sel = match at {
             Some(p) => {
@@ -67,18 +85,26 @@ impl App {
         if let Some(e) = self.engine() {
             e.select(|d| d.active = layer);
         }
-        self.text_edit = Some(TextEdit { layer, sel, last_click: None });
+        self.text_edit = Some(TextEdit {
+            layer,
+            sel,
+            last_click: None,
+        });
         self.needs_redraw = true;
     }
 
     /// Ends editing (an emptied text layer is removed, like in Photoshop).
     pub(super) fn end_text_edit(&mut self) {
-        let Some(te) = self.text_edit.take() else { return };
+        let Some(te) = self.text_edit.take() else {
+            return;
+        };
         if let Some(e) = self.engine() {
             e.end_merge();
-            let empty = e.doc().find(te.layer).and_then(|l| l.vector()).is_some_and(|v| matches!(&v.kind, VectorKind::Text(t) if t.text.trim().is_empty()));
+            let empty = e.doc().find(te.layer).and_then(|l| l.vector()).is_some_and(
+                |v| matches!(&v.kind, VectorKind::Text(t) if t.text.trim().is_empty()),
+            );
             if empty {
-                e.edit("Leeren Text löschen", |d| {
+                e.edit(tr("Delete Empty Text"), |d| {
                     d.active = te.layer;
                     d.remove_active()
                 });
@@ -90,7 +116,9 @@ impl App {
     /// Mouse down with the text tool while editing: caret, word, line, or
     /// Shift extends. False if the click is outside the edited text.
     pub(super) fn text_edit_press(&mut self, screen: DVec2, doc: DVec2) -> bool {
-        let Some((t, m)) = self.edit_spec() else { return false };
+        let Some((t, m)) = self.edit_spec() else {
+            return false;
+        };
         let v_bounds = self
             .session
             .as_ref()
@@ -104,7 +132,9 @@ impl App {
         let shift = self.mods.shift;
         let te = self.text_edit.as_mut().unwrap();
         let count = match te.last_click {
-            Some((when, p, n)) if when.elapsed().as_millis() < 450 && p.distance(screen) < 5.0 => n % 3 + 1,
+            Some((when, p, n)) if when.elapsed().as_millis() < 450 && p.distance(screen) < 5.0 => {
+                n % 3 + 1
+            }
             _ => 1,
         };
         te.last_click = Some((Instant::now(), screen, count));
@@ -125,10 +155,18 @@ impl App {
 
     /// Dragging extends the selection.
     pub(super) fn text_edit_drag(&mut self, doc: DVec2) {
-        let Some((t, m)) = self.edit_spec() else { return };
+        let Some((t, m)) = self.edit_spec() else {
+            return;
+        };
         let (x, y) = Self::to_box(&t, m, doc);
         if let Some(te) = &mut self.text_edit {
-            te.sel = imagine_vector::text_select_at(&t, x, y, ClickKind::Caret, Some(&valid(&t, &te.sel)));
+            te.sel = imagine_vector::text_select_at(
+                &t,
+                x,
+                y,
+                ClickKind::Caret,
+                Some(&valid(&t, &te.sel)),
+            );
         }
         self.needs_redraw = true;
     }
@@ -137,14 +175,23 @@ impl App {
     fn text_replace(&mut self, range: std::ops::Range<usize>, s: &str) {
         let Some(te) = &self.text_edit else { return };
         let id = te.layer;
-        let Some(mut v) = self.session.as_ref().and_then(|x| x.engine.doc().find(id)).and_then(|l| l.vector().cloned()) else { return };
-        let VectorKind::Text(t) = &mut v.kind else { return };
+        let Some(mut v) = self
+            .session
+            .as_ref()
+            .and_then(|x| x.engine.doc().find(id))
+            .and_then(|l| l.vector().cloned())
+        else {
+            return;
+        };
+        let VectorKind::Text(t) = &mut v.kind else {
+            return;
+        };
         let (a, b) = (range.start.min(t.text.len()), range.end.min(t.text.len()));
         t.text.replace_range(a..b, s);
         let caret = a + s.len();
         let spec = t.clone();
         if let Some(e) = self.engine() {
-            let _ = e.set_vector(id, v, "Text eingeben", Some(&format!("typing-{id}")));
+            let _ = e.set_vector(id, v, tr("Typing"), Some(&format!("typing-{id}")));
         }
         if let Some(te) = &mut self.text_edit {
             te.sel = imagine_vector::text_range(&spec, caret, caret);
@@ -163,12 +210,28 @@ impl App {
         let range = sel.text_range();
         let mv = |m: TextMove| imagine_vector::text_move(&t, &sel, m, shift);
         let moved = match ev.keysym {
-            Keysym::Left => Some(mv(if ctrl { TextMove::WordLeft } else { TextMove::Left })),
-            Keysym::Right => Some(mv(if ctrl { TextMove::WordRight } else { TextMove::Right })),
+            Keysym::Left => Some(mv(if ctrl {
+                TextMove::WordLeft
+            } else {
+                TextMove::Left
+            })),
+            Keysym::Right => Some(mv(if ctrl {
+                TextMove::WordRight
+            } else {
+                TextMove::Right
+            })),
             Keysym::Up => Some(mv(TextMove::Up)),
             Keysym::Down => Some(mv(TextMove::Down)),
-            Keysym::Home => Some(mv(if ctrl { TextMove::Start } else { TextMove::LineStart })),
-            Keysym::End => Some(mv(if ctrl { TextMove::End } else { TextMove::LineEnd })),
+            Keysym::Home => Some(mv(if ctrl {
+                TextMove::Start
+            } else {
+                TextMove::LineStart
+            })),
+            Keysym::End => Some(mv(if ctrl {
+                TextMove::End
+            } else {
+                TextMove::LineEnd
+            })),
             Keysym::a | Keysym::A if ctrl => Some(imagine_vector::text_range(&t, 0, t.text.len())),
             _ => None,
         };
@@ -188,7 +251,9 @@ impl App {
                 } else {
                     let i = range.start;
                     let before = if ctrl {
-                        imagine_vector::text_move(&t, &sel, TextMove::WordLeft, false).focus().index()
+                        imagine_vector::text_move(&t, &sel, TextMove::WordLeft, false)
+                            .focus()
+                            .index()
                     } else {
                         t.text[..i].char_indices().next_back().map_or(0, |(j, _)| j)
                     };
@@ -202,7 +267,9 @@ impl App {
                 } else {
                     let i = range.start;
                     let after = if ctrl {
-                        imagine_vector::text_move(&t, &sel, TextMove::WordRight, false).focus().index()
+                        imagine_vector::text_move(&t, &sel, TextMove::WordRight, false)
+                            .focus()
+                            .index()
                     } else {
                         t.text[i..].chars().next().map_or(i, |c| i + c.len_utf8())
                     };
@@ -215,7 +282,11 @@ impl App {
             Keysym::v | Keysym::V if ctrl => self.paste(super::clipboard::PasteTarget::Text),
             // Other shortcuts with Ctrl/Alt (undo, save …) work as usual.
             _ if ctrl || self.mods.alt => return false,
-            _ => match ev.utf8.as_deref().filter(|s| !s.is_empty() && s.chars().all(|c| !c.is_control() || c == '\t')) {
+            _ => match ev
+                .utf8
+                .as_deref()
+                .filter(|s| !s.is_empty() && s.chars().all(|c| !c.is_control() || c == '\t'))
+            {
                 Some(s) => self.text_replace(range, s),
                 None => return false,
             },
@@ -248,14 +319,27 @@ impl App {
     /// Caret, selection and box of the edited text in screen points (for the UI).
     pub(super) fn text_overlay(&self) -> Option<TextOverlay> {
         let te = self.text_edit.as_ref()?;
-        let v = self.session.as_ref()?.engine.doc().find(te.layer)?.vector()?;
+        let v = self
+            .session
+            .as_ref()?
+            .engine
+            .doc()
+            .find(te.layer)?
+            .vector()?;
         overlay(v, &te.sel, &self.view, self.scale)
     }
 }
 
 /// Caret, selection and frame of a text layer in screen points.
-pub fn overlay(v: &imagine_core::VectorLayer, sel: &TextSelection, view: &imagine_core::View, scale: f64) -> Option<TextOverlay> {
-    let VectorKind::Text(t) = &v.kind else { return None };
+pub fn overlay(
+    v: &imagine_core::VectorLayer,
+    sel: &TextSelection,
+    view: &imagine_core::View,
+    scale: f64,
+) -> Option<TextOverlay> {
+    let VectorKind::Text(t) = &v.kind else {
+        return None;
+    };
     let m = affine(&v.transform);
     let (rects, caret) = imagine_vector::text_geometry(t, &valid(t, sel));
     let k = 1.0 / scale as f32;
@@ -267,5 +351,9 @@ pub fn overlay(v: &imagine_core::VectorLayer, sel: &TextSelection, view: &imagin
         })
     };
     let (w, h) = imagine_vector::text_box_size(t);
-    Some(TextOverlay { selection: rects.into_iter().map(quad).collect(), caret: quad(caret), frame: quad([-4.0, -2.0, w + 4.0, h + 2.0]) })
+    Some(TextOverlay {
+        selection: rects.into_iter().map(quad).collect(),
+        caret: quad(caret),
+        frame: quad([-4.0, -2.0, w + 4.0, h + 2.0]),
+    })
 }

@@ -19,9 +19,15 @@ impl Engine {
 
     /// Replaces a vector layer's description. With a `merge` key, repeated
     /// changes (typing, dragging a slider) form one undo step.
-    pub fn set_vector(&mut self, layer: LayerId, v: VectorLayer, label: &str, merge: Option<&str>) -> Result<(), &'static str> {
+    pub fn set_vector(
+        &mut self,
+        layer: LayerId,
+        v: VectorLayer,
+        label: &str,
+        merge: Option<&str>,
+    ) -> Result<(), &'static str> {
         if self.doc.find(layer).is_none_or(|l| l.vector().is_none()) {
-            return Err("keine Text- oder Formebene");
+            return Err(imagine_core::tr("not a text or shape layer"));
         }
         let f = |d: &mut imagine_core::Document<crate::pool::Tile>| {
             let l = d.find_mut(layer).unwrap();
@@ -39,10 +45,14 @@ impl Engine {
     /// Converts a vector layer into ordinary pixels.
     pub fn rasterize(&mut self, layer: LayerId, label: &str) -> Result<(), &'static str> {
         if self.doc.find(layer).is_none_or(|l| l.vector().is_none()) {
-            return Err("keine Text- oder Formebene");
+            return Err(imagine_core::tr("not a text or shape layer"));
         }
         self.refresh_smart();
-        let tiles = self.vectors.get(&layer).map(|(_, t)| t.clone()).unwrap_or_default();
+        let tiles = self
+            .vectors
+            .get(&layer)
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
         self.edit(label, |d| {
             d.find_mut(layer).unwrap().content = Content::Pixels(tiles);
             true
@@ -52,7 +62,10 @@ impl Engine {
 
     /// Shows a text or shape layer with another description without changing
     /// the document (e.g. while browsing fonts). `None` ends it.
-    pub fn set_vector_preview(&mut self, p: Option<(LayerId, &VectorLayer)>) -> Result<(), &'static str> {
+    pub fn set_vector_preview(
+        &mut self,
+        p: Option<(LayerId, &VectorLayer)>,
+    ) -> Result<(), &'static str> {
         match p {
             None => self.set_filter_preview(None),
             Some((id, v)) => {

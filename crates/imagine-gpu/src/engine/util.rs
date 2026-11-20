@@ -23,7 +23,10 @@ impl Params {
     }
 
     pub fn push(&mut self, v: [u32; 4]) -> u32 {
-        assert!(self.data.len() < PARAM_SLOTS, "too many dispatches in one submission");
+        assert!(
+            self.data.len() < PARAM_SLOTS,
+            "too many dispatches in one submission"
+        );
         self.data.push(v);
         ((self.data.len() - 1) as u64 * UNIFORM_STRIDE) as u32
     }
@@ -41,7 +44,11 @@ impl Params {
     }
 
     pub fn binding(&self) -> wgpu::BindingResource<'_> {
-        wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &self.buf, offset: 0, size: wgpu::BufferSize::new(16) })
+        wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &self.buf,
+            offset: 0,
+            size: wgpu::BufferSize::new(16),
+        })
     }
 }
 
@@ -53,10 +60,19 @@ pub(super) struct DynBuf {
 }
 
 impl DynBuf {
-    pub fn new(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages, size: u64) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        label: &'static str,
+        usage: wgpu::BufferUsages,
+        size: u64,
+    ) -> Self {
         let usage = usage | wgpu::BufferUsages::COPY_DST;
-        let buf =
-            device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: size.max(256), usage, mapped_at_creation: false });
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: size.max(256),
+            usage,
+            mapped_at_creation: false,
+        });
         Self { buf, label, usage }
     }
 
@@ -123,14 +139,21 @@ pub(super) fn render_pipeline(device: &wgpu::Device, s: PipelineSpec) -> wgpu::R
             compilation_options: Default::default(),
             buffers: s.buffers,
         },
-        primitive: wgpu::PrimitiveState { topology: s.topology, ..Default::default() },
+        primitive: wgpu::PrimitiveState {
+            topology: s.topology,
+            ..Default::default()
+        },
         depth_stencil: None,
         multisample: Default::default(),
         fragment: Some(wgpu::FragmentState {
             module: s.module,
             entry_point: Some(s.fs),
             compilation_options: Default::default(),
-            targets: &[Some(wgpu::ColorTargetState { format: s.format, blend: s.blend, write_mask: wgpu::ColorWrites::ALL })],
+            targets: &[Some(wgpu::ColorTargetState {
+                format: s.format,
+                blend: s.blend,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
         }),
         multiview_mask: None,
         cache: None,
@@ -155,11 +178,17 @@ pub(super) fn compute_pipeline(
 }
 
 /// One render pass that just clears or loads a target.
-pub(super) fn color_attachment(view: &wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>) -> wgpu::RenderPassColorAttachment<'_> {
+pub(super) fn color_attachment(
+    view: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+) -> wgpu::RenderPassColorAttachment<'_> {
     wgpu::RenderPassColorAttachment {
         view,
         depth_slice: None,
         resolve_target: None,
-        ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
+        ops: wgpu::Operations {
+            load,
+            store: wgpu::StoreOp::Store,
+        },
     }
 }

@@ -7,8 +7,8 @@ use imagine_core::color::linear_to_srgb;
 use imagine_core::mask::{CombineOp, CpuMask, MaskData, combine, flood};
 use imagine_core::{TILE_SIZE, TileCoord};
 
-use super::readback::PoolKind;
 use super::Engine;
+use super::readback::PoolKind;
 use crate::pool::Tile;
 
 /// Which pixels the wand looks at.
@@ -42,7 +42,10 @@ fn straight(px: [f32; 4]) -> [f32; 4] {
 
 /// CPU twin of the shader's distance (for missing, i.e. transparent, tiles).
 fn similarity(a: [f32; 4], reference: [f32; 4], tolerance: f32, band: f32) -> u8 {
-    let dc = (0..3).map(|i| (a[i] - reference[i]).abs()).fold(0.0f32, f32::max) * a[3].min(reference[3]);
+    let dc = (0..3)
+        .map(|i| (a[i] - reference[i]).abs())
+        .fold(0.0f32, f32::max)
+        * a[3].min(reference[3]);
     let d = dc.max((a[3] - reference[3]).abs()) * 255.0;
     if d <= tolerance {
         255
@@ -56,32 +59,56 @@ impl Engine {
     fn sample_tiles(&mut self, from: SampleFrom) -> Result<Vec<(TileCoord, Tile)>, &'static str> {
         Ok(match from {
             SampleFrom::Layer => {
-                let l = self.doc.active_layer().ok_or("keine aktive Ebene")?;
-                let t = l.tiles().ok_or("Gruppen haben keine Pixel – Ebene wählen oder alle Ebenen aufnehmen")?;
-                t.iter().filter(|(c, _)| self.in_document(**c)).map(|(c, t)| (*c, t.clone())).collect()
+                let l = self
+                    .doc
+                    .active_layer()
+                    .ok_or(imagine_core::tr("no active layer"))?;
+                let t = l.tiles().ok_or(imagine_core::tr(
+                    "groups have no pixels – choose a layer or sample all layers",
+                ))?;
+                t.iter()
+                    .filter(|(c, _)| self.in_document(**c))
+                    .map(|(c, t)| (*c, t.clone()))
+                    .collect()
             }
             SampleFrom::Image => {
                 self.flush();
-                self.comp.iter().filter_map(|(c, e)| e.tile.clone().map(|t| (*c, t))).collect()
+                self.comp
+                    .iter()
+                    .filter_map(|(c, e)| e.tile.clone().map(|t| (*c, t)))
+                    .collect()
             }
         })
     }
 
     /// Straight sRGB colour + alpha at a document pixel.
-    pub fn sample_straight(&mut self, x: u32, y: u32, from: SampleFrom) -> Result<[f32; 4], &'static str> {
+    pub fn sample_straight(
+        &mut self,
+        x: u32,
+        y: u32,
+        from: SampleFrom,
+    ) -> Result<[f32; 4], &'static str> {
         let (w, h) = self.size();
         if x >= w || y >= h {
-            return Err("Punkt liegt außerhalb des Bildes");
+            return Err(imagine_core::tr("point lies outside the image"));
         }
         let c = TileCoord::containing(x as f64, y as f64);
         let tiles = self.sample_tiles(from)?;
-        let Some((_, t)) = tiles.into_iter().find(|(tc, _)| *tc == c) else { return Ok([0.0; 4]) };
-        let kind = if from == SampleFrom::Image { PoolKind::Composite } else { PoolKind::Layer };
+        let Some((_, t)) = tiles.into_iter().find(|(tc, _)| *tc == c) else {
+            return Ok([0.0; 4]);
+        };
+        let kind = if from == SampleFrom::Image {
+            PoolKind::Composite
+        } else {
+            PoolKind::Layer
+        };
         let raw = self.read_tiles_raw(kind, &[t]).remove(0);
         let px: &[half::f16] = bytemuck::cast_slice(&raw);
         let (ox, oy) = c.origin();
         let i = ((y as i64 - oy) as usize * TILE_SIZE as usize + (x as i64 - ox) as usize) * 4;
-        Ok(straight([px[i], px[i + 1], px[i + 2], px[i + 3]].map(half::f16::to_f32)))
+        Ok(straight(
+            [px[i], px[i + 1], px[i + 2], px[i + 3]].map(half::f16::to_f32),
+        ))
     }
 
     /// Similarity of every document pixel to `reference` (straight sRGB +
@@ -97,9 +124,17 @@ impl Engine {
         let composite = (from == SampleFrom::Image) as u32;
         let jobs: Vec<SimilarJob> = tiles
             .iter()
-            .map(|(_, t)| SimilarJob { reference, slot: t.slot().packed(), from_composite: composite, tolerance, band })
+            .map(|(_, t)| SimilarJob {
+                reference,
+                slot: t.slot().packed(),
+                from_composite: composite,
+                tolerance,
+                band,
+            })
             .collect();
-        let out = self.run_similar(&jobs).ok_or("GPU-Speicher voll")?;
+        let out = self
+            .run_similar(&jobs)
+            .ok_or(imagine_core::tr("GPU memory full"))?;
         let data = self.read_tiles_raw(PoolKind::Mask, &out);
         drop(out);
         // Tiles without content are transparent.
@@ -130,10 +165,18 @@ impl Engine {
         label: &str,
     ) -> Result<(), &'static str> {
         let reference = self.sample_straight(x, y, from)?;
-        let band = if antialias { (tolerance * 0.5).max(12.0) } else { 0.0 };
+        let band = if antialias {
+            (tolerance * 0.5).max(12.0)
+        } else {
+            0.0
+        };
         let map = self.similarity_map(reference, tolerance, band, from)?;
         let (w, h) = self.size();
-        let region = if contiguous { flood(&map, x, y, w, h) } else { map };
+        let region = if contiguous {
+            flood(&map, x, y, w, h)
+        } else {
+            map
+        };
         self.combine_selection(region, op, label)
     }
 
@@ -151,7 +194,12 @@ impl Engine {
         self.combine_selection(map, op, label)
     }
 
-    fn combine_selection(&mut self, new: CpuMask, op: CombineOp, label: &str) -> Result<(), &'static str> {
+    fn combine_selection(
+        &mut self,
+        new: CpuMask,
+        op: CombineOp,
+        label: &str,
+    ) -> Result<(), &'static str> {
         let result = match self.selection_cpu() {
             Some(old) => combine(&old, &new, op),
             None if op == CombineOp::Subtract => CpuMask::filled(0),

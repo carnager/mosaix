@@ -7,15 +7,15 @@ use std::time::Instant;
 
 use half::f16;
 use image::{DynamicImage, ImageReader};
-use imagine_core::color::{Pixels, extract_tile};
-use imagine_core::tile::grid_size;
-use imagine_core::{Document, LayerId, TILE_SIZE, TileCoord};
-use imagine_io::BlobRef;
-use imagine_core::mask::MaskData;
 use imagine_core::MaskTile;
+use imagine_core::color::{Pixels, extract_tile};
+use imagine_core::mask::MaskData;
+use imagine_core::tile::grid_size;
+use imagine_core::{Document, LayerId, TILE_SIZE, TileCoord, tr};
+use imagine_io::BlobRef;
 use imagine_io::native::{Reader, decompress_mask, decompress_tile};
-use std::collections::HashMap;
 use rayon::prelude::*;
+use std::collections::HashMap;
 
 pub enum Source {
     File(PathBuf),
@@ -46,9 +46,15 @@ pub enum LoaderMsg {
         native_len: Option<u64>,
         expected_tiles: u64,
     },
-    Tiles { layer: LayerId, tiles: Vec<TileData> },
+    Tiles {
+        layer: LayerId,
+        tiles: Vec<TileData>,
+    },
     Mask(MaskLoad),
-    Done { decode_ms: f64, total_ms: f64 },
+    Done {
+        decode_ms: f64,
+        total_ms: f64,
+    },
     Error(String),
 }
 
@@ -85,33 +91,52 @@ pub fn run(source: Source, tx: &impl Sink) {
 }
 
 fn is_native(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("imagine"))
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("imagine"))
 }
 
 fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
     let t0 = Instant::now();
-    let send = |m| if tx.send(m) { Ok(()) } else { Err(anyhow::anyhow!("UI beendet")) };
+    let send = |m| {
+        if tx.send(m) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(tr("UI closed")))
+        }
+    };
     let single_layer = |w, h, name: String, source: Option<PathBuf>| {
         let doc = Document::<()>::new(w, h);
         let layer = doc.active;
         let (gw, gh) = grid_size(w, h);
-        let msg = LoaderMsg::Structure { doc, name, source, native_len: None, expected_tiles: gw as u64 * gh as u64 };
+        let msg = LoaderMsg::Structure {
+            doc,
+            name,
+            source,
+            native_len: None,
+            expected_tiles: gw as u64 * gh as u64,
+        };
         (msg, layer)
     };
     match source {
         Source::Blank(w, h) => {
-            let (mut msg, _) = single_layer(w, h, "Unbenannt".into(), None);
+            let (mut msg, _) = single_layer(w, h, tr("Untitled").into(), None);
             if let LoaderMsg::Structure { expected_tiles, .. } = &mut msg {
                 *expected_tiles = 0;
             }
             send(msg)?;
-            send(LoaderMsg::Done { decode_ms: 0.0, total_ms: 0.0 })?;
+            send(LoaderMsg::Done {
+                decode_ms: 0.0,
+                total_ms: 0.0,
+            })?;
         }
         Source::Demo(w, h) => {
             let (msg, layer) = single_layer(w, h, format!("Demo {w}×{h}"), None);
             send(msg)?;
             stream_tiles(w, h, layer, tx, |x, y| Some(demo_tile(x, y, w, h)))?;
-            send(LoaderMsg::Done { decode_ms: 0.0, total_ms: ms(t0) })?;
+            send(LoaderMsg::Done {
+                decode_ms: 0.0,
+                total_ms: ms(t0),
+            })?;
         }
         Source::File(path) if is_native(&path) => {
             let name = file_name(&path);
@@ -166,15 +191,31 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                     .map(|(c, t)| {
                         Ok(match t {
                             MaskTile::Solid(v) => (*c, MaskData::Solid(*v), None),
-                            MaskTile::Pixels(b) => (*c, MaskData::Pixels(decompress_mask(&reader.read_blob(*b)?)?), Some(*b)),
+                            MaskTile::Pixels(b) => (
+                                *c,
+                                MaskData::Pixels(decompress_mask(&reader.read_blob(*b)?)?),
+                                Some(*b),
+                            ),
                         })
                     })
                     .collect::<anyhow::Result<Vec<_>>>()?;
-                let blobs = decoded.iter().filter_map(|(c, _, b)| b.map(|b| (*c, b))).collect();
+                let blobs = decoded
+                    .iter()
+                    .filter_map(|(c, _, b)| b.map(|b| (*c, b)))
+                    .collect();
                 let tiles = decoded.into_iter().map(|(c, d, _)| (c, d)).collect();
-                send(LoaderMsg::Mask(MaskLoad { layer, default: m.default, enabled, tiles, blobs }))?;
+                send(LoaderMsg::Mask(MaskLoad {
+                    layer,
+                    default: m.default,
+                    enabled,
+                    tiles,
+                    blobs,
+                }))?;
             }
-            send(LoaderMsg::Done { decode_ms: 0.0, total_ms: ms(t0) })?;
+            send(LoaderMsg::Done {
+                decode_ms: 0.0,
+                total_ms: ms(t0),
+            })?;
         }
         Source::File(path) => {
             let name = file_name(&path);
@@ -185,16 +226,36 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
             let mut reader = ImageReader::open(&path)?.with_guessed_format()?;
             reader.no_limits();
             let mut decoder = reader.into_decoder()?;
-            let icc = image::ImageDecoder::icc_profile(&mut decoder).ok().flatten();
+            let icc = image::ImageDecoder::icc_profile(&mut decoder)
+                .ok()
+                .flatten();
             let img = DynamicImage::from_decoder(decoder)?;
             let decode_ms = ms(t0);
-            tracing::info!("dekodiert {w}×{h} {:?} in {decode_ms:.0} ms", img.color());
+            tracing::info!(
+                "{}",
+                tr!(
+                    "decoded {w}×{h} {color} in {ms} ms",
+                    w = w,
+                    h = h,
+                    color = format!("{:?}", img.color()),
+                    ms = format!("{decode_ms:.0}")
+                )
+            );
 
             match icc.as_deref().and_then(color_transform) {
                 Some((name, convert)) => {
-                    tracing::info!("Farbprofil „{name}“ wird nach sRGB (linear, erweiterter Farbraum) umgerechnet");
+                    tracing::info!(
+                        "{}",
+                        tr!(
+                            "Converting color profile “{name}” to sRGB (linear, extended range)",
+                            name = name
+                        )
+                    );
                     let buf = img.into_rgba16();
-                    let px = Pixels::Converted16 { data: &buf, convert: &*convert };
+                    let px = Pixels::Converted16 {
+                        data: &buf,
+                        convert: &*convert,
+                    };
                     stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
                 }
                 None => match img {
@@ -218,7 +279,10 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                     }
                 },
             }
-            send(LoaderMsg::Done { decode_ms, total_ms: ms(t0) })?;
+            send(LoaderMsg::Done {
+                decode_ms,
+                total_ms: ms(t0),
+            })?;
         }
     }
     Ok(())
@@ -234,12 +298,20 @@ pub fn color_transform(icc: &[u8]) -> Option<(String, RowConverter)> {
     let src = match ColorProfile::new_from_slice(icc) {
         Ok(p) => p,
         Err(e) => {
-            tracing::warn!("Eingebettetes Farbprofil unlesbar ({e:?}), nehme sRGB an");
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "Embedded color profile unreadable ({error}), assuming sRGB",
+                    error = format!("{e:?}")
+                )
+            );
             return None;
         }
     };
     let name = match &src.description {
-        Some(moxcms::ProfileText::Localizable(v)) => v.first().map(|s| s.value.clone()).unwrap_or_default(),
+        Some(moxcms::ProfileText::Localizable(v)) => {
+            v.first().map(|s| s.value.clone()).unwrap_or_default()
+        }
         Some(moxcms::ProfileText::PlainString(s)) => s.clone(),
         _ => String::new(),
     };
@@ -256,19 +328,35 @@ pub fn color_transform(icc: &[u8]) -> Option<(String, RowConverter)> {
     linear.green_trc = Some(identity.clone());
     linear.blue_trc = Some(identity);
     linear.cicp = None;
-    let opts = TransformOptions { prefer_fixed_point: false, allow_extended_range_rgb_xyz: true, ..Default::default() };
+    let opts = TransformOptions {
+        prefer_fixed_point: false,
+        allow_extended_range_rgb_xyz: true,
+        ..Default::default()
+    };
     match src.create_transform_f32(Layout::Rgb, &linear, Layout::Rgb, opts) {
         Ok(t) => Some((
-            if name.is_empty() { "unbenannt".into() } else { name },
+            if name.is_empty() {
+                tr("untitled").into()
+            } else {
+                name
+            },
             Box::new(move |rgb: &mut [f32]| {
                 let input = rgb.to_vec();
                 if t.transform(&input, rgb).is_err() {
-                    rgb.iter_mut().for_each(|v| *v = imagine_core::color::srgb_to_linear(*v));
+                    rgb.iter_mut()
+                        .for_each(|v| *v = imagine_core::color::srgb_to_linear(*v));
                 }
             }),
         )),
         Err(e) => {
-            tracing::warn!("Farbprofil „{name}“ nicht umrechenbar ({e:?}), nehme sRGB an");
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "Color profile “{name}” cannot be converted ({error}), assuming sRGB",
+                    name = name,
+                    error = format!("{e:?}")
+                )
+            );
             None
         }
     }
@@ -279,7 +367,9 @@ fn ms(t0: Instant) -> f64 {
 }
 
 fn file_name(p: &Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Converts all tiles in parallel, centre-first, and sends them in chunks.
@@ -303,7 +393,7 @@ fn stream_tiles(
             .filter_map(|&(x, y)| make(x, y).map(|t| (TileCoord::new(x as i32, y as i32), t, None)))
             .collect();
         if !tiles.is_empty() && !tx.send(LoaderMsg::Tiles { layer, tiles }) {
-            anyhow::bail!("UI beendet");
+            anyhow::bail!("{}", tr("UI closed"));
         }
     }
     Ok(())
@@ -326,7 +416,11 @@ fn demo_tile(tx: u32, ty: u32, w: u32, h: u32) -> Vec<f16> {
             }
             let (u, v) = (x / fw, y / fh);
             let r = ((x - fw * 0.5).hypot(y - fh * 0.5) / 40.0).sin() * 0.5 + 0.5;
-            let grid = if (x as u32 % 512) < 2 || (y as u32 % 512) < 2 { 0.0 } else { 1.0 };
+            let grid = if (x as u32 % 512) < 2 || (y as u32 % 512) < 2 {
+                0.0
+            } else {
+                1.0
+            };
             let i = (row * ts + col) * 4;
             out[i] = f16::from_f32(u * u * grid);
             out[i + 1] = f16::from_f32(r * 0.6 * grid);
@@ -349,7 +443,8 @@ mod tests {
             enc.set_icc_profile(icc).unwrap();
         }
         let data: Vec<u8> = px.repeat(4);
-        enc.write_image(&data, 2, 2, image::ExtendedColorType::Rgba8).unwrap();
+        enc.write_image(&data, 2, 2, image::ExtendedColorType::Rgba8)
+            .unwrap();
     }
 
     fn first_pixel(path: &Path) -> [f32; 4] {
@@ -380,7 +475,10 @@ mod tests {
         assert_eq!(first_pixel(&path)[..3], [1.0, 0.0, 0.0]);
         let path = dir.path().join("plain.png");
         png_with_profile(&path, None, [128, 0, 0, 255]);
-        assert!((first_pixel(&path)[0] - imagine_core::color::srgb_to_linear(128.0 / 255.0)).abs() < 1e-3);
+        assert!(
+            (first_pixel(&path)[0] - imagine_core::color::srgb_to_linear(128.0 / 255.0)).abs()
+                < 1e-3
+        );
     }
 }
 
@@ -395,8 +493,16 @@ mod bench {
         use image::ImageEncoder;
         let dir = tempfile::tempdir().unwrap();
         let (w, h) = (6000u32, 4000u32);
-        let data: Vec<u8> = (0..w * h).flat_map(|i| [(i % 251) as u8, (i % 241) as u8, (i % 239) as u8]).collect();
-        for (name, icc) in [("srgb", None), ("p3", Some(moxcms::ColorProfile::new_display_p3().encode().unwrap()))] {
+        let data: Vec<u8> = (0..w * h)
+            .flat_map(|i| [(i % 251) as u8, (i % 241) as u8, (i % 239) as u8])
+            .collect();
+        for (name, icc) in [
+            ("srgb", None),
+            (
+                "p3",
+                Some(moxcms::ColorProfile::new_display_p3().encode().unwrap()),
+            ),
+        ] {
             let path = dir.path().join(format!("{name}.png"));
             let mut enc = image::codecs::png::PngEncoder::new_with_quality(
                 std::fs::File::create(&path).unwrap(),
@@ -406,13 +512,26 @@ mod bench {
             if let Some(icc) = icc {
                 enc.set_icc_profile(icc).unwrap();
             }
-            enc.write_image(&data, w, h, image::ExtendedColorType::Rgb8).unwrap();
+            enc.write_image(&data, w, h, image::ExtendedColorType::Rgb8)
+                .unwrap();
             let (tx, rx) = std::sync::mpsc::channel();
             let t0 = Instant::now();
             run(Source::File(path), &tx);
             drop(tx);
-            let n: usize = rx.iter().map(|m| if let LoaderMsg::Tiles { tiles, .. } = m { tiles.len() } else { 0 }).sum();
-            println!("{name}: {n} Kacheln in {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+            let n: usize = rx
+                .iter()
+                .map(|m| {
+                    if let LoaderMsg::Tiles { tiles, .. } = m {
+                        tiles.len()
+                    } else {
+                        0
+                    }
+                })
+                .sum();
+            println!(
+                "{name}: {n} tiles in {:.0} ms",
+                t0.elapsed().as_secs_f64() * 1e3
+            );
         }
     }
 }

@@ -7,11 +7,19 @@ use std::sync::OnceLock;
 use crate::tile::TILE_SIZE;
 
 pub fn srgb_to_linear(v: f32) -> f32 {
-    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 pub fn linear_to_srgb(v: f32) -> f32 {
-    if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    if v <= 0.0031308 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 fn srgb8_lut() -> &'static [f32; 256] {
@@ -30,14 +38,23 @@ pub enum Pixels<'a> {
     /// 16-bit RGBA in any colour space (straight alpha); `convert` turns a
     /// row of RGB triples (0…1, encoded) into linear sRGB in place – values
     /// outside 0…1 (wide gamut) are kept.
-    Converted16 { data: &'a [u16], convert: &'a (dyn Fn(&mut [f32]) + Sync) },
+    Converted16 {
+        data: &'a [u16],
+        convert: &'a (dyn Fn(&mut [f32]) + Sync),
+    },
 }
 
 /// Extracts one tile from an image of `width × height` pixels, converted to
 /// premultiplied linear f16. Pixels outside the image are transparent.
 /// Returns `None` if the tile is fully transparent (it can stay unallocated).
 pub fn extract_tile(src: &Pixels, width: u32, height: u32, tx: u32, ty: u32) -> Option<Vec<f16>> {
-    extract_region(src, width, height, (tx * TILE_SIZE) as i64, (ty * TILE_SIZE) as i64)
+    extract_region(
+        src,
+        width,
+        height,
+        (tx * TILE_SIZE) as i64,
+        (ty * TILE_SIZE) as i64,
+    )
 }
 
 /// Like [`extract_tile`] for a tile whose top-left corner lies at image
@@ -85,7 +102,12 @@ pub fn extract_region(src: &Pixels, width: u32, height: u32, x0: i64, y0: i64) -
                 Pixels::Linear32(p) => (p[s], p[s + 1], p[s + 2], p[s + 3].clamp(0.0, 1.0)),
                 Pixels::Converted16 { data, .. } => {
                     let i = ((col - col0) * 3) as usize;
-                    (rgb_row[i], rgb_row[i + 1], rgb_row[i + 2], data[s + 3] as f32 / 65535.0)
+                    (
+                        rgb_row[i],
+                        rgb_row[i + 1],
+                        rgb_row[i + 2],
+                        data[s + 3] as f32 / 65535.0,
+                    )
                 }
             };
             any |= a > 0.0;

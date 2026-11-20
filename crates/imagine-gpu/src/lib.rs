@@ -3,7 +3,11 @@
 pub mod engine;
 pub mod pool;
 
-pub use engine::{CloneSource, CopiedPixels, Engine, FillJob, FillResult, GradientKind, Histogram, Interp, LiquifyTool, Overlay, OverlayLine, PoolKind, Readback, RenderStats, SampleFrom, StrokeParams, StrokeTarget, is_integer_translation};
+pub use engine::{
+    CloneSource, CopiedPixels, Engine, FillJob, FillResult, GradientKind, Histogram, Interp,
+    LiquifyTool, Overlay, OverlayLine, PoolKind, Readback, RenderStats, SampleFrom, StrokeParams,
+    StrokeTarget, is_integer_translation,
+};
 pub use pool::Tile;
 
 pub struct GpuContext {
@@ -39,7 +43,13 @@ impl GpuContext {
             .await?;
         let missing = engine::required_features() - adapter.features();
         if !missing.is_empty() {
-            anyhow::bail!("GPU/Treiber unterstützt benötigte Features nicht: {missing:?}");
+            anyhow::bail!(
+                "{}",
+                imagine_core::tr!(
+                    "GPU/driver does not support required features: {missing}",
+                    missing = format!("{missing:?}")
+                )
+            );
         }
         let info = adapter.get_info();
         tracing::info!(
@@ -57,6 +67,11 @@ impl GpuContext {
                 ..Default::default()
             })
             .await?;
-        Ok(Self { instance, adapter, device, queue })
+        Ok(Self {
+            instance,
+            adapter,
+            device,
+            queue,
+        })
     }
 }

@@ -62,7 +62,11 @@ impl Tile {
 
 impl std::fmt::Debug for Tile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Tile#{}@{}:{}", self.0.serial, self.0.slot.chunk, self.0.slot.layer)
+        write!(
+            f,
+            "Tile#{}@{}:{}",
+            self.0.serial, self.0.slot.chunk, self.0.slot.layer
+        )
     }
 }
 
@@ -135,7 +139,9 @@ impl Pool {
             })
         };
         let view = array_view(0, None);
-        let mip_views = (0..self.cfg.mip_levels).map(|m| array_view(m, Some(1))).collect();
+        let mip_views = (0..self.cfg.mip_levels)
+            .map(|m| array_view(m, Some(1)))
+            .collect();
         self.chunks.push(Chunk {
             texture,
             view,
@@ -144,7 +150,11 @@ impl Pool {
         });
         self.fresh = 0;
         self.generation += 1;
-        tracing::debug!(pool = self.cfg.label, chunks = self.chunks.len(), "pool chunk added");
+        tracing::debug!(
+            pool = self.cfg.label,
+            chunks = self.chunks.len(),
+            "pool chunk added"
+        );
     }
 
     /// Allocates a slot. Contents are undefined; callers overwrite them fully.
@@ -159,7 +169,10 @@ impl Pool {
                     }
                     self.add_chunk();
                 }
-                let s = SlotId { chunk: (self.chunks.len() - 1) as u16, layer: self.fresh as u16 };
+                let s = SlotId {
+                    chunk: (self.chunks.len() - 1) as u16,
+                    layer: self.fresh as u16,
+                };
                 self.fresh += 1;
                 s
             }
@@ -194,7 +207,8 @@ impl Pool {
 
     /// Slots currently referenced by at least one handle.
     pub fn live(&self) -> usize {
-        let total = self.chunks.len().saturating_sub(1) * self.cfg.chunk_layers as usize + self.fresh as usize;
+        let total = self.chunks.len().saturating_sub(1) * self.cfg.chunk_layers as usize
+            + self.fresh as usize;
         total - self.free.lock().map(|f| f.len()).unwrap_or(0)
     }
 
@@ -207,13 +221,18 @@ impl Pool {
     }
 
     pub fn bytes_per_pixel(&self) -> u32 {
-        self.cfg.format.block_copy_size(None).expect("plain colour format")
+        self.cfg
+            .format
+            .block_copy_size(None)
+            .expect("plain colour format")
     }
 
     /// Bytes of GPU memory allocated by this pool.
     pub fn allocated_bytes(&self) -> u64 {
         let bpp = self.bytes_per_pixel() as u64;
-        let per_layer: u64 = (0..self.cfg.mip_levels).map(|m| ((TILE_SIZE >> m) as u64).pow(2) * bpp).sum();
+        let per_layer: u64 = (0..self.cfg.mip_levels)
+            .map(|m| ((TILE_SIZE >> m) as u64).pow(2) * bpp)
+            .sum();
         per_layer * self.cfg.chunk_layers as u64 * self.chunks.len() as u64
     }
 }
@@ -222,7 +241,11 @@ pub fn texel_copy(texture: &wgpu::Texture, mip: u32, layer: u32) -> wgpu::TexelC
     wgpu::TexelCopyTextureInfo {
         texture,
         mip_level: mip,
-        origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
+        origin: wgpu::Origin3d {
+            x: 0,
+            y: 0,
+            z: layer,
+        },
         aspect: wgpu::TextureAspect::All,
     }
 }

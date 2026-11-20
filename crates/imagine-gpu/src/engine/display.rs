@@ -8,7 +8,9 @@ use imagine_core::tile::tiles_in_rect;
 use imagine_core::{MaskTile, TileCoord, View};
 
 use super::util::color_attachment;
-use super::{CompositeEntry, Engine, FLATTEN_BUDGET, Globals, NONE, Overlay, RenderStats, ScreenMask};
+use super::{
+    CompositeEntry, Engine, FLATTEN_BUDGET, Globals, NONE, Overlay, RenderStats, ScreenMask,
+};
 use crate::pool::MASK_FORMAT;
 
 #[repr(C)]
@@ -35,7 +37,12 @@ struct LineVertex {
     side: f32,
 }
 
-const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.035, g: 0.037, b: 0.042, a: 1.0 };
+const BACKGROUND: wgpu::Color = wgpu::Color {
+    r: 0.035,
+    g: 0.037,
+    b: 0.042,
+    a: 1.0,
+};
 
 fn line_vertices(overlay: &Overlay) -> Vec<LineVertex> {
     let mut v = Vec::new();
@@ -54,7 +61,10 @@ fn line_vertices(overlay: &Overlay) -> Vec<LineVertex> {
             }
             let n = glam::DVec2::new(-d.y, d.x) / d.length() * 1.25;
             let corner = |p: glam::DVec2, side: f32, dd: f32| LineVertex {
-                pos: [(p.x + n.x * side as f64) as f32, (p.y + n.y * side as f64) as f32],
+                pos: [
+                    (p.x + n.x * side as f64) as f32,
+                    (p.y + n.y * side as f64) as f32,
+                ],
                 dist: dd,
                 side,
             };
@@ -81,9 +91,18 @@ impl Engine {
                     label: Some("display"),
                     layout: &self.display_bgl,
                     entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&ch.view) },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler_linear) },
-                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler_nearest) },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&ch.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler_nearest),
+                        },
                     ],
                 })
             })
@@ -97,7 +116,11 @@ impl Engine {
         }
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("screen selection mask"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -109,13 +132,25 @@ impl Engine {
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("screen mask"),
             layout: &self.screen_bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&view) }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&view),
+            }],
         });
-        self.screen_mask = Some(ScreenMask { view, bind_group, size: (w, h) });
+        self.screen_mask = Some(ScreenMask {
+            view,
+            bind_group,
+            size: (w, h),
+        });
     }
 
     /// Applies pending paint, re-flattens (budgeted, visible first) and draws.
-    pub fn render(&mut self, target: &wgpu::TextureView, view: &View, overlay: &Overlay) -> RenderStats {
+    pub fn render(
+        &mut self,
+        target: &wgpu::TextureView,
+        view: &View,
+        overlay: &Overlay,
+    ) -> RenderStats {
         self.visible = view.visible_doc_rect();
         let mut enc = self.device.create_command_encoder(&Default::default());
         let mut stats = RenderStats::default();
@@ -139,7 +174,12 @@ impl Engine {
                 [c[1][0], c[1][1], c[1][2], 0.0],
                 [c[2][0], c[2][1], c[2][2], 0.0],
             ],
-            doc_view: [self.doc.width as f32, self.doc.height as f32, view.viewport.x as f32, view.viewport.y as f32],
+            doc_view: [
+                self.doc.width as f32,
+                self.doc.height as f32,
+                view.viewport.x as f32,
+                view.viewport.y as f32,
+            ],
             cursor: [cursor[0], cursor[1], cursor[2], on],
             params: [
                 if nearest { 1.0 } else { 0.0 },
@@ -148,10 +188,16 @@ impl Engine {
                 if overlay.quick_mask { 1.0 } else { 0.0 },
             ],
         };
-        self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
+        self.queue
+            .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
         let (min, max) = self.visible;
-        let visible: Vec<TileCoord> =
-            tiles_in_rect((min.x, min.y), (max.x, max.y), self.doc.width, self.doc.height).collect();
+        let visible: Vec<TileCoord> = tiles_in_rect(
+            (min.x, min.y),
+            (max.x, max.y),
+            self.doc.width,
+            self.doc.height,
+        )
+        .collect();
 
         // Visible composite tiles, grouped by chunk.
         let mut by_chunk: BTreeMap<u16, Vec<TileInstance>> = BTreeMap::new();
@@ -173,12 +219,17 @@ impl Engine {
             instances.extend(list);
         }
         stats.visible_tiles = instances.len() as u32;
-        self.instance_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&instances));
+        self.instance_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&instances));
 
         // Selection → screen-space mask for the ants pass.
-        let show_sel = self.shown().selection.is_some() && (overlay.show_selection || overlay.quick_mask);
+        let show_sel =
+            self.shown().selection.is_some() && (overlay.show_selection || overlay.quick_mask);
         if show_sel {
-            let (vw, vh) = (view.viewport.x.max(1.0) as u32, view.viewport.y.max(1.0) as u32);
+            let (vw, vh) = (
+                view.viewport.x.max(1.0) as u32,
+                view.viewport.y.max(1.0) as u32,
+            );
             self.ensure_screen_mask(vw, vh);
             self.rebuild_arrays_bg();
             let sel = self.shown().selection.as_ref().unwrap();
@@ -187,19 +238,36 @@ impl Engine {
                 .filter_map(|&c| {
                     let (x, y) = c.origin();
                     let origin = [x as f32, y as f32];
-                    let solid = |v: u8| (v > 0).then_some(SelInstance { origin, slot: NONE, value: v as f32 / 255.0 });
+                    let solid = |v: u8| {
+                        (v > 0).then_some(SelInstance {
+                            origin,
+                            slot: NONE,
+                            value: v as f32 / 255.0,
+                        })
+                    };
                     match sel.tiles.get(&c) {
-                        Some(MaskTile::Pixels(t)) => Some(SelInstance { origin, slot: t.slot().packed(), value: 0.0 }),
+                        Some(MaskTile::Pixels(t)) => Some(SelInstance {
+                            origin,
+                            slot: t.slot().packed(),
+                            value: 0.0,
+                        }),
                         Some(MaskTile::Solid(v)) => solid(*v),
                         None => solid(sel.default),
                     }
                 })
                 .collect();
-            self.sel_instance_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&sel_instances));
+            self.sel_instance_buf.write(
+                &self.device,
+                &self.queue,
+                bytemuck::cast_slice(&sel_instances),
+            );
             let sm = self.screen_mask.as_ref().unwrap();
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("selection mask"),
-                color_attachments: &[Some(color_attachment(&sm.view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)))],
+                color_attachments: &[Some(color_attachment(
+                    &sm.view,
+                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                ))],
                 ..Default::default()
             });
             if !sel_instances.is_empty() {
@@ -212,13 +280,17 @@ impl Engine {
         }
 
         let lines = line_vertices(overlay);
-        self.line_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&lines));
+        self.line_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&lines));
         self.params.upload(&self.queue);
 
         {
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("display"),
-                color_attachments: &[Some(color_attachment(target, wgpu::LoadOp::Clear(BACKGROUND)))],
+                color_attachments: &[Some(color_attachment(
+                    target,
+                    wgpu::LoadOp::Clear(BACKGROUND),
+                ))],
                 ..Default::default()
             });
             rp.set_bind_group(0, &self.globals_bg, &[]);

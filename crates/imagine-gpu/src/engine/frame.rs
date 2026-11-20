@@ -73,7 +73,13 @@ impl FlattenBatch {
         let mut depth = 0usize;
         for op in program {
             let gpu = match *op {
-                Op::Layer { id, tile, opacity, blend, mask } => {
+                Op::Layer {
+                    id,
+                    tile,
+                    opacity,
+                    blend,
+                    mask,
+                } => {
                     let (mask_slot, mask_const) = mask_slot(mask);
                     let st = stroke.filter(|s| s.0 == id);
                     let stroke_mode = st.map_or(0, |s| match (s.2.target, s.2.erase) {
@@ -98,7 +104,13 @@ impl FlattenBatch {
                         adj_blend: 0,
                     }
                 }
-                Op::Adjust { id, adj, opacity, blend, mask } => {
+                Op::Adjust {
+                    id,
+                    adj,
+                    opacity,
+                    blend,
+                    mask,
+                } => {
                     let adjust = &mut self.adjust;
                     let (off, kind) = *self.adjust_at.entry(id).or_insert_with(|| {
                         let off = adjust.len() as u32;
@@ -135,15 +147,35 @@ impl FlattenBatch {
                 Op::Push => {
                     depth += 1;
                     if depth > MAX_GROUP_DEPTH && !self.deep_warned {
-                        tracing::warn!("Gruppen tiefer als {MAX_GROUP_DEPTH} Ebenen werden falsch dargestellt");
+                        tracing::warn!(
+                            "{}",
+                            imagine_core::tr!(
+                                "Groups nested deeper than {depth} levels are displayed incorrectly",
+                                depth = MAX_GROUP_DEPTH
+                            )
+                        );
                         self.deep_warned = true;
                     }
-                    GpuOp { kind: 1, ..Zeroable::zeroed() }
+                    GpuOp {
+                        kind: 1,
+                        ..Zeroable::zeroed()
+                    }
                 }
-                Op::Pop { opacity, blend, mask } => {
+                Op::Pop {
+                    opacity,
+                    blend,
+                    mask,
+                } => {
                     depth = depth.saturating_sub(1);
                     let (mask_slot, mask_const) = mask_slot(mask);
-                    GpuOp { kind: 2, blend: blend as u32, opacity, mask_slot, mask_const, ..Zeroable::zeroed() }
+                    GpuOp {
+                        kind: 2,
+                        blend: blend as u32,
+                        opacity,
+                        mask_slot,
+                        mask_const,
+                        ..Zeroable::zeroed()
+                    }
                 }
             };
             self.ops.push(gpu);
@@ -160,7 +192,9 @@ impl FlattenBatch {
 /// Binding-array views of all chunks of a pool, padded to `n` entries.
 pub(super) fn chunk_views(pool: &Pool, n: u32) -> Vec<&wgpu::TextureView> {
     let chunks = &pool.chunks;
-    (0..n as usize).map(|i| &chunks.get(i).unwrap_or(&chunks[0]).view).collect()
+    (0..n as usize)
+        .map(|i| &chunks.get(i).unwrap_or(&chunks[0]).view)
+        .collect()
 }
 
 impl Engine {
@@ -176,8 +210,14 @@ impl Engine {
             label: Some("tile arrays"),
             layout: &self.arrays_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureViewArray(&layers) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureViewArray(&masks) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureViewArray(&layers),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureViewArray(&masks),
+                },
             ],
         }));
         self.arrays_gen = generation;
@@ -190,7 +230,10 @@ impl Engine {
 
     /// Whether the selection allows any change in this tile.
     pub(super) fn selected_any(&self, c: TileCoord) -> bool {
-        !matches!(self.doc.selection.as_ref().map(|s| s.at(c)), Some(MaskRef::Solid(0)))
+        !matches!(
+            self.doc.selection.as_ref().map(|s| s.at(c)),
+            Some(MaskRef::Solid(0))
+        )
     }
 
     pub(super) fn encode_paint(&mut self, enc: &mut wgpu::CommandEncoder, stats: &mut RenderStats) {
@@ -209,11 +252,14 @@ impl Engine {
         // Tiles outside the selection cannot change.
         touched.retain(|c| self.selected_any(*c));
         let mut passes = Vec::new();
-        let stroke_tiles_missing: Vec<TileCoord> =
-            touched.iter().copied().filter(|c| !stroke.tiles.contains_key(c)).collect();
+        let stroke_tiles_missing: Vec<TileCoord> = touched
+            .iter()
+            .copied()
+            .filter(|c| !stroke.tiles.contains_key(c))
+            .collect();
         for c in stroke_tiles_missing {
             let Some(t) = self.layer_pool.alloc() else {
-                tracing::warn!("Ebenen-Speicher voll");
+                tracing::warn!("{}", imagine_core::tr("Layer memory full"));
                 continue;
             };
             self.stroke.as_mut().unwrap().tiles.insert(c, (t, true));
@@ -243,10 +289,12 @@ impl Engine {
             return;
         }
 
-        self.dab_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&dabs));
+        self.dab_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&dabs));
         if passes.len() as u64 > self.origin_cap {
             self.origin_cap = (passes.len() as u64).next_power_of_two();
-            (self.origin_buf, self.origin_bg) = make_origin_buf(&self.device, &self.brush_bgl, self.origin_cap);
+            (self.origin_buf, self.origin_bg) =
+                make_origin_buf(&self.device, &self.brush_bgl, self.origin_cap);
         }
         let mut origins = vec![0u8; passes.len() * UNIFORM_STRIDE as usize];
         for (i, (c, _, _)) in passes.iter().enumerate() {
@@ -258,7 +306,11 @@ impl Engine {
 
         for (i, &(_, slot, clear)) in passes.iter().enumerate() {
             let target = self.layer_pool.target(slot).clone();
-            let load = if clear { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) } else { wgpu::LoadOp::Load };
+            let load = if clear {
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+            } else {
+                wgpu::LoadOp::Load
+            };
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("paint"),
                 color_attachments: &[Some(color_attachment(&target, load))],
@@ -289,7 +341,14 @@ impl Engine {
         hash_program(&ops, |t: &Tile| t.serial(), &mut h);
         (self.shown().blend_space as u32).hash(&mut h);
         if let Some((_, t, p)) = stroke {
-            (t.serial(), p.opacity.to_bits(), p.erase, p.target, p.working_copy()).hash(&mut h);
+            (
+                t.serial(),
+                p.opacity.to_bits(),
+                p.erase,
+                p.target,
+                p.working_copy(),
+            )
+                .hash(&mut h);
             let (slot, val) = self.sel_slot(c);
             (slot, val.to_bits()).hash(&mut h);
         }
@@ -312,14 +371,21 @@ impl Engine {
         self.recheck_all = false;
         for c in coords {
             // Layers may hold content outside the canvas; it is not composited.
-            let sig = if self.in_document(c) { self.signature(c) } else { None };
+            let sig = if self.in_document(c) {
+                self.signature(c)
+            } else {
+                None
+            };
             match sig {
                 None => {
                     self.comp.remove(&c);
                     self.dirty.remove(&c);
                 }
                 Some(sig) => {
-                    let e = self.comp.entry(c).or_insert(CompositeEntry { tile: None, sig: !sig });
+                    let e = self.comp.entry(c).or_insert(CompositeEntry {
+                        tile: None,
+                        sig: !sig,
+                    });
                     if e.sig != sig {
                         e.sig = sig;
                         self.dirty.insert(c);
@@ -329,7 +395,12 @@ impl Engine {
         }
     }
 
-    pub(super) fn encode_flatten(&mut self, enc: &mut wgpu::CommandEncoder, budget: Option<usize>, stats: &mut RenderStats) {
+    pub(super) fn encode_flatten(
+        &mut self,
+        enc: &mut wgpu::CommandEncoder,
+        budget: Option<usize>,
+        stats: &mut RenderStats,
+    ) {
         if self.dirty.is_empty() {
             return;
         }
@@ -342,7 +413,8 @@ impl Engine {
             let ts = TILE_SIZE as f64;
             let key = |c: &TileCoord| {
                 let p = DVec2::new((c.x as f64 + 0.5) * ts, (c.y as f64 + 0.5) * ts);
-                let visible = p.x + ts > min.x && p.x - ts < max.x && p.y + ts > min.y && p.y - ts < max.y;
+                let visible =
+                    p.x + ts > min.x && p.x - ts < max.x && p.y + ts > min.y && p.y - ts < max.y;
                 (if visible { 0.0 } else { 1e18 }) + p.distance_squared(center)
             };
             list.sort_by(|a, b| key(a).total_cmp(&key(b)));
@@ -363,12 +435,14 @@ impl Engine {
             if program.is_empty() {
                 continue;
             }
-            let Some(entry) = self.comp.get_mut(&c) else { continue };
+            let Some(entry) = self.comp.get_mut(&c) else {
+                continue;
+            };
             if entry.tile.is_none() {
                 entry.tile = self.comp_pool.alloc();
             }
             let Some(tile) = &entry.tile else {
-                tracing::warn!("Composite-Speicher voll");
+                tracing::warn!("{}", imagine_core::tr("Composite memory full"));
                 continue;
             };
             let slot = tile.slot();
@@ -384,16 +458,21 @@ impl Engine {
         if b.jobs.is_empty() {
             return;
         }
-        let FlattenBatch { ops, jobs, adjust, .. } = b;
+        let FlattenBatch {
+            ops, jobs, adjust, ..
+        } = b;
         let mut all_jobs = Vec::new();
         let mut ranges = Vec::new();
         for (chunk, js) in jobs {
             ranges.push((chunk, all_jobs.len() as u32, js.len() as u32));
             all_jobs.extend(js);
         }
-        self.ops_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&ops));
-        self.jobs_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&all_jobs));
-        self.adjust_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&adjust));
+        self.ops_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&ops));
+        self.jobs_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&all_jobs));
+        self.adjust_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&adjust));
         self.rebuild_arrays_bg();
         let space = self.doc.blend_space as u32;
         let mut dispatches = Vec::new();
@@ -403,19 +482,36 @@ impl Engine {
                 label: Some("flatten"),
                 layout: &self.flatten_bgl,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: self.ops_buf.buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: self.jobs_buf.buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: self.params.binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.ops_buf.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.jobs_buf.buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.params.binding(),
+                    },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&self.comp_pool.chunks[chunk as usize].mip_views[0]),
+                        resource: wgpu::BindingResource::TextureView(
+                            &self.comp_pool.chunks[chunk as usize].mip_views[0],
+                        ),
                     },
-                    wgpu::BindGroupEntry { binding: 4, resource: self.adjust_buf.buf.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.adjust_buf.buf.as_entire_binding(),
+                    },
                 ],
             });
             dispatches.push((bg, off, count));
         }
-        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("flatten"), timestamp_writes: None });
+        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("flatten"),
+            timestamp_writes: None,
+        });
         cp.set_pipeline(&self.flatten_pipeline);
         cp.set_bind_group(0, self.arrays_bg.as_ref().unwrap(), &[]);
         for (bg, off, count) in &dispatches {
@@ -439,7 +535,8 @@ impl Engine {
                 _ => ranges.push((s.chunk, i as u32, 1)),
             }
         }
-        self.list_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&list));
+        self.list_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&list));
         let mut dispatches = Vec::new();
         for (chunk, base, count) in ranges {
             let off = self.params.push([base, count, 0, 0]);
@@ -451,21 +548,34 @@ impl Engine {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&ch.mip_views[mip as usize - 1]),
+                            resource: wgpu::BindingResource::TextureView(
+                                &ch.mip_views[mip as usize - 1],
+                            ),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&ch.mip_views[mip as usize]),
+                            resource: wgpu::BindingResource::TextureView(
+                                &ch.mip_views[mip as usize],
+                            ),
                         },
-                        wgpu::BindGroupEntry { binding: 2, resource: self.list_buf.buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 3, resource: self.params.binding() },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: self.list_buf.buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: self.params.binding(),
+                        },
                     ],
                 });
                 let s = TILE_SIZE >> mip;
                 dispatches.push((bg, off, s.div_ceil(8), count));
             }
         }
-        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("mips"), timestamp_writes: None });
+        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("mips"),
+            timestamp_writes: None,
+        });
         cp.set_pipeline(&self.mip_pipeline);
         for (bg, off, groups, count) in &dispatches {
             cp.set_bind_group(0, bg, &[*off]);
@@ -475,7 +585,10 @@ impl Engine {
 
     /// True while there is work left that needs further frames.
     pub fn busy(&self) -> bool {
-        !self.dirty.is_empty() || !self.pending_dabs.is_empty() || !self.recheck.is_empty() || self.recheck_all
+        !self.dirty.is_empty()
+            || !self.pending_dabs.is_empty()
+            || !self.recheck.is_empty()
+            || self.recheck_all
     }
 
     /// Processes all pending work without a budget (for export, saving, tests).
@@ -493,7 +606,12 @@ impl Engine {
 
     /// Coordinates that currently have composited content.
     pub fn composite_coords(&self) -> Vec<TileCoord> {
-        let mut v: Vec<_> = self.comp.iter().filter(|(_, e)| e.tile.is_some()).map(|(c, _)| *c).collect();
+        let mut v: Vec<_> = self
+            .comp
+            .iter()
+            .filter(|(_, e)| e.tile.is_some())
+            .map(|(c, _)| *c)
+            .collect();
         v.sort();
         v
     }

@@ -10,11 +10,11 @@ use bytemuck::{Pod, Zeroable};
 use imagine_core::doc::{Content, MaskTile};
 use imagine_core::{LayerId, MaskRef, TILE_SIZE, TileCoord};
 
-use super::util::color_attachment;
-use super::{Engine, NONE, SCRATCH_LAYERS, StrokeTarget, mask_slot};
 use super::filter::FilterJob;
 use super::magic::SimilarJob;
 use super::transform::WarpJob;
+use super::util::color_attachment;
+use super::{Engine, NONE, SCRATCH_LAYERS, StrokeTarget, mask_slot};
 use crate::pool::{Tile, texel_copy};
 
 #[derive(Clone, Copy)]
@@ -80,11 +80,20 @@ impl Engine {
     }
 
     /// Sets `old_slot`/`old_const` from the target (layer pixels or layer mask) at `c`.
-    fn with_old(&self, mut j: ApplyJob, layer: LayerId, target: StrokeTarget, c: TileCoord) -> ApplyJob {
+    fn with_old(
+        &self,
+        mut j: ApplyJob,
+        layer: LayerId,
+        target: StrokeTarget,
+        c: TileCoord,
+    ) -> ApplyJob {
         let l = self.doc.find(layer).expect("layer exists");
         match target {
             StrokeTarget::Pixels => {
-                j.old_slot = l.tiles().and_then(|t| t.get(&c)).map_or(NONE, |t| t.slot().packed());
+                j.old_slot = l
+                    .tiles()
+                    .and_then(|t| t.get(&c))
+                    .map_or(NONE, |t| t.slot().packed());
             }
             StrokeTarget::Mask => {
                 let (slot, val) = mask_slot(l.mask.as_ref().map(|m| m.at(c)));
@@ -97,26 +106,51 @@ impl Engine {
 
     /// Renders one new tile per job into the target pool. `None` if out of memory.
     fn run_apply(&mut self, target: StrokeTarget, jobs: &[ApplyJob]) -> Option<Vec<Tile>> {
-        self.run_tiles(target, Kernel::Apply, bytemuck::cast_slice(jobs), size_of::<ApplyJob>())
+        self.run_tiles(
+            target,
+            Kernel::Apply,
+            bytemuck::cast_slice(jobs),
+            size_of::<ApplyJob>(),
+        )
     }
 
     /// Like [`Self::run_apply`] for the warp kernel (grids must be uploaded).
     pub(super) fn run_warp(&mut self, target: StrokeTarget, jobs: &[WarpJob]) -> Option<Vec<Tile>> {
-        self.run_tiles(target, Kernel::Warp, bytemuck::cast_slice(jobs), size_of::<WarpJob>())
+        self.run_tiles(
+            target,
+            Kernel::Warp,
+            bytemuck::cast_slice(jobs),
+            size_of::<WarpJob>(),
+        )
     }
 
     /// Colour similarity tiles (mask pool) for the magic wand.
     pub(super) fn run_similar(&mut self, jobs: &[SimilarJob]) -> Option<Vec<Tile>> {
-        self.run_tiles(StrokeTarget::Mask, Kernel::Similar, bytemuck::cast_slice(jobs), size_of::<SimilarJob>())
+        self.run_tiles(
+            StrokeTarget::Mask,
+            Kernel::Similar,
+            bytemuck::cast_slice(jobs),
+            size_of::<SimilarJob>(),
+        )
     }
 
     /// Liquify tiles (grids and the field must be uploaded).
     pub(super) fn run_liquify(&mut self, jobs: &[super::liquify::LiquifyJob]) -> Option<Vec<Tile>> {
-        self.run_tiles(StrokeTarget::Pixels, Kernel::Liquify, bytemuck::cast_slice(jobs), size_of::<super::liquify::LiquifyJob>())
+        self.run_tiles(
+            StrokeTarget::Pixels,
+            Kernel::Liquify,
+            bytemuck::cast_slice(jobs),
+            size_of::<super::liquify::LiquifyJob>(),
+        )
     }
 
     pub(super) fn run_filter(&mut self, jobs: &[FilterJob]) -> Option<Vec<Tile>> {
-        self.run_tiles(StrokeTarget::Pixels, Kernel::Filter, bytemuck::cast_slice(jobs), size_of::<FilterJob>())
+        self.run_tiles(
+            StrokeTarget::Pixels,
+            Kernel::Filter,
+            bytemuck::cast_slice(jobs),
+            size_of::<FilterJob>(),
+        )
     }
 
     /// Job mixing `src_slot` over the layer's tile at `c` through the selection.
@@ -132,7 +166,13 @@ impl Engine {
         self.run_apply(StrokeTarget::Pixels, jobs)
     }
 
-    fn run_tiles(&mut self, target: StrokeTarget, kernel: Kernel, jobs: &[u8], stride: usize) -> Option<Vec<Tile>> {
+    fn run_tiles(
+        &mut self,
+        target: StrokeTarget,
+        kernel: Kernel,
+        jobs: &[u8],
+        stride: usize,
+    ) -> Option<Vec<Tile>> {
         let count = jobs.len() / stride;
         let mut out = Vec::with_capacity(count);
         for _ in 0..count {
@@ -151,30 +191,52 @@ impl Engine {
             self.apply_buf.write(&self.device, &self.queue, batch);
             let mut extra = None;
             let bg = match kernel {
-                Kernel::Apply | Kernel::Similar => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("apply"),
-                    layout: &self.apply_bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: self.apply_buf.buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: self.params.binding() },
-                    ],
-                }),
-                Kernel::Warp | Kernel::Filter | Kernel::Liquify => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("warp"),
-                    layout: &self.warp_bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: self.apply_buf.buf.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: self.params.binding() },
-                        wgpu::BindGroupEntry { binding: 2, resource: self.grid_buf.buf.as_entire_binding() },
-                    ],
-                }),
+                Kernel::Apply | Kernel::Similar => {
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("apply"),
+                        layout: &self.apply_bgl,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: self.apply_buf.buf.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: self.params.binding(),
+                            },
+                        ],
+                    })
+                }
+                Kernel::Warp | Kernel::Filter | Kernel::Liquify => {
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("warp"),
+                        layout: &self.warp_bgl,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: self.apply_buf.buf.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: self.params.binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: self.grid_buf.buf.as_entire_binding(),
+                            },
+                        ],
+                    })
+                }
             };
             if matches!(kernel, Kernel::Similar) {
                 let comp = super::frame::chunk_views(&self.comp_pool, super::MAX_COMPOSITE_CHUNKS);
                 extra = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("composite array"),
                     layout: &self.comp_array_bgl,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureViewArray(&comp) }],
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureViewArray(&comp),
+                    }],
                 }));
             }
             if matches!(kernel, Kernel::Liquify) {
@@ -182,7 +244,10 @@ impl Engine {
                 extra = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("liquify field"),
                     layout: &self.liquify_bgl,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() }],
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buf.as_entire_binding(),
+                    }],
                 }));
             }
             let pipeline = match (kernel, target) {
@@ -203,7 +268,10 @@ impl Engine {
                 let off = self.params.push([i as u32, 0, 0, 0]);
                 let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("apply"),
-                    color_attachments: &[Some(color_attachment(view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)))],
+                    color_attachments: &[Some(color_attachment(
+                        view,
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    ))],
                     ..Default::default()
                 });
                 rp.set_pipeline(pipeline);
@@ -223,7 +291,11 @@ impl Engine {
                 enc.copy_texture_to_texture(
                     texel_copy(scratch, 0, i as u32),
                     texel_copy(&pool.chunk(s).texture, 0, s.layer as u32),
-                    wgpu::Extent3d { width: TILE_SIZE, height: TILE_SIZE, depth_or_array_layers: 1 },
+                    wgpu::Extent3d {
+                        width: TILE_SIZE,
+                        height: TILE_SIZE,
+                        depth_or_array_layers: 1,
+                    },
                 );
             }
             self.params.upload(&self.queue);
@@ -245,7 +317,9 @@ impl Engine {
             let l = d.find_mut(layer).expect("layer exists");
             match target {
                 StrokeTarget::Pixels => {
-                    let Content::Pixels(map) = &mut l.content else { return false };
+                    let Content::Pixels(map) = &mut l.content else {
+                        return false;
+                    };
                     let map = Arc::make_mut(map);
                     for (c, t) in tiles {
                         match t {
@@ -255,7 +329,9 @@ impl Engine {
                     }
                 }
                 StrokeTarget::Mask => {
-                    let Some(mask) = &mut l.mask else { return false };
+                    let Some(mask) = &mut l.mask else {
+                        return false;
+                    };
                     let map = Arc::make_mut(&mut mask.tiles);
                     for (c, t) in tiles {
                         match t {
@@ -277,7 +353,12 @@ impl Engine {
             return;
         }
         // Healing: the preview was a clone; the result is computed from the footprint.
-        if let Some(src) = self.stroke.as_ref().and_then(|s| s.params.clone).filter(|c| c.heal) {
+        if let Some(src) = self
+            .stroke
+            .as_ref()
+            .and_then(|s| s.params.clone)
+            .filter(|c| c.heal)
+        {
             let stroke = self.stroke.take().unwrap();
             self.pending_dabs.clear();
             self.clone_cache.clear();
@@ -304,7 +385,12 @@ impl Engine {
         let target = stroke.params.target;
         let layer = stroke.layer;
 
-        let mut coords: Vec<TileCoord> = stroke.tiles.iter().filter(|(_, (_, unused))| !unused).map(|(c, _)| *c).collect();
+        let mut coords: Vec<TileCoord> = stroke
+            .tiles
+            .iter()
+            .filter(|(_, (_, unused))| !unused)
+            .map(|(c, _)| *c)
+            .collect();
         coords.sort();
         let mut jobs = Vec::new();
         let mut kept = Vec::new();
@@ -329,22 +415,29 @@ impl Engine {
             return;
         }
         let Some(tiles) = self.run_apply(target, &jobs) else {
-            tracing::warn!("GPU-Speicher voll – Strich verworfen");
+            tracing::warn!("{}", imagine_core::tr("GPU memory full – stroke discarded"));
             self.recheck.extend(stroke.tiles.keys().copied());
             return;
         };
         self.recheck.extend(stroke.tiles.keys().copied());
         drop(stroke); // stroke tiles return to the pool
-        self.commit(layer, target, kept.into_iter().zip(tiles.into_iter().map(Some)).collect(), label);
+        self.commit(
+            layer,
+            target,
+            kept.into_iter().zip(tiles.into_iter().map(Some)).collect(),
+            label,
+        );
     }
 
     /// Tiles that a fill-like operation must touch: everything selected.
     fn selected_coords(&self) -> Vec<TileCoord> {
         match &self.doc.selection {
             None => self.all_doc_coords(),
-            Some(sel) if sel.default > 0 => {
-                self.all_doc_coords().into_iter().filter(|c| !matches!(sel.at(*c), MaskRef::Solid(0))).collect()
-            }
+            Some(sel) if sel.default > 0 => self
+                .all_doc_coords()
+                .into_iter()
+                .filter(|c| !matches!(sel.at(*c), MaskRef::Solid(0)))
+                .collect(),
             Some(sel) => {
                 let mut v: Vec<TileCoord> = sel
                     .tiles
@@ -360,27 +453,38 @@ impl Engine {
 
     pub(super) fn check_target(&self, target: StrokeTarget) -> Result<LayerId, &'static str> {
         if self.stroke.is_some() {
-            return Err("während eines Pinselstrichs nicht möglich");
+            return Err(imagine_core::tr("not possible during a brush stroke"));
         }
-        let l = self.doc.active_layer().ok_or("keine aktive Ebene")?;
+        let l = self
+            .doc
+            .active_layer()
+            .ok_or(imagine_core::tr("no active layer"))?;
         if target == StrokeTarget::Pixels && !l.is_pixels() {
             return Err(if l.is_group() {
-                "Gruppen haben keine Pixel"
+                imagine_core::tr("groups have no pixels")
             } else if l.vector().is_some() {
-                "Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Rastern)"
+                imagine_core::tr(
+                    "text and shape layers have no pixels – rasterize first (Layer › Rasterize)",
+                )
             } else {
-                "Einstellungsebenen haben keine Pixel – in die Maske malen (\\)"
+                imagine_core::tr("adjustment layers have no pixels – paint into the mask (\\)")
             });
         }
         if target == StrokeTarget::Mask && l.mask.is_none() {
-            return Err("die Ebene hat keine Maske");
+            return Err(imagine_core::tr("the layer has no mask"));
         }
         Ok(l.id)
     }
 
     /// Fills the selection (or everything) of the active layer / its mask.
     /// `color` is premultiplied linear RGBA; for masks only red and alpha matter.
-    pub fn fill(&mut self, target: StrokeTarget, color: [f32; 4], opacity: f32, label: &str) -> Result<usize, &'static str> {
+    pub fn fill(
+        &mut self,
+        target: StrokeTarget,
+        color: [f32; 4],
+        opacity: f32,
+        label: &str,
+    ) -> Result<usize, &'static str> {
         let layer = self.check_target(target)?;
         let coords = self.selected_coords();
         let jobs: Vec<ApplyJob> = coords
@@ -415,7 +519,11 @@ impl Engine {
             .iter()
             .map(|&c| {
                 let mut j = self.with_old(self.job(c), layer, target, c);
-                j.src_kind = if kind == GradientKind::Linear { KIND_LINEAR } else { KIND_RADIAL };
+                j.src_kind = if kind == GradientKind::Linear {
+                    KIND_LINEAR
+                } else {
+                    KIND_RADIAL
+                };
                 j.color0 = c0;
                 j.color1 = c1;
                 j.g0 = [p0.0 as f32, p0.1 as f32];
@@ -430,15 +538,28 @@ impl Engine {
     /// Makes the selected pixels of the active layer transparent.
     pub fn clear_selected(&mut self, label: &str) -> Result<usize, &'static str> {
         let layer = self.check_target(StrokeTarget::Pixels)?;
-        let existing: BTreeSet<TileCoord> =
-            self.doc.find(layer).and_then(|l| l.tiles()).map(|t| t.keys().copied().collect()).unwrap_or_default();
+        let existing: BTreeSet<TileCoord> = self
+            .doc
+            .find(layer)
+            .and_then(|l| l.tiles())
+            .map(|t| t.keys().copied().collect())
+            .unwrap_or_default();
         if self.doc.selection.is_none() {
             // Everything: just drop the tiles.
             let n = existing.len();
-            self.commit(layer, StrokeTarget::Pixels, existing.into_iter().map(|c| (c, None)).collect(), label);
+            self.commit(
+                layer,
+                StrokeTarget::Pixels,
+                existing.into_iter().map(|c| (c, None)).collect(),
+                label,
+            );
             return Ok(n);
         }
-        let coords: Vec<TileCoord> = self.selected_coords().into_iter().filter(|c| existing.contains(c)).collect();
+        let coords: Vec<TileCoord> = self
+            .selected_coords()
+            .into_iter()
+            .filter(|c| existing.contains(c))
+            .collect();
         let jobs: Vec<ApplyJob> = coords
             .iter()
             .map(|&c| {
@@ -463,9 +584,19 @@ impl Engine {
         if jobs.is_empty() {
             return Ok(0);
         }
-        let tiles = self.run_apply(target, &jobs).ok_or("GPU-Speicher voll")?;
+        let tiles = self
+            .run_apply(target, &jobs)
+            .ok_or(imagine_core::tr("GPU memory full"))?;
         let n = tiles.len();
-        self.commit(layer, target, coords.into_iter().zip(tiles.into_iter().map(Some)).collect(), label);
+        self.commit(
+            layer,
+            target,
+            coords
+                .into_iter()
+                .zip(tiles.into_iter().map(Some))
+                .collect(),
+            label,
+        );
         Ok(n)
     }
 
@@ -481,8 +612,10 @@ impl Engine {
         let layer = self.check_target(StrokeTarget::Mask)?;
         let l = self.doc.find(layer).unwrap();
         let mask = l.mask.clone().unwrap();
-        let tiles: Vec<(TileCoord, Tile)> =
-            l.tiles().map(|t| t.iter().map(|(c, t)| (*c, t.clone())).collect()).unwrap_or_default();
+        let tiles: Vec<(TileCoord, Tile)> = l
+            .tiles()
+            .map(|t| t.iter().map(|(c, t)| (*c, t.clone())).collect())
+            .unwrap_or_default();
         let mut keep = Vec::new();
         let mut jobs = Vec::new();
         let mut job_coords = Vec::new();
@@ -502,10 +635,15 @@ impl Engine {
                 }
             }
         }
-        let baked = self.run_apply(StrokeTarget::Pixels, &jobs).ok_or("GPU-Speicher voll")?;
+        let baked = self
+            .run_apply(StrokeTarget::Pixels, &jobs)
+            .ok_or(imagine_core::tr("GPU memory full"))?;
         self.edit(label, |d| {
             let l = d.find_mut(layer).unwrap();
-            let map = keep.into_iter().chain(job_coords.into_iter().zip(baked)).collect();
+            let map = keep
+                .into_iter()
+                .chain(job_coords.into_iter().zip(baked))
+                .collect();
             l.content = Content::Pixels(Arc::new(map));
             l.mask = None;
             true

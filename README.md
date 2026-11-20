@@ -18,6 +18,10 @@ cargo test --workspace                       # inkl. Headless-GPU-Tests (Vulkan)
 
 Voraussetzungen: Wayland-Compositor, Vulkan-Treiber mit Descriptor Indexing (RADV, ANV, NVIDIA).
 
+## Sprache / Language
+
+The interface is English; other languages come from gettext catalogs (`crates/imagine-core/i18n/<lang>.po`, currently German). The language follows `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` (C/POSIX → English); `"language": "de"` in the settings file overrides it. `scripts/i18n-check.py check` lists untranslated or stale texts.
+
 ## Für Agenten
 
 imagine ist per **MCP** und JSON-Skript steuerbar, auch live im offenen Fenster:

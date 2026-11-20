@@ -10,8 +10,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::adjust::Adjustment;
-use crate::filter::{Filter, SmartFilter};
 use crate::blend::{BlendMode, BlendSpace};
+use crate::filter::{Filter, SmartFilter};
 use crate::tile::TileCoord;
 
 pub type LayerId = u32;
@@ -61,7 +61,10 @@ impl<T> Copy for MaskRef<'_, T> {}
 
 impl<T> Mask<T> {
     pub fn filled(v: u8) -> Self {
-        Self { tiles: Arc::new(TileMap::new()), default: v }
+        Self {
+            tiles: Arc::new(TileMap::new()),
+            default: v,
+        }
     }
 
     pub fn at(&self, c: TileCoord) -> MaskRef<'_, T> {
@@ -78,10 +81,13 @@ impl<T> Mask<T> {
                 self.tiles
                     .iter()
                     .map(|(c, t)| {
-                        (*c, match t {
-                            MaskTile::Solid(v) => MaskTile::Solid(*v),
-                            MaskTile::Pixels(p) => MaskTile::Pixels(f(p)),
-                        })
+                        (
+                            *c,
+                            match t {
+                                MaskTile::Solid(v) => MaskTile::Solid(*v),
+                                MaskTile::Pixels(p) => MaskTile::Pixels(f(p)),
+                            },
+                        )
                     })
                     .collect(),
             ),
@@ -139,7 +145,10 @@ impl<T> Layer<T> {
 
     /// The active mask's value at a tile, `None` if the layer has no (enabled) mask.
     pub fn mask_at(&self, c: TileCoord) -> Option<MaskRef<'_, T>> {
-        self.mask.as_ref().filter(|_| self.mask_enabled).map(|m| m.at(c))
+        self.mask
+            .as_ref()
+            .filter(|_| self.mask_enabled)
+            .map(|m| m.at(c))
     }
 }
 
@@ -150,13 +159,29 @@ pub enum Op<'a, T> {
     /// this coordinate (only emitted when `extra` asked for it, e.g. for a
     /// stroke on an empty area).
     /// `mask` is `None` when the layer is not masked here (no mask, or fully revealing).
-    Layer { id: LayerId, tile: Option<&'a T>, opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
+    Layer {
+        id: LayerId,
+        tile: Option<&'a T>,
+        opacity: f32,
+        blend: BlendMode,
+        mask: Option<MaskRef<'a, T>>,
+    },
     /// Start an isolated group.
     Push,
     /// Composite the group onto what is below.
-    Pop { opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
+    Pop {
+        opacity: f32,
+        blend: BlendMode,
+        mask: Option<MaskRef<'a, T>>,
+    },
     /// Apply an adjustment to what is below (mixed by opacity × mask).
-    Adjust { id: LayerId, adj: &'a Adjustment, opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
+    Adjust {
+        id: LayerId,
+        adj: &'a Adjustment,
+        opacity: f32,
+        blend: BlendMode,
+        mask: Option<MaskRef<'a, T>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -177,7 +202,7 @@ impl<T: Clone> Document<T> {
     pub fn new(width: u32, height: u32) -> Self {
         let mut d = Self::empty(width, height);
         let id = d.alloc_id();
-        d.layers.push(Layer::pixels(id, "Hintergrund"));
+        d.layers.push(Layer::pixels(id, crate::tr("Background")));
         d.active = id;
         d
     }
@@ -329,14 +354,14 @@ impl<T: Clone> Document<T> {
     pub fn add_pixel_layer(&mut self) -> LayerId {
         let id = self.alloc_id();
         let n = self.count_layers() + 1;
-        self.insert_above_active(Layer::pixels(id, &format!("Ebene {n}")))
+        self.insert_above_active(Layer::pixels(id, &crate::tr!("Layer {n}", n = n)))
     }
 
     /// Duplicates the active layer (tiles are shared, not copied).
     pub fn duplicate_active(&mut self) -> Option<LayerId> {
         let src = self.active_layer()?.clone();
         let mut copy = self.reassign_ids(src);
-        copy.name = format!("{} Kopie", copy.name);
+        copy.name = crate::tr!("{name} copy", name = copy.name);
         let id = copy.id;
         let (list, i) = self.locate_mut(self.active)?;
         list.insert(i + 1, copy);
@@ -347,7 +372,8 @@ impl<T: Clone> Document<T> {
     fn reassign_ids(&mut self, mut l: Layer<T>) -> Layer<T> {
         l.id = self.alloc_id();
         if let Content::Group(children) = l.content {
-            l.content = Content::Group(children.into_iter().map(|c| self.reassign_ids(c)).collect());
+            l.content =
+                Content::Group(children.into_iter().map(|c| self.reassign_ids(c)).collect());
         }
         l
     }
@@ -359,17 +385,23 @@ impl<T: Clone> Document<T> {
         }
         let order = self.display_order();
         let pos = order.iter().position(|&id| id == self.active);
-        let Some((list, i)) = self.locate_mut(self.active) else { return false };
+        let Some((list, i)) = self.locate_mut(self.active) else {
+            return false;
+        };
         let removed = list.remove(i);
         let mut gone = Vec::new();
         Self::collect_ids(&removed, &mut gone);
         // Select the next layer below in display order, else the one above.
         let next = pos.and_then(|p| {
-            order[p + 1..].iter().chain(order[..p].iter().rev()).find(|id| !gone.contains(id)).copied()
+            order[p + 1..]
+                .iter()
+                .chain(order[..p].iter().rev())
+                .find(|id| !gone.contains(id))
+                .copied()
         });
         if self.layers.is_empty() {
             let id = self.alloc_id();
-            self.layers.push(Layer::pixels(id, "Hintergrund"));
+            self.layers.push(Layer::pixels(id, crate::tr("Background")));
             self.active = id;
         } else if let Some(n) = next {
             self.active = n;
@@ -388,7 +420,9 @@ impl<T: Clone> Document<T> {
 
     /// Moves the active layer one step up (`+1`) or down (`-1`) within its list.
     pub fn move_active(&mut self, step: i32) -> bool {
-        let Some((list, i)) = self.locate_mut(self.active) else { return false };
+        let Some((list, i)) = self.locate_mut(self.active) else {
+            return false;
+        };
         let j = i as i32 + step;
         if j < 0 || j >= list.len() as i32 {
             return false;
@@ -409,13 +443,24 @@ impl<T: Clone> Document<T> {
             Some(l) => Self::collect_ids(l, &mut subtree),
             None => return false,
         }
-        if subtree.contains(&target) || self.find(target).is_none() || (into && !self.find(target).unwrap().is_group()) {
+        if subtree.contains(&target)
+            || self.find(target).is_none()
+            || (into && !self.find(target).unwrap().is_group())
+        {
             return false;
         }
-        let Some((list, i)) = self.locate_mut(id) else { return false };
+        let Some((list, i)) = self.locate_mut(id) else {
+            return false;
+        };
         let layer = list.remove(i);
         if into {
-            let Some(Layer { content: Content::Group(children), .. }) = self.find_mut(target) else { unreachable!() };
+            let Some(Layer {
+                content: Content::Group(children),
+                ..
+            }) = self.find_mut(target)
+            else {
+                unreachable!()
+            };
             children.push(layer);
         } else {
             let (list, j) = self.locate_mut(target).expect("target exists");
@@ -433,7 +478,7 @@ impl<T: Clone> Document<T> {
         let inner = list.remove(i);
         let group = Layer {
             id: gid,
-            name: format!("Gruppe {n}"),
+            name: crate::tr!("Group {n}", n = n),
             opacity: 1.0,
             blend: BlendMode::Normal,
             visible: true,
@@ -450,12 +495,16 @@ impl<T: Clone> Document<T> {
 
     /// Dissolves the active group into its parent.
     pub fn ungroup_active(&mut self) -> bool {
-        let Some((list, i)) = self.locate_mut(self.active) else { return false };
+        let Some((list, i)) = self.locate_mut(self.active) else {
+            return false;
+        };
         if !list[i].is_group() {
             return false;
         }
         let g = list.remove(i);
-        let Content::Group(children) = g.content else { unreachable!() };
+        let Content::Group(children) = g.content else {
+            unreachable!()
+        };
         let top = children.last().map(|c| c.id);
         for (k, c) in children.into_iter().enumerate() {
             list.insert(i + k, c);
@@ -527,7 +576,12 @@ impl<T: Clone> Document<T> {
         fn mask<T>(l: &Layer<T>, c: TileCoord) -> Option<MaskRef<'_, T>> {
             l.mask_at(c).filter(|m| !matches!(m, MaskRef::Solid(255)))
         }
-        fn walk<'a, T>(ls: &'a [Layer<T>], c: TileCoord, force: Option<LayerId>, out: &mut Vec<Op<'a, T>>) {
+        fn walk<'a, T>(
+            ls: &'a [Layer<T>],
+            c: TileCoord,
+            force: Option<LayerId>,
+            out: &mut Vec<Op<'a, T>>,
+        ) {
             for l in ls {
                 if !l.visible || l.opacity <= 0.0 {
                     continue;
@@ -542,14 +596,26 @@ impl<T: Clone> Document<T> {
                     Content::Pixels(tiles) => {
                         let tile = tiles.get(&c);
                         if tile.is_some() || force == Some(l.id) {
-                            out.push(Op::Layer { id: l.id, tile, opacity, blend: l.blend, mask: m });
+                            out.push(Op::Layer {
+                                id: l.id,
+                                tile,
+                                opacity,
+                                blend: l.blend,
+                                mask: m,
+                            });
                         }
                     }
                     Content::Vector(_) => {}
                     Content::Adjustment(adj) => {
                         // Nothing below in this group: nothing to adjust.
                         if !out.is_empty() && !matches!(out.last(), Some(Op::Push)) {
-                            out.push(Op::Adjust { id: l.id, adj, opacity, blend: l.blend, mask: m });
+                            out.push(Op::Adjust {
+                                id: l.id,
+                                adj,
+                                opacity,
+                                blend: l.blend,
+                                mask: m,
+                            });
                         }
                     }
                     Content::Group(children) => {
@@ -559,7 +625,11 @@ impl<T: Clone> Document<T> {
                         if out.len() == start + 1 {
                             out.pop(); // empty group
                         } else {
-                            out.push(Op::Pop { opacity, blend: l.blend, mask: m });
+                            out.push(Op::Pop {
+                                opacity,
+                                blend: l.blend,
+                                mask: m,
+                            });
                         }
                     }
                 }
@@ -644,9 +714,9 @@ impl<T: Clone> Document<T> {
                 ""
             };
             let mask = match (&l.mask, l.mask_enabled) {
-                (Some(_), true) => " [Maske]",
-                (Some(_), false) => " [Maske aus]",
-                (None, _) => "",
+                (Some(_), true) => format!(" [{}]", crate::tr("Mask")),
+                (Some(_), false) => format!(" [{}]", crate::tr("Mask off")),
+                (None, _) => String::new(),
             };
             let name = format!("{}{icon}{}{mask}", "  ".repeat(depth), l.name);
             s += &format!(
@@ -690,7 +760,13 @@ impl<T> Layer<T> {
 pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl Hasher) {
     for op in ops {
         match op {
-            Op::Layer { id, tile, opacity, blend, mask } => {
+            Op::Layer {
+                id,
+                tile,
+                opacity,
+                blend,
+                mask,
+            } => {
                 0u8.hash(h);
                 id.hash(h);
                 tile.map(&key).hash(h);
@@ -699,7 +775,13 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 hash_mask(mask, &key, h);
             }
             Op::Push => 1u8.hash(h),
-            Op::Adjust { id, adj, opacity, blend, mask } => {
+            Op::Adjust {
+                id,
+                adj,
+                opacity,
+                blend,
+                mask,
+            } => {
                 3u8.hash(h);
                 id.hash(h);
                 // Parameters change the result: hash their serialised form.
@@ -708,7 +790,11 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 (*blend as u32).hash(h);
                 hash_mask(mask, &key, h);
             }
-            Op::Pop { opacity, blend, mask } => {
+            Op::Pop {
+                opacity,
+                blend,
+                mask,
+            } => {
                 2u8.hash(h);
                 opacity.to_bits().hash(h);
                 (*blend as u32).hash(h);
@@ -738,7 +824,10 @@ mod adjust_tests {
         let adj = d.add_adjustment(Adjustment::Invert);
         assert!(d.find(adj).unwrap().tiles().is_none() && !d.find(adj).unwrap().is_pixels());
         let p = d.program(TileCoord::new(0, 0), None);
-        assert!(matches!(p.as_slice(), [Op::Layer { .. }, Op::Adjust { .. }]));
+        assert!(matches!(
+            p.as_slice(),
+            [Op::Layer { .. }, Op::Adjust { .. }]
+        ));
         // Nothing below at (1, 0): no adjust op (and no program).
         assert!(d.program(TileCoord::new(1, 0), None).is_empty());
         // Inside a group as first child: nothing below within the group.
@@ -767,7 +856,10 @@ mod move_tests {
         assert!(d.move_layer(b, g, false, true));
         assert_eq!(d.panel_rows(), vec![(bg, 0), (g, 0), (b, 1), (a, 1)]);
         assert!(!d.move_layer(g, b, true, false), "group into its own child");
-        assert!(!d.move_layer(a, bg, false, true), "only groups take children");
+        assert!(
+            !d.move_layer(a, bg, false, true),
+            "only groups take children"
+        );
     }
 }
 
@@ -777,7 +869,9 @@ mod tests {
 
     fn doc() -> Document<u32> {
         let mut d = Document::new(1000, 1000);
-        d.tiles_mut(d.active).unwrap().insert(TileCoord::new(0, 0), 7);
+        d.tiles_mut(d.active)
+            .unwrap()
+            .insert(TileCoord::new(0, 0), 7);
         d
     }
 
@@ -816,8 +910,13 @@ mod tests {
     fn snapshot_is_independent() {
         let mut d = doc();
         let before = d.clone();
-        d.tiles_mut(d.active).unwrap().insert(TileCoord::new(0, 0), 8);
-        assert_eq!(before.find(before.active).unwrap().tiles().unwrap()[&TileCoord::new(0, 0)], 7);
+        d.tiles_mut(d.active)
+            .unwrap()
+            .insert(TileCoord::new(0, 0), 8);
+        assert_eq!(
+            before.find(before.active).unwrap().tiles().unwrap()[&TileCoord::new(0, 0)],
+            7
+        );
     }
 
     #[test]
@@ -838,13 +937,36 @@ mod tests {
         Arc::make_mut(&mut m.tiles).insert(TileCoord::new(0, 0), MaskTile::Pixels(42));
         d.find_mut(top).unwrap().mask = Some(m);
         let p = d.program(TileCoord::new(0, 0), None);
-        assert!(matches!(p[2], Op::Layer { mask: Some(MaskRef::Tile(&42)), .. }));
+        assert!(matches!(
+            p[2],
+            Op::Layer {
+                mask: Some(MaskRef::Tile(&42)),
+                ..
+            }
+        ));
         d.find_mut(top).unwrap().mask = Some(Mask::filled(0));
-        assert_eq!(d.program(TileCoord::new(0, 0), None).len(), 1, "group with fully hidden layer vanishes");
+        assert_eq!(
+            d.program(TileCoord::new(0, 0), None).len(),
+            1,
+            "group with fully hidden layer vanishes"
+        );
         let forced = d.program(TileCoord::new(0, 0), Some(top));
-        assert!(matches!(forced[2], Op::Layer { mask: Some(MaskRef::Solid(0)), .. }), "mask painting needs the op");
+        assert!(
+            matches!(
+                forced[2],
+                Op::Layer {
+                    mask: Some(MaskRef::Solid(0)),
+                    ..
+                }
+            ),
+            "mask painting needs the op"
+        );
         d.find_mut(top).unwrap().mask_enabled = false;
-        assert_eq!(d.program(TileCoord::new(0, 0), None).len(), 4, "disabled mask is ignored");
+        assert_eq!(
+            d.program(TileCoord::new(0, 0), None).len(),
+            4,
+            "disabled mask is ignored"
+        );
         d.find_mut(top).unwrap().mask = None;
         // Empty coordinate inside the group: group disappears from the program.
         assert!(d.program(TileCoord::new(3, 3), None).is_empty());
@@ -890,8 +1012,14 @@ mod tests {
         all.sort();
         assert_eq!(all, vec![5, 7]);
         let m = d.map_tiles(&mut |v| *v as u64 * 2);
-        assert!(matches!(m.selection.as_ref().unwrap().at(TileCoord::new(1, 1)), MaskRef::Tile(&10)));
-        assert_eq!(m.find(d.active).unwrap().tiles().unwrap()[&TileCoord::new(0, 0)], 14);
+        assert!(matches!(
+            m.selection.as_ref().unwrap().at(TileCoord::new(1, 1)),
+            MaskRef::Tile(&10)
+        ));
+        assert_eq!(
+            m.find(d.active).unwrap().tiles().unwrap()[&TileCoord::new(0, 0)],
+            14
+        );
     }
 }
 

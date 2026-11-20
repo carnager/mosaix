@@ -83,11 +83,16 @@ pub fn language_from_env() -> String {
     let posix = |v: &str| v == "C" || v == "POSIX" || v.starts_with("C.");
     // LC_ALL wins over LC_MESSAGES over LANG; LANGUAGE (a priority list)
     // is honoured unless the locale is C/POSIX, like gettext does.
-    let locale = get("LC_ALL").or_else(|| get("LC_MESSAGES")).or_else(|| get("LANG")).unwrap_or_default();
+    let locale = get("LC_ALL")
+        .or_else(|| get("LC_MESSAGES"))
+        .or_else(|| get("LANG"))
+        .unwrap_or_default();
     if posix(&locale) || locale.is_empty() {
         return "en".into();
     }
-    let candidates = get("LANGUAGE").map(|l| l.split(':').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+    let candidates = get("LANGUAGE")
+        .map(|l| l.split(':').map(str::to_string).collect::<Vec<_>>())
+        .unwrap_or_default();
     for c in candidates.iter().chain(std::iter::once(&locale)) {
         let code: String = c.split(['_', '.', '@']).next().unwrap_or("").to_lowercase();
         if code == "en" || CATALOGS.iter().any(|(l, _)| *l == code) {
@@ -100,8 +105,17 @@ pub fn language_from_env() -> String {
 /// Chooses the language once at startup ("auto" = from the environment).
 /// Later calls have no effect.
 pub fn init(choice: &str) {
-    let lang = if choice.is_empty() || choice == "auto" { language_from_env() } else { choice.to_lowercase() };
-    let _ = ACTIVE.set(CATALOGS.iter().find(|(l, _)| *l == lang).map(|(_, po)| parse_po(po)));
+    let lang = if choice.is_empty() || choice == "auto" {
+        language_from_env()
+    } else {
+        choice.to_lowercase()
+    };
+    let _ = ACTIVE.set(
+        CATALOGS
+            .iter()
+            .find(|(l, _)| *l == lang)
+            .map(|(_, po)| parse_po(po)),
+    );
 }
 
 /// The active language code.
@@ -142,7 +156,10 @@ mod tests {
         let po = "# comment\nmsgid \"\"\nmsgstr \"\"\n\"Content-Type: text/plain\\n\"\n\nmsgid \"Open\"\nmsgstr \"Öffnen\"\n\nmsgid \"Two\\nlines\"\nmsgstr \"\"\n\"Zwei\\n\"\n\"Zeilen\"\n";
         let m = parse_po(po);
         assert_eq!(m.get("Open").map(String::as_str), Some("Öffnen"));
-        assert_eq!(m.get("Two\nlines").map(String::as_str), Some("Zwei\nZeilen"));
+        assert_eq!(
+            m.get("Two\nlines").map(String::as_str),
+            Some("Zwei\nZeilen")
+        );
         assert!(!m.contains_key(""), "the header is not a translation");
     }
 
@@ -152,8 +169,15 @@ mod tests {
         // Placeholders must survive translation.
         for (k, v) in &m {
             for part in k.split('{').skip(1) {
-                if let Some(name) = part.split('}').next().filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_')) {
-                    assert!(v.contains(&format!("{{{name}}}")), "placeholder {{{name}}} missing in translation of {k:?}");
+                if let Some(name) = part
+                    .split('}')
+                    .next()
+                    .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_'))
+                {
+                    assert!(
+                        v.contains(&format!("{{{name}}}")),
+                        "placeholder {{{name}}} missing in translation of {k:?}"
+                    );
                 }
             }
         }

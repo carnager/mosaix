@@ -31,9 +31,13 @@ pub(super) struct StyleEntry {
 impl Engine {
     /// Brings the styles of all layers up to date; `sources` maps layer →
     /// the pixels the style is computed from. True if anything changed.
-    pub(super) fn refresh_styles(&mut self, sources: &[(LayerId, Arc<TileSet>, Vec<Effect>)]) -> bool {
+    pub(super) fn refresh_styles(
+        &mut self,
+        sources: &[(LayerId, Arc<TileSet>, Vec<Effect>)],
+    ) -> bool {
         let before = self.styles.len();
-        self.styles.retain(|id, _| sources.iter().any(|s| s.0 == *id));
+        self.styles
+            .retain(|id, _| sources.iter().any(|s| s.0 == *id));
         let mut changed = self.styles.len() != before;
         for (id, src, effects) in sources {
             let mut h = DefaultHasher::new();
@@ -46,20 +50,39 @@ impl Engine {
             let t0 = std::time::Instant::now();
             match self.compute_style(src, effects) {
                 Some((below, content)) => {
-                    self.styles.insert(*id, StyleEntry { key, _src: src.clone(), below, content });
+                    self.styles.insert(
+                        *id,
+                        StyleEntry {
+                            key,
+                            _src: src.clone(),
+                            below,
+                            content,
+                        },
+                    );
                 }
                 None => {
                     self.styles.remove(id);
                 }
             }
-            tracing::debug!("Ebenenstil {id}: {:.1} ms", t0.elapsed().as_secs_f64() * 1e3);
+            tracing::debug!(
+                "{}",
+                imagine_core::tr!(
+                    "Layer style {id}: {ms} ms",
+                    id = id,
+                    ms = format!("{:.1}", t0.elapsed().as_secs_f64() * 1e3)
+                )
+            );
             changed = true;
         }
         changed
     }
 
     #[allow(clippy::type_complexity)]
-    fn compute_style(&mut self, src: &Arc<TileSet>, effects: &[Effect]) -> Option<(Vec<(BlendMode, Arc<TileSet>)>, Arc<TileSet>)> {
+    fn compute_style(
+        &mut self,
+        src: &Arc<TileSet>,
+        effects: &[Effect],
+    ) -> Option<(Vec<(BlendMode, Arc<TileSet>)>, Arc<TileSet>)> {
         if src.is_empty() {
             return None;
         }
@@ -91,7 +114,13 @@ impl Engine {
         let (x0, y0, x1, y1) = (x0 - pad, y0 - pad, x1 + pad, y1 + pad);
         let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
         if w * h > MAX_PIXELS {
-            tracing::warn!("Ebenenstil übersprungen: Ebene zu groß ({} MP)", w * h / 1_000_000);
+            tracing::warn!(
+                "{}",
+                imagine_core::tr!(
+                    "Layer style skipped: layer too large ({mp} MP)",
+                    mp = w * h / 1_000_000
+                )
+            );
             return None;
         }
         let mut region = Region::new(w, h);
@@ -109,7 +138,12 @@ impl Engine {
                         continue;
                     }
                     let s = ((ly * ts + lx) * 4) as usize;
-                    region.px[row + x as usize] = [px[s].to_f32(), px[s + 1].to_f32(), px[s + 2].to_f32(), px[s + 3].to_f32()];
+                    region.px[row + x as usize] = [
+                        px[s].to_f32(),
+                        px[s + 1].to_f32(),
+                        px[s + 2].to_f32(),
+                        px[s + 3].to_f32(),
+                    ];
                 }
             }
         }
@@ -142,7 +176,10 @@ impl Engine {
                         }
                     }
                     if any {
-                        map.insert(TileCoord::new(tx as i32, ty as i32), self.write_new_tile(&px)?);
+                        map.insert(
+                            TileCoord::new(tx as i32, ty as i32),
+                            self.write_new_tile(&px)?,
+                        );
                     }
                 }
             }

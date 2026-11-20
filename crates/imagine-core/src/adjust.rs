@@ -24,7 +24,13 @@ pub struct Levels {
 
 impl Default for Levels {
     fn default() -> Self {
-        Self { in_black: 0.0, in_white: 1.0, gamma: 1.0, out_black: 0.0, out_white: 1.0 }
+        Self {
+            in_black: 0.0,
+            in_white: 1.0,
+            gamma: 1.0,
+            out_black: 0.0,
+            out_white: 1.0,
+        }
     }
 }
 
@@ -61,12 +67,18 @@ pub fn eval_curve(points: &[[f32; 2]], x: f32) -> f32 {
         return p[p.len() - 1][1].clamp(0.0, 1.0);
     }
     let n = p.len();
-    let d: Vec<f32> = (0..n - 1).map(|i| (p[i + 1][1] - p[i][1]) / (p[i + 1][0] - p[i][0])).collect();
+    let d: Vec<f32> = (0..n - 1)
+        .map(|i| (p[i + 1][1] - p[i][1]) / (p[i + 1][0] - p[i][0]))
+        .collect();
     let mut m = vec![0.0f32; n];
     m[0] = d[0];
     m[n - 1] = d[n - 2];
     for i in 1..n - 1 {
-        m[i] = if d[i - 1] * d[i] <= 0.0 { 0.0 } else { (d[i - 1] + d[i]) / 2.0 };
+        m[i] = if d[i - 1] * d[i] <= 0.0 {
+            0.0
+        } else {
+            (d[i - 1] + d[i]) / 2.0
+        };
     }
     for i in 0..n - 1 {
         if d[i] == 0.0 {
@@ -82,7 +94,10 @@ pub fn eval_curve(points: &[[f32; 2]], x: f32) -> f32 {
             }
         }
     }
-    let i = p.windows(2).position(|w| x >= w[0][0] && x <= w[1][0]).unwrap_or(n - 2);
+    let i = p
+        .windows(2)
+        .position(|w| x >= w[0][0] && x <= w[1][0])
+        .unwrap_or(n - 2);
     let h = p[i + 1][0] - p[i][0];
     let t = (x - p[i][0]) / h;
     let (t2, t3) = (t * t, t * t * t);
@@ -201,18 +216,40 @@ impl Adjustment {
     /// All kinds with neutral settings, for menus.
     pub fn defaults() -> Vec<Adjustment> {
         vec![
-            Adjustment::BrightnessContrast { brightness: 0.0, contrast: 0.0 },
+            Adjustment::BrightnessContrast {
+                brightness: 0.0,
+                contrast: 0.0,
+            },
             Adjustment::Levels {
                 master: Levels::default(),
                 red: Levels::default(),
                 green: Levels::default(),
                 blue: Levels::default(),
             },
-            Adjustment::Curves { master: identity_curve(), red: identity_curve(), green: identity_curve(), blue: identity_curve() },
-            Adjustment::Exposure { exposure: 0.0, offset: 0.0, gamma: 1.0 },
-            Adjustment::Vibrance { vibrance: 0.0, saturation: 0.0 },
-            Adjustment::HueSaturation { hue: 0.0, saturation: 0.0, lightness: 0.0, colorize: false },
-            Adjustment::BlackWhite { weights: bw_default() },
+            Adjustment::Curves {
+                master: identity_curve(),
+                red: identity_curve(),
+                green: identity_curve(),
+                blue: identity_curve(),
+            },
+            Adjustment::Exposure {
+                exposure: 0.0,
+                offset: 0.0,
+                gamma: 1.0,
+            },
+            Adjustment::Vibrance {
+                vibrance: 0.0,
+                saturation: 0.0,
+            },
+            Adjustment::HueSaturation {
+                hue: 0.0,
+                saturation: 0.0,
+                lightness: 0.0,
+                colorize: false,
+            },
+            Adjustment::BlackWhite {
+                weights: bw_default(),
+            },
             Adjustment::Invert,
             Adjustment::Posterize { levels: 4.0 },
             Adjustment::Threshold { level: 128.0 },
@@ -221,16 +258,16 @@ impl Adjustment {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Adjustment::BrightnessContrast { .. } => "Helligkeit/Kontrast",
-            Adjustment::Levels { .. } => "Tonwertkorrektur",
-            Adjustment::Curves { .. } => "Gradationskurven",
-            Adjustment::HueSaturation { .. } => "Farbton/Sättigung",
-            Adjustment::Vibrance { .. } => "Dynamik",
-            Adjustment::BlackWhite { .. } => "Schwarzweiß",
-            Adjustment::Exposure { .. } => "Belichtung",
-            Adjustment::Invert => "Umkehren",
-            Adjustment::Threshold { .. } => "Schwellenwert",
-            Adjustment::Posterize { .. } => "Tontrennung",
+            Adjustment::BrightnessContrast { .. } => crate::tr("Brightness/Contrast"),
+            Adjustment::Levels { .. } => crate::tr("Levels"),
+            Adjustment::Curves { .. } => crate::tr("Curves"),
+            Adjustment::HueSaturation { .. } => crate::tr("Hue/Saturation"),
+            Adjustment::Vibrance { .. } => crate::tr("Vibrance"),
+            Adjustment::BlackWhite { .. } => crate::tr("Black & White"),
+            Adjustment::Exposure { .. } => crate::tr("Exposure"),
+            Adjustment::Invert => crate::tr("Invert"),
+            Adjustment::Threshold { .. } => crate::tr("Threshold"),
+            Adjustment::Posterize { .. } => crate::tr("Posterize"),
         }
     }
 
@@ -252,22 +289,39 @@ impl Adjustment {
     /// Per-channel mapping on sRGB values, if this adjustment is one.
     fn channel_map(&self) -> Option<Box<dyn Fn(usize, f32) -> f32 + '_>> {
         Some(match self {
-            Adjustment::BrightnessContrast { brightness, contrast } => {
+            Adjustment::BrightnessContrast {
+                brightness,
+                contrast,
+            } => {
                 // Brightness bends the midtones (gamma), contrast is an S-curve around 0.5.
                 let g = 2f32.powf(-brightness.clamp(-150.0, 150.0) / 100.0);
                 let c = contrast.clamp(-50.0, 100.0) / 100.0;
-                let k = if c >= 0.0 { 1.0 / (1.0 - 0.7 * c) } else { 1.0 + c };
+                let k = if c >= 0.0 {
+                    1.0 / (1.0 - 0.7 * c)
+                } else {
+                    1.0 + c
+                };
                 Box::new(move |_, x| {
                     let x = x.clamp(0.0, 1.0).powf(g);
                     (0.5 + (x - 0.5) * k).clamp(0.0, 1.0)
                 })
             }
-            Adjustment::Levels { master, red, green, blue } => {
+            Adjustment::Levels {
+                master,
+                red,
+                green,
+                blue,
+            } => {
                 let ch = [*red, *green, *blue];
                 let m = *master;
                 Box::new(move |c, x| ch[c].map(m.map(x)))
             }
-            Adjustment::Curves { master, red, green, blue } => {
+            Adjustment::Curves {
+                master,
+                red,
+                green,
+                blue,
+            } => {
                 let ch = [red, green, blue];
                 Box::new(move |c, x| eval_curve(ch[c], eval_curve(master, x)))
             }
@@ -293,11 +347,24 @@ impl Adjustment {
         }
         let mut p = [0.0f32; 8];
         let kind = match self {
-            Adjustment::HueSaturation { hue, saturation, lightness, colorize } => {
-                p[..4].copy_from_slice(&[*hue / 360.0, *saturation / 100.0, *lightness / 100.0, *colorize as u8 as f32]);
+            Adjustment::HueSaturation {
+                hue,
+                saturation,
+                lightness,
+                colorize,
+            } => {
+                p[..4].copy_from_slice(&[
+                    *hue / 360.0,
+                    *saturation / 100.0,
+                    *lightness / 100.0,
+                    *colorize as u8 as f32,
+                ]);
                 KIND_HSL
             }
-            Adjustment::Vibrance { vibrance, saturation } => {
+            Adjustment::Vibrance {
+                vibrance,
+                saturation,
+            } => {
                 p[..2].copy_from_slice(&[*vibrance / 100.0, *saturation / 100.0]);
                 KIND_VIBRANCE
             }
@@ -307,8 +374,16 @@ impl Adjustment {
                 }
                 KIND_BW
             }
-            Adjustment::Exposure { exposure, offset, gamma } => {
-                p[..3].copy_from_slice(&[2f32.powf(*exposure), *offset, 1.0 / gamma.clamp(0.1, 10.0)]);
+            Adjustment::Exposure {
+                exposure,
+                offset,
+                gamma,
+            } => {
+                p[..3].copy_from_slice(&[
+                    2f32.powf(*exposure),
+                    *offset,
+                    1.0 / gamma.clamp(0.1, 10.0),
+                ]);
                 KIND_EXPOSURE
             }
             Adjustment::Threshold { level } => {
@@ -363,7 +438,11 @@ fn rgb_to_hsl(c: [f32; 3]) -> [f32; 3] {
     if d < 1e-6 {
         return [0.0, 0.0, l];
     }
-    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
     let h = if max == c[0] {
         (c[1] - c[2]) / d + if c[1] < c[2] { 6.0 } else { 0.0 }
     } else if max == c[1] {
@@ -379,7 +458,11 @@ fn hsl_to_rgb(h: [f32; 3]) -> [f32; 3] {
     if s <= 0.0 {
         return [l; 3];
     }
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let f = |t: f32| {
         let t = t.rem_euclid(1.0);
@@ -405,7 +488,11 @@ fn hue_sat(c: [f32; 3], p: [f32; 8]) -> [f32; 3] {
         hsl[1] = (0.25 + p[1] * 0.75).clamp(0.0, 1.0);
     } else {
         hsl[0] = (hsl[0] + p[0]).rem_euclid(1.0);
-        hsl[1] = if p[1] >= 0.0 { hsl[1] + (1.0 - hsl[1]) * p[1] * hsl[1].sqrt() } else { hsl[1] * (1.0 + p[1]) };
+        hsl[1] = if p[1] >= 0.0 {
+            hsl[1] + (1.0 - hsl[1]) * p[1] * hsl[1].sqrt()
+        } else {
+            hsl[1] * (1.0 + p[1])
+        };
     }
     let mut rgb = hsl_to_rgb(hsl);
     if p[2] > 0.0 {
@@ -469,12 +556,20 @@ mod tests {
             assert!(y >= last - 1e-6, "monotone");
             last = y;
         }
-        assert_eq!(eval_curve(&[[0.0, 1.0], [1.0, 0.0]], 0.0), 1.0, "inverted curve");
+        assert_eq!(
+            eval_curve(&[[0.0, 1.0], [1.0, 0.0]], 0.0),
+            1.0,
+            "inverted curve"
+        );
     }
 
     #[test]
     fn levels_invert_threshold_and_bw() {
-        let l = Levels { in_black: 0.2, in_white: 0.8, ..Default::default() };
+        let l = Levels {
+            in_black: 0.2,
+            in_white: 0.8,
+            ..Default::default()
+        };
         assert_eq!(l.map(0.1), 0.0);
         assert_eq!(l.map(0.9), 1.0);
         assert!((l.map(0.5) - 0.5).abs() < 1e-6);
@@ -484,30 +579,59 @@ mod tests {
         assert_eq!(t.apply([0.9, 0.9, 0.9]), [1.0; 3]);
         assert_eq!(t.apply([0.1, 0.1, 0.1]), [0.0; 3]);
         // Black & white: pure red with the red weight 40 % → about 40 % grey.
-        let g = Adjustment::BlackWhite { weights: bw_default() }.apply([1.0, 0.0, 0.0]);
+        let g = Adjustment::BlackWhite {
+            weights: bw_default(),
+        }
+        .apply([1.0, 0.0, 0.0]);
         assert!((linear_to_srgb(g[0]) - 0.4).abs() < 0.01 && g[0] == g[1] && g[1] == g[2]);
     }
 
     #[test]
     fn hue_rotation_and_desaturation() {
-        let h = Adjustment::HueSaturation { hue: 120.0, saturation: 0.0, lightness: 0.0, colorize: false };
-        assert!(close(h.apply([1.0, 0.0, 0.0]), [0.0, 1.0, 0.0], 1e-3), "red → green");
-        let d = Adjustment::HueSaturation { hue: 0.0, saturation: -100.0, lightness: 0.0, colorize: false };
+        let h = Adjustment::HueSaturation {
+            hue: 120.0,
+            saturation: 0.0,
+            lightness: 0.0,
+            colorize: false,
+        };
+        assert!(
+            close(h.apply([1.0, 0.0, 0.0]), [0.0, 1.0, 0.0], 1e-3),
+            "red → green"
+        );
+        let d = Adjustment::HueSaturation {
+            hue: 0.0,
+            saturation: -100.0,
+            lightness: 0.0,
+            colorize: false,
+        };
         let g = d.apply([1.0, 0.0, 0.0]);
         assert!((g[0] - g[1]).abs() < 1e-4 && (g[1] - g[2]).abs() < 1e-4);
-        let e = Adjustment::Exposure { exposure: 1.0, offset: 0.0, gamma: 1.0 };
+        let e = Adjustment::Exposure {
+            exposure: 1.0,
+            offset: 0.0,
+            gamma: 1.0,
+        };
         assert!(close(e.apply([0.25, 0.1, 0.0]), [0.5, 0.2, 0.0], 1e-6));
     }
 
     #[test]
     fn serde_roundtrip_with_defaults() {
-        let a: Adjustment = serde_json::from_str(r#"{"kind": "curves", "master": [[0,0],[0.5,0.7],[1,1]]}"#).unwrap();
-        let Adjustment::Curves { master, red, .. } = &a else { panic!() };
+        let a: Adjustment =
+            serde_json::from_str(r#"{"kind": "curves", "master": [[0,0],[0.5,0.7],[1,1]]}"#)
+                .unwrap();
+        let Adjustment::Curves { master, red, .. } = &a else {
+            panic!()
+        };
         assert_eq!(master.len(), 3);
         assert_eq!(red, &identity_curve());
         let s = serde_json::to_string(&a).unwrap();
         assert_eq!(serde_json::from_str::<Adjustment>(&s).unwrap(), a);
         let b: Adjustment = serde_json::from_str(r#"{"kind": "black_white"}"#).unwrap();
-        assert_eq!(b, Adjustment::BlackWhite { weights: bw_default() });
+        assert_eq!(
+            b,
+            Adjustment::BlackWhite {
+                weights: bw_default()
+            }
+        );
     }
 }

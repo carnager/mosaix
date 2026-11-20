@@ -22,8 +22,8 @@
 
 mod apply;
 mod cafill;
-mod clipboard;
 mod cafill_gpu;
+mod clipboard;
 mod display;
 mod filter;
 mod frame;
@@ -49,14 +49,16 @@ use std::sync::atomic::AtomicU64;
 use bytemuck::{Pod, Zeroable};
 use glam::DVec2;
 use half::f16;
-use imagine_core::{Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TILE_SIZE, TileCoord};
+use imagine_core::{
+    Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TILE_SIZE, TileCoord,
+};
 
 pub use apply::GradientKind;
-pub use magic::SampleFrom;
 pub use cafill::{FillJob, FillResult};
 pub use clipboard::CopiedPixels;
 pub use histogram::Histogram;
 pub use liquify::LiquifyTool;
+pub use magic::SampleFrom;
 pub use readback::{PoolKind, Readback};
 pub use thumbs::THUMB;
 pub use transform::{Interp, is_integer_translation};
@@ -154,7 +156,13 @@ impl StrokeParams {
 
 impl Default for StrokeParams {
     fn default() -> Self {
-        Self { opacity: 1.0, erase: false, target: StrokeTarget::Pixels, smudge: false, clone: None }
+        Self {
+            opacity: 1.0,
+            erase: false,
+            target: StrokeTarget::Pixels,
+            smudge: false,
+            clone: None,
+        }
     }
 }
 
@@ -298,7 +306,8 @@ pub struct Engine {
 
 /// Features the engine needs on top of WebGPU core.
 pub fn required_features() -> wgpu::Features {
-    wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
+    wgpu::Features::TEXTURE_BINDING_ARRAY
+        | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
 }
 
 /// Shader-side reference to a mask value: a tile slot, or a constant.
@@ -319,7 +328,8 @@ impl Engine {
         surface_format: wgpu::TextureFormat,
         structure: &Document<()>,
     ) -> Self {
-        let mut doc = structure.map_tiles(&mut |_| -> Tile { unreachable!("structure has no tiles") });
+        let mut doc =
+            structure.map_tiles(&mut |_| -> Tile { unreachable!("structure has no tiles") });
         doc.fix_next_id();
 
         use wgpu::TextureUsages as U;
@@ -327,7 +337,14 @@ impl Engine {
         let pool = |label, format, mip_levels, max_chunks, usage| {
             Pool::new(
                 device,
-                PoolConfig { label, format, mip_levels, chunk_layers: CHUNK_LAYERS, max_chunks, usage },
+                PoolConfig {
+                    label,
+                    format,
+                    mip_levels,
+                    chunk_layers: CHUNK_LAYERS,
+                    max_chunks,
+                    usage,
+                },
                 serial.clone(),
             )
         };
@@ -363,7 +380,10 @@ impl Engine {
         let display_shader = shader("display", include_str!("../shaders/display.wgsl").into());
         let overlay_shader = shader("overlay", include_str!("../shaders/overlay.wgsl").into());
         let tip_src = include_str!("../shaders/tip.wgsl");
-        let brush_shader = shader("brush", format!("{}\n{tip_src}", include_str!("../shaders/brush.wgsl")));
+        let brush_shader = shader(
+            "brush",
+            format!("{}\n{tip_src}", include_str!("../shaders/brush.wgsl")),
+        );
         let flatten_shader = shader(
             "flatten",
             format!(
@@ -374,7 +394,10 @@ impl Engine {
         );
         let apply_shader = shader("apply", include_str!("../shaders/apply.wgsl").into());
         let mip_shader = shader("mip", include_str!("../shaders/mip.wgsl").into());
-        let smudge_shader = shader("smudge", format!("{}\n{tip_src}", include_str!("../shaders/smudge.wgsl")));
+        let smudge_shader = shader(
+            "smudge",
+            format!("{}\n{tip_src}", include_str!("../shaders/smudge.wgsl")),
+        );
         let warp_shader = shader("warp", include_str!("../shaders/warp.wgsl").into());
         let bounds_shader = shader("bounds", include_str!("../shaders/bounds.wgsl").into());
         let similar_shader = shader("similar", include_str!("../shaders/similar.wgsl").into());
@@ -389,7 +412,11 @@ impl Engine {
             ty: wgpu::BindingType::Buffer {
                 ty,
                 has_dynamic_offset: dynamic,
-                min_binding_size: if dynamic { wgpu::BufferSize::new(16) } else { None },
+                min_binding_size: if dynamic {
+                    wgpu::BufferSize::new(16)
+                } else {
+                    None
+                },
             },
             count: None,
         };
@@ -422,18 +449,40 @@ impl Engine {
             count: None,
         };
         let bgl = |label, entries: &[wgpu::BindGroupLayoutEntry]| {
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some(label), entries })
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some(label),
+                entries,
+            })
         };
         use wgpu::TextureViewDimension as D;
 
         let globals_bgl = bgl("globals", &[buffer(0, S::VERTEX_FRAGMENT, uniform, false)]);
-        let display_bgl = bgl("display", &[texture(0, S::FRAGMENT, true, D::D2Array, None), sampler(1), sampler(2)]);
+        let display_bgl = bgl(
+            "display",
+            &[
+                texture(0, S::FRAGMENT, true, D::D2Array, None),
+                sampler(1),
+                sampler(2),
+            ],
+        );
         let brush_bgl = bgl("brush", &[buffer(0, S::VERTEX, uniform, true)]);
         let arrays_bgl = bgl(
             "tile arrays",
             &[
-                texture(0, S::COMPUTE | S::FRAGMENT, false, D::D2Array, NonZeroU32::new(MAX_LAYER_CHUNKS)),
-                texture(1, S::COMPUTE | S::FRAGMENT, false, D::D2Array, NonZeroU32::new(MAX_MASK_CHUNKS)),
+                texture(
+                    0,
+                    S::COMPUTE | S::FRAGMENT,
+                    false,
+                    D::D2Array,
+                    NonZeroU32::new(MAX_LAYER_CHUNKS),
+                ),
+                texture(
+                    1,
+                    S::COMPUTE | S::FRAGMENT,
+                    false,
+                    D::D2Array,
+                    NonZeroU32::new(MAX_MASK_CHUNKS),
+                ),
             ],
         );
         let flatten_bgl = bgl(
@@ -446,7 +495,13 @@ impl Engine {
                 buffer(4, S::COMPUTE, storage, false),
             ],
         );
-        let apply_bgl = bgl("apply", &[buffer(0, S::FRAGMENT, storage, false), buffer(1, S::FRAGMENT, uniform, true)]);
+        let apply_bgl = bgl(
+            "apply",
+            &[
+                buffer(0, S::FRAGMENT, storage, false),
+                buffer(1, S::FRAGMENT, uniform, true),
+            ],
+        );
         let warp_bgl = bgl(
             "warp",
             &[
@@ -457,8 +512,16 @@ impl Engine {
         );
         // Binding arrays cannot share a group with dynamic offsets: the
         // composite array gets its own group.
-        let comp_array_bgl =
-            bgl("composite array", &[texture(0, S::FRAGMENT, false, D::D2Array, NonZeroU32::new(MAX_COMPOSITE_CHUNKS))]);
+        let comp_array_bgl = bgl(
+            "composite array",
+            &[texture(
+                0,
+                S::FRAGMENT,
+                false,
+                D::D2Array,
+                NonZeroU32::new(MAX_COMPOSITE_CHUNKS),
+            )],
+        );
         let storage_rw = wgpu::BufferBindingType::Storage { read_only: false };
         let bounds_bgl = bgl(
             "bounds",
@@ -477,7 +540,10 @@ impl Engine {
                 buffer(3, S::COMPUTE, uniform, true),
             ],
         );
-        let screen_bgl = bgl("screen mask", &[texture(2, S::FRAGMENT, false, D::D2, None)]);
+        let screen_bgl = bgl(
+            "screen mask",
+            &[texture(2, S::FRAGMENT, false, D::D2, None)],
+        );
 
         let layout = |label, bgls: &[&wgpu::BindGroupLayout]| {
             let bgls: Vec<_> = bgls.iter().map(|b| Some(*b)).collect();
@@ -550,16 +616,58 @@ impl Engine {
         let premul = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
         use wgpu::PrimitiveTopology::{TriangleList, TriangleStrip};
         let rp = |label, layout, module, (vs, fs), buffers, format, blend, topology| {
-            render_pipeline(device, PipelineSpec { label, layout, module, vs, fs, buffers, format, blend, topology })
+            render_pipeline(
+                device,
+                PipelineSpec {
+                    label,
+                    layout,
+                    module,
+                    vs,
+                    fs,
+                    buffers,
+                    format,
+                    blend,
+                    topology,
+                },
+            )
         };
         let f = surface_format;
-        let (tile_vbs, sel_vbs, line_vbs, dab_vbs) = ([Some(tile_vb)], [Some(sel_vb)], [Some(line_vb)], [Some(dab_vb)]);
-        let checker_pipeline =
-            rp("checker", &display_layout, &display_shader, ("vs_checker", "fs_checker"), &[], f, None, TriangleStrip);
-        let tile_pipeline =
-            rp("tiles", &display_layout, &display_shader, ("vs_tile", "fs_tile"), &tile_vbs, f, premul, TriangleStrip);
-        let cursor_pipeline =
-            rp("cursor", &display_layout, &display_shader, ("vs_cursor", "fs_cursor"), &[], f, premul, TriangleStrip);
+        let (tile_vbs, sel_vbs, line_vbs, dab_vbs) = (
+            [Some(tile_vb)],
+            [Some(sel_vb)],
+            [Some(line_vb)],
+            [Some(dab_vb)],
+        );
+        let checker_pipeline = rp(
+            "checker",
+            &display_layout,
+            &display_shader,
+            ("vs_checker", "fs_checker"),
+            &[],
+            f,
+            None,
+            TriangleStrip,
+        );
+        let tile_pipeline = rp(
+            "tiles",
+            &display_layout,
+            &display_shader,
+            ("vs_tile", "fs_tile"),
+            &tile_vbs,
+            f,
+            premul,
+            TriangleStrip,
+        );
+        let cursor_pipeline = rp(
+            "cursor",
+            &display_layout,
+            &display_shader,
+            ("vs_cursor", "fs_cursor"),
+            &[],
+            f,
+            premul,
+            TriangleStrip,
+        );
         let sel_pipeline = rp(
             "selection",
             &sel_layout,
@@ -570,15 +678,56 @@ impl Engine {
             None,
             TriangleStrip,
         );
-        let ants_pipeline = rp("ants", &ants_layout, &overlay_shader, ("vs_full", "fs_ants"), &[], f, premul, TriangleList);
-        let line_pipeline =
-            rp("lines", &line_layout, &overlay_shader, ("vs_line", "fs_line"), &line_vbs, f, premul, TriangleList);
-        let brush_pipeline =
-            rp("brush", &brush_layout, &brush_shader, ("vs", "fs"), &dab_vbs, TILE_FORMAT, premul, TriangleStrip);
-        let apply_rgba_pipeline =
-            rp("apply rgba", &apply_layout, &apply_shader, ("vs", "fs_rgba"), &[], TILE_FORMAT, None, TriangleList);
-        let apply_mask_pipeline =
-            rp("apply mask", &apply_layout, &apply_shader, ("vs", "fs_mask"), &[], MASK_FORMAT, None, TriangleList);
+        let ants_pipeline = rp(
+            "ants",
+            &ants_layout,
+            &overlay_shader,
+            ("vs_full", "fs_ants"),
+            &[],
+            f,
+            premul,
+            TriangleList,
+        );
+        let line_pipeline = rp(
+            "lines",
+            &line_layout,
+            &overlay_shader,
+            ("vs_line", "fs_line"),
+            &line_vbs,
+            f,
+            premul,
+            TriangleList,
+        );
+        let brush_pipeline = rp(
+            "brush",
+            &brush_layout,
+            &brush_shader,
+            ("vs", "fs"),
+            &dab_vbs,
+            TILE_FORMAT,
+            premul,
+            TriangleStrip,
+        );
+        let apply_rgba_pipeline = rp(
+            "apply rgba",
+            &apply_layout,
+            &apply_shader,
+            ("vs", "fs_rgba"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
+        let apply_mask_pipeline = rp(
+            "apply mask",
+            &apply_layout,
+            &apply_shader,
+            ("vs", "fs_mask"),
+            &[],
+            MASK_FORMAT,
+            None,
+            TriangleList,
+        );
         let flatten_pipeline = compute_pipeline(
             device,
             "flatten",
@@ -586,21 +735,93 @@ impl Engine {
             &flatten_shader,
             "main",
         );
-        let mip_pipeline = compute_pipeline(device, "mip", &layout("mip", &[&mip_bgl]), &mip_shader, "main");
-        let warp_rgba_pipeline =
-            rp("warp rgba", &warp_layout, &warp_shader, ("vs", "fs_rgba"), &[], TILE_FORMAT, None, TriangleList);
-        let warp_mask_pipeline =
-            rp("warp mask", &warp_layout, &warp_shader, ("vs", "fs_mask"), &[], MASK_FORMAT, None, TriangleList);
-        let smudge_pickup_pipeline =
-            rp("smudge pickup", &smudge_layout, &smudge_shader, ("vs", "fs_pickup"), &[], TILE_FORMAT, None, TriangleList);
-        let smudge_write_pipeline =
-            rp("smudge write", &smudge_layout, &smudge_shader, ("vs", "fs_write"), &[], TILE_FORMAT, None, TriangleList);
-        let clone_pipeline = rp("clone", &smudge_layout, &smudge_shader, ("vs", "fs_clone"), &[], TILE_FORMAT, None, TriangleList);
-        let filter_pipeline = rp("filter", &warp_layout, &filter_shader, ("vs", "fs"), &[], TILE_FORMAT, None, TriangleList);
-        let liquify_pipeline =
-            rp("liquify", &liquify_layout, &liquify_shader, ("vs", "fs"), &[], TILE_FORMAT, None, TriangleList);
-        let similar_pipeline =
-            rp("similar", &similar_layout, &similar_shader, ("vs", "fs"), &[], MASK_FORMAT, None, TriangleList);
+        let mip_pipeline = compute_pipeline(
+            device,
+            "mip",
+            &layout("mip", &[&mip_bgl]),
+            &mip_shader,
+            "main",
+        );
+        let warp_rgba_pipeline = rp(
+            "warp rgba",
+            &warp_layout,
+            &warp_shader,
+            ("vs", "fs_rgba"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
+        let warp_mask_pipeline = rp(
+            "warp mask",
+            &warp_layout,
+            &warp_shader,
+            ("vs", "fs_mask"),
+            &[],
+            MASK_FORMAT,
+            None,
+            TriangleList,
+        );
+        let smudge_pickup_pipeline = rp(
+            "smudge pickup",
+            &smudge_layout,
+            &smudge_shader,
+            ("vs", "fs_pickup"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
+        let smudge_write_pipeline = rp(
+            "smudge write",
+            &smudge_layout,
+            &smudge_shader,
+            ("vs", "fs_write"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
+        let clone_pipeline = rp(
+            "clone",
+            &smudge_layout,
+            &smudge_shader,
+            ("vs", "fs_clone"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
+        let filter_pipeline = rp(
+            "filter",
+            &warp_layout,
+            &filter_shader,
+            ("vs", "fs"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
+        let liquify_pipeline = rp(
+            "liquify",
+            &liquify_layout,
+            &liquify_shader,
+            ("vs", "fs"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
+        let similar_pipeline = rp(
+            "similar",
+            &similar_layout,
+            &similar_shader,
+            ("vs", "fs"),
+            &[],
+            MASK_FORMAT,
+            None,
+            TriangleList,
+        );
         let bounds_pipeline = compute_pipeline(
             device,
             "bounds",
@@ -619,7 +840,10 @@ impl Engine {
         let globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
             layout: &globals_bgl,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals_buf.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals_buf.as_entire_binding(),
+            }],
         });
         let make_sampler = |label, mag| {
             device.create_sampler(&wgpu::SamplerDescriptor {
@@ -635,7 +859,11 @@ impl Engine {
         let scratch = |label, format| {
             let t = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
-                size: wgpu::Extent3d { width: TILE_SIZE, height: TILE_SIZE, depth_or_array_layers: SCRATCH_LAYERS },
+                size: wgpu::Extent3d {
+                    width: TILE_SIZE,
+                    height: TILE_SIZE,
+                    depth_or_array_layers: SCRATCH_LAYERS,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -679,8 +907,16 @@ impl Engine {
                 queue.write_texture(
                     texel_copy(&tips_tex, mip as u32, layer as u32),
                     data,
-                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size), rows_per_image: Some(size) },
-                    wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(size),
+                        rows_per_image: Some(size),
+                    },
+                    wgpu::Extent3d {
+                        width: size,
+                        height: size,
+                        depth_or_array_layers: 1,
+                    },
                 );
             }
         }
@@ -699,8 +935,14 @@ impl Engine {
             label: Some("brush tips"),
             layout: &tips_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&tips_view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&tips_sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&tips_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&tips_sampler),
+                },
             ],
         });
         let origin_cap = 64;
@@ -837,7 +1079,12 @@ impl Engine {
 
     /// Like [`Self::edit`], but consecutive calls with the same `key` (e.g.
     /// while dragging an opacity slider) form a single undo step.
-    pub fn edit_merged(&mut self, label: &str, key: &str, f: impl FnOnce(&mut Document<Tile>) -> bool) -> bool {
+    pub fn edit_merged(
+        &mut self,
+        label: &str,
+        key: &str,
+        f: impl FnOnce(&mut Document<Tile>) -> bool,
+    ) -> bool {
         if self.merge_key.as_deref() == Some(key) && self.stroke.is_none() {
             if f(&mut self.doc) {
                 // A preview was computed from the old document: recompute it.
@@ -861,7 +1108,14 @@ impl Engine {
 
     /// Labels of all history steps (oldest first) and how many are done.
     pub fn history_labels(&self) -> (Vec<String>, usize) {
-        (self.history.labels().into_iter().map(String::from).collect(), self.history.undo_len())
+        (
+            self.history
+                .labels()
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            self.history.undo_len(),
+        )
     }
 
     /// Undoes/redoes until exactly `done` steps are applied.
@@ -900,7 +1154,11 @@ impl Engine {
         }
         self.merge_key = None;
         let cur = std::mem::replace(&mut self.doc, Document::empty(0, 0));
-        let r = if back { self.history.undo(cur) } else { self.history.redo(cur) };
+        let r = if back {
+            self.history.undo(cur)
+        } else {
+            self.history.redo(cur)
+        };
         match r {
             Ok((doc, label)) => {
                 self.doc = doc;
@@ -935,7 +1193,12 @@ impl Engine {
 
     /// Replaces (or removes, with `None`) tiles of a pixel layer as one undoable step.
     /// Returns false if the layer is not a pixel layer, a stroke is active, or memory ran out.
-    pub fn replace_tiles(&mut self, layer: LayerId, tiles: Vec<(TileCoord, Option<Vec<f16>>)>, label: &str) -> bool {
+    pub fn replace_tiles(
+        &mut self,
+        layer: LayerId,
+        tiles: Vec<(TileCoord, Option<Vec<f16>>)>,
+        label: &str,
+    ) -> bool {
         if self.stroke.is_some() || self.doc.find(layer).is_none_or(|l| l.is_group()) {
             return false;
         }
@@ -976,7 +1239,11 @@ impl Engine {
                 bytes_per_row: Some(TILE_SIZE * BYTES_PER_PIXEL),
                 rows_per_image: Some(TILE_SIZE),
             },
-            wgpu::Extent3d { width: TILE_SIZE, height: TILE_SIZE, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: TILE_SIZE,
+                height: TILE_SIZE,
+                depth_or_array_layers: 1,
+            },
         );
         Some(tile)
     }
@@ -988,8 +1255,16 @@ impl Engine {
         self.queue.write_texture(
             texel_copy(&self.mask_pool.chunk(slot).texture, 0, slot.layer as u32),
             values,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(TILE_SIZE), rows_per_image: Some(TILE_SIZE) },
-            wgpu::Extent3d { width: TILE_SIZE, height: TILE_SIZE, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(TILE_SIZE),
+                rows_per_image: Some(TILE_SIZE),
+            },
+            wgpu::Extent3d {
+                width: TILE_SIZE,
+                height: TILE_SIZE,
+                depth_or_array_layers: 1,
+            },
         );
         Some(tile)
     }
@@ -1007,43 +1282,62 @@ impl Engine {
 
     fn all_doc_coords(&self) -> Vec<TileCoord> {
         let (gw, gh) = imagine_core::tile::grid_size(self.doc.width, self.doc.height);
-        (0..gh as i32).flat_map(|y| (0..gw as i32).map(move |x| TileCoord::new(x, y))).collect()
+        (0..gh as i32)
+            .flat_map(|y| (0..gw as i32).map(move |x| TileCoord::new(x, y)))
+            .collect()
     }
 
     // ---- strokes ----------------------------------------------------------------
 
     /// Starts a stroke on the active layer (or its mask).
     pub fn begin_stroke(&mut self, params: StrokeParams) -> Result<(), &'static str> {
-        let l = self.doc.active_layer().ok_or("keine aktive Ebene")?;
+        let l = self
+            .doc
+            .active_layer()
+            .ok_or(imagine_core::tr("no active layer"))?;
         if l.is_group() {
-            return Err("auf Gruppen kann nicht gemalt werden");
+            return Err(imagine_core::tr("cannot paint on groups"));
         }
         if l.vector().is_some() && params.target != StrokeTarget::Mask {
-            return Err("Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Rastern) oder in die Maske malen");
+            return Err(imagine_core::tr(
+                "text and shape layers have no pixels – rasterize first (Layer › Rasterize) or paint into the mask",
+            ));
         }
         if l.adjustment().is_some() && params.target != StrokeTarget::Mask {
-            return Err("Einstellungsebenen haben keine Pixel – Maske anlegen und hineinmalen");
+            return Err(imagine_core::tr(
+                "adjustment layers have no pixels – add a mask and paint into it",
+            ));
         }
         if !l.visible {
-            return Err("die Ebene ist ausgeblendet");
+            return Err(imagine_core::tr("the layer is hidden"));
         }
         if params.target == StrokeTarget::Mask && l.mask.is_none() {
-            return Err("die Ebene hat keine Maske");
+            return Err(imagine_core::tr("the layer has no mask"));
         }
         if params.working_copy() && (params.target == StrokeTarget::Mask || params.erase) {
-            return Err("Verwischen und Stempeln gehen nur auf Pixeln");
+            return Err(imagine_core::tr("smudge and clone only work on pixels"));
         }
         self.smudge_primed = false;
         self.clone_cache.clear();
-        if self.doc.selection.as_ref().is_some_and(|s| s.tiles.is_empty() && s.default == 0) {
-            return Err("die Auswahl ist leer");
+        if self
+            .doc
+            .selection
+            .as_ref()
+            .is_some_and(|s| s.tiles.is_empty() && s.default == 0)
+        {
+            return Err(imagine_core::tr("the selection is empty"));
         }
         let layer = l.id;
         if params.clone.is_some_and(|c| c.all_layers) {
             // The source is the composite: make sure it is complete.
             self.flush();
         }
-        self.stroke = Some(ActiveStroke { layer, params, tiles: HashMap::new(), footprint: Vec::new() });
+        self.stroke = Some(ActiveStroke {
+            layer,
+            params,
+            tiles: HashMap::new(),
+            footprint: Vec::new(),
+        });
         Ok(())
     }
 
@@ -1054,7 +1348,8 @@ impl Engine {
     pub fn stroke_dabs(&mut self, dabs: &[Dab]) {
         if let Some(s) = &mut self.stroke {
             if s.params.clone.is_some_and(|c| c.heal) {
-                s.footprint.extend(dabs.iter().map(|d| [d.center[0], d.center[1], d.radius]));
+                s.footprint
+                    .extend(dabs.iter().map(|d| [d.center[0], d.center[1], d.radius]));
             }
             self.pending_dabs.extend_from_slice(dabs);
         }
@@ -1075,7 +1370,9 @@ impl Engine {
     }
 
     pub fn gpu_bytes(&self) -> u64 {
-        self.layer_pool.allocated_bytes() + self.mask_pool.allocated_bytes() + self.comp_pool.allocated_bytes()
+        self.layer_pool.allocated_bytes()
+            + self.mask_pool.allocated_bytes()
+            + self.comp_pool.allocated_bytes()
     }
 
     pub fn max_layer_tiles(&self) -> u64 {

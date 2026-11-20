@@ -33,7 +33,14 @@ pub struct Readback {
 }
 
 impl Readback {
-    pub(super) fn start(device: &wgpu::Device, queue: &wgpu::Queue, pool: &Pool, slots: &[SlotId], mip: u32, keep: Vec<Tile>) -> Self {
+    pub(super) fn start(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pool: &Pool,
+        slots: &[SlotId],
+        mip: u32,
+        keep: Vec<Tile>,
+    ) -> Self {
         let size = TILE_SIZE >> mip;
         let row = (size * pool.bytes_per_pixel()) as usize;
         let padded_row = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize);
@@ -59,7 +66,11 @@ impl Readback {
                             rows_per_image: Some(size),
                         },
                     },
-                    wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+                    wgpu::Extent3d {
+                        width: size,
+                        height: size,
+                        depth_or_array_layers: 1,
+                    },
                 );
             }
             queue.submit([enc.finish()]);
@@ -70,7 +81,14 @@ impl Readback {
             });
             buffers.push((buf, batch.len()));
         }
-        Self { buffers, mapped, row, padded_row, rows: size as usize, _tiles: keep }
+        Self {
+            buffers,
+            mapped,
+            row,
+            padded_row,
+            rows: size as usize,
+            _tiles: keep,
+        }
     }
 
     /// Advances the GPU without blocking; true once all data is available.
@@ -89,13 +107,18 @@ impl Readback {
 
     /// The data; call only after [`Readback::poll`] returned true.
     pub fn take(self) -> Vec<Vec<u8>> {
-        assert_eq!(self.mapped.load(Ordering::Acquire), self.buffers.len(), "readback not finished");
+        assert_eq!(
+            self.mapped.load(Ordering::Acquire),
+            self.buffers.len(),
+            "readback not finished"
+        );
         let mut out = Vec::new();
         for (buf, n) in &self.buffers {
             {
                 let data = buf.slice(..).get_mapped_range().expect("mapped range");
                 for t in 0..*n {
-                    let tile = &data[t * self.padded_row * self.rows..][..self.padded_row * self.rows];
+                    let tile =
+                        &data[t * self.padded_row * self.rows..][..self.padded_row * self.rows];
                     let mut px = Vec::with_capacity(self.row * self.rows);
                     for r in tile.chunks_exact(self.padded_row) {
                         px.extend_from_slice(&r[..self.row]);
@@ -125,7 +148,14 @@ impl Engine {
     /// Starts an asynchronous readback of mip 0 of the given tiles.
     pub fn begin_readback(&self, kind: PoolKind, tiles: &[Tile]) -> Readback {
         let slots: Vec<SlotId> = tiles.iter().map(Tile::slot).collect();
-        Readback::start(&self.device, &self.queue, self.pool(kind), &slots, 0, tiles.to_vec())
+        Readback::start(
+            &self.device,
+            &self.queue,
+            self.pool(kind),
+            &slots,
+            0,
+            tiles.to_vec(),
+        )
     }
 
     pub fn device(&self) -> &wgpu::Device {
@@ -142,7 +172,10 @@ impl Engine {
 
     /// Reads mip 0 of layer tiles (blocking).
     pub fn read_layer_tiles(&self, tiles: &[Tile]) -> Vec<Vec<f16>> {
-        self.read_tiles_raw(PoolKind::Layer, tiles).into_iter().map(to_f16).collect()
+        self.read_tiles_raw(PoolKind::Layer, tiles)
+            .into_iter()
+            .map(to_f16)
+            .collect()
     }
 
     /// Reads mask tiles (blocking), 8-bit values.
@@ -159,23 +192,45 @@ impl Engine {
     pub fn read_composite_mip(&self, coords: &[TileCoord], mip: u32) -> Vec<Vec<f16>> {
         let mip = mip.min(TILE_MIP_LEVELS - 1);
         let n = ((TILE_SIZE >> mip).pow(2) * 4) as usize;
-        let tiles: Vec<Option<Tile>> =
-            coords.iter().map(|c| self.comp.get(c).and_then(|e| e.tile.clone())).collect();
+        let tiles: Vec<Option<Tile>> = coords
+            .iter()
+            .map(|c| self.comp.get(c).and_then(|e| e.tile.clone()))
+            .collect();
         let present: Vec<Tile> = tiles.iter().flatten().cloned().collect();
         let slots: Vec<SlotId> = present.iter().map(Tile::slot).collect();
         let mut data = if slots.is_empty() {
             Vec::new().into_iter()
         } else {
-            Readback::start(&self.device, &self.queue, &self.comp_pool, &slots, mip, present)
-                .wait(&self.device)
-                .into_iter()
+            Readback::start(
+                &self.device,
+                &self.queue,
+                &self.comp_pool,
+                &slots,
+                mip,
+                present,
+            )
+            .wait(&self.device)
+            .into_iter()
         };
-        tiles.iter().map(|t| if t.is_some() { to_f16(data.next().unwrap()) } else { vec![f16::ZERO; n] }).collect()
+        tiles
+            .iter()
+            .map(|t| {
+                if t.is_some() {
+                    to_f16(data.next().unwrap())
+                } else {
+                    vec![f16::ZERO; n]
+                }
+            })
+            .collect()
     }
 
     /// All composited tiles (call [`Engine::flush`] first), for asynchronous export.
     pub fn composite_tiles(&self) -> Vec<(TileCoord, Tile)> {
-        let mut v: Vec<_> = self.comp.iter().filter_map(|(c, e)| e.tile.clone().map(|t| (*c, t))).collect();
+        let mut v: Vec<_> = self
+            .comp
+            .iter()
+            .filter_map(|(c, e)| e.tile.clone().map(|t| (*c, t)))
+            .collect();
         v.sort_by_key(|(c, _)| *c);
         v
     }

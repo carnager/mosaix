@@ -99,11 +99,19 @@ struct LayerEntry {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum ContentEntry {
-    Pixels { tiles: Vec<TileEntry> },
-    Group { children: Vec<LayerEntry> },
+    Pixels {
+        tiles: Vec<TileEntry>,
+    },
+    Group {
+        children: Vec<LayerEntry>,
+    },
     /// Since format 3.
-    Adjustment { adjustment: imagine_core::Adjustment },
-    Vector { vector: imagine_core::VectorLayer },
+    Adjustment {
+        adjustment: imagine_core::Adjustment,
+    },
+    Vector {
+        vector: imagine_core::VectorLayer,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -119,12 +127,28 @@ fn mask_to_entry(m: &Mask<BlobRef>, enabled: bool) -> MaskEntry {
         .tiles
         .iter()
         .map(|(c, t)| match t {
-            MaskTile::Solid(v) => MaskTileEntry { x: c.x, y: c.y, solid: Some(*v), offset: 0, len: 0 },
-            MaskTile::Pixels(b) => MaskTileEntry { x: c.x, y: c.y, solid: None, offset: b.offset, len: b.len },
+            MaskTile::Solid(v) => MaskTileEntry {
+                x: c.x,
+                y: c.y,
+                solid: Some(*v),
+                offset: 0,
+                len: 0,
+            },
+            MaskTile::Pixels(b) => MaskTileEntry {
+                x: c.x,
+                y: c.y,
+                solid: None,
+                offset: b.offset,
+                len: b.len,
+            },
         })
         .collect();
     tiles.sort_by_key(|t| (t.y, t.x));
-    MaskEntry { default: m.default, enabled, tiles }
+    MaskEntry {
+        default: m.default,
+        enabled,
+        tiles,
+    }
 }
 
 fn entry_to_mask(e: MaskEntry, file_len: u64) -> anyhow::Result<(Mask<BlobRef>, bool)> {
@@ -133,13 +157,26 @@ fn entry_to_mask(e: MaskEntry, file_len: u64) -> anyhow::Result<(Mask<BlobRef>, 
         let v = match t.solid {
             Some(v) => MaskTile::Solid(v),
             None => {
-                ensure!(t.offset + t.len <= file_len, "Maskenkachel außerhalb der Datei");
-                MaskTile::Pixels(BlobRef { offset: t.offset, len: t.len })
+                ensure!(
+                    t.offset + t.len <= file_len,
+                    "{}",
+                    imagine_core::tr("mask tile outside the file")
+                );
+                MaskTile::Pixels(BlobRef {
+                    offset: t.offset,
+                    len: t.len,
+                })
             }
         };
         tiles.insert(TileCoord::new(t.x, t.y), v);
     }
-    Ok((Mask { tiles: Arc::new(tiles), default: e.default }, e.enabled))
+    Ok((
+        Mask {
+            tiles: Arc::new(tiles),
+            default: e.default,
+        },
+        e.enabled,
+    ))
 }
 
 fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
@@ -155,13 +192,22 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                     Content::Pixels(t) => {
                         let mut tiles: Vec<TileEntry> = t
                             .iter()
-                            .map(|(c, b)| TileEntry { x: c.x, y: c.y, offset: b.offset, len: b.len })
+                            .map(|(c, b)| TileEntry {
+                                x: c.x,
+                                y: c.y,
+                                offset: b.offset,
+                                len: b.len,
+                            })
                             .collect();
                         tiles.sort_by_key(|t| (t.y, t.x));
                         ContentEntry::Pixels { tiles }
                     }
-                    Content::Group(c) => ContentEntry::Group { children: layers(c) },
-                    Content::Adjustment(a) => ContentEntry::Adjustment { adjustment: a.clone() },
+                    Content::Group(c) => ContentEntry::Group {
+                        children: layers(c),
+                    },
+                    Content::Adjustment(a) => ContentEntry::Adjustment {
+                        adjustment: a.clone(),
+                    },
                     Content::Vector(v) => ContentEntry::Vector { vector: v.clone() },
                 },
                 mask: l.mask.as_ref().map(|m| mask_to_entry(m, l.mask_enabled)),
@@ -182,7 +228,14 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
 }
 
 fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>> {
-    ensure!(m.format <= FORMAT_VERSION, "Dateiversion {} ist neuer als dieses Programm", m.format);
+    ensure!(
+        m.format <= FORMAT_VERSION,
+        "{}",
+        imagine_core::tr!(
+            "file version {version} is newer than this program",
+            version = m.format
+        )
+    );
     fn layers(es: Vec<LayerEntry>, file_len: u64) -> anyhow::Result<Vec<Layer<BlobRef>>> {
         es.into_iter()
             .map(|e| {
@@ -190,8 +243,18 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     ContentEntry::Pixels { tiles } => {
                         let mut map = TileMap::new();
                         for t in tiles {
-                            ensure!(t.offset + t.len <= file_len, "Kachel außerhalb der Datei");
-                            map.insert(TileCoord::new(t.x, t.y), BlobRef { offset: t.offset, len: t.len });
+                            ensure!(
+                                t.offset + t.len <= file_len,
+                                "{}",
+                                imagine_core::tr("tile outside the file")
+                            );
+                            map.insert(
+                                TileCoord::new(t.x, t.y),
+                                BlobRef {
+                                    offset: t.offset,
+                                    len: t.len,
+                                },
+                            );
                         }
                         Content::Pixels(Arc::new(map))
                     }
@@ -224,9 +287,20 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
     let mut doc = Document::empty(m.width, m.height);
     doc.blend_space = BlendSpace::from_key(&m.blend_space).unwrap_or_default();
     doc.layers = layers(m.layers, file_len)?;
-    doc.selection = m.selection.map(|e| entry_to_mask(e, file_len).map(|m| m.0)).transpose()?;
-    ensure!(!doc.layers.is_empty(), "Dokument ohne Ebenen");
-    doc.active = if doc.find(m.active).is_some() { m.active } else { doc.display_order()[0] };
+    doc.selection = m
+        .selection
+        .map(|e| entry_to_mask(e, file_len).map(|m| m.0))
+        .transpose()?;
+    ensure!(
+        !doc.layers.is_empty(),
+        "{}",
+        imagine_core::tr("document without layers")
+    );
+    doc.active = if doc.find(m.active).is_some() {
+        m.active
+    } else {
+        doc.display_order()[0]
+    };
     doc.fix_next_id();
     Ok(doc)
 }
@@ -237,7 +311,11 @@ pub fn compress_tile(px: &[f16]) -> Vec<u8> {
 
 pub fn decompress_tile(data: &[u8]) -> anyhow::Result<Vec<f16>> {
     let raw = zstd::bulk::decompress(data, TILE_VALUES * 2)?;
-    ensure!(raw.len() == TILE_VALUES * 2, "Kachel hat falsche Größe");
+    ensure!(
+        raw.len() == TILE_VALUES * 2,
+        "{}",
+        imagine_core::tr("tile has the wrong size")
+    );
     let mut out = vec![f16::ZERO; TILE_VALUES];
     bytemuck::cast_slice_mut::<f16, u8>(&mut out).copy_from_slice(&raw);
     Ok(out)
@@ -249,7 +327,11 @@ pub fn compress_mask(values: &[u8]) -> Vec<u8> {
 
 pub fn decompress_mask(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     let raw = zstd::bulk::decompress(data, MASK_VALUES)?;
-    ensure!(raw.len() == MASK_VALUES, "Maskenkachel hat falsche Größe");
+    ensure!(
+        raw.len() == MASK_VALUES,
+        "{}",
+        imagine_core::tr("mask tile has the wrong size")
+    );
     Ok(raw)
 }
 
@@ -276,26 +358,46 @@ impl Writer {
     /// Starts a full write (into a temp file, renamed atomically on finish).
     pub fn create(path: &Path) -> anyhow::Result<Self> {
         let tmp = path.with_extension("imagine.tmp");
-        let mut file = File::create(&tmp).with_context(|| format!("{} anlegen", tmp.display()))?;
+        let mut file = File::create(&tmp)
+            .with_context(|| imagine_core::tr!("creating {path}", path = tmp.display()))?;
         file.write_all(MAGIC)?;
-        Ok(Self { file, pos: MAGIC.len() as u64, rename: Some((tmp, path.to_path_buf())) })
+        Ok(Self {
+            file,
+            pos: MAGIC.len() as u64,
+            rename: Some((tmp, path.to_path_buf())),
+        })
     }
 
     /// Continues an existing file, which must still be exactly as we left it.
     pub fn append(path: &Path, expected_len: u64) -> anyhow::Result<Self> {
         let mut file = OpenOptions::new().read(true).write(true).open(path)?;
         let len = file.metadata()?.len();
-        ensure!(len == expected_len, "Datei wurde zwischenzeitlich verändert");
+        ensure!(
+            len == expected_len,
+            "{}",
+            imagine_core::tr("file was changed in the meantime")
+        );
         let mut magic = [0u8; 8];
         file.read_exact_at(&mut magic, 0)?;
-        ensure!(&magic == MAGIC, "keine imagine-Datei");
+        ensure!(
+            &magic == MAGIC,
+            "{}",
+            imagine_core::tr("not an imagine file")
+        );
         file.seek(SeekFrom::End(0))?;
-        Ok(Self { file, pos: len, rename: None })
+        Ok(Self {
+            file,
+            pos: len,
+            rename: None,
+        })
     }
 
     pub fn write_blob(&mut self, data: &[u8]) -> anyhow::Result<BlobRef> {
         self.file.write_all(data)?;
-        let r = BlobRef { offset: self.pos, len: data.len() as u64 };
+        let r = BlobRef {
+            offset: self.pos,
+            len: data.len() as u64,
+        };
         self.pos += data.len() as u64;
         Ok(r)
     }
@@ -312,7 +414,8 @@ impl Writer {
         self.pos += FOOTER_LEN;
         self.file.sync_all()?;
         if let Some((tmp, path)) = self.rename.take() {
-            std::fs::rename(&tmp, &path).with_context(|| format!("{} ersetzen", path.display()))?;
+            std::fs::rename(&tmp, &path)
+                .with_context(|| imagine_core::tr!("replacing {path}", path = path.display()))?;
         }
         Ok(self.pos)
     }
@@ -334,11 +437,17 @@ pub struct Reader {
 
 impl Reader {
     pub fn open(path: &Path) -> anyhow::Result<(Self, Document<BlobRef>)> {
-        let file = File::open(path).with_context(|| format!("{} öffnen", path.display()))?;
+        let file = File::open(path)
+            .with_context(|| imagine_core::tr!("opening {path}", path = path.display()))?;
         let len = file.metadata()?.len();
         let mut magic = [0u8; 8];
-        file.read_exact_at(&mut magic, 0).context("Datei zu kurz")?;
-        ensure!(&magic == MAGIC, "keine imagine-Datei");
+        file.read_exact_at(&mut magic, 0)
+            .context(imagine_core::tr("file too short"))?;
+        ensure!(
+            &magic == MAGIC,
+            "{}",
+            imagine_core::tr("not an imagine file")
+        );
         let r = Self { file, len };
 
         // Newest footer first; fall back to older ones if the tail is damaged.
@@ -348,15 +457,28 @@ impl Reader {
             match r.read_manifest(footer_at) {
                 Ok(doc) => {
                     if end != len {
-                        eprintln!("Warnung: Dateiende beschädigt, ältere Version wiederhergestellt");
+                        eprintln!(
+                            "{}",
+                            imagine_core::tr(
+                                "Warning: end of file damaged, older version restored"
+                            )
+                        );
                     }
-                    return Ok((Self { len: footer_at + FOOTER_LEN, ..r }, doc));
+                    return Ok((
+                        Self {
+                            len: footer_at + FOOTER_LEN,
+                            ..r
+                        },
+                        doc,
+                    ));
                 }
                 Err(e) => last_err = Some(e),
             }
             end = footer_at + FOOTER_LEN - 1;
         }
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("kein gültiges Inhaltsverzeichnis gefunden")))
+        Err(last_err.unwrap_or_else(|| {
+            anyhow::anyhow!("{}", imagine_core::tr("no valid table of contents found"))
+        }))
     }
 
     /// Offset of the last footer that ends at or before `end`.
@@ -396,11 +518,12 @@ impl Reader {
         let offset = u64::from_le_bytes(f[..8].try_into().unwrap());
         let len = u64::from_le_bytes(f[8..].try_into().unwrap());
         if offset + len > footer_at || len > 1 << 30 {
-            bail!("Inhaltsverzeichnis ungültig");
+            bail!("{}", imagine_core::tr("table of contents invalid"));
         }
         let data = self.read_blob(BlobRef { offset, len })?;
         let json = zstd::stream::decode_all(&data[..])?;
-        let manifest: Manifest = serde_json::from_slice(&json).context("Inhaltsverzeichnis unlesbar")?;
+        let manifest: Manifest = serde_json::from_slice(&json)
+            .context(imagine_core::tr("table of contents unreadable"))?;
         from_manifest(manifest, footer_at)
     }
 
@@ -430,7 +553,9 @@ mod tests {
         d.find_mut(top).unwrap().opacity = 0.5;
         d.group_active();
         d.blend_space = BlendSpace::Linear;
-        let mb = w.write_blob(&compress_mask(&vec![77u8; MASK_VALUES])).unwrap();
+        let mb = w
+            .write_blob(&compress_mask(&vec![77u8; MASK_VALUES]))
+            .unwrap();
         let mut m = Mask::filled(255);
         Arc::make_mut(&mut m.tiles).insert(TileCoord::new(0, 0), MaskTile::Pixels(mb));
         Arc::make_mut(&mut m.tiles).insert(TileCoord::new(1, 0), MaskTile::Solid(0));
@@ -438,7 +563,10 @@ mod tests {
         d.find_mut(bg).unwrap().mask_enabled = false;
         d.find_mut(bg).unwrap().filters = vec![
             imagine_core::SmartFilter::new(imagine_core::Filter::GaussianBlur { radius: 3.5 }),
-            imagine_core::SmartFilter { filter: imagine_core::Filter::HighPass { radius: 9.0 }, enabled: false },
+            imagine_core::SmartFilter {
+                filter: imagine_core::Filter::HighPass { radius: 9.0 },
+                enabled: false,
+            },
         ];
         d.selection = Some(Mask::filled(255));
         d
@@ -458,14 +586,19 @@ mod tests {
         assert_eq!(loaded.blend_space, BlendSpace::Linear);
         let bg = loaded.layers[0].id;
         let blob = loaded.find(bg).unwrap().tiles().unwrap()[&TileCoord::new(1, 0)];
-        assert_eq!(decompress_tile(&r.read_blob(blob).unwrap()).unwrap()[5].to_f32(), 0.25);
+        assert_eq!(
+            decompress_tile(&r.read_blob(blob).unwrap()).unwrap()[5].to_f32(),
+            0.25
+        );
         let l = loaded.find(bg).unwrap();
         assert!(!l.mask_enabled);
         assert_eq!(l.filters, doc.find(bg).unwrap().filters);
         let m = l.mask.as_ref().unwrap();
         assert_eq!(m.default, 255);
         assert!(matches!(m.tiles[&TileCoord::new(1, 0)], MaskTile::Solid(0)));
-        let MaskTile::Pixels(mb) = m.tiles[&TileCoord::new(0, 0)] else { panic!("pixel mask tile") };
+        let MaskTile::Pixels(mb) = m.tiles[&TileCoord::new(0, 0)] else {
+            panic!("pixel mask tile")
+        };
         assert_eq!(decompress_mask(&r.read_blob(mb).unwrap()).unwrap()[100], 77);
         assert_eq!(loaded.selection.as_ref().unwrap().default, 255);
 
@@ -477,8 +610,16 @@ mod tests {
         assert!(len2 > len);
         let (r, loaded) = Reader::open(&path).unwrap();
         let tiles = loaded.find(bg).unwrap().tiles().unwrap().clone();
-        assert_eq!(tiles[&TileCoord::new(1, 0)], blob, "old blob reused in place");
-        assert_eq!(decompress_tile(&r.read_blob(tiles[&TileCoord::new(0, 0)]).unwrap()).unwrap()[0].to_f32(), 0.75);
+        assert_eq!(
+            tiles[&TileCoord::new(1, 0)],
+            blob,
+            "old blob reused in place"
+        );
+        assert_eq!(
+            decompress_tile(&r.read_blob(tiles[&TileCoord::new(0, 0)]).unwrap()).unwrap()[0]
+                .to_f32(),
+            0.75
+        );
 
         // Stale length → append refused.
         assert!(Writer::append(&path, len).is_err());
@@ -516,8 +657,13 @@ mod tests {
     #[test]
     fn live_bytes_counts_shared_blobs_once() {
         let mut d = Document::<BlobRef>::new(300, 300);
-        let b = BlobRef { offset: 8, len: 100 };
-        d.tiles_mut(d.active).unwrap().insert(TileCoord::new(0, 0), b);
+        let b = BlobRef {
+            offset: 8,
+            len: 100,
+        };
+        d.tiles_mut(d.active)
+            .unwrap()
+            .insert(TileCoord::new(0, 0), b);
         d.duplicate_active();
         assert_eq!(live_bytes(&d), 100);
     }

@@ -44,13 +44,29 @@ pub struct BrushSettings {
     pub smudge: Option<f32>,
 }
 
-/// Names of the built-in tips, index = `tip`.
-pub const TIP_NAMES: [&str; 6] = ["rund", "kreide", "borsten", "spray", "rau", "kohle"];
+/// Identifiers of the built-in tips, index = `tip` (see [`tip_label`] for display).
+pub const TIP_NAMES: [&str; 6] = ["round", "chalk", "bristles", "spray", "rough", "charcoal"];
 
-/// Index of a tip by name (German or English).
+/// Display name of a tip, translated.
+pub fn tip_label(tip: u32) -> &'static str {
+    match tip {
+        0 => crate::tr("round"),
+        1 => crate::tr("chalk"),
+        2 => crate::tr("bristles"),
+        3 => crate::tr("spray"),
+        4 => crate::tr("rough"),
+        _ => crate::tr("charcoal"),
+    }
+}
+
+/// Index of a tip by name (English or German).
 pub fn tip_from_name(name: &str) -> Option<u32> {
-    let en = ["round", "chalk", "bristles", "spray", "rough", "charcoal"];
-    TIP_NAMES.iter().position(|n| *n == name).or_else(|| en.iter().position(|n| *n == name)).map(|i| i as u32)
+    let de = ["rund", "kreide", "borsten", "spray", "rau", "kohle"];
+    TIP_NAMES
+        .iter()
+        .position(|n| *n == name)
+        .or_else(|| de.iter().position(|n| *n == name))
+        .map(|i| i as u32)
 }
 
 impl Default for BrushSettings {
@@ -125,7 +141,12 @@ pub struct Stroke {
 
 impl Stroke {
     pub fn new(settings: BrushSettings) -> Self {
-        Self { settings, last: None, to_next: 0.0, rng: 0x9e37_79b9 }
+        Self {
+            settings,
+            last: None,
+            to_next: 0.0,
+            rng: 0x9e37_79b9,
+        }
     }
 
     /// Uniform random number in [0, 1) (xorshift; deterministic per stroke).
@@ -147,7 +168,12 @@ impl Stroke {
         let s = self.settings;
         let p = pressure.clamp(0.0, 1.0);
         let mut radius = self.diameter(p) * 0.5;
-        let mut angle = s.angle.to_radians() + if s.follow_direction { direction as f32 } else { 0.0 };
+        let mut angle = s.angle.to_radians()
+            + if s.follow_direction {
+                direction as f32
+            } else {
+                0.0
+            };
         let mut flow = s.flow * (0.3 + 0.7 * p);
         let mut pos = pos;
         if s.size_jitter > 0.0 {
@@ -186,7 +212,10 @@ impl Stroke {
             None => (sample.pos, sample.pressure),
             Some((p, pr)) => {
                 let k = 1.0 - self.settings.smoothing.clamp(0.0, 0.95) as f64;
-                (p + (sample.pos - p) * k, pr + (sample.pressure - pr) * k as f32)
+                (
+                    p + (sample.pos - p) * k,
+                    pr + (sample.pressure - pr) * k as f32,
+                )
             }
         };
         self.advance_to(target.0, target.1)
@@ -234,11 +263,20 @@ mod tests {
     use super::*;
 
     fn raw() -> BrushSettings {
-        BrushSettings { smoothing: 0.0, size: 10.0, spacing: 0.1, min_size: 1.0, ..Default::default() }
+        BrushSettings {
+            smoothing: 0.0,
+            size: 10.0,
+            spacing: 0.1,
+            min_size: 1.0,
+            ..Default::default()
+        }
     }
 
     fn s(x: f64, y: f64) -> InputSample {
-        InputSample { pos: DVec2::new(x, y), pressure: 1.0 }
+        InputSample {
+            pos: DVec2::new(x, y),
+            pressure: 1.0,
+        }
     }
 
     #[test]
@@ -266,7 +304,10 @@ mod tests {
 
     #[test]
     fn smoothing_lags_but_finish_catches_up() {
-        let mut st = Stroke::new(BrushSettings { smoothing: 0.8, ..raw() });
+        let mut st = Stroke::new(BrushSettings {
+            smoothing: 0.8,
+            ..raw()
+        });
         st.add(s(0.0, 0.0));
         let mid = st.add(s(100.0, 0.0));
         assert!(mid.last().unwrap().center[0] < 50.0);
@@ -276,7 +317,13 @@ mod tests {
 
     #[test]
     fn jitter_varies_dabs_within_limits_and_is_deterministic() {
-        let settings = BrushSettings { size_jitter: 0.5, angle_jitter: 90.0, scatter: 1.0, flow_jitter: 0.5, ..raw() };
+        let settings = BrushSettings {
+            size_jitter: 0.5,
+            angle_jitter: 90.0,
+            scatter: 1.0,
+            flow_jitter: 0.5,
+            ..raw()
+        };
         let run = || {
             let mut st = Stroke::new(settings);
             let mut d = st.add(s(0.0, 0.0));
@@ -286,14 +333,21 @@ mod tests {
         let a = run();
         assert_eq!(a, run(), "same input, same dabs");
         assert!(a.iter().all(|d| d.radius <= 5.0 && d.radius >= 2.5));
-        assert!(a.iter().all(|d| d.center[1].abs() <= 10.0), "scatter across the stroke");
+        assert!(
+            a.iter().all(|d| d.center[1].abs() <= 10.0),
+            "scatter across the stroke"
+        );
         assert!(a.iter().any(|d| d.center[1].abs() > 1.0));
         assert!(a.iter().map(|d| d.angle).any(|x| x.abs() > 0.1));
     }
 
     #[test]
     fn follow_direction_and_tip_names() {
-        let mut st = Stroke::new(BrushSettings { follow_direction: true, tip: 2, ..raw() });
+        let mut st = Stroke::new(BrushSettings {
+            follow_direction: true,
+            tip: 2,
+            ..raw()
+        });
         st.add(s(0.0, 0.0));
         let d = st.add(s(0.0, 10.0));
         assert!((d[0].angle - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
@@ -305,8 +359,14 @@ mod tests {
 
     #[test]
     fn pressure_scales_size() {
-        let mut st = Stroke::new(BrushSettings { min_size: 0.2, ..raw() });
-        let d = st.add(InputSample { pos: DVec2::ZERO, pressure: 0.0 });
+        let mut st = Stroke::new(BrushSettings {
+            min_size: 0.2,
+            ..raw()
+        });
+        let d = st.add(InputSample {
+            pos: DVec2::ZERO,
+            pressure: 0.0,
+        });
         assert!((d[0].radius - 1.0).abs() < 1e-6);
     }
 }

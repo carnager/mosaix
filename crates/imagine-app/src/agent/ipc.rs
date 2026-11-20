@@ -21,7 +21,10 @@ use super::{Backend, CallOutput};
 pub fn socket_dir() -> PathBuf {
     match std::env::var_os("XDG_RUNTIME_DIR") {
         Some(d) => PathBuf::from(d).join("imagine"),
-        None => std::env::temp_dir().join(format!("imagine-{}", std::env::var("USER").unwrap_or_default())),
+        None => std::env::temp_dir().join(format!(
+            "imagine-{}",
+            std::env::var("USER").unwrap_or_default()
+        )),
     }
 }
 
@@ -42,7 +45,9 @@ impl Drop for SocketGuard {
 
 /// Removes sockets of windows that are gone (crashed or killed).
 fn remove_stale(dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.extension().is_some_and(|x| x == "sock") && UnixStream::connect(&p).is_err() {
@@ -53,19 +58,27 @@ fn remove_stale(dir: &Path) {
 
 pub fn bind() -> anyhow::Result<(UnixListener, SocketGuard)> {
     let dir = socket_dir();
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
     remove_stale(&dir);
     let path = dir.join(format!("{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path).with_context(|| format!("{} binden", path.display()))?;
+    let listener =
+        UnixListener::bind(&path).with_context(|| format!("cannot bind {}", path.display()))?;
     listener.set_nonblocking(true)?;
     Ok((listener, SocketGuard(path)))
 }
 
 /// Connects to `explicit`, `$IMAGINE_SOCKET`, or the most recently started window.
 pub fn connect(explicit: Option<&Path>) -> anyhow::Result<UnixStream> {
-    if let Some(p) = explicit.map(Path::to_path_buf).or_else(|| std::env::var_os("IMAGINE_SOCKET").map(PathBuf::from)) {
-        return UnixStream::connect(&p).with_context(|| format!("cannot connect to {}", p.display()));
+    if let Some(p) = explicit
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os("IMAGINE_SOCKET").map(PathBuf::from))
+    {
+        return UnixStream::connect(&p)
+            .with_context(|| format!("cannot connect to {}", p.display()));
     }
     let mut socks: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(socket_dir())
         .map(|rd| {
@@ -114,7 +127,11 @@ pub struct Client {
 impl Client {
     pub fn connect(explicit: Option<&Path>) -> anyhow::Result<Self> {
         let s = connect(explicit)?;
-        Ok(Self { reader: BufReader::new(s.try_clone()?), writer: s, next_id: 1 })
+        Ok(Self {
+            reader: BufReader::new(s.try_clone()?),
+            writer: s,
+            next_id: 1,
+        })
     }
 }
 
@@ -125,7 +142,9 @@ impl Backend for Client {
         cmd["id"] = id.into();
         let mut line = cmd.to_string();
         line.push('\n');
-        self.writer.write_all(line.as_bytes()).context("window closed")?;
+        self.writer
+            .write_all(line.as_bytes())
+            .context("window closed")?;
         let mut resp = String::new();
         if self.reader.read_line(&mut resp)? == 0 {
             bail!("window closed");
@@ -138,6 +157,9 @@ impl Backend for Client {
             Some(b) => Some(base64::engine::general_purpose::STANDARD.decode(b)?),
             None => None,
         };
-        Ok(CallOutput { result: v["result"].clone(), image_png })
+        Ok(CallOutput {
+            result: v["result"].clone(),
+            image_png,
+        })
     }
 }

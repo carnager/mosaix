@@ -96,7 +96,10 @@ pub(super) struct Grids {
 impl Grids {
     pub(super) fn add(&mut self, entries: &[(TileCoord, u32)], fallback: f32) -> GridRef {
         if entries.is_empty() {
-            return GridRef { fallback, ..Default::default() };
+            return GridRef {
+                fallback,
+                ..Default::default()
+            };
         }
         let x0 = entries.iter().map(|e| e.0.x).min().unwrap();
         let y0 = entries.iter().map(|e| e.0.y).min().unwrap();
@@ -107,7 +110,15 @@ impl Grids {
         for (c, v) in entries {
             self.data[(base + (c.y - y0) as u32 * w + (c.x - x0) as u32) as usize] = *v;
         }
-        GridRef { base, w, h, x0, y0, fallback, ..Default::default() }
+        GridRef {
+            base,
+            w,
+            h,
+            x0,
+            y0,
+            fallback,
+            ..Default::default()
+        }
     }
 
     pub(super) fn layer(&mut self, tiles: &HashMap<TileCoord, Tile>) -> GridRef {
@@ -120,10 +131,13 @@ impl Grids {
             .tiles
             .iter()
             .map(|(c, t)| {
-                (*c, match t {
-                    MaskTile::Pixels(t) => t.slot().packed(),
-                    MaskTile::Solid(v) => CONST_TAG | *v as u32,
-                })
+                (
+                    *c,
+                    match t {
+                        MaskTile::Pixels(t) => t.slot().packed(),
+                        MaskTile::Solid(v) => CONST_TAG | *v as u32,
+                    },
+                )
             })
             .collect();
         self.add(&e, m.default as f32 / 255.0)
@@ -132,7 +146,11 @@ impl Grids {
 
 /// Destination tiles covered by the transformed source tiles (exact
 /// parallelogram/tile overlap test, `margin` = filter support in source px).
-pub(super) fn footprint(src: impl IntoIterator<Item = TileCoord>, fwd: DAffine2, margin: f64) -> BTreeSet<TileCoord> {
+pub(super) fn footprint(
+    src: impl IntoIterator<Item = TileCoord>,
+    fwd: DAffine2,
+    margin: f64,
+) -> BTreeSet<TileCoord> {
     let ts = TILE_SIZE as f64;
     let mut out = BTreeSet::new();
     let ax = fwd.matrix2.x_axis;
@@ -143,12 +161,20 @@ pub(super) fn footprint(src: impl IntoIterator<Item = TileCoord>, fwd: DAffine2,
         let (ox, oy) = c.origin();
         let (x0, y0) = (ox as f64 - margin, oy as f64 - margin);
         let (x1, y1) = (ox as f64 + ts + margin, oy as f64 + ts + margin);
-        let quad =
-            [DVec2::new(x0, y0), DVec2::new(x1, y0), DVec2::new(x1, y1), DVec2::new(x0, y1)].map(|p| fwd.transform_point2(p));
+        let quad = [
+            DVec2::new(x0, y0),
+            DVec2::new(x1, y0),
+            DVec2::new(x1, y1),
+            DVec2::new(x0, y1),
+        ]
+        .map(|p| fwd.transform_point2(p));
         let min = quad.iter().fold(DVec2::INFINITY, |a, p| a.min(*p));
         let max = quad.iter().fold(DVec2::NEG_INFINITY, |a, p| a.max(*p));
         let (tx0, ty0) = ((min.x / ts).floor() as i64, (min.y / ts).floor() as i64);
-        let (tx1, ty1) = (((max.x / ts).ceil() as i64) - 1, ((max.y / ts).ceil() as i64) - 1);
+        let (tx1, ty1) = (
+            ((max.x / ts).ceil() as i64) - 1,
+            ((max.y / ts).ceil() as i64) - 1,
+        );
         for ty in ty0..=ty1 {
             for tx in tx0..=tx1 {
                 let (bx0, by0) = (tx as f64 * ts, ty as f64 * ts);
@@ -181,10 +207,11 @@ pub(super) fn footprint(src: impl IntoIterator<Item = TileCoord>, fwd: DAffine2,
 }
 
 fn proj(pts: &[DVec2; 4], n: DVec2) -> (f64, f64) {
-    pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| {
-        let d = p.dot(n);
-        (a.min(d), b.max(d))
-    })
+    pts.iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| {
+            let d = p.dot(n);
+            (a.min(d), b.max(d))
+        })
 }
 
 /// Whether `fwd` moves by whole pixels only.
@@ -240,8 +267,16 @@ impl Engine {
         only: Option<(DVec2, DVec2)>,
     ) -> Result<(LayerId, Document<Tile>), &'static str> {
         // Text and shape layers keep their description: the transform is composed.
-        let vector = self.stroke.is_none() && self.doc.active_layer().is_some_and(|l| l.vector().is_some());
-        let layer = if vector { self.doc.active } else { self.check_target(StrokeTarget::Pixels)? };
+        let vector = self.stroke.is_none()
+            && self
+                .doc
+                .active_layer()
+                .is_some_and(|l| l.vector().is_some());
+        let layer = if vector {
+            self.doc.active
+        } else {
+            self.check_target(StrokeTarget::Pixels)?
+        };
         let mut doc = self.doc.clone();
         self.warp_layer(layer, fwd, interp, use_selection && !vector, only, &mut doc)?;
         Ok((layer, doc))
@@ -259,13 +294,23 @@ impl Engine {
         out: &mut Document<Tile>,
     ) -> Result<(), &'static str> {
         if fwd.matrix2.determinant().abs() < 1e-9 {
-            return Err("Transformation ist zu flach (Größe 0)");
+            return Err(imagine_core::tr("transformation is too flat (size 0)"));
         }
-        let l = self.doc.find(layer).ok_or("Ebene existiert nicht")?;
+        let l = self
+            .doc
+            .find(layer)
+            .ok_or(imagine_core::tr("layer does not exist"))?;
         if let Some(v) = l.vector() {
             let mut v = v.clone();
             let m = fwd.matrix2;
-            let f = [m.x_axis.x, m.x_axis.y, m.y_axis.x, m.y_axis.y, fwd.translation.x, fwd.translation.y];
+            let f = [
+                m.x_axis.x,
+                m.x_axis.y,
+                m.y_axis.x,
+                m.y_axis.y,
+                fwd.translation.x,
+                fwd.translation.y,
+            ];
             v.transform = imagine_core::vector::compose(f, v.transform);
             if let Some(o) = out.find_mut(layer) {
                 o.content = imagine_core::doc::Content::Vector(v);
@@ -274,13 +319,21 @@ impl Engine {
         let has_pixels = l.tiles().is_some();
         let src: HashMap<TileCoord, Tile> = l.tiles().map(|t| (**t).clone()).unwrap_or_default();
         let mask = l.mask.clone();
-        let sel = if use_selection { self.doc.selection.clone() } else { None };
+        let sel = if use_selection {
+            self.doc.selection.clone()
+        } else {
+            None
+        };
 
         let inv = fwd.inverse();
         let lin = inv.matrix2;
         let stretch = lin.x_axis.length().max(lin.y_axis.length());
         let mut interp = interp;
-        let samples = if interp == Interp::Nearest { 1 } else { (stretch - 0.01).ceil().clamp(1.0, 4.0) as u32 };
+        let samples = if interp == Interp::Nearest {
+            1
+        } else {
+            (stretch - 0.01).ceil().clamp(1.0, 4.0) as u32
+        };
         if samples > 1 && interp == Interp::Bicubic {
             interp = Interp::Bilinear;
         }
@@ -293,7 +346,10 @@ impl Engine {
             only.is_none_or(|(a, b)| {
                 let (x, y) = c.origin();
                 let ts = TILE_SIZE as f64;
-                (x as f64) < b.x && (x as f64 + ts) > a.x && (y as f64) < b.y && (y as f64 + ts) > a.y
+                (x as f64) < b.x
+                    && (x as f64 + ts) > a.x
+                    && (y as f64) < b.y
+                    && (y as f64 + ts) > a.y
             })
         };
 
@@ -309,7 +365,12 @@ impl Engine {
             WarpJob {
                 s0_int: [si.x as i32, si.y as i32],
                 s0_frac: [(s0.x - si.x) as f32, (s0.y - si.y) as f32],
-                lin: [lin.x_axis.x as f32, lin.x_axis.y as f32, lin.y_axis.x as f32, lin.y_axis.y as f32],
+                lin: [
+                    lin.x_axis.x as f32,
+                    lin.x_axis.y as f32,
+                    lin.y_axis.x as f32,
+                    lin.y_axis.y as f32,
+                ],
                 src: GridRef::default(),
                 src_sel: GridRef::default(),
                 old_slot: NONE,
@@ -326,7 +387,10 @@ impl Engine {
         // ---- pixels ----
         let moving: Vec<TileCoord> = if float {
             let s = sel.as_ref().unwrap();
-            src.keys().copied().filter(|c| !matches!(s.at(*c), MaskRef::Solid(0))).collect()
+            src.keys()
+                .copied()
+                .filter(|c| !matches!(s.at(*c), MaskRef::Solid(0)))
+                .collect()
         } else {
             src.keys().copied().collect()
         };
@@ -358,9 +422,16 @@ impl Engine {
         let mut mask_dest = Vec::new();
         if let Some(m) = &outline {
             let g = grids.mask(m);
-            let coords: Vec<TileCoord> =
-                m.tiles.iter().filter(|(_, t)| !matches!(t, MaskTile::Solid(v) if *v == m.default)).map(|(c, _)| *c).collect();
-            mask_dest = footprint(coords, fwd, margin).into_iter().filter(keep).collect();
+            let coords: Vec<TileCoord> = m
+                .tiles
+                .iter()
+                .filter(|(_, t)| !matches!(t, MaskTile::Solid(v) if *v == m.default))
+                .map(|(c, _)| *c)
+                .collect();
+            mask_dest = footprint(coords, fwd, margin)
+                .into_iter()
+                .filter(keep)
+                .collect();
             mask_jobs = mask_dest
                 .iter()
                 .map(|&c| {
@@ -371,9 +442,14 @@ impl Engine {
                 .collect();
         }
 
-        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
-        let new_pixels = self.run_warp(StrokeTarget::Pixels, &jobs).ok_or("GPU-Speicher voll")?;
-        let new_mask = self.run_warp(StrokeTarget::Mask, &mask_jobs).ok_or("GPU-Speicher voll")?;
+        self.grid_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+        let new_pixels = self
+            .run_warp(StrokeTarget::Pixels, &jobs)
+            .ok_or(imagine_core::tr("GPU memory full"))?;
+        let new_mask = self
+            .run_warp(StrokeTarget::Mask, &mask_jobs)
+            .ok_or(imagine_core::tr("GPU memory full"))?;
 
         let l = out.find_mut(layer).unwrap();
         if has_pixels {
@@ -382,8 +458,16 @@ impl Engine {
             l.content = Content::Pixels(Arc::new(map));
         }
         if let Some(m) = outline {
-            let tiles = Arc::new(mask_dest.into_iter().zip(new_mask.into_iter().map(MaskTile::Pixels)).collect());
-            let new = Mask { tiles, default: m.default };
+            let tiles = Arc::new(
+                mask_dest
+                    .into_iter()
+                    .zip(new_mask.into_iter().map(MaskTile::Pixels))
+                    .collect(),
+            );
+            let new = Mask {
+                tiles,
+                default: m.default,
+            };
             if float {
                 out.selection = Some(new);
             } else {
@@ -395,23 +479,54 @@ impl Engine {
 
     /// Crops (or extends) the canvas to `w × h` starting at `(x, y)`; content
     /// outside the new canvas is kept, not deleted. Drops the selection.
-    pub fn crop(&mut self, x: i64, y: i64, w: u32, h: u32, label: &str) -> Result<(), &'static str> {
-        self.canvas_op(w, h, DAffine2::from_translation(DVec2::new(-x as f64, -y as f64)), Interp::Nearest, label)
+    pub fn crop(
+        &mut self,
+        x: i64,
+        y: i64,
+        w: u32,
+        h: u32,
+        label: &str,
+    ) -> Result<(), &'static str> {
+        self.canvas_op(
+            w,
+            h,
+            DAffine2::from_translation(DVec2::new(-x as f64, -y as f64)),
+            Interp::Nearest,
+            label,
+        )
     }
 
     /// Scales the whole image (all layers and masks) to `w × h`.
     /// Rotates the whole image by `quarter_turns` × 90° clockwise and/or
     /// mirrors it (`flip_x`: left ↔ right, `flip_y`: top ↔ bottom). Exact (no
     /// resampling); the canvas swaps width and height for odd turns.
-    pub fn rotate_image(&mut self, quarter_turns: i32, flip_x: bool, flip_y: bool, label: &str) -> Result<(), &'static str> {
+    pub fn rotate_image(
+        &mut self,
+        quarter_turns: i32,
+        flip_x: bool,
+        flip_y: bool,
+        label: &str,
+    ) -> Result<(), &'static str> {
         let (w, h) = self.size();
         let (w, h) = (w as f64, h as f64);
         let turns = quarter_turns.rem_euclid(4);
         // Rotation about the origin, then moved back into the canvas.
         let (rot, nw, nh) = match turns {
-            1 => (DAffine2::from_cols_array(&[0.0, 1.0, -1.0, 0.0, h, 0.0]), h, w),
-            2 => (DAffine2::from_cols_array(&[-1.0, 0.0, 0.0, -1.0, w, h]), w, h),
-            3 => (DAffine2::from_cols_array(&[0.0, -1.0, 1.0, 0.0, 0.0, w]), h, w),
+            1 => (
+                DAffine2::from_cols_array(&[0.0, 1.0, -1.0, 0.0, h, 0.0]),
+                h,
+                w,
+            ),
+            2 => (
+                DAffine2::from_cols_array(&[-1.0, 0.0, 0.0, -1.0, w, h]),
+                w,
+                h,
+            ),
+            3 => (
+                DAffine2::from_cols_array(&[0.0, -1.0, 1.0, 0.0, 0.0, w]),
+                h,
+                w,
+            ),
             _ => (DAffine2::IDENTITY, w, h),
         };
         let mut flip = DAffine2::IDENTITY;
@@ -429,36 +544,64 @@ impl Engine {
     }
 
     /// Rotates / mirrors the active layer about the centre of its content.
-    pub fn rotate_layer(&mut self, degrees: f64, flip_x: bool, flip_y: bool, label: &str) -> Result<(), &'static str> {
+    pub fn rotate_layer(
+        &mut self,
+        degrees: f64,
+        flip_x: bool,
+        flip_y: bool,
+        label: &str,
+    ) -> Result<(), &'static str> {
         let id = self.doc.active;
-        let (x0, y0, x1, y1) = self.content_bounds(id).ok_or("die Ebene ist leer")?;
+        let (x0, y0, x1, y1) = self
+            .content_bounds(id)
+            .ok_or(imagine_core::tr("the layer is empty"))?;
         let c = DVec2::new((x0 + x1) as f64 * 0.5, (y0 + y1) as f64 * 0.5);
         let mut m = DAffine2::from_angle(degrees.to_radians());
         // Exact quarter turns (no rounding noise in the matrix).
         if (degrees / 90.0).fract() == 0.0 {
             m.matrix2 = glam::DMat2::from_cols_array(&m.matrix2.to_cols_array().map(f64::round));
         }
-        let f = DAffine2::from_scale(DVec2::new(if flip_x { -1.0 } else { 1.0 }, if flip_y { -1.0 } else { 1.0 }));
+        let f = DAffine2::from_scale(DVec2::new(
+            if flip_x { -1.0 } else { 1.0 },
+            if flip_y { -1.0 } else { 1.0 },
+        ));
         let lin = m * f;
         // About the centre; for quarter turns keep pixel centres on pixel centres.
         let mut fwd = DAffine2::from_translation(c) * lin * DAffine2::from_translation(-c);
         fwd.translation = fwd.translation.round();
-        let interp = if (degrees / 90.0).fract() == 0.0 { Interp::Nearest } else { Interp::Bicubic };
+        let interp = if (degrees / 90.0).fract() == 0.0 {
+            Interp::Nearest
+        } else {
+            Interp::Bicubic
+        };
         self.transform_layer(fwd, interp, false, label)
     }
 
-    pub fn resize_image(&mut self, w: u32, h: u32, interp: Interp, label: &str) -> Result<(), &'static str> {
+    pub fn resize_image(
+        &mut self,
+        w: u32,
+        h: u32,
+        interp: Interp,
+        label: &str,
+    ) -> Result<(), &'static str> {
         let (ow, oh) = self.size();
         let k = DVec2::new(w as f64 / ow as f64, h as f64 / oh as f64);
         self.canvas_op(w, h, DAffine2::from_scale(k), interp, label)
     }
 
-    fn canvas_op(&mut self, w: u32, h: u32, fwd: DAffine2, interp: Interp, label: &str) -> Result<(), &'static str> {
+    fn canvas_op(
+        &mut self,
+        w: u32,
+        h: u32,
+        fwd: DAffine2,
+        interp: Interp,
+        label: &str,
+    ) -> Result<(), &'static str> {
         if self.stroke.is_some() {
-            return Err("während eines Pinselstrichs nicht möglich");
+            return Err(imagine_core::tr("not possible during a brush stroke"));
         }
         if w == 0 || h == 0 || w > 300_000 || h > 300_000 {
-            return Err("ungültige Bildgröße");
+            return Err(imagine_core::tr("invalid image size"));
         }
         if self.preview.take().is_some() {
             self.recheck_all = true;
@@ -476,12 +619,20 @@ impl Engine {
                 let shift = |c: &TileCoord| TileCoord::new(c.x + dx, c.y + dy);
                 let l = out.find_mut(id).unwrap();
                 match &mut l.content {
-                    Content::Pixels(map) => *map = Arc::new(map.iter().map(|(c, t)| (shift(c), t.clone())).collect()),
-                    Content::Vector(v) => v.transform = imagine_core::vector::compose([1.0, 0.0, 0.0, 1.0, t.x, t.y], v.transform),
+                    Content::Pixels(map) => {
+                        *map = Arc::new(map.iter().map(|(c, t)| (shift(c), t.clone())).collect())
+                    }
+                    Content::Vector(v) => {
+                        v.transform = imagine_core::vector::compose(
+                            [1.0, 0.0, 0.0, 1.0, t.x, t.y],
+                            v.transform,
+                        )
+                    }
                     _ => {}
                 }
                 if let Some(m) = &mut l.mask {
-                    m.tiles = Arc::new(m.tiles.iter().map(|(c, t)| (shift(c), t.clone())).collect());
+                    m.tiles =
+                        Arc::new(m.tiles.iter().map(|(c, t)| (shift(c), t.clone())).collect());
                 }
             } else {
                 self.warp_layer(id, fwd, interp, false, None, &mut out)?;
@@ -499,7 +650,12 @@ impl Engine {
 
     /// Transforms the active layer (or the selected part of it) by `fwd`
     /// (document px → document px) as one undo step.
-    pub fn transform_active(&mut self, fwd: DAffine2, interp: Interp, label: &str) -> Result<(), &'static str> {
+    pub fn transform_active(
+        &mut self,
+        fwd: DAffine2,
+        interp: Interp,
+        label: &str,
+    ) -> Result<(), &'static str> {
         self.transform_layer(fwd, interp, true, label)
     }
 
@@ -515,14 +671,22 @@ impl Engine {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
-        if !self.doc.active_layer().is_some_and(|l| l.vector().is_some()) {
+        if !self
+            .doc
+            .active_layer()
+            .is_some_and(|l| l.vector().is_some())
+        {
             self.check_target(StrokeTarget::Pixels)?;
         }
         if fwd == DAffine2::IDENTITY {
             return Ok(());
         }
         // Whole-pixel moves are exact with nearest sampling.
-        let interp = if is_integer_translation(fwd) { Interp::Nearest } else { interp };
+        let interp = if is_integer_translation(fwd) {
+            Interp::Nearest
+        } else {
+            interp
+        };
         let (_, doc) = self.transformed_doc(fwd, interp, use_selection, None)?;
         self.edit(label, |d| {
             *d = doc;
@@ -533,7 +697,10 @@ impl Engine {
 
     /// Shows the transform live without changing the document (only the
     /// visible area is computed). `None` ends the preview.
-    pub fn set_transform_preview(&mut self, t: Option<(DAffine2, Interp)>) -> Result<(), &'static str> {
+    pub fn set_transform_preview(
+        &mut self,
+        t: Option<(DAffine2, Interp)>,
+    ) -> Result<(), &'static str> {
         match t {
             None => {
                 if self.preview.take().is_some() {
@@ -542,7 +709,11 @@ impl Engine {
                 Ok(())
             }
             Some((fwd, interp)) => {
-                let interp = if is_integer_translation(fwd) { Interp::Nearest } else { interp };
+                let interp = if is_integer_translation(fwd) {
+                    Interp::Nearest
+                } else {
+                    interp
+                };
                 let kind = PreviewKind::Transform(fwd, interp);
                 if self.preview.as_ref().is_some_and(|p| p.kind == kind) {
                     return Ok(());
@@ -562,15 +733,23 @@ impl Engine {
         let rect = (min - pad, max + pad);
         self.preview = None;
         let doc = match &kind {
-            PreviewKind::Transform(fwd, interp) => self.transformed_doc(*fwd, *interp, true, Some(rect))?.1,
+            PreviewKind::Transform(fwd, interp) => {
+                self.transformed_doc(*fwd, *interp, true, Some(rect))?.1
+            }
             PreviewKind::Filter(f) => self.filtered_doc(f, Some(rect))?,
-            PreviewKind::Liquify => return Err("Verflüssigen-Vorschau wird nicht hier berechnet"),
+            PreviewKind::Liquify => {
+                return Err(imagine_core::tr("the Liquify preview is not computed here"));
+            }
             PreviewKind::Vector(id, v) => {
                 let mut d = self.doc.clone();
-                let l = d.find_mut(*id).ok_or("Ebene existiert nicht")?;
+                let l = d
+                    .find_mut(*id)
+                    .ok_or(imagine_core::tr("layer does not exist"))?;
                 // Only ever replaces a text or shape layer (never pixels or a group).
                 if l.vector().is_none() {
-                    return Err("die aktive Ebene ist keine Text- oder Formebene");
+                    return Err(imagine_core::tr(
+                        "the active layer is not a text or shape layer",
+                    ));
                 }
                 l.content = imagine_core::doc::Content::Vector((**v).clone());
                 d
@@ -601,7 +780,7 @@ impl Engine {
         }
         let kind = p.kind.clone();
         if let Err(e) = self.compute_preview(kind) {
-            tracing::warn!("Vorschau: {e}");
+            tracing::warn!("{}", imagine_core::tr!("Preview: {err}", err = e));
             self.preview = None;
         }
     }
@@ -629,7 +808,12 @@ impl Engine {
                 WarpJob {
                     s0_int: [si.x as i32, si.y as i32],
                     s0_frac: [(s0.x - si.x) as f32, (s0.y - si.y) as f32],
-                    lin: [lin.x_axis.x as f32, lin.x_axis.y as f32, lin.y_axis.x as f32, lin.y_axis.y as f32],
+                    lin: [
+                        lin.x_axis.x as f32,
+                        lin.x_axis.y as f32,
+                        lin.y_axis.x as f32,
+                        lin.y_axis.y as f32,
+                    ],
                     src: g,
                     src_sel: GridRef::default(),
                     old_slot: NONE,
@@ -643,15 +827,22 @@ impl Engine {
                 }
             })
             .collect();
-        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+        self.grid_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
         let tiles = self.run_warp(StrokeTarget::Pixels, &jobs)?;
         Some(dest.iter().copied().zip(tiles).collect())
     }
 
     /// Renders a layer scaled by `scale` into tile (0, 0) of a new layer-pool
     /// tile (thumbnails). Supersampled, `samples` per axis.
-    pub(super) fn downscaled_tile(&mut self, layer: LayerId, scale: f64, samples: u32) -> Option<Tile> {
-        let tiles: HashMap<TileCoord, Tile> = self.doc.find(layer)?.tiles().map(|t| (**t).clone())?;
+    pub(super) fn downscaled_tile(
+        &mut self,
+        layer: LayerId,
+        scale: f64,
+        samples: u32,
+    ) -> Option<Tile> {
+        let tiles: HashMap<TileCoord, Tile> =
+            self.doc.find(layer)?.tiles().map(|t| (**t).clone())?;
         let mut grids = Grids::default();
         let src = grids.layer(&tiles);
         let inv = DAffine2::from_scale(DVec2::splat(1.0 / scale));
@@ -659,7 +850,12 @@ impl Engine {
         let job = WarpJob {
             s0_int: [0, 0],
             s0_frac: [0.0, 0.0],
-            lin: [lin.x_axis.x as f32, lin.x_axis.y as f32, lin.y_axis.x as f32, lin.y_axis.y as f32],
+            lin: [
+                lin.x_axis.x as f32,
+                lin.x_axis.y as f32,
+                lin.y_axis.x as f32,
+                lin.y_axis.y as f32,
+            ],
             src,
             src_sel: GridRef::default(),
             old_slot: NONE,
@@ -671,7 +867,8 @@ impl Engine {
             samples,
             _pad: 0,
         };
-        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+        self.grid_buf
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
         self.run_warp(StrokeTarget::Pixels, &[job])?.pop()
     }
 
@@ -681,23 +878,39 @@ impl Engine {
         let l = self.doc.find(layer)?;
         if let Some(v) = l.vector() {
             let b = imagine_vector::bounds(v)?;
-            return Some((b[0].floor() as i64, b[1].floor() as i64, b[2].ceil() as i64, b[3].ceil() as i64));
+            return Some((
+                b[0].floor() as i64,
+                b[1].floor() as i64,
+                b[2].ceil() as i64,
+                b[3].ceil() as i64,
+            ));
         }
-        let tiles: Vec<(TileCoord, Tile)> = l.tiles()?.iter().map(|(c, t)| (*c, t.clone())).collect();
+        let tiles: Vec<(TileCoord, Tile)> =
+            l.tiles()?.iter().map(|(c, t)| (*c, t.clone())).collect();
         let jobs: Vec<BoundsJob> = tiles
             .iter()
             .filter(|(c, _)| self.selected_any(*c))
             .map(|(c, t)| {
                 let (sel_slot, sel_const) = self.sel_slot(*c);
-                BoundsJob { slot: t.slot().packed(), sel_slot, sel_const, _pad: 0 }
+                BoundsJob {
+                    slot: t.slot().packed(),
+                    sel_slot,
+                    sel_const,
+                    _pad: 0,
+                }
             })
             .collect();
-        let coords: Vec<TileCoord> = tiles.iter().filter(|(c, _)| self.selected_any(*c)).map(|(c, _)| *c).collect();
+        let coords: Vec<TileCoord> = tiles
+            .iter()
+            .filter(|(c, _)| self.selected_any(*c))
+            .map(|(c, _)| *c)
+            .collect();
         if jobs.is_empty() {
             return None;
         }
         self.rebuild_arrays_bg();
-        self.bounds_jobs.write(&self.device, &self.queue, bytemuck::cast_slice(&jobs));
+        self.bounds_jobs
+            .write(&self.device, &self.queue, bytemuck::cast_slice(&jobs));
         let size = (jobs.len() * 16) as u64;
         let out = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bounds"),
@@ -716,9 +929,18 @@ impl Engine {
             label: Some("bounds"),
             layout: &self.bounds_bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.bounds_jobs.buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: out.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: self.params.binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.bounds_jobs.buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.params.binding(),
+                },
             ],
         });
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -744,7 +966,12 @@ impl Engine {
                 continue;
             }
             let (ox, oy) = c.origin();
-            let bb = (ox + r[0] as i64, oy + r[1] as i64, ox + r[2] as i64 + 1, oy + r[3] as i64 + 1);
+            let bb = (
+                ox + r[0] as i64,
+                oy + r[1] as i64,
+                ox + r[2] as i64 + 1,
+                oy + r[3] as i64 + 1,
+            );
             acc = Some(match acc {
                 None => bb,
                 Some(a) => (a.0.min(bb.0), a.1.min(bb.1), a.2.max(bb.2), a.3.max(bb.3)),
@@ -762,8 +989,15 @@ mod tests {
     fn footprint_of_translation_is_shifted_tiles() {
         let fwd = DAffine2::from_translation(DVec2::new(256.0, 0.0));
         let f = footprint([TileCoord::new(0, 0)], fwd, 0.0);
-        assert_eq!(f.into_iter().collect::<Vec<_>>(), vec![TileCoord::new(1, 0)]);
-        let f = footprint([TileCoord::new(0, 0)], DAffine2::from_translation(DVec2::new(10.0, 0.0)), 0.0);
+        assert_eq!(
+            f.into_iter().collect::<Vec<_>>(),
+            vec![TileCoord::new(1, 0)]
+        );
+        let f = footprint(
+            [TileCoord::new(0, 0)],
+            DAffine2::from_translation(DVec2::new(10.0, 0.0)),
+            0.0,
+        );
         assert_eq!(f.len(), 2);
     }
 
@@ -779,13 +1013,22 @@ mod tests {
         for c in [(1, 1), (1, 0), (0, 1), (2, 1), (1, 2)] {
             assert!(f.contains(&TileCoord::new(c.0, c.1)), "{c:?} missing");
         }
-        assert!(!f.contains(&TileCoord::new(0, 0)) && !f.contains(&TileCoord::new(2, 2)), "{f:?}");
+        assert!(
+            !f.contains(&TileCoord::new(0, 0)) && !f.contains(&TileCoord::new(2, 2)),
+            "{f:?}"
+        );
     }
 
     #[test]
     fn integer_translation_detection() {
-        assert!(is_integer_translation(DAffine2::from_translation(DVec2::new(3.0, -7.0))));
-        assert!(!is_integer_translation(DAffine2::from_translation(DVec2::new(3.5, 0.0))));
-        assert!(!is_integer_translation(DAffine2::from_scale(DVec2::splat(2.0))));
+        assert!(is_integer_translation(DAffine2::from_translation(
+            DVec2::new(3.0, -7.0)
+        )));
+        assert!(!is_integer_translation(DAffine2::from_translation(
+            DVec2::new(3.5, 0.0)
+        )));
+        assert!(!is_integer_translation(DAffine2::from_scale(DVec2::splat(
+            2.0
+        ))));
     }
 }

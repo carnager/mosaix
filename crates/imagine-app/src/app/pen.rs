@@ -4,8 +4,8 @@
 //! one a stroked line.
 
 use glam::{DAffine2, DVec2};
-use imagine_core::LayerId;
 use imagine_core::vector::{Geometry, PathNode, ShapeSpec, StrokeStyle, VectorKind, VectorLayer};
+use imagine_core::{LayerId, tr};
 use smithay_client_toolkit::seat::keyboard::{KeyEvent, Keysym};
 
 use super::{App, Drag};
@@ -50,25 +50,41 @@ impl App {
         let l = self.session.as_ref()?.engine.doc().active_layer()?;
         let vl = l.vector()?;
         match &vl.kind {
-            VectorKind::Shape(ShapeSpec { geometry: Geometry::Bezier { nodes, closed }, .. }) => Some((l.id, nodes.clone(), *closed, affine(&vl.transform))),
+            VectorKind::Shape(ShapeSpec {
+                geometry: Geometry::Bezier { nodes, closed },
+                ..
+            }) => Some((l.id, nodes.clone(), *closed, affine(&vl.transform))),
             _ => None,
         }
     }
 
     /// Writes new nodes into the edited path layer (merged into one undo step per drag).
     fn set_path_nodes(&mut self, id: LayerId, nodes: Vec<PathNode>) {
-        let Some(mut vl) = self.session.as_ref().and_then(|s| s.engine.doc().find(id)).and_then(|l| l.vector().cloned()) else { return };
-        if let VectorKind::Shape(ShapeSpec { geometry: Geometry::Bezier { nodes: n, .. }, .. }) = &mut vl.kind {
+        let Some(mut vl) = self
+            .session
+            .as_ref()
+            .and_then(|s| s.engine.doc().find(id))
+            .and_then(|l| l.vector().cloned())
+        else {
+            return;
+        };
+        if let VectorKind::Shape(ShapeSpec {
+            geometry: Geometry::Bezier { nodes: n, .. },
+            ..
+        }) = &mut vl.kind
+        {
             *n = nodes;
         }
         if let Some(e) = self.engine() {
-            let _ = e.set_vector(id, vl, "Pfad bearbeiten", Some(&format!("path-{id}")));
+            let _ = e.set_vector(id, vl, tr("Edit Path"), Some(&format!("path-{id}")));
         }
         self.touch();
     }
 
     pub(super) fn pen_press(&mut self, screen: DVec2, doc: DVec2) -> Drag {
-        let near = |a: DVec2, b: DVec2, view: &imagine_core::View| view.doc_to_screen(a).distance(view.doc_to_screen(b)) <= GRAB;
+        let near = |a: DVec2, b: DVec2, view: &imagine_core::View| {
+            view.doc_to_screen(a).distance(view.doc_to_screen(b)) <= GRAB
+        };
         // Drawing: close on the first node, else add a node.
         if !self.pen.drawing.is_empty() {
             let first = v(self.pen.drawing[0].p);
@@ -87,11 +103,18 @@ impl App {
                 for out in [true, false] {
                     let h = if out { nodes[i].h_out } else { nodes[i].h_in };
                     if h != nodes[i].p && near(to_doc(h), doc, &self.view) {
-                        return Drag::Pen(PenDrag::Handle { idx: i, out, free: self.mods.alt });
+                        return Drag::Pen(PenDrag::Handle {
+                            idx: i,
+                            out,
+                            free: self.mods.alt,
+                        });
                     }
                 }
             }
-            if let Some(i) = nodes.iter().position(|n| near(to_doc(n.p), doc, &self.view)) {
+            if let Some(i) = nodes
+                .iter()
+                .position(|n| near(to_doc(n.p), doc, &self.view))
+            {
                 self.pen.selected = Some(i);
                 if self.mods.alt {
                     // Alt+click: corner ↔ smooth.
@@ -100,7 +123,10 @@ impl App {
                         *n = PathNode::corner(n.p);
                     } else {
                         // Handles along the neighbours' direction.
-                        let prev = nodes.get(i.wrapping_sub(1)).or(nodes.last()).map(|x| v(x.p));
+                        let prev = nodes
+                            .get(i.wrapping_sub(1))
+                            .or(nodes.last())
+                            .map(|x| v(x.p));
                         let next = nodes.get(i + 1).or(nodes.first()).map(|x| v(x.p));
                         if let (Some(pp), Some(nn)) = (prev, next) {
                             let d = (nn - pp) * 0.25;
@@ -115,14 +141,22 @@ impl App {
                     }
                     return Drag::None;
                 }
-                return Drag::Pen(PenDrag::Node { idx: i, last: local });
+                return Drag::Pen(PenDrag::Node {
+                    idx: i,
+                    last: local,
+                });
             }
         }
         // Anywhere else: start a new path.
         let _ = screen;
         self.pen.selected = None;
         self.pen.drawing = vec![PathNode::corner(a(doc))];
-        tracing::info!("Zeichenstift: klicken = Ecke, ziehen = Kurve, auf den Startpunkt = schließen, Enter/Esc = offen beenden, Rücktaste = letzten Punkt entfernen");
+        tracing::info!(
+            "{}",
+            tr(
+                "Pen: click = corner, drag = curve, on the start point = close, Enter/Esc = finish open, Backspace = remove last point"
+            )
+        );
         Drag::Pen(PenDrag::NewNode(0))
     }
 
@@ -137,7 +171,9 @@ impl App {
                 d
             }
             PenDrag::Node { idx, last } => {
-                let Some((id, mut nodes, _, m)) = self.edited_path() else { return d };
+                let Some((id, mut nodes, _, m)) = self.edited_path() else {
+                    return d;
+                };
                 let local = m.inverse().transform_point2(doc);
                 let delta = local - last;
                 if let Some(n) = nodes.get_mut(idx) {
@@ -149,11 +185,17 @@ impl App {
                 PenDrag::Node { idx, last: local }
             }
             PenDrag::Handle { idx, out, free } => {
-                let Some((id, mut nodes, _, m)) = self.edited_path() else { return d };
+                let Some((id, mut nodes, _, m)) = self.edited_path() else {
+                    return d;
+                };
                 let local = m.inverse().transform_point2(doc);
                 if let Some(n) = nodes.get_mut(idx) {
                     let p = v(n.p);
-                    let (this, other) = if out { (&mut n.h_out, &mut n.h_in) } else { (&mut n.h_in, &mut n.h_out) };
+                    let (this, other) = if out {
+                        (&mut n.h_out, &mut n.h_in)
+                    } else {
+                        (&mut n.h_in, &mut n.h_out)
+                    };
                     *this = a(local);
                     if !free {
                         // Smooth: the opposite handle keeps its length, opposite direction.
@@ -185,13 +227,30 @@ impl App {
         let c = self.brush.color;
         let colour = [c[0], c[1], c[2], 1.0];
         let spec = if closed {
-            ShapeSpec { geometry: Geometry::Bezier { nodes, closed: true }, fill: Some(colour), stroke: None }
+            ShapeSpec {
+                geometry: Geometry::Bezier {
+                    nodes,
+                    closed: true,
+                },
+                fill: Some(colour),
+                stroke: None,
+            }
         } else {
             let width = (2.0 / self.view.zoom as f32).clamp(1.0, 50.0).max(2.0);
-            ShapeSpec { geometry: Geometry::Bezier { nodes, closed: false }, fill: None, stroke: Some(StrokeStyle { color: colour, width }) }
+            ShapeSpec {
+                geometry: Geometry::Bezier {
+                    nodes,
+                    closed: false,
+                },
+                fill: None,
+                stroke: Some(StrokeStyle {
+                    color: colour,
+                    width,
+                }),
+            }
         };
         if let Some(e) = self.engine()
-            && e.add_vector(VectorLayer::shape(spec), "Pfad").is_some()
+            && e.add_vector(VectorLayer::shape(spec), tr("Path")).is_some()
         {
             self.touch();
         }
@@ -236,8 +295,21 @@ impl App {
             let (_, n, c, m) = self.edited_path()?;
             (n, c, m, false)
         };
-        let cursor = if matches!(self.drag, Drag::Pen(_)) { None } else { self.cursor };
-        Some(overlay(&nodes, closed, m, drawing, self.pen.selected, cursor, &self.view, self.scale))
+        let cursor = if matches!(self.drag, Drag::Pen(_)) {
+            None
+        } else {
+            self.cursor
+        };
+        Some(overlay(
+            &nodes,
+            closed,
+            m,
+            drawing,
+            self.pen.selected,
+            cursor,
+            &self.view,
+            self.scale,
+        ))
     }
 }
 
@@ -265,7 +337,10 @@ pub fn overlay(
         for i in 0..=24 {
             let t = i as f64 / 24.0;
             let u = 1.0 - t;
-            curve.push(s(p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t)));
+            curve.push(s(p0 * (u * u * u)
+                + p1 * (3.0 * u * u * t)
+                + p2 * (3.0 * u * t * t)
+                + p3 * (t * t * t)));
         }
     };
     for w in nodes.windows(2) {
@@ -274,7 +349,11 @@ pub fn overlay(
     if closed && nodes.len() > 2 {
         seg(nodes.last().unwrap(), &nodes[0]);
     }
-    let selected = if drawing { Some(nodes.len().saturating_sub(1)) } else { selected };
+    let selected = if drawing {
+        Some(nodes.len().saturating_sub(1))
+    } else {
+        selected
+    };
     let mut handles = Vec::new();
     for (i, n) in nodes.iter().enumerate() {
         if Some(i) == selected || drawing {
@@ -285,12 +364,26 @@ pub fn overlay(
             }
         }
     }
-    let rubber = if drawing { cursor.and_then(|c| nodes.last().map(|l| (s(doc(l.p)), s(view.screen_to_doc(c))))) } else { None };
+    let rubber = if drawing {
+        cursor.and_then(|c| {
+            nodes
+                .last()
+                .map(|l| (s(doc(l.p)), s(view.screen_to_doc(c))))
+        })
+    } else {
+        None
+    };
     PathOverlay {
         curve,
-        nodes: nodes.iter().enumerate().map(|(i, n)| (s(doc(n.p)), Some(i) == selected, n.is_smooth())).collect(),
+        nodes: nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (s(doc(n.p)), Some(i) == selected, n.is_smooth()))
+            .collect(),
         handles,
         rubber,
-        closing: drawing && nodes.len() >= 2 && cursor.is_some_and(|c| view.doc_to_screen(v(nodes[0].p)).distance(c) <= GRAB),
+        closing: drawing
+            && nodes.len() >= 2
+            && cursor.is_some_and(|c| view.doc_to_screen(v(nodes[0].p)).distance(c) <= GRAB),
     }
 }

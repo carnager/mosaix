@@ -2,6 +2,7 @@
 //! its keyboard shortcut. Executing a command replays its shortcut, so
 //! menus, palette and keyboard can never disagree.
 
+use imagine_core::tr;
 use smithay_client_toolkit::seat::keyboard::Keysym as K;
 
 #[derive(Debug, Clone, Copy)]
@@ -14,140 +15,302 @@ pub struct Cmd {
     pub alt: bool,
 }
 
-const fn c(menu: &'static str, label: &'static str, key: K, ctrl: bool, shift: bool, alt: bool) -> Cmd {
-    Cmd { menu, label, key, ctrl, shift, alt }
+const fn c(
+    menu: &'static str,
+    label: &'static str,
+    key: K,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+) -> Cmd {
+    Cmd {
+        menu,
+        label,
+        key,
+        ctrl,
+        shift,
+        alt,
+    }
 }
 
-pub const MENUS: [&str; 7] = ["Datei", "Bearbeiten", "Bild", "Ebene", "Auswahl", "Werkzeug", "Ansicht"];
+pub const MENUS: [&str; 7] = ["File", "Edit", "Image", "Layer", "Select", "Tool", "View"];
 
 pub const COMMANDS: &[Cmd] = &[
-    c("Datei", "Neu …", K::n, true, false, false),
-    c("Datei", "Öffnen …", K::o, true, false, false),
-    c("Datei", "Speichern", K::s, true, false, false),
-    c("Datei", "Speichern unter …", K::S, true, true, false),
-    c("Datei", "Exportieren unter …", K::E, true, true, true),
-    c("Datei", "Als PNG exportieren", K::E, true, true, false),
-    c("Datei", "Beenden", K::q, true, false, false),
-    c("Bearbeiten", "Rückgängig", K::z, true, false, false),
-    c("Bearbeiten", "Wiederholen", K::Z, true, true, false),
-    c("Bearbeiten", "Kopieren", K::c, true, false, false),
-    c("Bearbeiten", "Kopieren (alle Ebenen)", K::C, true, true, false),
-    c("Bearbeiten", "Ausschneiden", K::x, true, false, false),
-    c("Bearbeiten", "Einfügen", K::v, true, false, false),
-    c("Bearbeiten", "Frei transformieren", K::t, true, false, false),
-    c("Bearbeiten", "Fläche füllen", K::BackSpace, false, false, true),
-    c("Bearbeiten", "Inhaltsbasiert füllen", K::BackSpace, false, true, false),
-    c("Bearbeiten", "Inhaltsbasiert füllen (alle Ebenen)", K::BackSpace, true, true, false),
-    c("Bearbeiten", "Auswahl löschen (Pixel)", K::Delete, false, false, false),
-    c("Bild", "Zuschneiden", K::c, false, false, false),
-    c("Bild", "Bild 90° im Uhrzeigersinn drehen", K::Right, true, true, true),
-    c("Bild", "Bild 90° gegen den Uhrzeigersinn drehen", K::Left, true, true, true),
-    c("Bild", "Bild um 180° drehen", K::Down, true, true, true),
-    c("Bild", "Bild horizontal spiegeln", K::H, true, true, true),
-    c("Bild", "Bild vertikal spiegeln", K::V, true, true, true),
-    c("Bild", "Verflüssigen …", K::X, true, true, false),
-    c("Bild", "Blend-Raum sRGB / linear", K::F7, false, false, false),
-    c("Ebene", "Neue Ebene", K::N, true, true, false),
-    c("Ebene", "Ebene duplizieren", K::j, true, false, false),
-    c("Ebene", "Gruppieren", K::g, true, false, false),
-    c("Ebene", "Gruppierung aufheben", K::G, true, true, false),
-    c("Ebene", "Rastern (Text/Form zu Pixeln)", K::r, true, false, true),
-    c("Ebene", "Ebene 90° im Uhrzeigersinn drehen", K::Right, true, false, true),
-    c("Ebene", "Ebene 90° gegen den Uhrzeigersinn drehen", K::Left, true, false, true),
-    c("Ebene", "Ebene um 180° drehen", K::Down, true, false, true),
-    c("Ebene", "Ebene horizontal spiegeln", K::h, true, false, true),
-    c("Ebene", "Ebene vertikal spiegeln", K::v, true, false, true),
-    c("Ebene", "Frei transformieren / drehen", K::t, true, false, false),
-    c("Ebene", "Ebenenmaske hinzufügen", K::M, true, true, false),
-    c("Ebene", "Ebenenmaske ein/aus", K::m, true, false, true),
-    c("Ebene", "Ebenenmaske anwenden", K::M, true, true, true),
-    c("Ebene", "Maske bemalen / Pixel", K::backslash, false, false, false),
-    c("Ebene", "Ebene sichtbar/unsichtbar", K::comma, true, false, false),
-    c("Ebene", "Ebene nach oben", K::bracketright, true, false, false),
-    c("Ebene", "Ebene nach unten", K::bracketleft, true, false, false),
-    c("Ebene", "Nächste Füllmethode", K::plus, false, true, false),
-    c("Auswahl", "Alles auswählen", K::a, true, false, false),
-    c("Auswahl", "Auswahl aufheben", K::d, true, false, false),
-    c("Auswahl", "Auswahl umkehren", K::I, true, true, false),
-    c("Auswahl", "Weiche Kante (10 px)", K::F6, false, true, false),
-    c("Auswahl", "Maskierungsmodus-Ansicht", K::q, false, false, false),
-    c("Werkzeug", "Pinsel", K::b, false, false, false),
-    c("Werkzeug", "Text", K::t, false, false, false),
-    c("Werkzeug", "Zeichenstift", K::p, false, false, false),
-    c("Werkzeug", "Nächste Palettenfarbe", K::P, false, true, false),
-    c("Werkzeug", "Form (Rechteck / Ellipse)", K::U, false, true, false),
-    c("Werkzeug", "Wischfinger", K::u, false, false, false),
-    c("Werkzeug", "Kopierstempel", K::s, false, false, false),
-    c("Werkzeug", "Bereichsreparatur / Reparaturpinsel", K::j, false, false, false),
-    c("Werkzeug", "Radierer", K::e, false, false, false),
-    c("Werkzeug", "Auswahlrechteck / -ellipse", K::m, false, false, false),
-    c("Werkzeug", "Lasso", K::l, false, false, false),
-    c("Werkzeug", "Zauberstab", K::w, false, false, false),
-    c("Werkzeug", "Verlauf", K::g, false, false, false),
-    c("Werkzeug", "Verschieben", K::v, false, false, false),
-    c("Werkzeug", "Zuschneiden", K::c, false, false, false),
-    c("Werkzeug", "Pinselspitze wechseln", K::B, false, true, false),
-    c("Werkzeug", "Pinsel-Dynamik an/aus", K::J, false, true, false),
-    c("Werkzeug", "Schwarz / Weiß", K::x, false, false, false),
-    c("Ansicht", "Einpassen", K::_0, true, false, false),
-    c("Ansicht", "100 %", K::_1, true, false, false),
-    c("Ansicht", "Drehung zurücksetzen", K::R, false, true, false),
-    c("Ansicht", "Oberfläche ein/aus", K::Tab, false, false, false),
-    c("Ansicht", "Befehlspalette", K::p, true, true, false),
-    c("Ansicht", "Benchmark", K::F12, false, false, false),
+    c("File", "New …", K::n, true, false, false),
+    c("File", "Open …", K::o, true, false, false),
+    c("File", "Save", K::s, true, false, false),
+    c("File", "Save As …", K::S, true, true, false),
+    c("File", "Export As …", K::E, true, true, true),
+    c("File", "Export as PNG", K::E, true, true, false),
+    c("File", "Quit", K::q, true, false, false),
+    c("Edit", "Undo", K::z, true, false, false),
+    c("Edit", "Redo", K::Z, true, true, false),
+    c("Edit", "Copy", K::c, true, false, false),
+    c("Edit", "Copy Merged", K::C, true, true, false),
+    c("Edit", "Cut", K::x, true, false, false),
+    c("Edit", "Paste", K::v, true, false, false),
+    c("Edit", "Free Transform", K::t, true, false, false),
+    c("Edit", "Fill Area", K::BackSpace, false, false, true),
+    c(
+        "Edit",
+        "Content-Aware Fill",
+        K::BackSpace,
+        false,
+        true,
+        false,
+    ),
+    c(
+        "Edit",
+        "Content-Aware Fill (All Layers)",
+        K::BackSpace,
+        true,
+        true,
+        false,
+    ),
+    c(
+        "Edit",
+        "Delete Selection (Pixels)",
+        K::Delete,
+        false,
+        false,
+        false,
+    ),
+    c("Image", "Crop Image", K::c, false, false, false),
+    c(
+        "Image",
+        "Rotate Image 90° Clockwise",
+        K::Right,
+        true,
+        true,
+        true,
+    ),
+    c(
+        "Image",
+        "Rotate Image 90° Counter-Clockwise",
+        K::Left,
+        true,
+        true,
+        true,
+    ),
+    c("Image", "Rotate Image 180°", K::Down, true, true, true),
+    c("Image", "Flip Image Horizontal", K::H, true, true, true),
+    c("Image", "Flip Image Vertical", K::V, true, true, true),
+    c("Image", "Liquify …", K::X, true, true, false),
+    c(
+        "Image",
+        "Blend Space sRGB / Linear",
+        K::F7,
+        false,
+        false,
+        false,
+    ),
+    c("Layer", "New Layer", K::N, true, true, false),
+    c("Layer", "Duplicate Layer", K::j, true, false, false),
+    c("Layer", "Group Layers", K::g, true, false, false),
+    c("Layer", "Ungroup Layers", K::G, true, true, false),
+    c(
+        "Layer",
+        "Rasterize (Text/Shape to Pixels)",
+        K::r,
+        true,
+        false,
+        true,
+    ),
+    c(
+        "Layer",
+        "Rotate Layer 90° Clockwise",
+        K::Right,
+        true,
+        false,
+        true,
+    ),
+    c(
+        "Layer",
+        "Rotate Layer 90° Counter-Clockwise",
+        K::Left,
+        true,
+        false,
+        true,
+    ),
+    c("Layer", "Rotate Layer 180°", K::Down, true, false, true),
+    c("Layer", "Flip Layer Horizontal", K::h, true, false, true),
+    c("Layer", "Flip Layer Vertical", K::v, true, false, true),
+    c("Layer", "Free Transform / Rotate", K::t, true, false, false),
+    c("Layer", "Add Layer Mask", K::M, true, true, false),
+    c("Layer", "Toggle Layer Mask", K::m, true, false, true),
+    c("Layer", "Apply Layer Mask", K::M, true, true, true),
+    c(
+        "Layer",
+        "Paint Mask / Pixels",
+        K::backslash,
+        false,
+        false,
+        false,
+    ),
+    c(
+        "Layer",
+        "Toggle Layer Visibility",
+        K::comma,
+        true,
+        false,
+        false,
+    ),
+    c(
+        "Layer",
+        "Bring Layer Forward",
+        K::bracketright,
+        true,
+        false,
+        false,
+    ),
+    c(
+        "Layer",
+        "Send Layer Backward",
+        K::bracketleft,
+        true,
+        false,
+        false,
+    ),
+    c("Layer", "Next Blend Mode", K::plus, false, true, false),
+    c("Select", "Select All", K::a, true, false, false),
+    c("Select", "Deselect", K::d, true, false, false),
+    c("Select", "Inverse", K::I, true, true, false),
+    c("Select", "Feather (10 px)", K::F6, false, true, false),
+    c("Select", "Quick Mask View", K::q, false, false, false),
+    c("Tool", "Brush", K::b, false, false, false),
+    c("Tool", "Text", K::t, false, false, false),
+    c("Tool", "Pen", K::p, false, false, false),
+    c("Tool", "Next Palette Color", K::P, false, true, false),
+    c(
+        "Tool",
+        "Shape (Rectangle / Ellipse)",
+        K::U,
+        false,
+        true,
+        false,
+    ),
+    c("Tool", "Smudge", K::u, false, false, false),
+    c("Tool", "Clone Stamp", K::s, false, false, false),
+    c(
+        "Tool",
+        "Spot Healing / Healing Brush",
+        K::j,
+        false,
+        false,
+        false,
+    ),
+    c("Tool", "Eraser", K::e, false, false, false),
+    c(
+        "Tool",
+        "Rectangular / Elliptical Marquee",
+        K::m,
+        false,
+        false,
+        false,
+    ),
+    c("Tool", "Lasso", K::l, false, false, false),
+    c("Tool", "Magic Wand", K::w, false, false, false),
+    c("Tool", "Gradient", K::g, false, false, false),
+    c("Tool", "Move", K::v, false, false, false),
+    c("Tool", "Crop Tool", K::c, false, false, false),
+    c("Tool", "Switch Brush Tip", K::B, false, true, false),
+    c("Tool", "Toggle Brush Dynamics", K::J, false, true, false),
+    c("Tool", "Black / White", K::x, false, false, false),
+    c("View", "Fit on Screen", K::_0, true, false, false),
+    c("View", "100 %", K::_1, true, false, false),
+    c("View", "Reset Rotation", K::R, false, true, false),
+    c("View", "Toggle Interface", K::Tab, false, false, false),
+    c("View", "Command Palette", K::p, true, true, false),
+    c("View", "Benchmark", K::F12, false, false, false),
 ];
 
 impl Cmd {
-    /// Human-readable shortcut, e.g. "Strg+Umschalt+N".
+    /// The menu name as shown (translated). `menu` itself stays the English key.
+    pub fn menu_text(&self) -> &'static str {
+        tr(self.menu)
+    }
+
+    /// The label as shown (translated). `label` itself stays the English key.
+    pub fn label_text(&self) -> &'static str {
+        tr(self.label)
+    }
+
+    /// Human-readable shortcut, e.g. "Ctrl+Shift+N".
     pub fn shortcut(&self) -> String {
+        let ctrl = tr("Ctrl");
+        let shift = tr("Shift");
         let mut s = String::new();
         if self.ctrl {
-            s += "Strg+";
+            s += ctrl;
+            s += "+";
         }
         if self.alt {
             s += "Alt+";
         }
         let name = match self.key {
-            K::BackSpace => "Rücktaste".to_string(),
-            K::Delete => "Entf".to_string(),
+            K::BackSpace => tr("Backspace").to_string(),
+            K::Delete => tr("Del").to_string(),
             K::Tab => "Tab".to_string(),
             K::backslash => "\\".to_string(),
             K::comma => ",".to_string(),
             K::plus => "+".to_string(),
             K::bracketleft => "[".to_string(),
             K::bracketright => "]".to_string(),
-            K::Left => "Pfeil links".to_string(),
-            K::Right => "Pfeil rechts".to_string(),
-            K::Up => "Pfeil hoch".to_string(),
-            K::Down => "Pfeil runter".to_string(),
+            K::Left => tr("Left Arrow").to_string(),
+            K::Right => tr("Right Arrow").to_string(),
+            K::Up => tr("Up Arrow").to_string(),
+            K::Down => tr("Down Arrow").to_string(),
             k => {
-                let n = k.name().unwrap_or("?").trim_start_matches("XK_").to_string();
+                let n = k
+                    .name()
+                    .unwrap_or("?")
+                    .trim_start_matches("XK_")
+                    .to_string();
                 let n = n.trim_start_matches('_').to_string();
                 // Upper-case letters stand for Shift+letter.
                 if n.len() == 1 && n.chars().all(|c| c.is_ascii_uppercase()) && !self.shift {
-                    format!("Umschalt+{n}")
+                    format!("{shift}+{n}")
                 } else {
                     n.to_uppercase()
                 }
             }
         };
         if self.shift {
-            s += "Umschalt+";
+            s += shift;
+            s += "+";
         }
         s + &name
     }
 }
 
+/// Translated name of a menu key from [`MENUS`].
+pub fn menu_text(menu: &'static str) -> &'static str {
+    tr(menu)
+}
+
+/// The command with the given (English) label.
+pub fn find(label: &str) -> Cmd {
+    *COMMANDS
+        .iter()
+        .find(|c| c.label == label)
+        .unwrap_or_else(|| panic!("no command {label:?}"))
+}
+
 /// Commands matching a query: all words must occur (case-insensitive) in
-/// "menu label"; prefix matches of the label rank first.
+/// "menu label" (shown text, or the English original); prefix matches of
+/// the label rank first.
 pub fn search(query: &str) -> Vec<&'static Cmd> {
     let q = query.to_lowercase();
     let words: Vec<&str> = q.split_whitespace().collect();
     let mut hits: Vec<(&Cmd, bool)> = COMMANDS
         .iter()
         .filter_map(|c| {
-            let hay = format!("{} {}", c.menu, c.label).to_lowercase();
-            words.iter().all(|w| hay.contains(w)).then(|| (c, c.label.to_lowercase().starts_with(&q)))
+            let shown = format!("{} {}", c.menu_text(), c.label_text()).to_lowercase();
+            let orig = format!("{} {}", c.menu, c.label).to_lowercase();
+            let all = |hay: &str| words.iter().all(|w| hay.contains(w));
+            let prefix = c.label_text().to_lowercase().starts_with(&q)
+                || c.label.to_lowercase().starts_with(&q);
+            (all(&shown) || all(&orig)).then_some((c, prefix))
         })
         .collect();
     hits.sort_by_key(|(_, prefix)| !*prefix);
@@ -161,20 +324,20 @@ mod tests {
     #[test]
     fn shortcuts_read_like_photoshop() {
         let find = |l: &str| COMMANDS.iter().find(|c| c.label == l).unwrap().shortcut();
-        assert_eq!(find("Neue Ebene"), "Strg+Umschalt+N");
-        assert_eq!(find("Speichern"), "Strg+S");
-        assert_eq!(find("Fläche füllen"), "Alt+Rücktaste");
-        assert_eq!(find("Ebenenmaske anwenden"), "Strg+Alt+Umschalt+M");
-        assert_eq!(find("Einpassen"), "Strg+0");
-        assert_eq!(find("Pinselspitze wechseln"), "Umschalt+B");
+        assert_eq!(find("New Layer"), "Ctrl+Shift+N");
+        assert_eq!(find("Save"), "Ctrl+S");
+        assert_eq!(find("Fill Area"), "Alt+Backspace");
+        assert_eq!(find("Apply Layer Mask"), "Ctrl+Alt+Shift+M");
+        assert_eq!(find("Fit on Screen"), "Ctrl+0");
+        assert_eq!(find("Switch Brush Tip"), "Shift+B");
     }
 
     #[test]
     fn search_finds_by_words_and_ranks_prefixes() {
-        let r = search("maske");
+        let r = search("mask");
         assert!(r.len() >= 3);
-        assert!(search("ebene neu").iter().any(|c| c.label == "Neue Ebene"));
-        assert_eq!(search("zau")[0].label, "Zauberstab");
+        assert!(search("layer new").iter().any(|c| c.label == "New Layer"));
+        assert_eq!(search("mag")[0].label, "Magic Wand");
         assert!(search("xyzzy").is_empty());
         assert_eq!(search("").len(), COMMANDS.len());
     }

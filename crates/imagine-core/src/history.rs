@@ -9,7 +9,11 @@ pub struct History<S> {
 
 impl<S> History<S> {
     pub fn new(limit: usize) -> Self {
-        Self { undo: Vec::new(), redo: Vec::new(), limit: limit.max(1) }
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+            limit: limit.max(1),
+        }
     }
 
     /// Records the state *before* an action.
@@ -58,7 +62,11 @@ impl<S> History<S> {
     /// Labels of all steps, oldest first: the done steps, then the undone
     /// (redoable) ones. The current state sits after `undo_len()` entries.
     pub fn labels(&self) -> Vec<&str> {
-        self.undo.iter().map(|(_, l)| l.as_str()).chain(self.redo.iter().rev().map(|(_, l)| l.as_str())).collect()
+        self.undo
+            .iter()
+            .map(|(_, l)| l.as_str())
+            .chain(self.redo.iter().rev().map(|(_, l)| l.as_str()))
+            .collect()
     }
 }
 
