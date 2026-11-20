@@ -418,10 +418,11 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 ## Stand Phase 5 (20.11.2026) – Retusche (begonnen)
 
 - **Kopierstempel** (`S`): Alt+Klick setzt die Quelle, ein Kreuz zeigt beim Malen, woher kopiert wird. Ausgerichtet (Abstand bleibt) oder nicht; Quelle ist die Ebene oder das ganze Bild (dann auch auf eine leere Ebene). Läuft über die Arbeitskopie des Wischfingers, jeder Tupfer kopiert pixelgenau mit ganzzahligem Versatz (kein Weichzeichnen durch Neuabtasten). Agent: `paint_stroke` mit `clone_offset`, `clone_all_layers`.
-- Pinsel-Glättung wechselt jetzt mit Umschalt+S (vorher S).
+- **Reparaturpinsel** (`J`): malt wie der Stempel; beim Loslassen wird der Bereich (Vereinigung der Pinseltupfer) per Poisson-Angleich in die Umgebung eingepasst – Struktur von der Quelle, Farbe/Helligkeit vom Rand. Löser auf der CPU: kaskadisches Multigrid mit rot-schwarzem SOR, parallel über Zeilen (4 MP Bereich: 97 ms, 0,25 MP: 10 ms). Agent: `paint_stroke` mit `heal: true`.
+- Pinsel-Glättung wechselt jetzt mit Umschalt+S (vorher S), Pinsel-Dynamik mit Umschalt+J (vorher J).
 
 
-Phase 5: Reparaturpinsel (Poisson-Angleich), Bereichsreparatur, inhaltsbasiertes Füllen.
+Phase 5: Bereichsreparatur (ohne Quelle), inhaltsbasiertes Füllen (PatchMatch).
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

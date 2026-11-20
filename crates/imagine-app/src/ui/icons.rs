@@ -98,6 +98,12 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.add(Shape::convex_polygon(vec![at(3.5, 12.0), at(16.5, 12.0), at(16.5, 15.0), at(3.5, 15.0)], color, Stroke::NONE));
             p.line_segment([at(4.0, 17.5), at(16.0, 17.5)], thin);
         }
+        Icon::Tool(ToolId::Heal) => {
+            // A plaster: rotated band with a pad.
+            let band = [at(4.0, 13.0), at(13.0, 4.0), at(16.0, 7.0), at(7.0, 16.0)];
+            p.add(Shape::convex_polygon(band.to_vec(), color.gamma_multiply(0.55), Stroke::NONE));
+            p.add(Shape::convex_polygon(vec![at(7.5, 9.5), at(9.5, 7.5), at(12.5, 10.5), at(10.5, 12.5)], color, Stroke::NONE));
+        }
         Icon::Tool(ToolId::Eraser) => {
             let pts = [at(3.0, 13.0), at(10.0, 6.0), at(16.0, 12.0), at(9.0, 19.0)];
             p.add(Shape::convex_polygon(pts.to_vec(), Color32::TRANSPARENT, mid));

@@ -24,6 +24,7 @@ mod apply;
 mod display;
 mod filter;
 mod frame;
+mod heal;
 mod histogram;
 mod liquify;
 mod magic;
@@ -130,6 +131,8 @@ pub struct CloneSource {
     pub offset: [i32; 2],
     /// The active layer or the flattened image.
     pub all_layers: bool,
+    /// Healing brush: blend the result into its surroundings when the stroke ends.
+    pub heal: bool,
 }
 
 impl StrokeParams {
@@ -150,6 +153,8 @@ struct ActiveStroke {
     params: StrokeParams,
     /// Stroke tile and whether it still has to be cleared before first use.
     tiles: HashMap<TileCoord, (Tile, bool)>,
+    /// Centre and radius of every dab (healing needs the covered area).
+    footprint: Vec<[f32; 3]>,
 }
 
 struct CompositeEntry {
@@ -1011,7 +1016,7 @@ impl Engine {
             // The source is the composite: make sure it is complete.
             self.flush();
         }
-        self.stroke = Some(ActiveStroke { layer, params, tiles: HashMap::new() });
+        self.stroke = Some(ActiveStroke { layer, params, tiles: HashMap::new(), footprint: Vec::new() });
         Ok(())
     }
 
@@ -1020,7 +1025,10 @@ impl Engine {
     }
 
     pub fn stroke_dabs(&mut self, dabs: &[Dab]) {
-        if self.stroke.is_some() {
+        if let Some(s) = &mut self.stroke {
+            if s.params.clone.is_some_and(|c| c.heal) {
+                s.footprint.extend(dabs.iter().map(|d| [d.center[0], d.center[1], d.radius]));
+            }
             self.pending_dabs.extend_from_slice(dabs);
         }
     }

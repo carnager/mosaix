@@ -980,7 +980,7 @@ fn clone_stamp_copies_exactly_from_layer_and_image() {
     e.flush();
     let before = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new(0, 0), x, y);
     let want = before(&e, 60, 150);
-    let params = |all| StrokeParams { clone: Some(CloneSource { offset: [-300, 0], all_layers: all }), ..Default::default() };
+    let params = |all| StrokeParams { clone: Some(CloneSource { offset: [-300, 0], all_layers: all, heal: false }), ..Default::default() };
     // Stamp at x = 360 → copies x = 60 exactly (hard brush centre).
     stroke(&mut e, DVec2::new(360.0, 150.0), params(false));
     let got = composite_px(&e, TileCoord::new(1, 0), 360 - 256, 150);
@@ -1001,4 +1001,36 @@ fn clone_stamp_copies_exactly_from_layer_and_image() {
     assert_eq!(got, want, "exact copy from the image");
     let layer = e.doc().active;
     assert!(e.doc().find(layer).unwrap().tiles().unwrap().contains_key(&TileCoord::new(1, 0)), "painted into the new layer");
+}
+
+#[test]
+fn healing_matches_the_surroundings() {
+    use imagine_gpu::CloneSource;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 300));
+    // A horizontal brightness ramp, plus a dark blemish at (400, 150).
+    for x in 0..600 {
+        let v = 0.1 + 0.8 * x as f32 / 600.0;
+        e.select_shape(&Shape::Rect { x: x as f64, y: 0.0, w: 1.0, h: 300.0 }, CombineOp::Replace, "A").unwrap();
+        e.fill(StrokeTarget::Pixels, [v, v, v, 1.0], 1.0, "F").unwrap();
+    }
+    e.select_shape(&Shape::Ellipse { cx: 400.0, cy: 150.0, rx: 6.0, ry: 6.0 }, CombineOp::Replace, "A").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 0.0, 1.0], 1.0, "Fleck").unwrap();
+    e.deselect("x").unwrap();
+    e.flush();
+    let ramp = |x: usize| 0.1 + 0.8 * x as f32 / 600.0;
+    let at = |e: &Engine, x: usize| composite_px(e, TileCoord::new((x / 256) as i32, 0), x % 256, 150)[0];
+    assert!(at(&e, 400) < 0.01);
+    // Source 250 px to the left: much darker, but clean.
+    let heal = StrokeParams { clone: Some(CloneSource { offset: [-250, 0], all_layers: false, heal: true }), ..Default::default() };
+    stroke(&mut e, DVec2::new(400.0, 150.0), heal);
+    for x in [395, 400, 405] {
+        let (got, want) = (at(&e, x), ramp(x));
+        assert!((got - want).abs() < 0.01, "x = {x}: healed {got}, surroundings {want}");
+    }
+    // A plain clone would have brought the darker source along.
+    e.undo();
+    let clone = StrokeParams { clone: Some(CloneSource { offset: [-250, 0], all_layers: false, heal: false }), ..Default::default() };
+    stroke(&mut e, DVec2::new(400.0, 150.0), clone);
+    assert!((at(&e, 400) - ramp(150)).abs() < 0.01);
 }

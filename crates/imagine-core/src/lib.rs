@@ -7,6 +7,7 @@ pub mod brush;
 pub mod color;
 pub mod doc;
 pub mod filter;
+pub mod heal;
 pub mod history;
 pub mod mask;
 pub mod tile;

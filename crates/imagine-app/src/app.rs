@@ -113,6 +113,7 @@ enum Tool {
     Wand,
     Smudge,
     Clone,
+    Heal,
 }
 
 impl Tool {
@@ -130,11 +131,12 @@ impl Tool {
             Tool::Wand => "Zauberstab",
             Tool::Smudge => "Wischfinger",
             Tool::Clone => "Kopierstempel",
+            Tool::Heal => "Reparaturpinsel",
         }
     }
 
     fn paints(self) -> bool {
-        matches!(self, Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone)
+        matches!(self, Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal)
     }
 }
 
@@ -732,17 +734,17 @@ impl App {
         let doc = self.view.screen_to_doc(pos);
         let op = self.combine_op();
         match self.tool {
-            Tool::Clone if self.mods.alt => {
+            Tool::Clone | Tool::Heal if self.mods.alt => {
                 self.clone_source = Some(doc);
                 self.clone_offset = None;
                 tracing::info!("Stempelquelle: {:.0}, {:.0}", doc.x, doc.y);
                 Drag::None
             }
-            Tool::Clone if self.clone_source.is_none() => {
-                tracing::warn!("Kopierstempel: erst mit Alt+Klick die Quelle setzen");
+            Tool::Clone | Tool::Heal if self.clone_source.is_none() => {
+                tracing::warn!("{}: erst mit Alt+Klick die Quelle setzen", self.tool.name());
                 Drag::None
             }
-            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone => {
+            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal => {
                 self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
             }
             Tool::Marquee { ellipse } => Drag::Marquee { start: doc, end: doc, op, ellipse },
@@ -953,7 +955,7 @@ impl App {
             settings.smudge = Some(self.smudge_strength);
         }
         let start = self.view.screen_to_doc(pos);
-        let clone = (self.tool == Tool::Clone && !eraser).then(|| {
+        let clone = (matches!(self.tool, Tool::Clone | Tool::Heal) && !eraser).then(|| {
             let offset = match self.clone_offset {
                 Some(o) if self.clone_aligned => o,
                 _ => {
@@ -962,7 +964,7 @@ impl App {
                 }
             };
             self.clone_offset = Some(offset);
-            imagine_gpu::CloneSource { offset, all_layers: self.clone_all }
+            imagine_gpu::CloneSource { offset, all_layers: self.clone_all, heal: self.tool == Tool::Heal }
         });
         let target = self.stroke_target();
         if target == StrokeTarget::Mask {
@@ -1303,6 +1305,7 @@ impl App {
             "eraser" => Tool::Eraser,
             "smudge" => Tool::Smudge,
             "clone" => Tool::Clone,
+            "heal" => Tool::Heal,
             "marquee" => Tool::Marquee { ellipse: false },
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
@@ -1326,6 +1329,7 @@ impl App {
             Tool::Eraser => "eraser",
             Tool::Smudge => "smudge",
             Tool::Clone => "clone",
+            Tool::Heal => "heal",
             Tool::Marquee { ellipse: false } => "marquee",
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
@@ -1824,7 +1828,8 @@ impl App {
             }
             Keysym::u => self.set_tool(Tool::Smudge),
             Keysym::s if !ctrl => self.set_tool(Tool::Clone),
-            Keysym::j => {
+            Keysym::j if !ctrl && !shift => self.set_tool(Tool::Heal),
+            Keysym::J if shift => {
                 let on = self.brush.size_jitter == 0.0;
                 let b = &mut self.brush;
                 (b.size_jitter, b.angle_jitter, b.scatter, b.flow_jitter) =
@@ -2088,6 +2093,7 @@ impl App {
             Tool::Eraser => ToolId::Eraser,
             Tool::Smudge => ToolId::Smudge,
             Tool::Clone => ToolId::Clone,
+            Tool::Heal => ToolId::Heal,
             Tool::Marquee { ellipse: false } => ToolId::Marquee,
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
@@ -2174,6 +2180,7 @@ impl App {
                         ToolId::Eraser => Tool::Eraser,
                         ToolId::Smudge => Tool::Smudge,
                         ToolId::Clone => Tool::Clone,
+                        ToolId::Heal => Tool::Heal,
                         ToolId::Marquee => Tool::Marquee { ellipse: false },
                         ToolId::Ellipse => Tool::Marquee { ellipse: true },
                         ToolId::Lasso => Tool::Lasso,
@@ -2551,7 +2558,7 @@ impl App {
 
     /// Clone stamp: a cross where the source is sampled for the cursor position.
     fn clone_marker(&self) -> Vec<OverlayLine> {
-        if self.tool != Tool::Clone || self.space {
+        if !matches!(self.tool, Tool::Clone | Tool::Heal) || self.space {
             return Vec::new();
         }
         let at = match (self.clone_offset.filter(|_| self.clone_aligned), self.cursor, self.clone_source) {

@@ -39,8 +39,8 @@ Ansicht:
   Einpassen/100 % Strg+0 / Strg+1
 
 Werkzeuge:
-  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; J: Dynamik)   U Wischfinger
-  S Kopierstempel (Alt+Klick: Quelle)
+  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   U Wischfinger
+  S Kopierstempel, J Reparaturpinsel (Alt+Klick: Quelle)
   E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
   G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
   W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)

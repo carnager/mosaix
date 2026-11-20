@@ -106,6 +106,9 @@ pub enum Command {
         clone_offset: Option<[i32; 2]>,
         #[serde(default)]
         clone_all_layers: bool,
+        /// Healing brush (with clone_offset): blend into the surroundings.
+        #[serde(default)]
+        heal: bool,
     },
     Fill { layer: Option<LayerId>, color: ColorSpec, opacity: Option<f32>, target: Option<String> },
     Clear { layer: Option<LayerId> },
@@ -557,6 +560,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             smudge,
             clone_offset,
             clone_all_layers,
+            heal,
         } => {
             pixel_layer(s, layer)?;
             not_painting(s)?;
@@ -603,7 +607,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             s.engine
-                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target, smudge: smudge.is_some() && clone_offset.is_none(), clone: clone_offset.map(|offset| imagine_gpu::CloneSource { offset, all_layers: clone_all_layers }) })
+                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target, smudge: smudge.is_some() && clone_offset.is_none(), clone: clone_offset.map(|offset| imagine_gpu::CloneSource { offset, all_layers: clone_all_layers, heal }) })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);
             let mut dabs = 0;
@@ -615,7 +619,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let d = stroke.finish(*samples.last().unwrap());
             dabs += d.len();
             s.engine.stroke_dabs(&d);
-            s.engine.end_stroke(if clone_offset.is_some() {
+            s.engine.end_stroke(if heal && clone_offset.is_some() {
+                "Reparaturpinsel"
+            } else if clone_offset.is_some() {
                 "Kopierstempel"
             } else if smudge.is_some() {
                 "Verwischen"

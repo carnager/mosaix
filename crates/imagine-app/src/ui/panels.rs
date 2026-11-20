@@ -8,7 +8,7 @@ use super::icons::{self, Icon};
 use super::palette::{self, Cmd, COMMANDS, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut).
-pub const TOOLS: [(ToolId, &str, &str); 12] = [
+pub const TOOLS: [(ToolId, &str, &str); 13] = [
     (ToolId::Move, "Verschieben", "V"),
     (ToolId::Marquee, "Auswahlrechteck", "M"),
     (ToolId::Ellipse, "Auswahlellipse", "M"),
@@ -18,6 +18,7 @@ pub const TOOLS: [(ToolId, &str, &str); 12] = [
     (ToolId::Brush, "Pinsel", "B"),
     (ToolId::Smudge, "Wischfinger", "U"),
     (ToolId::Clone, "Kopierstempel", "S"),
+    (ToolId::Heal, "Reparaturpinsel", "J"),
     (ToolId::Eraser, "Radierer", "E"),
     (ToolId::Gradient, "Verlauf linear", "G"),
     (ToolId::Radial, "Verlauf radial", "G"),
@@ -34,6 +35,7 @@ pub enum ToolId {
     Brush,
     Smudge,
     Clone,
+    Heal,
     Eraser,
     Gradient,
     Radial,
@@ -634,7 +636,7 @@ fn slider(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInc
 
 fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     match m.tool {
-        ToolId::Brush | ToolId::Eraser | ToolId::Smudge | ToolId::Clone => {
+        ToolId::Brush | ToolId::Eraser | ToolId::Smudge | ToolId::Clone | ToolId::Heal => {
             let mut b = m.brush;
             let mut changed = false;
             ui.horizontal(|ui| {
@@ -654,7 +656,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             if b.tip == 0 {
                 changed |= slider(ui, "Härte", &mut b.hardness, 0.0..=1.0, true);
             }
-            if m.tool == ToolId::Clone {
+            if matches!(m.tool, ToolId::Clone | ToolId::Heal) {
                 let (mut all, mut aligned) = (m.clone_all, m.clone_aligned);
                 let a = ui.checkbox(&mut all, "Alle Ebenen aufnehmen").on_hover_text("Quelle ist das ganze Bild – zum Stempeln auf eine leere Ebene");
                 let b = ui.checkbox(&mut aligned, "Ausgerichtet").on_hover_text("Der Abstand zur Quelle bleibt über alle Striche gleich");

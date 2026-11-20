@@ -276,6 +276,18 @@ impl Engine {
         if self.stroke.is_none() {
             return;
         }
+        // Healing: the preview was a clone; the result is computed from the footprint.
+        if let Some(src) = self.stroke.as_ref().and_then(|s| s.params.clone).filter(|c| c.heal) {
+            let stroke = self.stroke.take().unwrap();
+            self.pending_dabs.clear();
+            self.clone_cache.clear();
+            self.recheck.extend(stroke.tiles.keys().copied());
+            let (layer, opacity) = (stroke.layer, stroke.params.opacity);
+            let footprint = stroke.footprint;
+            drop(stroke.tiles);
+            self.heal_stroke(layer, src, &footprint, opacity, label);
+            return;
+        }
         let mut enc = self.device.create_command_encoder(&Default::default());
         let mut stats = Default::default();
         self.encode_paint(&mut enc, &mut stats);

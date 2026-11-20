@@ -37,8 +37,8 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 | Aktion | Eingabe |
 |---|---|
 | Werkzeuge | `B` Pinsel, `U` Wischfinger, `E` Radierer, `M` Auswahlrechteck/-ellipse, `L` Lasso, `W` Zauberstab, `G` Verlauf linear/radial, `V` Verschieben, `C` Zuschneiden |
-| Malen | linke Maustaste / Stift; Radierer-Ende des Stifts; `[` `]` Größe, Ziffern Deckkraft (Wischfinger: Stärke), `H` Härte, Umschalt+`S` Glättung, Umschalt+`B` Spitze, `J` Dynamik, `P` Farbe, `X` Schwarz↔Weiß |
-| Kopierstempel | `S`; Alt+Klick setzt die Quelle, dann malen. Optionen: alle Ebenen aufnehmen (auf leere Ebene stempeln), ausgerichtet. Ein Kreuz zeigt, woher gerade kopiert wird |
+| Malen | linke Maustaste / Stift; Radierer-Ende des Stifts; `[` `]` Größe, Ziffern Deckkraft (Wischfinger: Stärke), `H` Härte, Umschalt+`S` Glättung, Umschalt+`B` Spitze, Umschalt+`J` Dynamik, `P` Farbe, `X` Schwarz↔Weiß |
+| Kopierstempel / Reparaturpinsel | `S` / `J`; Alt+Klick setzt die Quelle, dann malen. Der Reparaturpinsel gleicht beim Loslassen Farbe und Helligkeit an die Umgebung an. Optionen: alle Ebenen aufnehmen (auf leere Ebene stempeln), ausgerichtet. Ein Kreuz zeigt, woher gerade kopiert wird |
 | Ansicht | Leertaste+Ziehen schwenken, Mausrad zoomen, `R`+Ziehen drehen, Strg+`0` einpassen, Strg+`1` 100 %, `Q` Maskierungsmodus-Ansicht |
 | Auswahl | Aufziehen mit Umschalt/Alt/beidem = hinzufügen/abziehen/Schnittmenge; Strg+`A` / Strg+`D` / Strg+Umschalt+`I`; Umschalt+`F6` weiche Kante |
 | Transformieren | Strg+`T`: Ecken skalieren (Umschalt frei), Kanten strecken, außen drehen (Umschalt 15°), Alt um die Mitte; Enter übernimmt, Esc bricht ab. Mit Auswahl nur die ausgewählten Pixel (auch `V`) |
