@@ -386,9 +386,35 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 
 **Noch offen in Phase 3:** frei belegbare Tastenkürzel, Docking/abtrennbare Panels, Panelbreite merken, Vorschaubilder für Gruppen und Masken.
 
+## Stand Phase 4 (20.11.2026) – Nicht-destruktiv, Filter, Farbe (erster Teil)
+
+- **Einstellungsebenen:** Helligkeit/Kontrast, Tonwertkorrektur, Gradationskurven (monoton-kubisch), Belichtung (linear), Dynamik, Farbton/Sättigung (inkl. Färben), Schwarzweiß, Umkehren, Tontrennung, Schwellenwert.
+  - Kanalweise Arten werden zu einer 256er-Tabelle gebacken, die übrigen rechnet der Flatten-Shader direkt. Eine CPU-Referenz prüft jede Art auf der GPU.
+  - Jede Einstellungsebene hat eine Maske (aus der Auswahl), die live bemalt werden kann. Deckkraft mischt.
+  - Eigenschaften-Panel mit Kurven-Editor, Dateiformat v3.
+- **Filter (GPU):** Gaußscher Weichzeichner (separabel; ab 10 px Radius auf einer verkleinerten Kopie, deckungsgleich mit der analytischen Sprungantwort), Unscharf maskieren, Hochpass, Rauschen. Sie wirken durch die Auswahl, als ein Undo-Schritt, mit Live-Vorschau des sichtbaren Bereichs.
+- **Farbmanagement beim Import:** Eingebettete ICC-Profile (z. B. Display P3, Adobe RGB) werden mit moxcms nach linearem sRGB im erweiterten Bereich umgerechnet. Farben außerhalb von sRGB bleiben in f16 erhalten, statt abgeschnitten zu werden.
+- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`.
+
+| Messung (100 MP, RX 6700 XT) | Ergebnis |
+|---|---|
+| Gauß r = 2 / 10 / 40 / 200 | 52 / 114 / 64 / 29 ms |
+| Unscharf maskieren r = 2 | 51 ms |
+| Rauschen | 17 ms |
+| Kurven-Einstellungsebene (kompletter Neuaufbau) | 42 ms |
+| 24-MP-PNG mit Display-P3-Profil laden | 133 ms (ohne Profil 67 ms) |
+
+**Noch offen in Phase 4:**
+- Smart-Filter (nicht-destruktive Filterebenen)
+- Verflüssigen
+- Histogramm in der Tonwertkorrektur
+- Export mit ICC-Profil / in weitem Farbraum
+- Monitorprofil (Wayland color-management)
+- Füllmethoden für Einstellungsebenen (bisher nur Normal)
+
 ## Nächster konkreter Schritt
 
-Phase 4: nicht-destruktiv (Korrektur- und Filterebenen, Farbmanagement).
+Rest von Phase 4: Histogramm, Smart-Filter, Export mit Profil, Verflüssigen. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

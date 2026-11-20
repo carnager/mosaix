@@ -686,6 +686,7 @@ fn filters_blur_sharpen_noise_and_preview() {
     for sigma in [4.0f32, 40.0] {
         e.apply_filter(&Filter::GaussianBlur { radius: sigma }, "Weichzeichnen").unwrap();
         // Φ(z) via the Abramowitz–Stegun erf approximation.
+        #[allow(clippy::excessive_precision)]
         let phi = |z: f32| {
             let x = z.abs() / std::f32::consts::SQRT_2;
             let t = 1.0 / (1.0 + 0.3275911 * x);

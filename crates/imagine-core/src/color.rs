@@ -27,6 +27,10 @@ pub enum Pixels<'a> {
     Srgb16(&'a [u16]),
     /// Linear 32-bit float RGBA, straight alpha (e.g. EXR).
     Linear32(&'a [f32]),
+    /// 16-bit RGBA in any colour space (straight alpha); `convert` turns a
+    /// row of RGB triples (0…1, encoded) into linear sRGB in place – values
+    /// outside 0…1 (wide gamut) are kept.
+    Converted16 { data: &'a [u16], convert: &'a (dyn Fn(&mut [f32]) + Sync) },
 }
 
 /// Extracts one tile from an image of `width × height` pixels, converted to
@@ -49,10 +53,19 @@ pub fn extract_region(src: &Pixels, width: u32, height: u32, x0: i64, y0: i64) -
     if col0 >= col1 {
         return None;
     }
+    let mut rgb_row: Vec<f32> = Vec::new();
     for row in 0..ts {
         let y = y0 + row;
         if y < 0 || y >= h {
             continue;
+        }
+        if let Pixels::Converted16 { data, convert } = src {
+            rgb_row.clear();
+            for col in col0..col1 {
+                let s = ((y * w + x0 + col) * 4) as usize;
+                rgb_row.extend([data[s], data[s + 1], data[s + 2]].map(|v| v as f32 / 65535.0));
+            }
+            convert(&mut rgb_row);
         }
         for col in col0..col1 {
             let s = ((y * w + x0 + col) * 4) as usize;
@@ -70,6 +83,10 @@ pub fn extract_region(src: &Pixels, width: u32, height: u32, x0: i64, y0: i64) -
                     p[s + 3] as f32 / 65535.0,
                 ),
                 Pixels::Linear32(p) => (p[s], p[s + 1], p[s + 2], p[s + 3].clamp(0.0, 1.0)),
+                Pixels::Converted16 { data, .. } => {
+                    let i = ((col - col0) * 3) as usize;
+                    (rgb_row[i], rgb_row[i + 1], rgb_row[i + 2], data[s + 3] as f32 / 65535.0)
+                }
             };
             any |= a > 0.0;
             let d = ((row * ts + col) * 4) as usize;

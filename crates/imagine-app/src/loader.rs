@@ -184,34 +184,91 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
 
             let mut reader = ImageReader::open(&path)?.with_guessed_format()?;
             reader.no_limits();
-            let img = reader.decode()?;
+            let mut decoder = reader.into_decoder()?;
+            let icc = image::ImageDecoder::icc_profile(&mut decoder).ok().flatten();
+            let img = DynamicImage::from_decoder(decoder)?;
             let decode_ms = ms(t0);
             tracing::info!("dekodiert {w}×{h} {:?} in {decode_ms:.0} ms", img.color());
 
-            match img {
-                DynamicImage::ImageRgb32F(_) | DynamicImage::ImageRgba32F(_) => {
-                    let buf = img.into_rgba32f();
-                    let px = Pixels::Linear32(&buf);
-                    stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
-                }
-                DynamicImage::ImageLuma16(_)
-                | DynamicImage::ImageLumaA16(_)
-                | DynamicImage::ImageRgb16(_)
-                | DynamicImage::ImageRgba16(_) => {
+            match icc.as_deref().and_then(color_transform) {
+                Some((name, convert)) => {
+                    tracing::info!("Farbprofil „{name}“ wird nach sRGB (linear, erweiterter Farbraum) umgerechnet");
                     let buf = img.into_rgba16();
-                    let px = Pixels::Srgb16(&buf);
+                    let px = Pixels::Converted16 { data: &buf, convert: &*convert };
                     stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
                 }
-                _ => {
-                    let buf = img.into_rgba8();
-                    let px = Pixels::Srgb8(&buf);
-                    stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
-                }
+                None => match img {
+                    DynamicImage::ImageRgb32F(_) | DynamicImage::ImageRgba32F(_) => {
+                        let buf = img.into_rgba32f();
+                        let px = Pixels::Linear32(&buf);
+                        stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
+                    }
+                    DynamicImage::ImageLuma16(_)
+                    | DynamicImage::ImageLumaA16(_)
+                    | DynamicImage::ImageRgb16(_)
+                    | DynamicImage::ImageRgba16(_) => {
+                        let buf = img.into_rgba16();
+                        let px = Pixels::Srgb16(&buf);
+                        stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
+                    }
+                    _ => {
+                        let buf = img.into_rgba8();
+                        let px = Pixels::Srgb8(&buf);
+                        stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
+                    }
+                },
             }
             send(LoaderMsg::Done { decode_ms, total_ms: ms(t0) })?;
         }
     }
     Ok(())
+}
+
+/// Converter from an embedded ICC profile to linear sRGB, unless the
+/// profile already is sRGB (or cannot be used, then the image is taken as sRGB).
+pub fn color_transform(icc: &[u8]) -> Option<(String, Box<dyn Fn(&mut [f32]) + Send + Sync>)> {
+    use moxcms::{ColorProfile, Layout, ToneReprCurve, TransformOptions};
+    let src = match ColorProfile::new_from_slice(icc) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("Eingebettetes Farbprofil unlesbar ({e:?}), nehme sRGB an");
+            return None;
+        }
+    };
+    let name = match &src.description {
+        Some(moxcms::ProfileText::Localizable(v)) => v.first().map(|s| s.value.clone()).unwrap_or_default(),
+        Some(moxcms::ProfileText::PlainString(s)) => s.clone(),
+        _ => String::new(),
+    };
+    let srgb = ColorProfile::new_srgb();
+    let same_primaries = src.red_colorant == srgb.red_colorant
+        && src.green_colorant == srgb.green_colorant
+        && src.blue_colorant == srgb.blue_colorant;
+    if name.to_lowercase().contains("srgb") || (same_primaries && src.red_trc == srgb.red_trc) {
+        return None;
+    }
+    let mut linear = ColorProfile::new_srgb();
+    let identity = ToneReprCurve::Lut(vec![]);
+    linear.red_trc = Some(identity.clone());
+    linear.green_trc = Some(identity.clone());
+    linear.blue_trc = Some(identity);
+    linear.cicp = None;
+    let opts = TransformOptions { prefer_fixed_point: false, allow_extended_range_rgb_xyz: true, ..Default::default() };
+    match src.create_transform_f32(Layout::Rgb, &linear, Layout::Rgb, opts) {
+        Ok(t) => Some((
+            if name.is_empty() { "unbenannt".into() } else { name },
+            Box::new(move |rgb: &mut [f32]| {
+                let input = rgb.to_vec();
+                if t.transform(&input, rgb).is_err() {
+                    rgb.iter_mut().for_each(|v| *v = imagine_core::color::srgb_to_linear(*v));
+                }
+            }),
+        )),
+        Err(e) => {
+            tracing::warn!("Farbprofil „{name}“ nicht umrechenbar ({e:?}), nehme sRGB an");
+            None
+        }
+    }
 }
 
 fn ms(t0: Instant) -> f64 {
@@ -275,4 +332,84 @@ fn demo_tile(tx: u32, ty: u32, w: u32, h: u32) -> Vec<f16> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn png_with_profile(path: &Path, icc: Option<Vec<u8>>, px: [u8; 4]) {
+        use image::ImageEncoder;
+        let file = std::fs::File::create(path).unwrap();
+        let mut enc = image::codecs::png::PngEncoder::new(file);
+        if let Some(icc) = icc {
+            enc.set_icc_profile(icc).unwrap();
+        }
+        let data: Vec<u8> = px.repeat(4);
+        enc.write_image(&data, 2, 2, image::ExtendedColorType::Rgba8).unwrap();
+    }
+
+    fn first_pixel(path: &Path) -> [f32; 4] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(Source::File(path.to_path_buf()), &tx);
+        for m in rx {
+            if let LoaderMsg::Tiles { tiles, .. } = m {
+                return [0, 1, 2, 3].map(|i| tiles[0].1[i].to_f32());
+            }
+        }
+        panic!("no tiles");
+    }
+
+    #[test]
+    fn display_p3_is_converted_and_srgb_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let p3 = moxcms::ColorProfile::new_display_p3().encode().unwrap();
+        let path = dir.path().join("p3.png");
+        png_with_profile(&path, Some(p3), [255, 0, 0, 255]);
+        let px = first_pixel(&path);
+        // P3 red lies outside sRGB: more than 1 in red, negative green/blue.
+        assert!((px[0] - 1.2249).abs() < 0.01, "{px:?}");
+        assert!(px[1] < -0.02 && px[2] < -0.01, "{px:?}");
+
+        let srgb = moxcms::ColorProfile::new_srgb().encode().unwrap();
+        let path = dir.path().join("srgb.png");
+        png_with_profile(&path, Some(srgb), [255, 0, 0, 255]);
+        assert_eq!(first_pixel(&path)[..3], [1.0, 0.0, 0.0]);
+        let path = dir.path().join("plain.png");
+        png_with_profile(&path, None, [128, 0, 0, 255]);
+        assert!((first_pixel(&path)[0] - imagine_core::color::srgb_to_linear(128.0 / 255.0)).abs() < 1e-3);
+    }
+}
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    /// `cargo test --release -p imagine-app icc_load_speed -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn icc_load_speed() {
+        use image::ImageEncoder;
+        let dir = tempfile::tempdir().unwrap();
+        let (w, h) = (6000u32, 4000u32);
+        let data: Vec<u8> = (0..w * h).flat_map(|i| [(i % 251) as u8, (i % 241) as u8, (i % 239) as u8]).collect();
+        for (name, icc) in [("srgb", None), ("p3", Some(moxcms::ColorProfile::new_display_p3().encode().unwrap()))] {
+            let path = dir.path().join(format!("{name}.png"));
+            let mut enc = image::codecs::png::PngEncoder::new_with_quality(
+                std::fs::File::create(&path).unwrap(),
+                image::codecs::png::CompressionType::Fast,
+                image::codecs::png::FilterType::NoFilter,
+            );
+            if let Some(icc) = icc {
+                enc.set_icc_profile(icc).unwrap();
+            }
+            enc.write_image(&data, w, h, image::ExtendedColorType::Rgb8).unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let t0 = Instant::now();
+            run(Source::File(path), &tx);
+            drop(tx);
+            let n: usize = rx.iter().map(|m| if let LoaderMsg::Tiles { tiles, .. } = m { tiles.len() } else { 0 }).sum();
+            println!("{name}: {n} Kacheln in {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+        }
+    }
 }

@@ -864,6 +864,7 @@ dependencies = [
  "imagine-core",
  "imagine-gpu",
  "imagine-io",
+ "moxcms",
  "pollster",
  "raw-window-handle",
  "rayon",

@@ -56,6 +56,8 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 | `place_image` | Bilddatei als neue Ebene an Position (x, y) |
 | `sample_color` | Farbe des Gesamtbilds an einem Punkt |
 | `render_preview` | **Das Ergebnis ansehen:** Gesamtbild oder Ausschnitt als PNG, optional zusätzlich als Datei (`output`); `show_selection` färbt nicht Ausgewähltes rot |
+| `adjustment_add`, `adjustment_set` | Einstellungsebenen (Kurven, Tonwerte, Farbton/Sättigung, Belichtung, …) hinzufügen und ändern; mit Auswahl wird sie zur Maske |
+| `filter_apply` | Filter: Gaußscher Weichzeichner, Unscharf maskieren, Hochpass, Rauschen (durch die Auswahl) |
 | `undo`, `redo` | Verlauf |
 | `save`, `export` | `.imagine` (mit Ebenen, inkrementell) bzw. PNG/JPEG/WebP/TIFF |
 
@@ -83,7 +85,7 @@ Jede Zeile erzeugt eine JSON-Ergebniszeile auf stdout. Beim ersten Fehler bricht
 
 ## Grenzen (Stand Phase 2b)
 
-- Noch nicht vorhanden: Filter und Korrekturen (Phase 4), Text (Phase 6). Gruppen lassen sich noch nicht transformieren.
+- Noch nicht vorhanden: Smart-Filter, Verflüssigen, Retusche-Werkzeuge (Phase 5), Text (Phase 6). Gruppen lassen sich noch nicht transformieren.
 - Alle Auswahl-, Füll- und Malbefehle respektieren die aktuelle Auswahl, auch eine weiche.
 - `render_preview` zeigt das Bild, nicht die Fensteransicht (kein Zoom, keine Drehung).
 - `document_open`/`document_new` ersetzen im Live-Modus das offene Dokument ohne Rückfrage. Ungespeicherte Änderungen gehen dabei verloren.
