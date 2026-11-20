@@ -647,6 +647,11 @@ fn psd_text_layer(
     spec.line_height = t.line_height;
     spec.letter_spacing = t.tracking;
     spec.width = t.width;
+    // Photoshop's transform is anchored at the first baseline (point text):
+    // place the layout so that anchor lands on it.
+    let [ax, ay] = imagine_vector::text_anchor(&spec);
+    spec.x = -ax;
+    spec.y = -ay;
     let mut v = VectorLayer::text(spec);
     v.transform = t.transform;
     // Align the ink with Photoshop's pixels (baselines and metrics differ a little).
@@ -657,7 +662,8 @@ fn psd_text_layer(
         for (c, px) in &tiles {
             let (ox, oy) = c.origin();
             for (i, p) in px.chunks(4).enumerate() {
-                if p[3].to_f32() > 0.25 {
+                // Any visible ink, as Photoshop's layer bounds count it.
+                if p[3].to_f32() > 0.5 / 255.0 {
                     let (x, y) = (ox + i as i64 % ts, oy + i as i64 / ts);
                     x0 = x0.min(x);
                     y0 = y0.min(y);

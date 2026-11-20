@@ -502,6 +502,144 @@ pub(crate) fn read_text(data: &[u8]) -> Result<crate::psd::Text> {
     })
 }
 
+/// Photoshop's own EngineData of a one-run text layer (from a file it wrote),
+/// used as the template for writing text layers.
+const ENGINE_TEMPLATE: &[u8] = include_bytes!("psd_engine_template.dat");
+
+/// The "TySh" block for a text layer. `height`: box height of paragraph text.
+pub(crate) fn write_text(t: &crate::psd::Text, height: f32) -> Vec<u8> {
+    let mut e = engine_data(ENGINE_TEMPLATE).expect("template");
+    // Photoshop: lines end with \r, the text with one more.
+    let body = t.text.replace("\r\n", "\r").replace('\n', "\r");
+    let full = format!("{body}\r");
+    let len = |s: &str| s.encode_utf16().count() as i64;
+    if let Some(v) = e.at_mut("EngineDict/Editor/Text") {
+        *v = Ps::Str(full.clone());
+    }
+    // One paragraph run per line, with the alignment.
+    let just = match t.align {
+        TextAlign::Left => 0,
+        TextAlign::Right => 1,
+        TextAlign::Center => 2,
+        TextAlign::Justify => 3,
+    };
+    let lines: Vec<&str> = body.split('\r').collect();
+    if let Some(pr) = e.at_mut("EngineDict/ParagraphRun") {
+        let first = pr.at("RunArray/0").cloned().expect("paragraph run");
+        let mut runs = Vec::new();
+        for _ in &lines {
+            let mut r = first.clone();
+            if let Some(p) = r.at_mut("ParagraphSheet/Properties") {
+                p.set("Justification", Ps::Int(just));
+            }
+            runs.push(r);
+        }
+        let mut lens: Vec<Ps> = lines.iter().map(|l| Ps::Int(len(l) + 1)).collect();
+        if lens.is_empty() {
+            lens.push(Ps::Int(1));
+        }
+        pr.set("RunArray", Ps::Array(runs));
+        pr.set("RunLengthArray", Ps::Array(lens));
+    }
+    if let Some(sr) = e.at_mut("EngineDict/StyleRun") {
+        sr.set("RunLengthArray", Ps::Array(vec![Ps::Int(len(&full))]));
+    }
+    if let Some(st) = e.at_mut("EngineDict/StyleRun/RunArray/0/StyleSheet/StyleSheetData") {
+        st.set("Font", Ps::Int(0));
+        st.set("FontSize", Ps::Num(t.size as f64));
+        st.set("FauxBold", Ps::Bool(t.faux_bold));
+        st.set("FauxItalic", Ps::Bool(t.faux_italic));
+        let auto = (t.line_height - 1.2).abs() < 1e-3;
+        st.set("AutoLeading", Ps::Bool(auto));
+        st.set("Leading", Ps::Num(if auto { 0.01 } else { (t.size * t.line_height) as f64 }));
+        st.set("Tracking", Ps::Int((t.tracking / t.size.max(1.0) * 1000.0).round() as i64));
+        let c = t.color;
+        st.set(
+            "FillColor",
+            Ps::Dict(vec![
+                ("Type".into(), Ps::Int(1)),
+                ("Values".into(), Ps::Array([c[3], c[0], c[1], c[2]].iter().map(|v| Ps::Num(v.clamp(0.0, 1.0) as f64)).collect())),
+            ]),
+        );
+        let f = |k: &str| t.features.get(k).map(|v| *v != 0);
+        for (key, tag, default) in [
+            ("Ligatures", "liga", true),
+            ("DLigatures", "dlig", false),
+            ("OldStyle", "onum", false),
+            ("Fractions", "frac", false),
+            ("Ordinals", "ordn", false),
+            ("Swash", "swsh", false),
+            ("StylisticAlternates", "salt", false),
+        ] {
+            let on = f(tag).unwrap_or(default);
+            if on != default || st.get(key).is_some() {
+                st.set(key, Ps::Bool(on));
+            }
+        }
+        st.set("FontCaps", Ps::Int(f("smcp").unwrap_or(false) as i64));
+        let base = if f("sups") == Some(true) { 1 } else if f("subs") == Some(true) { 2 } else { 0 };
+        st.set("FontBaseline", Ps::Int(base));
+    }
+    // The font: first entry of both font sets.
+    for set in ["ResourceDict/FontSet/0", "DocumentResources/FontSet/0"] {
+        if let Some(fe) = e.at_mut(set) {
+            fe.set("Name", Ps::Str(t.font.clone()));
+            fe.set("FontType", Ps::Int(1));
+        }
+    }
+    // Point or paragraph (box) text.
+    if let (Some(w), Some(ch)) = (t.width, e.at_mut("EngineDict/Rendered/Shapes/Children/0")) {
+        ch.set("ShapeType", Ps::Int(1));
+        if let Some(ps) = ch.at_mut("Cookie/Photoshop") {
+            ps.set("ShapeType", Ps::Int(1));
+            if let Ps::Dict(items) = ps {
+                items.retain(|(k, _)| k != "PointBase");
+            }
+            ps.set("BoxBounds", Ps::Array([0.0, 0.0, w as f64, height as f64].map(Ps::Num).to_vec()));
+            if let Some(b) = ps.get_mut("Base") {
+                b.set("ShapeType", Ps::Int(1));
+            }
+        }
+    }
+    let engine = crate::psd_data::write_engine_data(&e);
+    // TySh: version, transform, text version, descriptor, warp, bounds.
+    let mut o = Vec::new();
+    o.extend(1u16.to_be_bytes());
+    for v in t.transform {
+        o.extend(v.to_be_bytes());
+    }
+    o.extend(50u16.to_be_bytes());
+    o.extend(16u32.to_be_bytes());
+    let en = |a: &str, b: &str| Value::Enum(a.into(), b.into());
+    let txt = Desc {
+        class: "TxLr".into(),
+        items: vec![
+            ("Txt ".into(), Value::Text(body)),
+            ("textGridding".into(), en("textGridding", "None")),
+            ("Ornt".into(), en("Ornt", "Hrzn")),
+            ("AntA".into(), en("Annt", "AnSm")),
+            ("TextIndex".into(), Value::Long(0)),
+            ("EngineData".into(), Value::Raw(engine)),
+        ],
+    };
+    w_desc(&mut o, &txt);
+    o.extend(1u16.to_be_bytes());
+    o.extend(16u32.to_be_bytes());
+    let warp = Desc {
+        class: "warp".into(),
+        items: vec![
+            ("warpStyle".into(), en("warpStyle", "warpNone")),
+            ("warpValue".into(), Value::Double(0.0)),
+            ("warpPerspective".into(), Value::Double(0.0)),
+            ("warpPerspectiveOther".into(), Value::Double(0.0)),
+            ("warpRotate".into(), en("Ornt", "Hrzn")),
+        ],
+    };
+    w_desc(&mut o, &warp);
+    o.extend([0u8; 16]);
+    o
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,5 +717,36 @@ mod tests {
         };
         let (k, d) = &adjustment_blocks(&cv)[0];
         assert_eq!(read_adjustment(k, d).unwrap(), cv);
+    }
+
+    #[test]
+    fn text_layer_roundtrips_through_tysh() {
+        let t = crate::psd::Text {
+            text: "Hello (world)\nSecond line ü".into(),
+            font: "LiberationSans-Bold".into(),
+            size: 36.0,
+            color: [1.0, 0.5, 0.0, 1.0],
+            align: TextAlign::Center,
+            line_height: 1.5,
+            tracking: 3.6,
+            faux_bold: false,
+            faux_italic: true,
+            width: Some(400.0),
+            transform: [1.0, 0.0, 0.0, 1.0, 20.0, 60.0],
+            features: [("dlig".to_string(), 1u16), ("liga".to_string(), 0)].into_iter().collect(),
+        };
+        let b = write_text(&t, 200.0);
+        let back = read_text(&b).unwrap();
+        assert_eq!(back.text, t.text);
+        assert_eq!(back.font, t.font);
+        assert_eq!((back.size, back.align, back.width, back.transform), (t.size, t.align, t.width, t.transform));
+        assert!((back.line_height - 1.5).abs() < 1e-4 && (back.tracking - 3.6).abs() < 1e-3);
+        assert!(back.faux_italic && !back.faux_bold);
+        assert!((back.color[1] - 0.5).abs() < 1e-6);
+        assert_eq!(back.features, t.features);
+        // Point text with default leading.
+        let p = crate::psd::Text { width: None, line_height: 1.2, align: TextAlign::Left, features: Default::default(), ..t };
+        let back = read_text(&write_text(&p, 0.0)).unwrap();
+        assert_eq!((back.width, back.line_height, back.align), (None, 1.2, TextAlign::Left));
     }
 }

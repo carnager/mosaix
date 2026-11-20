@@ -1065,6 +1065,9 @@ pub struct WLayer {
     /// A shape layer (written as a solid fill with vector mask and stroke;
     /// the pixels stay as Photoshop's rendering of it).
     pub shape: Option<crate::psd_shape::PsdShape>,
+    /// A text layer (written as Photoshop's editable text, "TySh") and its
+    /// box height for paragraph text.
+    pub text: Option<(Text, f32)>,
     pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
     pub mask: Option<WMask>,
 }
@@ -1436,6 +1439,12 @@ fn write_record(
         block(o, b"vsms", &crate::psd_shape::write_vector_mask(&sh.subpaths, size));
         block(o, b"vstk", &desc(&crate::psd_shape::write_stroke(sh.stroke.as_ref(), sh.fill.is_some())));
     }
+    if let Some((t, height)) = &l.text {
+        o.b.extend(b"8BIMTySh");
+        let blk = o.open(false);
+        o.b.extend(crate::psd_layers::write_text(t, *height));
+        o.close(blk, 4);
+    }
     if l.fill_opacity < 1.0 {
         o.b.extend(b"8BIMiOpa");
         let blk = o.open(false);
@@ -1532,6 +1541,7 @@ pub fn write(
         effects: Vec::new(),
         fill_opacity: 1.0,
         shape: None,
+        text: None,
         tiles: Vec::new(),
         mask: None,
     };
@@ -1553,6 +1563,7 @@ pub fn write(
                     effects: Vec::new(),
                     fill_opacity: 1.0,
                     shape: None,
+                    text: None,
                     tiles: Vec::new(),
                     mask: l.mask.clone(),
                 },
@@ -1629,6 +1640,7 @@ pub fn write(
         effects: Vec::new(),
         fill_opacity: 1.0,
         shape: None,
+        text: None,
         tiles: composite.to_vec(),
         mask: None,
     };

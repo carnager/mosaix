@@ -465,6 +465,8 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Formebenen im PSD-Export** (2026-11-20): Formebenen werden als Photoshop-Formen geschrieben (Volltonfüllung `SoCo`, Vektormaske `vsms`, Kontur `vstk` mit Ausrichtung/Ecken/Enden, Konturbreite mit der Transformation skaliert) – in Photoshop weiter editierbar; Rundreise pixelgleich. Ellipsen-Pfade sind jetzt geschlossen (Kontur innen/außen wirkte bei Ellipsen bisher mittig).
 
+- **Editierbarer Text im PSD-Export** (2026-11-20): Textebenen werden als Photoshop-Text (`TySh`) geschrieben – Punkt- und Absatztext, Schrift (PostScript-Name der tatsächlich verwendeten Schrift), Größe, Farbe, Ausrichtung je Absatz, Zeilenabstand, Laufweite, OpenType-Schalter, Transformation. Die EngineData basiert auf Photoshops eigener (Schreiber erzeugt sie byte-gleich neu). Rundreise pixelgleich (auch gedreht); Text auf Pfad bleibt Pixel. Beim Import sitzt Text jetzt auf Photoshops Grundlinie (Abweichung zu Photoshops Rendering 0,036 → 0,0095 RMSE).
+
 **Noch offen in Phase 6:** Musterüberlagerung (braucht eine Musterbibliothek), Cursor direkt in Text auf Pfad.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)

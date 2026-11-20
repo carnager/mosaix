@@ -292,6 +292,8 @@ pub enum Ps {
     Dict(Vec<(String, Ps)>),
     Array(Vec<Ps>),
     Num(f64),
+    /// A number written without a decimal point.
+    Int(i64),
     Str(String),
     Name(String),
     Bool(bool),
@@ -318,7 +320,37 @@ impl Ps {
     pub fn num(&self) -> Option<f64> {
         match self {
             Ps::Num(n) => Some(*n),
+            Ps::Int(n) => Some(*n as f64),
             _ => None,
+        }
+    }
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Ps> {
+        match self {
+            Ps::Dict(d) => d.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+    /// Like [`Ps::at`], for changing a value.
+    pub fn at_mut(&mut self, path: &str) -> Option<&mut Ps> {
+        let mut cur = self;
+        for part in path.split('/') {
+            cur = match part.parse::<usize>() {
+                Ok(i) if matches!(cur, Ps::Array(_)) => match cur {
+                    Ps::Array(a) => a.get_mut(i)?,
+                    _ => unreachable!(),
+                },
+                _ => cur.get_mut(part)?,
+            };
+        }
+        Some(cur)
+    }
+    /// Sets `key` in a dictionary (added at the end if missing).
+    pub fn set(&mut self, key: &str, v: Ps) {
+        if let Ps::Dict(d) = self {
+            match d.iter_mut().find(|(k, _)| k == key) {
+                Some(e) => e.1 = v,
+                None => d.push((key.into(), v)),
+            }
         }
     }
     pub fn str(&self) -> Option<&str> {
@@ -421,6 +453,7 @@ fn ps_value(b: &[u8], p: &mut usize) -> Result<Ps> {
             match tok {
                 "true" => Ok(Ps::Bool(true)),
                 "false" => Ok(Ps::Bool(false)),
+                t if !t.contains(['.', 'e', 'E']) && t.parse::<i64>().is_ok() => Ok(Ps::Int(t.parse().unwrap())),
                 t => t
                     .parse::<f64>()
                     .map(Ps::Num)
@@ -428,6 +461,91 @@ fn ps_value(b: &[u8], p: &mut usize) -> Result<Ps> {
             }
         }
     }
+}
+
+/// Writes EngineData the way Photoshop does (tab-indented, UTF-16 strings).
+pub fn write_engine_data(v: &Ps) -> Vec<u8> {
+    fn num(o: &mut Vec<u8>, n: f64) {
+        // Photoshop: "1.0", ".5", "-.25"
+        let mut s = format!("{n:?}");
+        if s.contains('e') {
+            s = format!("{n:.6}");
+        }
+        // (but zero stays "0.0").
+        if let Some(r) = s.strip_prefix("0.").filter(|r| *r != "0") {
+            s = format!(".{r}");
+        } else if let Some(r) = s.strip_prefix("-0.").filter(|r| *r != "0") {
+            s = format!("-.{r}");
+        }
+        o.extend(s.as_bytes());
+    }
+    fn value(o: &mut Vec<u8>, v: &Ps, depth: usize) {
+        let tabs = |o: &mut Vec<u8>, n: usize| o.extend(std::iter::repeat_n(b'\t', n));
+        match v {
+            Ps::Dict(items) => {
+                o.extend(b"<<\n");
+                for (k, v) in items {
+                    tabs(o, depth + 1);
+                    o.push(b'/');
+                    o.extend(k.as_bytes());
+                    // Nested dictionaries and arrays of them start on their own line.
+                    let block = matches!(v, Ps::Dict(_)) || matches!(v, Ps::Array(a) if a.iter().any(|x| matches!(x, Ps::Dict(_))));
+                    if block && matches!(v, Ps::Dict(_)) {
+                        o.push(b'\n');
+                        tabs(o, depth + 1);
+                    } else {
+                        o.push(b' ');
+                    }
+                    value(o, v, depth + 1);
+                    o.push(b'\n');
+                }
+                tabs(o, depth);
+                o.extend(b">>");
+            }
+            Ps::Array(items) => {
+                if items.iter().any(|x| matches!(x, Ps::Dict(_))) {
+                    o.extend(b"[");
+                    for x in items {
+                        o.push(b'\n');
+                        tabs(o, depth);
+                        value(o, x, depth);
+                    }
+                    o.push(b'\n');
+                    tabs(o, depth);
+                    o.push(b']');
+                } else {
+                    o.extend(b"[");
+                    for x in items {
+                        o.push(b' ');
+                        value(o, x, depth);
+                    }
+                    o.extend(b" ]");
+                }
+            }
+            Ps::Num(n) => num(o, *n),
+            Ps::Int(n) => o.extend(n.to_string().as_bytes()),
+            Ps::Bool(b) => o.extend(if *b { &b"true"[..] } else { &b"false"[..] }),
+            Ps::Name(n) => {
+                o.push(b'/');
+                o.extend(n.as_bytes());
+            }
+            Ps::Str(s) => {
+                o.extend(b"(\xfe\xff");
+                for u in s.encode_utf16() {
+                    for byte in u.to_be_bytes() {
+                        if matches!(byte, b'(' | b')' | b'\\') {
+                            o.push(b'\\');
+                        }
+                        o.push(byte);
+                    }
+                }
+                o.push(b')');
+            }
+        }
+    }
+    let mut o = b"\n\n".to_vec();
+    value(&mut o, v, 0);
+    o
 }
 
 fn ps_name(b: &[u8], p: &mut usize) -> String {
@@ -477,5 +595,26 @@ mod tests {
                 .and_then(Ps::num),
             Some(48.0)
         );
+    }
+}
+
+#[cfg(test)]
+mod engine_writer_tests {
+    use super::*;
+
+    #[test]
+    fn photoshop_engine_data_is_written_back_byte_for_byte() {
+        let src: &[u8] = include_bytes!("psd_engine_template.dat");
+        let v = engine_data(src).unwrap();
+        let out = write_engine_data(&v);
+        assert_eq!(engine_data(&out).unwrap(), v, "same tree");
+        if out != src {
+            let i = out.iter().zip(src).position(|(a, b)| a != b).unwrap_or(out.len().min(src.len()));
+            panic!(
+                "differs at {i}:\n ours: {:?}\n  ps:  {:?}",
+                String::from_utf8_lossy(&out[i.saturating_sub(40)..(i + 40).min(out.len())]),
+                String::from_utf8_lossy(&src[i.saturating_sub(40)..(i + 40).min(src.len())])
+            );
+        }
     }
 }

@@ -441,6 +441,7 @@ impl Session {
             mask_rb: start(PoolKind::Mask, &mask_tiles),
             doc: doc.map_tiles(&mut |_| ()),
             shapes: psd_shapes(self.engine.doc()),
+            texts: psd_texts(self.engine.doc()),
             layer_keys,
             mask_keys,
             layer_data: Vec::new(),
@@ -469,11 +470,47 @@ fn psd_shapes<T: Clone>(doc: &Document<T>) -> HashMap<LayerId, imagine_io::psd_s
     out
 }
 
+/// The text layers of a document as Photoshop text (not text on a path).
+fn psd_texts<T: Clone>(doc: &Document<T>) -> HashMap<LayerId, (imagine_io::psd::Text, f32)> {
+    use imagine_core::color::linear_to_srgb;
+    use imagine_core::vector::VectorKind;
+    let mut out = HashMap::new();
+    doc.for_each(&mut |l, _| {
+        let Some(v) = l.vector() else { return };
+        let VectorKind::Text(t) = &v.kind else { return };
+        if t.path.is_some() {
+            return;
+        }
+        let Some(font) = imagine_vector::font_postscript_name(t) else { return };
+        let [ax, ay] = imagine_vector::text_anchor(t);
+        let m = v.transform;
+        let c = t.color;
+        let text = imagine_io::psd::Text {
+            text: t.text.clone(),
+            font,
+            size: t.size,
+            color: [linear_to_srgb(c[0]), linear_to_srgb(c[1]), linear_to_srgb(c[2]), c[3]],
+            align: t.align,
+            line_height: t.line_height,
+            tracking: t.letter_spacing,
+            faux_bold: false,
+            faux_italic: false,
+            width: t.width,
+            transform: [m[0], m[1], m[2], m[3], m[0] * ax + m[2] * ay + m[4], m[1] * ax + m[3] * ay + m[5]],
+            features: t.features.clone(),
+        };
+        out.insert(l.id, (text, imagine_vector::text_box_size(t).1));
+    });
+    out
+}
+
 /// Layer and mask pixels of a PSD export (readbacks, then their data).
 struct PsdLayers {
     doc: Document<()>,
     /// Shape layers' vector data (written as Photoshop shapes).
     shapes: HashMap<LayerId, imagine_io::psd_shape::PsdShape>,
+    /// Text layers as Photoshop text (and box height).
+    texts: HashMap<LayerId, (imagine_io::psd::Text, f32)>,
     layer_keys: Vec<(LayerId, TileCoord)>,
     mask_keys: Vec<(LayerId, TileCoord)>,
     layer_rb: Option<Readback>,
@@ -502,9 +539,11 @@ impl PsdLayers {
         let ts = imagine_core::TILE_SIZE as usize;
         let mut skipped = 0;
         let mut shapes = self.shapes;
+        let mut texts = self.texts;
         fn build(
             ls: &[imagine_core::Layer<()>],
             shapes: &mut HashMap<LayerId, imagine_io::psd_shape::PsdShape>,
+            texts: &mut HashMap<LayerId, (imagine_io::psd::Text, f32)>,
             px: &mut HashMap<(LayerId, TileCoord), Vec<half::f16>>,
             mk: &mut HashMap<(LayerId, TileCoord), Vec<u8>>,
             ts: usize,
@@ -539,6 +578,7 @@ impl PsdLayers {
                     effects: l.effects.clone(),
                     fill_opacity: l.fill_opacity,
                     shape: shapes.remove(&l.id),
+                    text: texts.remove(&l.id),
                     tiles: Vec::new(),
                     mask,
                 };
@@ -551,7 +591,7 @@ impl PsdLayers {
                         out.push(WNode::Layer(w));
                     }
                     Content::Group(children) => {
-                        let children = build(children, shapes, px, mk, ts, skipped);
+                        let children = build(children, shapes, texts, px, mk, ts, skipped);
                         out.push(WNode::Group { layer: w, children });
                     }
                     Content::Adjustment(a) => {
@@ -564,7 +604,7 @@ impl PsdLayers {
             }
             out
         }
-        let nodes = build(&self.doc.layers, &mut shapes, &mut px, &mut mk, ts, &mut skipped);
+        let nodes = build(&self.doc.layers, &mut shapes, &mut texts, &mut px, &mut mk, ts, &mut skipped);
         if skipped > 0 {
             tracing::warn!(
                 "{}",

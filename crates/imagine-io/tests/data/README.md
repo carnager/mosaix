@@ -5,3 +5,7 @@ Test files for the PSD reader.
 - `ps-text.psd`, `ps-clipping.psd`: written by Adobe Photoshop, from the psd-tools
   test suite (https://github.com/psd-tools/psd-tools, MIT license; originally
   `text.psd` and `clipping-mask3.psd`).
+
+`../../src/psd_engine_template.dat` is the text-engine data (EngineData) of
+the text layer in `ps-text.psd`, written by Photoshop; imagine fills it in to
+write editable text layers.

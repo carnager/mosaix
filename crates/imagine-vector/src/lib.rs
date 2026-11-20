@@ -567,6 +567,50 @@ fn build_layout(t: &TextSpec) -> parley::Layout<()> {
     l
 }
 
+/// PostScript name of the font a text is set in ("LiberationSans-Bold"),
+/// as Photoshop names fonts.
+pub fn font_postscript_name(t: &TextSpec) -> Option<String> {
+    use read_fonts::types::NameId;
+    use read_fonts::{FontRef, TableProvider};
+    let mut probe = t.clone();
+    probe.text = "a".into();
+    let l = build_layout(&probe);
+    let line = l.lines().next()?;
+    for item in line.items() {
+        if let PositionedLayoutItem::GlyphRun(g) = item {
+            let fd = g.run().font();
+            let f = FontRef::from_index(fd.data.data(), fd.index).ok()?;
+            let name = f.name().ok()?;
+            let data = name.string_data();
+            return name
+                .name_record()
+                .iter()
+                .filter(|r| r.name_id() == NameId::POSTSCRIPT_NAME)
+                .find_map(|r| Some(r.string(data).ok()?.chars().collect::<String>()))
+                .filter(|s| !s.is_empty());
+        }
+    }
+    None
+}
+
+/// Where Photoshop anchors a text, in the layer's own coordinates: point
+/// text at the first baseline (left end, centre or right end by alignment),
+/// paragraph text at the box's top left.
+pub fn text_anchor(t: &TextSpec) -> [f64; 2] {
+    if t.width.is_some() {
+        return [t.x, t.y];
+    }
+    let l = build_layout(t);
+    let baseline = l.lines().next().map_or(t.size * 0.8, |ln| ln.metrics().baseline) as f64;
+    let w = l.width() as f64;
+    let x = match t.align {
+        TextAlign::Center => t.x + w * 0.5,
+        TextAlign::Right => t.x + w,
+        _ => t.x,
+    };
+    [x, t.y + baseline]
+}
+
 /// OpenType feature tags (GSUB and GPOS) of the font a text is set in.
 pub fn font_feature_tags(t: &TextSpec) -> std::collections::BTreeSet<String> {
     use read_fonts::{FontRef, TableProvider};

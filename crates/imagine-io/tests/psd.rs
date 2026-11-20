@@ -108,6 +108,7 @@ mod roundtrip {
             effects: Vec::new(),
             fill_opacity: 1.0,
             shape: None,
+            text: None,
             tiles,
             mask: None,
         }
@@ -338,6 +339,7 @@ fn adjustment_layers_roundtrip() {
                 effects: Vec::new(),
                 fill_opacity: 1.0,
                 shape: None,
+                text: None,
                 tiles: Vec::new(),
                 mask: None,
             })
