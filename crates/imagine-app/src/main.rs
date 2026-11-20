@@ -3,6 +3,7 @@
 mod agent;
 mod app;
 mod boxedit;
+mod ui;
 mod loader;
 mod session;
 mod tablet;
@@ -103,6 +104,7 @@ fn main() -> anyhow::Result<()> {
     let mut offscreen = false;
     let mut save: Option<PathBuf> = None;
     let mut export: Option<PathBuf> = None;
+    let mut snapshot: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -122,9 +124,13 @@ fn main() -> anyhow::Result<()> {
             "--bench-offscreen" => offscreen = true,
             "--save" => save = Some(args.next().context("--save braucht einen Pfad")?.into()),
             "--export" => export = Some(args.next().context("--export braucht einen Pfad")?.into()),
+            "--ui-snapshot" => snapshot = Some(PathBuf::from(args.next().context("--ui-snapshot braucht einen Pfad")?)),
             s if s.starts_with('-') => bail!("unbekannte Option {s}\n\n{HELP}"),
             path => source = Source::File(PathBuf::from(path)),
         }
+    }
+    if let Some(out) = snapshot {
+        return ui::snapshot::run(source, &out, (1600, 1000));
     }
     if save.is_some() || export.is_some() || offscreen {
         return headless(source, save, export, offscreen);
@@ -258,8 +264,9 @@ fn init_tracing() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,wgpu_core=warn,wgpu_hal=warn,naga=warn"));
     // Logs go to stderr: stdout belongs to MCP / script results.
-    let registry =
-        tracing_subscriber::registry().with(fmt::layer().with_writer(std::io::stderr).with_filter(filter));
+    let registry = tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr).with_filter(filter))
+        .with(ui::log::UiLog);
     #[cfg(feature = "profile")]
     let registry = registry.with(tracing_tracy::TracyLayer::default());
     registry.init();

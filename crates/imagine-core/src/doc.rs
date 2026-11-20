@@ -328,6 +328,34 @@ impl<T: Clone> Document<T> {
         true
     }
 
+    /// Moves layer `id` next to `target` (`above` in panel order), or into
+    /// the group `target` as its topmost child when `into` is set. Refuses to
+    /// move a group into itself.
+    pub fn move_layer(&mut self, id: LayerId, target: LayerId, above: bool, into: bool) -> bool {
+        if id == target {
+            return false;
+        }
+        let mut subtree = Vec::new();
+        match self.find(id) {
+            Some(l) => Self::collect_ids(l, &mut subtree),
+            None => return false,
+        }
+        if subtree.contains(&target) || self.find(target).is_none() || (into && !self.find(target).unwrap().is_group()) {
+            return false;
+        }
+        let Some((list, i)) = self.locate_mut(id) else { return false };
+        let layer = list.remove(i);
+        if into {
+            let Some(Layer { content: Content::Group(children), .. }) = self.find_mut(target) else { unreachable!() };
+            children.push(layer);
+        } else {
+            let (list, j) = self.locate_mut(target).expect("target exists");
+            // Lists are stored bottom → top; "above" in the panel = later in the list.
+            list.insert(if above { j + 1 } else { j }, layer);
+        }
+        true
+    }
+
     /// Wraps the active layer in a new group.
     pub fn group_active(&mut self) -> Option<LayerId> {
         let gid = self.alloc_id();
@@ -586,6 +614,28 @@ fn hash_mask<T>(m: &Option<MaskRef<'_, T>>, key: impl Fn(&T) -> u64, h: &mut imp
         None => 0u8.hash(h),
         Some(MaskRef::Solid(v)) => (1u8, *v).hash(h),
         Some(MaskRef::Tile(t)) => (2u8, key(t)).hash(h),
+    }
+}
+
+#[cfg(test)]
+mod move_tests {
+    use super::*;
+
+    #[test]
+    fn move_layer_reorders_and_nests() {
+        let mut d = Document::<()>::new(10, 10);
+        let bg = d.active;
+        let a = d.add_pixel_layer();
+        let b = d.add_pixel_layer();
+        assert_eq!(d.display_order(), vec![b, a, bg]);
+        assert!(d.move_layer(bg, b, true, false));
+        assert_eq!(d.display_order(), vec![bg, b, a]);
+        d.active = a;
+        let g = d.group_active().unwrap();
+        assert!(d.move_layer(b, g, false, true));
+        assert_eq!(d.panel_rows(), vec![(bg, 0), (g, 0), (b, 1), (a, 1)]);
+        assert!(!d.move_layer(g, b, true, false), "group into its own child");
+        assert!(!d.move_layer(a, bg, false, true), "only groups take children");
     }
 }
 

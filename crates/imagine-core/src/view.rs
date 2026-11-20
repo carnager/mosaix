@@ -82,6 +82,18 @@ impl View {
         self.center = doc * 0.5;
     }
 
+    /// Fits the document into a sub-rectangle of the viewport (screen px),
+    /// e.g. the area left free by panels.
+    pub fn fit_in(&mut self, doc_w: u32, doc_h: u32, min: DVec2, max: DVec2) {
+        let doc = DVec2::new(doc_w.max(1) as f64, doc_h.max(1) as f64);
+        let area = (max - min).max(DVec2::ONE);
+        self.zoom = ((area / doc).min_element() * 0.92).clamp(MIN_ZOOM, MAX_ZOOM);
+        self.rotation = 0.0;
+        // The document centre goes to the centre of the area.
+        let offset = (min + max) * 0.5 - self.half_viewport();
+        self.center = doc * 0.5 - offset / self.zoom;
+    }
+
     /// Whether the view is axis aligned (rotation is a multiple of 90°).
     pub fn is_axis_aligned(&self) -> bool {
         let q = self.rotation / std::f64::consts::FRAC_PI_2;
@@ -122,6 +134,15 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_in_centres_the_document_in_the_area() {
+        let mut v = View { viewport: DVec2::new(1000.0, 800.0), ..Default::default() };
+        v.fit_in(400, 400, DVec2::new(100.0, 0.0), DVec2::new(700.0, 800.0));
+        let c = v.doc_to_screen(DVec2::new(200.0, 200.0));
+        assert!((c - DVec2::new(400.0, 400.0)).length() < 1e-9, "{c}");
+        assert!((v.zoom - 600.0 / 400.0 * 0.92).abs() < 1e-9);
+    }
 
     fn view() -> View {
         View {

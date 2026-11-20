@@ -163,6 +163,7 @@ pub struct Engine {
     recheck_all: bool,
     stroke: Option<ActiveStroke>,
     preview: Option<transform::Preview>,
+    merge_key: Option<String>,
     pending_dabs: Vec<Dab>,
     pending_mips: Vec<crate::pool::SlotId>,
     visible: (DVec2, DVec2),
@@ -644,6 +645,7 @@ impl Engine {
             recheck_all: true,
             stroke: None,
             preview: None,
+            merge_key: None,
             pending_dabs: Vec::new(),
             pending_mips: Vec::new(),
             visible: (DVec2::ZERO, DVec2::ZERO),
@@ -731,6 +733,7 @@ impl Engine {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
+        self.merge_key = None;
         let before = self.doc.clone();
         if f(&mut self.doc) {
             self.history.push(before, label);
@@ -739,6 +742,45 @@ impl Engine {
         } else {
             false
         }
+    }
+
+    /// Like [`Self::edit`], but consecutive calls with the same `key` (e.g.
+    /// while dragging an opacity slider) form a single undo step.
+    pub fn edit_merged(&mut self, label: &str, key: &str, f: impl FnOnce(&mut Document<Tile>) -> bool) -> bool {
+        if self.merge_key.as_deref() == Some(key) && self.stroke.is_none() {
+            if f(&mut self.doc) {
+                self.recheck_all = true;
+                return true;
+            }
+            return false;
+        }
+        let changed = self.edit(label, f);
+        if changed {
+            self.merge_key = Some(key.to_string());
+        }
+        changed
+    }
+
+    /// Ends merging of [`Self::edit_merged`] steps (slider released).
+    pub fn end_merge(&mut self) {
+        self.merge_key = None;
+    }
+
+    /// Labels of all history steps (oldest first) and how many are done.
+    pub fn history_labels(&self) -> (Vec<String>, usize) {
+        (self.history.labels().into_iter().map(String::from).collect(), self.history.undo_len())
+    }
+
+    /// Undoes/redoes until exactly `done` steps are applied.
+    pub fn jump_history(&mut self, done: usize) -> bool {
+        let mut moved = false;
+        while self.history.undo_len() > done && self.undo().is_some() {
+            moved = true;
+        }
+        while self.history.undo_len() < done && self.redo().is_some() {
+            moved = true;
+        }
+        moved
     }
 
     /// Changes that are not part of the history (layer selection).
@@ -763,6 +805,7 @@ impl Engine {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
+        self.merge_key = None;
         let cur = std::mem::replace(&mut self.doc, Document::empty(0, 0));
         let r = if back { self.history.undo(cur) } else { self.history.redo(cur) };
         match r {

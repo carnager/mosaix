@@ -56,6 +56,7 @@ use wayland_protocols::wp::{
 
 use crate::agent::{command, ipc};
 use crate::boxedit::{self, BoxEdit};
+use crate::ui::{self, panels::{Action, ToolId}};
 use crate::loader::{self, LoaderMsg, Source, TileData};
 use crate::session::{ExportJob, SaveDone, SaveJob, Session};
 use crate::tablet::{self, TabletFrame};
@@ -134,7 +135,31 @@ enum BgDone {
     /// A new selection computed from the one identified by `base`.
     Selection { label: &'static str, base: usize, mask: anyhow::Result<CpuMask>, started: Instant },
     Exported { path: std::path::PathBuf, result: anyhow::Result<f64> },
+    Autosaved { path: std::path::PathBuf, result: anyhow::Result<()> },
 }
+
+/// Recovery copies: `~/.local/state/imagine/autosave/` (or `$XDG_STATE_HOME`).
+fn autosave_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("imagine/autosave")
+}
+
+/// Mentions recovery copies left behind by windows that no longer run.
+fn report_orphaned_autosaves() {
+    let Ok(dir) = std::fs::read_dir(autosave_dir()) else { return };
+    for e in dir.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let pid = name.rsplit_once('-').and_then(|(_, p)| p.strip_suffix(".imagine")).and_then(|p| p.parse::<u32>().ok());
+        if pid.is_some_and(|p| !std::path::Path::new(&format!("/proc/{p}")).exists()) {
+            tracing::warn!("Wiederherstellungskopie gefunden: imagine {}", e.path().display());
+        }
+    }
+}
+
+const AUTOSAVE_EVERY: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum BoxKind {
@@ -225,8 +250,25 @@ pub struct App {
     bg_tx: channel::Sender<BgDone>,
     bg_running: usize,
     export_job: Option<ExportJob>,
+    autosave_job: Option<(std::path::PathBuf, SaveJob)>,
+    autosave_path: Option<std::path::PathBuf>,
+    autosave_mark: u64,
+    autosave_at: Instant,
     edit_count: u64,
     save_mark: u64,
+
+    // Interface
+    gui: ui::Gui,
+    ui_state: ui::panels::State,
+    /// Canvas area not covered by panels (physical px).
+    canvas_rect: (DVec2, DVec2),
+    /// The current mouse press belongs to the interface.
+    ui_pointer: bool,
+    tablet_ui: bool,
+    ui_log_gen: usize,
+    last_model: Option<ui::panels::Model>,
+    /// Status text, refreshed a few times per second (not every frame).
+    ui_status: String,
 
     // Agents
     socket: Option<ipc::SocketGuard>,
@@ -339,6 +381,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         })
         .map_err(|e| anyhow::anyhow!("background channel: {e}"))?;
 
+    let gui = ui::Gui::new(&gpu.device, surface_config.format);
     let mut app = App {
         surface,
         session: None,
@@ -394,8 +437,20 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         bg_tx,
         bg_running: 0,
         export_job: None,
+        autosave_job: None,
+        autosave_path: None,
+        autosave_mark: 0,
+        autosave_at: Instant::now(),
         edit_count: 0,
         save_mark: 0,
+        gui,
+        ui_state: ui::panels::State::default(),
+        canvas_rect: (DVec2::ZERO, DVec2::ZERO),
+        ui_pointer: false,
+        tablet_ui: false,
+        ui_log_gen: 0,
+        last_model: None,
+        ui_status: String::new(),
         socket: None,
         bench: None,
         bench_on_load: bench,
@@ -431,6 +486,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         app.bind_tablet_seat(&seat);
     }
 
+    report_orphaned_autosaves();
     while !app.exit {
         // Wake up periodically while a save is in flight or ants are marching.
         let ants = app.session.as_ref().is_some_and(|s| s.engine.has_selection());
@@ -438,19 +494,30 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
             Some(Duration::from_millis(10))
         } else if ants {
             Some(Duration::from_millis(100))
+        } else if app.modified || app.autosave_job.is_some() {
+            Some(Duration::from_secs(5))
         } else {
             None
+        };
+        // The interface may want a frame later (tooltips, fading messages).
+        let ui_wait = app.gui.repaint_at.map(|t| t.saturating_duration_since(Instant::now()));
+        let timeout = match (timeout, ui_wait) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         };
         event_loop.dispatch(timeout, &mut app)?;
         app.poll_save();
         app.poll_export();
-        if ants {
+        app.maybe_autosave();
+        if ants || app.gui.repaint_at.is_some_and(|t| t <= Instant::now()) || ui::log::generation() != app.ui_log_gen {
             app.needs_redraw = true;
         }
         if app.configured && app.needs_redraw && !app.frame_pending {
             app.draw();
         }
     }
+    // A deliberate quit: the recovery copy is no longer needed.
+    app.drop_autosave();
     Ok(())
 }
 
@@ -497,7 +564,12 @@ impl App {
             && let Some(s) = &self.session
         {
             let (w, h) = s.engine.size();
-            self.view.fit(w, h);
+            let (a, b) = self.canvas_rect;
+            if b != DVec2::ZERO {
+                self.view.fit_in(w, h, a, b);
+            } else {
+                self.view.fit(w, h);
+            }
             self.view_fitted = true;
         }
     }
@@ -513,7 +585,7 @@ impl App {
     fn print_layers(&self) {
         if let Some(s) = &self.session {
             let d = s.engine.doc();
-            println!("── Ebenen (oben → unten), Blend-Raum: {} ──\n{}", d.blend_space.name(), d.describe());
+            tracing::debug!("Ebenen (oben → unten), Blend-Raum: {}\n{}", d.blend_space.name(), d.describe());
         }
     }
 
@@ -878,6 +950,27 @@ impl App {
 
     pub fn on_tablet_frame(&mut self, f: TabletFrame) {
         let pos = self.to_physical(f.pos);
+        // The pen also operates the interface.
+        self.gui.pointer_moved(pos, self.scale);
+        self.needs_redraw = true;
+        if self.tablet_ui || (self.over_ui(pos) && !self.tablet_contact && matches!(self.drag, Drag::None)) {
+            self.cursor = None;
+            match f.contact {
+                Some(true) => {
+                    self.tablet_ui = true;
+                    self.gui.pointer_button(pos, self.scale, false, true);
+                }
+                Some(false) => {
+                    self.tablet_ui = false;
+                    self.gui.pointer_button(pos, self.scale, false, false);
+                }
+                _ => {}
+            }
+            if f.proximity == Some(false) {
+                self.gui.pointer_gone();
+            }
+            return;
+        }
         if f.proximity == Some(false) {
             if self.tablet_contact {
                 self.release(pos, 0.0);
@@ -978,6 +1071,7 @@ impl App {
                 let r = s.complete_save(done);
                 if self.edit_count == self.save_mark {
                     self.modified = false;
+                    self.drop_autosave();
                 }
                 tracing::info!(
                     "Gespeichert: {} ({} Kacheln geschrieben, {}, {:.1} MB, {:.0} ms im Hintergrund)",
@@ -1003,6 +1097,50 @@ impl App {
         tracing::info!("Exportiere {} im Hintergrund …", path.display());
         self.export_job = Some(s.start_export(&path));
         self.bg_running += 1;
+    }
+
+    /// Starts a background recovery copy if there are unsaved changes and
+    /// the last one is old enough. The document's own file is not touched.
+    fn maybe_autosave(&mut self) {
+        if let Some((_, job)) = &self.autosave_job {
+            if job.ready(&self.gpu.device) {
+                let (path, job) = self.autosave_job.take().unwrap();
+                let work = job.into_writer();
+                self.spawn_bg("autosave", move || BgDone::Autosaved { path, result: work().map(|_| ()) });
+            }
+            return;
+        }
+        if !self.modified
+            || self.edit_count == self.autosave_mark
+            || self.autosave_at.elapsed() < AUTOSAVE_EVERY
+            || self.stroke.is_some()
+            || self.loading
+        {
+            return;
+        }
+        let Some(s) = &mut self.session else { return };
+        let dir = autosave_dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!("Automatisches Sichern: {}: {e}", dir.display());
+            self.autosave_at = Instant::now();
+            return;
+        }
+        let stem = std::path::Path::new(&s.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let path = dir.join(format!("{}-{}.imagine", if stem.is_empty() { "Unbenannt" } else { &stem }, std::process::id()));
+        match s.start_save_copy(&path) {
+            Ok(job) => self.autosave_job = Some((path, job)),
+            Err(e) => tracing::warn!("Automatisches Sichern: {e:#}"),
+        }
+        self.autosave_mark = self.edit_count;
+        self.autosave_at = Instant::now();
+    }
+
+    /// Removes the recovery copy (after a real save or a clean exit).
+    fn drop_autosave(&mut self) {
+        let paths = [self.autosave_path.take(), self.autosave_job.take().map(|(p, _)| p)];
+        for p in paths.into_iter().flatten() {
+            let _ = std::fs::remove_file(p);
+        }
     }
 
     /// Hands a finished export readback to a worker thread.
@@ -1045,6 +1183,13 @@ impl App {
     fn on_background_done(&mut self, done: BgDone) {
         self.bg_running = self.bg_running.saturating_sub(1);
         match done {
+            BgDone::Autosaved { path, result } => match result {
+                Ok(()) => {
+                    tracing::info!("Wiederherstellungskopie gesichert: {}", path.display());
+                    self.autosave_path = Some(path);
+                }
+                Err(e) => tracing::warn!("Automatisches Sichern fehlgeschlagen: {e:#}"),
+            },
             BgDone::Exported { path, result } => match result {
                 Ok(ms) => tracing::info!("Exportiert: {} ({ms:.0} ms)", path.display()),
                 Err(e) => tracing::error!("Export fehlgeschlagen: {e:#}"),
@@ -1093,6 +1238,17 @@ impl App {
     fn key(&mut self, ev: &KeyEvent, pressed: bool) {
         let sym = ev.keysym;
         tracing::debug!(?sym, raw = ev.raw_code, pressed, "Taste");
+        // Text fields and the command palette take the keyboard.
+        if self.ui_state.palette.is_some() || self.gui.wants_keyboard() {
+            if let Some(k) = ui::egui_key(sym) {
+                self.gui.key(k, pressed);
+            }
+            if pressed && let Some(t) = &ev.utf8 {
+                self.gui.text(t);
+            }
+            self.needs_redraw = true;
+            return;
+        }
         match sym {
             Keysym::space => self.space = pressed,
             Keysym::r => self.r_key = pressed,
@@ -1101,6 +1257,23 @@ impl App {
         if !pressed || self.stroke.is_some() {
             return;
         }
+        self.hotkey(ev);
+        self.needs_redraw = true;
+    }
+
+    /// Runs a menu / palette command by replaying its shortcut.
+    fn run_cmd(&mut self, c: ui::palette::Cmd) {
+        let saved = self.mods;
+        self.mods.ctrl = c.ctrl;
+        self.mods.shift = c.shift;
+        self.mods.alt = c.alt;
+        self.hotkey(&KeyEvent { time: 0, raw_code: 0, keysym: c.key, utf8: None });
+        self.mods = saved;
+        self.needs_redraw = true;
+    }
+
+    fn hotkey(&mut self, ev: &KeyEvent) {
+        let sym = ev.keysym;
         let (ctrl, shift, alt) = (self.mods.ctrl, self.mods.shift, self.mods.alt);
         let center = self.view.viewport * 0.5;
         let anchor = self.cursor.unwrap_or(center);
@@ -1129,6 +1302,9 @@ impl App {
 
         match sym {
             Keysym::q | Keysym::Q if ctrl => self.request_quit(),
+            Keysym::p | Keysym::P if ctrl && shift => self.ui_state.palette = Some((String::new(), 0)),
+            Keysym::k if ctrl => self.ui_state.palette = Some((String::new(), 0)),
+            Keysym::Tab => self.ui_state.hidden = !self.ui_state.hidden,
             Keysym::Escape => self.cancel_box(),
             Keysym::Return | Keysym::KP_Enter => self.commit_box(),
             Keysym::t if ctrl => self.begin_transform(),
@@ -1511,6 +1687,228 @@ impl App {
         }
     }
 
+    /// Whether a screen position (physical px) is covered by the interface.
+    fn over_ui(&self, pos: DVec2) -> bool {
+        let (a, b) = self.canvas_rect;
+        let outside = b != DVec2::ZERO && (pos.x < a.x || pos.y < a.y || pos.x >= b.x || pos.y >= b.y);
+        let p = egui::pos2((pos.x / self.scale) as f32, (pos.y / self.scale) as f32);
+        let floating = self.gui.ctx.layer_id_at(p).is_some_and(|l| l.order != egui::Order::Background);
+        outside || floating
+    }
+
+    fn tool_id(&self) -> ToolId {
+        match self.tool {
+            Tool::Brush => ToolId::Brush,
+            Tool::Eraser => ToolId::Eraser,
+            Tool::Smudge => ToolId::Smudge,
+            Tool::Marquee { ellipse: false } => ToolId::Marquee,
+            Tool::Marquee { ellipse: true } => ToolId::Ellipse,
+            Tool::Lasso => ToolId::Lasso,
+            Tool::Wand => ToolId::Wand,
+            Tool::Gradient { radial: false } => ToolId::Gradient,
+            Tool::Gradient { radial: true } => ToolId::Radial,
+            Tool::Move => ToolId::Move,
+            Tool::Crop => ToolId::Crop,
+        }
+    }
+
+    /// Snapshot of the app state for the panels.
+    fn ui_model(&self) -> Option<ui::panels::Model> {
+        let s = self.session.as_ref()?;
+        let e = &s.engine;
+        let doc = e.doc();
+        let active = doc.active_layer();
+        let (history, history_done) = e.history_labels();
+        let b = &self.brush;
+        Some(ui::panels::Model {
+            doc_size: e.size(),
+            name: s.name.clone(),
+            modified: self.modified,
+            zoom: self.view.zoom / self.scale,
+            rotation_deg: self.view.rotation.to_degrees(),
+            // Not while dragging: the panels need not be rebuilt for every stroke frame.
+            cursor_doc: self.cursor.filter(|_| matches!(self.drag, Drag::None)).map(|c| {
+                let d = self.view.screen_to_doc(c);
+                (d.x, d.y)
+            }),
+            tool: self.tool_id(),
+            color: b.color,
+            brush: ui::panels::BrushModel {
+                size: b.size,
+                hardness: b.hardness,
+                flow: b.flow,
+                opacity: b.opacity,
+                spacing: b.spacing,
+                smoothing: b.smoothing,
+                tip: b.tip,
+                angle: b.angle,
+                roundness: b.roundness,
+                size_jitter: b.size_jitter,
+                angle_jitter: b.angle_jitter,
+                scatter: b.scatter,
+                flow_jitter: b.flow_jitter,
+                follow_direction: b.follow_direction,
+            },
+            smudge_strength: self.smudge_strength,
+            wand_tolerance: self.wand_tolerance,
+            wand_contiguous: self.wand_contiguous,
+            boxed: self.boxed.as_ref().map(|(k, _)| match k {
+                BoxKind::Transform => "Frei transformieren",
+                BoxKind::Crop => "Zuschneiden",
+            }),
+            mask_edit: self.mask_edit,
+            layers: ui::panels::layer_rows(doc),
+            active: doc.active,
+            active_opacity: active.map_or(1.0, |l| l.opacity),
+            active_blend: active.map_or(imagine_core::BlendMode::Normal, |l| l.blend),
+            history,
+            history_done,
+            has_selection: doc.selection.is_some(),
+            status: self.ui_status.clone(),
+            busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
+        })
+    }
+
+    fn apply_ui(&mut self, actions: Vec<Action>) {
+        for a in actions {
+            self.needs_redraw = true;
+            match a {
+                Action::Command(c) => self.run_cmd(c),
+                Action::Tool(t) => {
+                    let tool = match t {
+                        ToolId::Brush => Tool::Brush,
+                        ToolId::Eraser => Tool::Eraser,
+                        ToolId::Smudge => Tool::Smudge,
+                        ToolId::Marquee => Tool::Marquee { ellipse: false },
+                        ToolId::Ellipse => Tool::Marquee { ellipse: true },
+                        ToolId::Lasso => Tool::Lasso,
+                        ToolId::Wand => Tool::Wand,
+                        ToolId::Gradient => Tool::Gradient { radial: false },
+                        ToolId::Radial => Tool::Gradient { radial: true },
+                        ToolId::Move => Tool::Move,
+                        ToolId::Crop => Tool::Crop,
+                    };
+                    self.set_tool(tool);
+                }
+                Action::Color(c) => self.brush.color = c,
+                Action::Brush(m) => {
+                    let b = &mut self.brush;
+                    (b.size, b.hardness, b.flow, b.opacity, b.spacing, b.smoothing) =
+                        (m.size, m.hardness, m.flow, m.opacity, m.spacing, m.smoothing);
+                    (b.tip, b.angle, b.roundness, b.follow_direction) = (m.tip, m.angle, m.roundness, m.follow_direction);
+                    (b.size_jitter, b.angle_jitter, b.scatter, b.flow_jitter) =
+                        (m.size_jitter, m.angle_jitter, m.scatter, m.flow_jitter);
+                }
+                Action::SmudgeStrength(v) => self.smudge_strength = v,
+                Action::WandTolerance(v) => self.wand_tolerance = v,
+                Action::WandContiguous(v) => self.wand_contiguous = v,
+                Action::SelectLayer(id) => {
+                    if let Some(e) = self.engine() {
+                        e.select(|d| d.active = id);
+                    }
+                    let has_mask = self.engine().and_then(|e| e.doc().find(id).map(|l| l.mask.is_some()));
+                    if has_mask == Some(false) {
+                        self.mask_edit = false;
+                    }
+                }
+                Action::ToggleVisible(id) => self.edit("Sichtbarkeit", |d| {
+                    let l = d.find_mut(id).unwrap();
+                    l.visible = !l.visible;
+                    true
+                }),
+                Action::ToggleMaskEdit(id) => {
+                    let was_active = self.engine().is_some_and(|e| e.doc().active == id);
+                    if let Some(e) = self.engine() {
+                        e.select(|d| d.active = id);
+                    }
+                    self.mask_edit = !(was_active && self.mask_edit);
+                    tracing::info!("Ziel: {}", if self.mask_edit { "Ebenenmaske" } else { "Pixel" });
+                }
+                Action::RenameLayer(id, name) => self.edit("Umbenennen", |d| {
+                    let l = d.find_mut(id).unwrap();
+                    let changed = l.name != name;
+                    l.name = name;
+                    changed
+                }),
+                Action::MoveLayer { id, target, above, into } => {
+                    self.edit("Ebene verschieben", |d| d.move_layer(id, target, above, into))
+                }
+                Action::LayerOpacity { value, done } => {
+                    if let Some(e) = self.engine() {
+                        let changed = e.edit_merged("Deckkraft", "layer-opacity", |d| {
+                            let id = d.active;
+                            let l = d.find_mut(id).unwrap();
+                            let c = l.opacity != value;
+                            l.opacity = value;
+                            c
+                        });
+                        if done {
+                            e.end_merge();
+                        }
+                        if changed {
+                            self.touch();
+                        }
+                    }
+                }
+                Action::LayerBlend(b) => self.edit("Füllmethode", |d| {
+                    let id = d.active;
+                    let l = d.find_mut(id).unwrap();
+                    let c = l.blend != b;
+                    l.blend = b;
+                    c
+                }),
+                Action::DeleteLayer => self.edit("Ebene löschen", |d| d.remove_active()),
+                Action::HistoryJump(n) => {
+                    if self.engine().is_some_and(|e| e.jump_history(n)) {
+                        self.touch();
+                    }
+                }
+                Action::CommitBox => self.commit_box(),
+                Action::CancelBox => self.cancel_box(),
+                Action::CanvasSize { w, h, anchor } => {
+                    let Some((ow, oh)) = self.session.as_ref().map(|s| s.engine.size()) else { continue };
+                    let x = ((ow as f64 - w as f64) * anchor.0).round() as i64;
+                    let y = ((oh as f64 - h as f64) * anchor.1).round() as i64;
+                    self.engine_op(|e| e.crop(x, y, w, h, "Arbeitsfläche"));
+                    self.view_fitted = false;
+                }
+                Action::ImageSize { w, h } => {
+                    self.engine_op(|e| e.resize_image(w, h, Interp::Bicubic, "Bildgröße"));
+                    self.view_fitted = false;
+                }
+            }
+        }
+    }
+
+    /// Builds the interface for this frame and applies what the user did.
+    fn run_ui(&mut self) {
+        let Some(model) = self.ui_model() else { return };
+        let size = (self.surface_config.width, self.surface_config.height);
+        let changed = self.last_model.as_ref() != Some(&model) || ui::log::generation() != self.ui_log_gen;
+        if !self.gui.needs_pass(size, self.scale, changed) {
+            return;
+        }
+        let mut actions = Vec::new();
+        let state = &mut self.ui_state;
+        self.gui.run(size, self.scale, |ctx| actions = ui::panels::build(ctx, &model, state));
+        let s = self.scale;
+        let rect = match self.ui_state.canvas {
+            Some(r) => (DVec2::new(r.min.x as f64 * s, r.min.y as f64 * s), DVec2::new(r.max.x as f64 * s, r.max.y as f64 * s)),
+            None => (DVec2::ZERO, DVec2::new(size.0 as f64, size.1 as f64)),
+        };
+        if rect != self.canvas_rect {
+            // First layout: fit the image into the free area.
+            if self.canvas_rect.1 == DVec2::ZERO {
+                self.view_fitted = false;
+            }
+            self.canvas_rect = rect;
+        }
+        self.ui_log_gen = ui::log::generation();
+        self.last_model = Some(model);
+        self.apply_ui(actions);
+        self.fit_if_needed();
+    }
+
     fn draw(&mut self) {
         let t0 = Instant::now();
         let busy = self.session.as_ref().is_some_and(|s| s.engine.busy());
@@ -1545,6 +1943,7 @@ impl App {
             quick_mask: self.quick_mask,
             time: self.started.elapsed().as_secs_f32(),
         };
+        self.run_ui();
         let preview = self.preview_transform();
         if let Some(s) = &mut self.session {
             let mut batch: Vec<(LayerId, TileData)> = Vec::new();
@@ -1569,6 +1968,8 @@ impl App {
         } else {
             clear(&self.gpu, &target);
         }
+        let size = (self.surface_config.width, self.surface_config.height);
+        self.gui.paint(&self.gpu.device, &self.gpu.queue, &target, size);
 
         let surface = self.window.wl_surface();
         surface.frame(&self.qh, FrameCallbackData(surface.clone()));
@@ -1589,13 +1990,25 @@ impl App {
             }
         }
 
-        self.needs_redraw = !self.pending_uploads.is_empty()
+        self.needs_redraw = self.gui.repaint_at.is_some_and(|t| t <= Instant::now() + Duration::from_millis(4))
+            || self.gui.has_events()
+            || ui::log::generation() != self.ui_log_gen
+            || !self.pending_uploads.is_empty()
             || self.bench.is_some()
             || (self.bench_on_load && !self.loading)
             || self.session.as_ref().is_some_and(|s| s.engine.busy());
         if now.duration_since(self.title_at).as_millis() > 250 {
             self.title_at = now;
             self.update_title();
+            if let Some(s) = &self.session {
+                let e = &s.engine;
+                self.ui_status = format!(
+                    "{} Kacheln · {:.0} MB GPU · {:.2} ms",
+                    e.layer_tiles_live(),
+                    e.gpu_bytes() as f64 / 1e6,
+                    self.frame_cpu_ms
+                );
+            }
         }
     }
 
@@ -1852,7 +2265,11 @@ impl KeyboardHandler for App {
         self.key(&ev, true);
     }
 
-    fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, _: KeyEvent) {}
+    fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
+        if self.ui_state.palette.is_some() || self.gui.wants_keyboard() {
+            self.key(&ev, true);
+        }
+    }
 
     fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
         self.key(&ev, false);
@@ -1869,6 +2286,7 @@ impl KeyboardHandler for App {
         _: u32,
     ) {
         self.mods = mods;
+        self.gui.set_modifiers(mods.ctrl, mods.shift, mods.alt);
     }
 }
 
@@ -1879,6 +2297,50 @@ impl PointerHandler for App {
                 continue;
             }
             let pos = self.to_physical(ev.position);
+            let scale = self.scale;
+            self.needs_redraw = true;
+            match &ev.kind {
+                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => self.gui.pointer_moved(pos, scale),
+                PointerEventKind::Leave { .. } => self.gui.pointer_gone(),
+                _ => {}
+            }
+            let canvas_busy = !matches!(self.drag, Drag::None);
+            let over_ui = self.over_ui(pos);
+            match &ev.kind {
+                PointerEventKind::Press { button, .. } if !self.tablet_contact && (over_ui || self.ui_pointer) && !canvas_busy => {
+                    self.ui_pointer = true;
+                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, true);
+                    continue;
+                }
+                PointerEventKind::Release { button, .. } if self.ui_pointer => {
+                    self.ui_pointer = false;
+                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, false);
+                    continue;
+                }
+                PointerEventKind::Motion { .. } if (over_ui || self.ui_pointer) && !canvas_busy => {
+                    self.cursor = None;
+                    continue;
+                }
+                PointerEventKind::Axis { vertical, .. } if over_ui && !canvas_busy => {
+                    let steps = if vertical.value120 != 0 {
+                        vertical.value120 as f64 / 120.0
+                    } else if vertical.discrete != 0 {
+                        vertical.discrete as f64
+                    } else {
+                        vertical.absolute / 15.0
+                    };
+                    self.gui.scroll(steps);
+                    continue;
+                }
+                // Canvas clicks also reach egui (closes open menus and popups).
+                PointerEventKind::Press { button, .. } if !self.tablet_contact => {
+                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, true);
+                }
+                PointerEventKind::Release { button, .. } if !self.tablet_contact => {
+                    self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, false);
+                }
+                _ => {}
+            }
             match &ev.kind {
                 PointerEventKind::Enter { .. } => {
                     if let Some(p) = &self.pointer {

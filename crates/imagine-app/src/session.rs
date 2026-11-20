@@ -252,6 +252,17 @@ impl Session {
         })
     }
 
+    /// Starts writing a complete copy to `path` (recovery / autosave). Unlike
+    /// [`Self::start_save`], the session keeps its own file: do not pass the
+    /// result to [`Self::complete_save`].
+    pub fn start_save_copy(&mut self, path: &Path) -> anyhow::Result<SaveJob> {
+        let (save_path, file_len) = (self.save_path.take(), self.file_len.take());
+        let job = self.start_save(Some(path));
+        self.save_path = save_path;
+        self.file_len = file_len;
+        job
+    }
+
     /// Records a finished save (call on the thread that owns the session).
     pub fn complete_save(&mut self, done: SaveDone) -> SaveReport {
         self.saved = done.refs;
@@ -330,6 +341,34 @@ mod tests {
     use imagine_core::{BrushSettings, Document, InputSample, Stroke, TILE_SIZE};
     use imagine_gpu::{GpuContext, StrokeParams};
     use imagine_io::native::Reader;
+
+    #[test]
+    fn recovery_copy_keeps_the_documents_own_file() {
+        let Ok(g) = pollster::block_on(GpuContext::new(GpuContext::create_instance(), None)) else {
+            eprintln!("skipping: no GPU");
+            return;
+        };
+        let doc = Document::<()>::new(TILE_SIZE, TILE_SIZE);
+        let layer = doc.active;
+        let engine = Engine::new(&g.device, &g.queue, wgpu::TextureFormat::Rgba8UnormSrgb, &doc);
+        let mut s = Session::new(engine, "t".into(), None, None);
+        let px = vec![f16::from_f32(0.5); (TILE_SIZE * TILE_SIZE * 4) as usize];
+        s.add_tiles(layer, &[(TileCoord::new(0, 0), px, None)]);
+        let dir = tempfile::tempdir().unwrap();
+        let own = dir.path().join("own.imagine");
+        s.save(Some(&own)).unwrap();
+        let copy = dir.path().join("copy.imagine");
+        let job = s.start_save_copy(&copy).unwrap();
+        while !job.ready(s.engine.device()) {
+            let _ = s.engine.device().poll(wgpu::PollType::wait_indefinitely());
+        }
+        job.into_writer()().unwrap();
+        assert_eq!(s.default_save_path(), own);
+        let (_, doc) = Reader::open(&copy).unwrap();
+        assert_eq!(doc.find(layer).unwrap().tiles().unwrap().len(), 1);
+        // The next real save is still incremental into the own file.
+        assert!(s.save(None).unwrap().incremental);
+    }
 
     #[test]
     fn incremental_save_writes_only_changed_tiles() {

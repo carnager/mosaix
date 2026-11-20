@@ -364,9 +364,29 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 - Pinselspitzen sind fest eingebaut (eigene Spitzen und ABR kommen mit Phase 7).
 - Neue Fensterwerkzeuge (Strg+T, C, W, U, Umschalt+B, J) sind nur über Engine-, Agenten- und Geometrie-Tests abgesichert und brauchen den Handtest.
 
+## Stand Phase 3 (20.11.2026) – Oberfläche (MVP)
+
+- **egui** (0.37, egui-wgpu auf derselben wgpu-30-Instanz), ohne winit: Wayland-Eingaben (Maus, Stift, Tastatur, Modifier, Tastenwiederholung) werden selbst übersetzt. Die Oberfläche wird nach der Leinwand im selben Frame gezeichnet.
+- **Eingabe-Routing:** Klicks über Panels oder Fenstern gehen an die Oberfläche, auf der Leinwand begonnene Striche bleiben bei der Leinwand. Auch der Stift bedient die Oberfläche. Textfelder und die Palette bekommen die Tastatur, sonst gelten die Tastenkürzel.
+- **Layout:** Menüleiste (alle Befehle mit Kürzeln), Werkzeugleiste mit selbst gezeichneten Vektor-Symbolen, rechte Seitenleiste mit Farbwähler (eigenes HSV-Feld, Farbfelder, Hex), kontextabhängigen Werkzeug-Einstellungen (Pinsel inkl. Spitze und Dynamik, Wischfinger, Zauberstab, Verlauf), Ebenen (Sichtbarkeit, Füllmethode, Deckkraft mit einem Undo-Schritt pro Ziehen, Drag & Drop inkl. in Gruppen, Umbenennen, Masken-Symbol) und Verlaufsliste mit Sprüngen. Statusleiste mit Zoom, Größe, Cursor-Position, Hintergrund-Arbeit und der letzten Meldung (alle `tracing`-Meldungen landen im Meldungsfenster).
+- **Befehlspalette** (Strg+K / Strg+Umschalt+P) und Menüs nutzen eine Befehlsliste, die die Tastenkürzel abspielt. Menü, Palette und Tastatur können so nicht auseinanderlaufen.
+- **Dialoge:** Arbeitsfläche (mit Anker) und Bildgröße (Seitenverhältnis).
+- **Automatisches Sichern:** alle 3 min bei Änderungen eine vollständige Kopie im Hintergrund nach `~/.local/state/imagine/autosave/`. Die eigene Datei und das inkrementelle Speichern bleiben unberührt. Nach dem Speichern bzw. Beenden wird die Kopie gelöscht, verwaiste Kopien werden beim Start gemeldet.
+- **Einpassen** berücksichtigt die Panels. `Tab` blendet die Oberfläche aus.
+- **Kosten:** etwa 0,4 ms pro UI-Durchlauf inkl. GPU. Ohne Eingabe und ohne Modelländerung wird das letzte UI-Bild wiederverwendet, beim Malen läuft also kein UI-Durchlauf pro Frame.
+- **Prüfung ohne Fenster:** `imagine --ui-snapshot OUT.png [DATEI]` rendert Leinwand und Oberfläche offscreen (Layout-Kontrolle per Bild).
+
+**Noch offen in Phase 3:**
+- Ebenen-Vorschaubilder
+- frei belegbare Tastenkürzel
+- HUDs (Pinselgröße per Alt+Rechtsziehen)
+- Docking und abtrennbare Panels
+- Einstellungen speichern (Werkzeug, Farben, Panelbreite)
+- Datei öffnen/neu per Dialog (bisher nur über die Kommandozeile)
+
 ## Nächster konkreter Schritt
 
-**Phase 3 – UI (MVP):** egui-Overlay mit Werkzeugleiste, Ebenen-Panel (Sichtbarkeit, Deckkraft, Füllmethode, Masken-Vorschau, Ziehen zum Sortieren), Farbwähler, Pinsel-Einstellungen, Statusleiste und Verlaufsliste; Command-Palette; Autosave.
+Rückmeldung zur Oberfläche einarbeiten, dann der Rest von Phase 3: Ebenen-Vorschaubilder, Öffnen/Neu-Dialoge (xdg-desktop-portal), Einstellungen speichern, Pinselgröße-HUD.
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

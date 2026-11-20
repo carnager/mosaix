@@ -33,6 +33,8 @@ rayon.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
 tracing-tracy = { workspace = true, optional = true }
 
 [dev-dependencies]

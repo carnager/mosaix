@@ -54,6 +54,12 @@ impl<S> History<S> {
     pub fn redo_len(&self) -> usize {
         self.redo.len()
     }
+
+    /// Labels of all steps, oldest first: the done steps, then the undone
+    /// (redoable) ones. The current state sits after `undo_len()` entries.
+    pub fn labels(&self) -> Vec<&str> {
+        self.undo.iter().map(|(_, l)| l.as_str()).chain(self.redo.iter().rev().map(|(_, l)| l.as_str())).collect()
+    }
 }
 
 #[cfg(test)]
