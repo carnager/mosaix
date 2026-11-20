@@ -436,6 +436,8 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 - **Werkzeuge:** Text (`T`: Klick legt Text an bzw. wählt vorhandenen zum Bearbeiten), Form (Umschalt+`U`: Rechteck/Ellipse aufziehen, Umschalt quadratisch, Alt von der Mitte; Fläche in Pinselfarbe). Eigenschaften-Panel mit Textfeld, Schriftliste mit Suche, Größe, Fett/Kursiv, Ausrichtung, Farbe, Zeilenabstand, Laufweite, Absatz; bei Formen Ecken, Fläche, Kontur. Tippen und Regler ergeben je einen Undo-Schritt.
 - **Agenten:** `text_add`, `shape_add`, `vector_set` (JSON-Merge in die Beschreibung, auch `transform`), `layer_rasterize`; `document_info` zeigt Vektorebenen mit Beschreibung und Grenzen.
 
+- **Drehen auffindbar gemacht:** Transformieren-Panel mit Winkelfeld, 90°/180°-Knöpfen und Spiegeln; Menüs Bild › drehen/spiegeln (exakt, Arbeitsfläche tauscht Breite/Höhe) und Ebene › drehen/spiegeln (um die Inhaltsmitte, 90°-Schritte pixelgenau). Behoben: Arbeitsfläche/Zuschneiden um ganze Kacheln verschob Vektorebenen nicht mit.
+
 **Noch offen in Phase 6:** Text direkt im Bild bearbeiten (Cursor, Auswahl), Zeichenstift/Pfade bearbeiten, Ebenenstile (Schlagschatten, Kontur, Schein, Farbüberlagerung), Text auf Pfad, OpenType-Features.
 
 ## Nächster konkreter Schritt

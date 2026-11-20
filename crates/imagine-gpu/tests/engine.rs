@@ -1265,3 +1265,37 @@ fn vector_layers_render_transform_and_rasterize() {
     assert_eq!((40..500).filter(|&x| at(&e, x, 370)[3] > 0.5).count(), ink);
     assert!(e.doc().find(text).unwrap().tiles().is_some_and(|t| !t.is_empty()));
 }
+
+#[test]
+fn rotate_and_flip_image_and_layer() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 300));
+    // A single red pixel at (10, 20) and a text layer that must follow.
+    e.select_shape(&Shape::Rect { x: 10.0, y: 20.0, w: 1.0, h: 1.0 }, CombineOp::Replace, "A").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "F").unwrap();
+    e.deselect("x").unwrap();
+    let a = |e: &mut Engine, x: usize, y: usize| {
+        e.flush();
+        composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), x % 256, y % 256)[0]
+    };
+    assert_eq!(a(&mut e, 10, 20), 1.0);
+    // 90° clockwise: (x, y) → (H − 1 − y, x), canvas 300 × 600.
+    e.rotate_image(1, false, false, "Drehen").unwrap();
+    assert_eq!(e.size(), (300, 600));
+    assert_eq!(a(&mut e, 300 - 1 - 20, 10), 1.0);
+    // Back, then mirror left ↔ right: (x, y) → (W − 1 − x, y).
+    e.rotate_image(3, false, false, "Drehen").unwrap();
+    assert_eq!(e.size(), (600, 300));
+    assert_eq!(a(&mut e, 10, 20), 1.0);
+    e.rotate_image(0, true, false, "Spiegeln").unwrap();
+    assert_eq!(a(&mut e, 600 - 1 - 10, 20), 1.0);
+    assert_eq!(a(&mut e, 10, 20), 0.0);
+    e.undo();
+    // 180°: (x, y) → (W − 1 − x, H − 1 − y).
+    e.rotate_image(2, false, false, "Drehen").unwrap();
+    assert_eq!(a(&mut e, 600 - 1 - 10, 300 - 1 - 20), 1.0);
+    e.undo();
+    // Layer about its content centre (a 1 px dot stays put when turned).
+    e.rotate_layer(90.0, false, false, "Ebene drehen").unwrap();
+    assert_eq!(a(&mut e, 10, 20), 1.0);
+}

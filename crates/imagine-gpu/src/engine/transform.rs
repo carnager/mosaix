@@ -398,6 +398,53 @@ impl Engine {
     }
 
     /// Scales the whole image (all layers and masks) to `w × h`.
+    /// Rotates the whole image by `quarter_turns` × 90° clockwise and/or
+    /// mirrors it (`flip_x`: left ↔ right, `flip_y`: top ↔ bottom). Exact (no
+    /// resampling); the canvas swaps width and height for odd turns.
+    pub fn rotate_image(&mut self, quarter_turns: i32, flip_x: bool, flip_y: bool, label: &str) -> Result<(), &'static str> {
+        let (w, h) = self.size();
+        let (w, h) = (w as f64, h as f64);
+        let turns = quarter_turns.rem_euclid(4);
+        // Rotation about the origin, then moved back into the canvas.
+        let (rot, nw, nh) = match turns {
+            1 => (DAffine2::from_cols_array(&[0.0, 1.0, -1.0, 0.0, h, 0.0]), h, w),
+            2 => (DAffine2::from_cols_array(&[-1.0, 0.0, 0.0, -1.0, w, h]), w, h),
+            3 => (DAffine2::from_cols_array(&[0.0, -1.0, 1.0, 0.0, 0.0, w]), h, w),
+            _ => (DAffine2::IDENTITY, w, h),
+        };
+        let mut flip = DAffine2::IDENTITY;
+        if flip_x {
+            flip = DAffine2::from_cols_array(&[-1.0, 0.0, 0.0, 1.0, nw, 0.0]) * flip;
+        }
+        if flip_y {
+            flip = DAffine2::from_cols_array(&[1.0, 0.0, 0.0, -1.0, 0.0, nh]) * flip;
+        }
+        let fwd = flip * rot;
+        if fwd == DAffine2::IDENTITY {
+            return Ok(());
+        }
+        self.canvas_op(nw as u32, nh as u32, fwd, Interp::Nearest, label)
+    }
+
+    /// Rotates / mirrors the active layer about the centre of its content.
+    pub fn rotate_layer(&mut self, degrees: f64, flip_x: bool, flip_y: bool, label: &str) -> Result<(), &'static str> {
+        let id = self.doc.active;
+        let (x0, y0, x1, y1) = self.content_bounds(id).ok_or("die Ebene ist leer")?;
+        let c = DVec2::new((x0 + x1) as f64 * 0.5, (y0 + y1) as f64 * 0.5);
+        let mut m = DAffine2::from_angle(degrees.to_radians());
+        // Exact quarter turns (no rounding noise in the matrix).
+        if (degrees / 90.0).fract() == 0.0 {
+            m.matrix2 = glam::DMat2::from_cols_array(&m.matrix2.to_cols_array().map(f64::round));
+        }
+        let f = DAffine2::from_scale(DVec2::new(if flip_x { -1.0 } else { 1.0 }, if flip_y { -1.0 } else { 1.0 }));
+        let lin = m * f;
+        // About the centre; for quarter turns keep pixel centres on pixel centres.
+        let mut fwd = DAffine2::from_translation(c) * lin * DAffine2::from_translation(-c);
+        fwd.translation = fwd.translation.round();
+        let interp = if (degrees / 90.0).fract() == 0.0 { Interp::Nearest } else { Interp::Bicubic };
+        self.transform_layer(fwd, interp, false, label)
+    }
+
     pub fn resize_image(&mut self, w: u32, h: u32, interp: Interp, label: &str) -> Result<(), &'static str> {
         let (ow, oh) = self.size();
         let k = DVec2::new(w as f64 / ow as f64, h as f64 / oh as f64);
@@ -426,8 +473,10 @@ impl Engine {
                 let (dx, dy) = ((t.x / ts) as i32, (t.y / ts) as i32);
                 let shift = |c: &TileCoord| TileCoord::new(c.x + dx, c.y + dy);
                 let l = out.find_mut(id).unwrap();
-                if let Content::Pixels(map) = &mut l.content {
-                    *map = Arc::new(map.iter().map(|(c, t)| (shift(c), t.clone())).collect());
+                match &mut l.content {
+                    Content::Pixels(map) => *map = Arc::new(map.iter().map(|(c, t)| (shift(c), t.clone())).collect()),
+                    Content::Vector(v) => v.transform = imagine_core::vector::compose([1.0, 0.0, 0.0, 1.0, t.x, t.y], v.transform),
+                    _ => {}
                 }
                 if let Some(m) = &mut l.mask {
                     m.tiles = Arc::new(m.tiles.iter().map(|(c, t)| (shift(c), t.clone())).collect());

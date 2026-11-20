@@ -120,6 +120,8 @@ pub struct Model {
     pub wand_tolerance: f32,
     pub wand_contiguous: bool,
     pub boxed: Option<&'static str>,
+    /// Free transform: current angle (degrees).
+    pub box_angle: Option<f64>,
     /// Liquify session: tool, brush diameter, strength.
     pub liquify: Option<(imagine_gpu::LiquifyTool, f32, f32)>,
     pub mask_edit: bool,
@@ -167,6 +169,10 @@ pub enum Action {
     HistoryJump(usize),
     CommitBox,
     CancelBox,
+    /// Free transform: turn by (degrees), set the angle, mirror.
+    BoxRotate(f64),
+    BoxAngle(f64),
+    BoxFlip { x: bool, y: bool },
     CanvasSize { w: u32, h: u32, anchor: (f64, f64) },
     ImageSize { w: u32, h: u32 },
     OpenFile(std::path::PathBuf),
@@ -489,6 +495,31 @@ fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action
     if let Some(kind) = m.boxed {
         ui.group(|ui| {
             ui.label(RichText::new(kind).strong());
+            if let Some(angle) = m.box_angle {
+                ui.label(RichText::new("Ecken ziehen: skalieren (Umschalt frei) · außerhalb ziehen: drehen (Umschalt 15°) · Alt: um die Mitte").weak().small());
+                ui.horizontal(|ui| {
+                    ui.label("Winkel");
+                    let mut a = angle;
+                    let r = ui.add(egui::DragValue::new(&mut a).range(-180.0..=180.0).suffix("°").speed(0.5).max_decimals(1));
+                    if r.changed() {
+                        out.push(Action::BoxAngle(a));
+                    }
+                    for (label, deg, tip) in [("90° links", -90.0, "90° gegen den Uhrzeigersinn"), ("90° rechts", 90.0, "90° im Uhrzeigersinn"), ("180°", 180.0, "halbe Drehung")] {
+                        if ui.small_button(label).on_hover_text(tip).clicked() {
+                            out.push(Action::BoxRotate(deg));
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Spiegeln");
+                    if ui.small_button("horizontal").clicked() {
+                        out.push(Action::BoxFlip { x: true, y: false });
+                    }
+                    if ui.small_button("vertikal").clicked() {
+                        out.push(Action::BoxFlip { x: false, y: true });
+                    }
+                });
+            }
             ui.label(RichText::new("Enter übernimmt, Esc bricht ab").weak());
             ui.horizontal(|ui| {
                 if ui.button("Übernehmen").clicked() {

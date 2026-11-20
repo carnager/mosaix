@@ -1908,6 +1908,32 @@ impl App {
                     tracing::warn!("Die Ebene hat keine Maske (Strg+Umschalt+M legt eine an).");
                 }
             }
+            // Rotate / mirror: Strg+Alt (layer) or Strg+Alt+Umschalt (image) with arrows, H, V.
+            Keysym::Left | Keysym::Right | Keysym::Down | Keysym::h | Keysym::H | Keysym::v | Keysym::V if ctrl && alt => {
+                let (turn, fx, fy) = match sym {
+                    Keysym::Left => (-1, false, false),
+                    Keysym::Right => (1, false, false),
+                    Keysym::Down => (2, false, false),
+                    Keysym::h | Keysym::H => (0, true, false),
+                    _ => (0, false, true),
+                };
+                let label = match (turn, fx) {
+                    (0, true) => "horizontal spiegeln",
+                    (0, false) => "vertikal spiegeln",
+                    (2, _) => "um 180° drehen",
+                    (1, _) => "90° im Uhrzeigersinn drehen",
+                    _ => "90° gegen den Uhrzeigersinn drehen",
+                };
+                if shift {
+                    let label = format!("Bild {label}");
+                    self.engine_op(|e| e.rotate_image(turn, fx, fy, &label));
+                    self.view_fitted = false;
+                    self.fit_if_needed();
+                } else {
+                    let label = format!("Ebene {label}");
+                    self.engine_op(|e| e.rotate_layer(turn as f64 * 90.0, fx, fy, &label));
+                }
+            }
             Keysym::Left | Keysym::Right | Keysym::Up | Keysym::Down if self.tool == Tool::Move => {
                 let step = if shift { 10 } else { 1 };
                 let (dx, dy) = match sym {
@@ -2299,6 +2325,10 @@ impl App {
                 BoxKind::Crop => "Zuschneiden",
             }),
             mask_edit: self.mask_edit,
+            box_angle: match &self.boxed {
+                Some((BoxKind::Transform, b)) => Some(b.angle()),
+                _ => None,
+            },
             liquify: e.liquify_active().then_some((self.liq_tool, self.liq_size, self.liq_strength)),
             layers: ui::panels::layer_rows(doc),
             active: doc.active,
@@ -2446,6 +2476,22 @@ impl App {
                 Action::LiquifyUndo => {
                     if let Some(e) = self.engine() {
                         e.liquify_undo();
+                    }
+                }
+                Action::BoxRotate(deg) => {
+                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                        b.rotate_by(deg);
+                    }
+                }
+                Action::BoxAngle(deg) => {
+                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                        let now = b.angle();
+                        b.rotate_by(if b.fwd.matrix2.determinant() < 0.0 { now - deg } else { deg - now });
+                    }
+                }
+                Action::BoxFlip { x, y } => {
+                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                        b.flip(x, y);
                     }
                 }
                 Action::CommitBox => self.commit_box(),

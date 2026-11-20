@@ -61,6 +61,33 @@ impl BoxEdit {
         DVec2::new(pick(sx, a.x, b.x), pick(sy, a.y, b.y))
     }
 
+    /// Centre of the transformed box (document px).
+    pub fn centre(&self) -> DVec2 {
+        self.fwd.transform_point2(self.local_point(0, 0))
+    }
+
+    /// Current rotation in degrees (−180 … 180).
+    pub fn angle(&self) -> f64 {
+        let x = self.fwd.matrix2.x_axis;
+        let a = x.y.atan2(x.x).to_degrees();
+        // Mirrored boxes: report the angle of the unmirrored axis.
+        if self.fwd.matrix2.determinant() < 0.0 { -a } else { a }
+    }
+
+    /// Turns the box (and its content) about its centre.
+    pub fn rotate_by(&mut self, degrees: f64) {
+        let c = self.centre();
+        let r = DAffine2::from_angle(degrees.to_radians());
+        self.fwd = DAffine2::from_translation(c) * r * DAffine2::from_translation(-c) * self.fwd;
+    }
+
+    /// Mirrors the box about its centre (horizontally and/or vertically).
+    pub fn flip(&mut self, x: bool, y: bool) {
+        let c = self.centre();
+        let f = DAffine2::from_scale(DVec2::new(if x { -1.0 } else { 1.0 }, if y { -1.0 } else { 1.0 }));
+        self.fwd = DAffine2::from_translation(c) * f * DAffine2::from_translation(-c) * self.fwd;
+    }
+
     /// Corners in document space, clockwise from the top left.
     pub fn corners(&self) -> [DVec2; 4] {
         [(-1, -1), (1, -1), (1, 1), (-1, 1)].map(|(x, y)| self.fwd.transform_point2(self.local_point(x, y)))
