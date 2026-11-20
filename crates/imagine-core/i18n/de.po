@@ -635,6 +635,9 @@ msgstr "Farbprofil einbetten: {err}"
 msgid "Emboss"
 msgstr "Relief"
 
+msgid "End"
+msgstr "Ende"
+
 msgid "Enter applies, Esc cancels"
 msgstr "Enter übernimmt, Esc bricht ab"
 
@@ -802,6 +805,9 @@ msgstr "GPU/Treiber unterstützt benötigte Features nicht: {missing}"
 
 msgid "Gradient"
 msgstr "Verlauf"
+
+msgid "Gradient Overlay"
+msgstr "Verlaufsüberlagerung"
 
 msgid "Green"
 msgstr "Grün"
@@ -1024,6 +1030,9 @@ msgstr "Helligkeit"
 
 msgid "Line height"
 msgstr "Zeilenabstand"
+
+msgid "Linear"
+msgstr "Linear"
 
 msgid "Linear Dodge (Add)"
 msgstr "Linear abwedeln (Addieren)"
@@ -1373,6 +1382,9 @@ msgstr "Maskierungsmodus-Ansicht an"
 msgid "Quit"
 msgstr "Beenden"
 
+msgid "Radial"
+msgstr "Radial"
+
 msgid "Radial Gradient"
 msgstr "Verlauf radial"
 
@@ -1444,6 +1456,9 @@ msgstr "Bedienfelder zurücksetzen"
 
 msgid "Reset Rotation"
 msgstr "Drehung zurücksetzen"
+
+msgid "Reverse"
+msgstr "Umkehren"
 
 msgid "Right"
 msgstr "rechts"
@@ -1523,6 +1538,9 @@ msgstr "Speichern …"
 msgid "saving …"
 msgstr "speichert …"
 
+msgid "Scale"
+msgstr "Skalieren"
+
 msgid "Scatter"
 msgstr "Streuung"
 
@@ -1582,6 +1600,9 @@ msgstr "Form & Dynamik"
 
 msgid "Shape (Rectangle / Ellipse)"
 msgstr "Form (Rechteck / Ellipse)"
+
+msgid "Share the light angle with all other effects that use the global light"
+msgstr "Den Lichtwinkel mit allen anderen Effekten teilen, die den globalen Lichteinfall nutzen"
 
 msgid "Shift"
 msgstr "Umschalt"
@@ -1678,6 +1699,9 @@ msgstr "Quadrat 2048"
 
 msgid "sRGB (Photoshop-compatible)"
 msgstr "sRGB (Photoshop-kompatibel)"
+
+msgid "Start"
+msgstr "Anfang"
 
 msgid "Step Back"
 msgstr "Zurück"
@@ -1933,6 +1957,9 @@ msgstr "unbenannt"
 
 msgid "Up Arrow"
 msgstr "Pfeil hoch"
+
+msgid "Use Global Light"
+msgstr "Globalen Lichteinfall verwenden"
 
 msgid "Use Legacy"
 msgstr "Früheren Wert verwenden"

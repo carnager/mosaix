@@ -2238,6 +2238,8 @@ fn layer_styles_stroke_and_shadow() {
         d.find_mut(id).unwrap().effects = vec![
             Effect {
                 enabled: true,
+                blend: None,
+                global_light: false,
                 kind: EffectKind::Stroke {
                     size: 8.0,
                     position: StrokePosition::Outside,
@@ -2247,6 +2249,8 @@ fn layer_styles_stroke_and_shadow() {
             },
             Effect {
                 enabled: true,
+                blend: None,
+                global_light: false,
                 kind: EffectKind::DropShadow {
                     color: [0.0; 3],
                     opacity: 0.8,
@@ -2339,6 +2343,8 @@ fn text_resize_speed() {
             e.edit("fx", |d| {
                 d.find_mut(id).unwrap().effects = vec![Effect {
                     enabled: true,
+                    blend: None,
+                    global_light: false,
                     kind: EffectKind::Stroke {
                         size: 6.0,
                         position: StrokePosition::Outside,
@@ -2386,6 +2392,8 @@ fn styled_rotated_text_updates_when_resized() {
     e.edit("fx", |d| {
         d.find_mut(id).unwrap().effects = vec![Effect {
             enabled: true,
+            blend: None,
+            global_light: false,
             kind: EffectKind::Stroke {
                 size: 4.0,
                 position: StrokePosition::Outside,

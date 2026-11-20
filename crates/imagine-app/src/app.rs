@@ -3268,7 +3268,27 @@ impl App {
                         e.edit_merged(tr("Layer Style"), &format!("fx-{id}"), |d| {
                             let l = d.find_mut(id).unwrap();
                             let changed = l.effects != effects;
+                            // Global light: a changed angle reaches every layer's effects that use it.
+                            let global = |fx: &[imagine_core::style::Effect]| {
+                                fx.iter().find(|e| e.global_light).and_then(|e| e.kind.angle())
+                            };
+                            let moved = global(&effects).filter(|g| global(&l.effects) != Some(*g));
                             l.effects = effects;
+                            if let Some(g) = moved {
+                                fn walk(ls: &mut [imagine_core::Layer<imagine_gpu::Tile>], g: f32) {
+                                    for l in ls {
+                                        for e in l.effects.iter_mut().filter(|e| e.global_light) {
+                                            if let Some((a, _)) = e.kind.light_mut() {
+                                                *a = g;
+                                            }
+                                        }
+                                        if let imagine_core::doc::Content::Group(c) = &mut l.content {
+                                            walk(c, g);
+                                        }
+                                    }
+                                }
+                                walk(&mut d.layers, g);
+                            }
                             changed
                         });
                         if done {

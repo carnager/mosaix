@@ -2,7 +2,8 @@
 //! remove. Returns the new list and whether the edit is finished.
 
 use egui::RichText;
-use imagine_core::style::{BevelStyle, Effect, EffectKind, StrokePosition};
+use imagine_core::BlendMode;
+use imagine_core::style::{BevelStyle, Effect, EffectKind, GradientStyle, StrokePosition};
 use imagine_core::tr;
 
 #[derive(Default)]
@@ -82,8 +83,73 @@ fn angle(ui: &mut egui::Ui, t: &mut Track, v: &mut f32) {
     ui.end_row();
 }
 
+/// Blend mode and (shadows, bevel) the global light switch.
+fn common(ui: &mut egui::Ui, e: &mut Effect, t: &mut Track) {
+    if matches!(e.kind, EffectKind::Bevel { .. }) {
+        // Bevels use Screen/Multiply for highlight and shadow.
+    } else {
+        ui.label(tr("Blend Mode"));
+        let current = e.mode();
+        egui::ComboBox::from_id_salt(("fx blend", e.kind.name()))
+            .selected_text(current.name())
+            .show_ui(ui, |ui| {
+                for b in BlendMode::ALL {
+                    if ui.selectable_label(b == current, b.name()).clicked() && b != current {
+                        e.blend = (b != e.kind.default_blend()).then_some(b);
+                        t.click();
+                    }
+                }
+            });
+        ui.end_row();
+    }
+    if e.kind.angle().is_some() {
+        ui.label("");
+        if ui
+            .checkbox(&mut e.global_light, tr("Use Global Light"))
+            .on_hover_text(tr("Share the light angle with all other effects that use the global light"))
+            .changed()
+        {
+            t.click();
+        }
+        ui.end_row();
+    }
+}
+
 fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
     match k {
+        EffectKind::GradientOverlay {
+            start,
+            end,
+            opacity,
+            angle: a,
+            style,
+            scale,
+            reverse,
+        } => {
+            colour(ui, t, "Start", start);
+            colour(ui, t, "End", end);
+            percent(ui, t, "Opacity", opacity);
+            ui.label(tr("Style"));
+            ui.horizontal(|ui| {
+                for (s, n) in [(GradientStyle::Linear, tr("Linear")), (GradientStyle::Radial, tr("Radial"))] {
+                    if ui.selectable_label(*style == s, n).clicked() && *style != s {
+                        *style = s;
+                        t.click();
+                    }
+                }
+                if ui.checkbox(reverse, tr("Reverse")).changed() {
+                    t.click();
+                }
+            });
+            ui.end_row();
+            ui.label(tr("Angle"));
+            let r = ui.add(egui::DragValue::new(a).range(-180.0..=180.0).suffix("°").speed(1.0));
+            t.add(&r);
+            ui.end_row();
+            let mut pct = *scale * 100.0;
+            slider(ui, t, "Scale", &mut pct, 10.0..=150.0, " %");
+            *scale = pct / 100.0;
+        }
         EffectKind::Stroke {
             size,
             position,
@@ -237,6 +303,13 @@ fn summary(k: &EffectKind) -> ([f32; 3], String) {
         EffectKind::ColorOverlay { color, opacity } => {
             (*color, format!("{:.0} %", opacity * 100.0))
         }
+        EffectKind::GradientOverlay { start, style, angle, .. } => (
+            *start,
+            match style {
+                GradientStyle::Linear => format!("{} · {angle:.0}°", tr("Linear")),
+                GradientStyle::Radial => tr("Radial").to_string(),
+            },
+        ),
         EffectKind::Bevel {
             highlight, size, ..
         } => (*highlight, px(*size)),
@@ -331,7 +404,10 @@ pub fn editor(
                 egui::Grid::new(("fx", i))
                     .num_columns(2)
                     .spacing([10.0, 6.0])
-                    .show(ui, |ui| settings(ui, &mut e.kind, &mut t));
+                    .show(ui, |ui| {
+                        common(ui, e, &mut t);
+                        settings(ui, &mut e.kind, &mut t)
+                    });
             });
         }
     }
@@ -350,12 +426,32 @@ pub fn editor(
         }
     });
     if let Some(kind) = add {
-        list.push(Effect {
-            enabled: true,
-            kind,
-        });
+        // New shadows and bevels take the global light angle of the others.
+        let mut e = Effect::new(kind);
+        if let Some(g) = list.iter().find(|x| x.global_light).and_then(|x| x.kind.angle())
+            && let Some((a, _)) = e.kind.light_mut()
+        {
+            *a = g;
+        }
+        list.push(e);
         *open = Some(list.len() - 1);
         t.click();
+    }
+    // An effect using the global light that changed its angle takes the
+    // others along (the app does the same across layers).
+    if t.changed {
+        let before: Vec<Option<f32>> = effects.iter().map(|e| e.global_light.then(|| e.kind.angle()).flatten()).collect();
+        let changed = list.iter().enumerate().find_map(|(i, e)| {
+            let now = e.global_light.then(|| e.kind.angle()).flatten()?;
+            (before.get(i).copied().flatten() != Some(now)).then_some(now)
+        });
+        if let Some(g) = changed {
+            for e in list.iter_mut().filter(|e| e.global_light) {
+                if let Some((a, _)) = e.kind.light_mut() {
+                    *a = g;
+                }
+            }
+        }
     }
     (t.changed || t.done).then_some((list, t.done))
 }

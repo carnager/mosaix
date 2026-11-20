@@ -455,8 +455,10 @@ pub fn tools() -> Vec<Value> {
              Kinds and fields (colours linear [r, g, b] 0…1, opacity 0…1, angle = light direction in degrees, 90 = from the top): \
              stroke {size, position: outside|inside|center, color, opacity}; drop_shadow {color, opacity, angle, distance, size, spread}; \
              inner_shadow {color, opacity, angle, distance, size}; outer_glow {color, opacity, size, spread}; inner_glow {color, opacity, size}; \
-             color_overlay {color, opacity}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
-             highlight_opacity, shadow, shadow_opacity}.",
+             color_overlay {color, opacity}; gradient_overlay {start, end, opacity, angle (90 = bottom to top), style: linear|radial, \
+             scale, reverse}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
+             highlight_opacity, shadow, shadow_opacity}. Optional on every effect: \"blend\" (a blend mode key; default: \
+             multiply for shadows, screen for glows, normal otherwise) and \"global_light\": true (shadows/bevel share one light angle).",
             json!({ "layer": layer_param(), "effects": { "type": "array", "items": { "type": "object" } } }),
             &["effects"],
             false,

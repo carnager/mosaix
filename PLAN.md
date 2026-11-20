@@ -451,7 +451,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Zeichenstift** (`P`): Bézier-Pfade zeichnen (Ecke/Kurve, Schließen am Startpunkt → gefüllte Form, offen → Linie) und Punkte/Griffe bearbeiten (Alt: Ecke↔Kurve, Griffe einzeln), auch auf transformierten Pfaden. Neue Geometrie `Bezier` mit Knoten; Overlay über der Leinwand. Palettenfarbe wechselt jetzt mit Umschalt+P.
 
-**Noch offen in Phase 6:** Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
+- **Ebenenstile erweitert** (2026-11-20): Füllmethode je Effekt (Standard wie Photoshop), Verlaufsüberlagerung (zwei Farben, linear/radial, Winkel, Skalierung, umkehren), „Globalen Lichteinfall verwenden“ für Schatten und Abgeflachte Kante (ein Winkel für alle Ebenen, ein Rückgängig-Schritt). Überlagerungen behalten weiche Kanten.
+
+**Noch offen in Phase 6:** Text auf Pfad, OpenType-Features, Musterüberlagerung (braucht eine Musterbibliothek), PSD-Import der Ebenenstile.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)
 

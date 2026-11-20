@@ -27,6 +27,52 @@ pub struct Effect {
     pub enabled: bool,
     #[serde(flatten)]
     pub kind: EffectKind,
+    /// Blend mode of the effect (`None`: Photoshop's default for its kind).
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "blend_key")]
+    pub blend: Option<BlendMode>,
+    /// Shadows and bevels: share the document's light angle with all other
+    /// effects that have this on (Photoshop's "Use Global Light").
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub global_light: bool,
+}
+
+/// Blend modes stored by their key ("multiply").
+mod blend_key {
+    use super::BlendMode;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Option<BlendMode>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(b) => s.serialize_some(b.key()),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<BlendMode>, D::Error> {
+        let k: Option<String> = Option::deserialize(d)?;
+        Ok(k.and_then(|k| BlendMode::from_key(&k)))
+    }
+}
+
+impl Effect {
+    /// A new, switched-on effect; shadows and bevels use the global light.
+    pub fn new(kind: EffectKind) -> Self {
+        let global_light = kind.angle().is_some();
+        Self { enabled: true, kind, blend: None, global_light }
+    }
+
+    /// The blend mode in effect.
+    pub fn mode(&self) -> BlendMode {
+        self.blend.unwrap_or_else(|| self.kind.default_blend())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GradientStyle {
+    #[default]
+    Linear,
+    Radial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -95,6 +141,22 @@ pub enum EffectKind {
         color: [f32; 3],
         opacity: f32,
     },
+    /// A gradient across the layer's content, from `start` to `end`.
+    GradientOverlay {
+        start: [f32; 3],
+        end: [f32; 3],
+        opacity: f32,
+        /// Direction (degrees, 90 = from bottom to top).
+        #[serde(default = "ninety")]
+        angle: f32,
+        #[serde(default)]
+        style: GradientStyle,
+        /// Length relative to the content (1 = edge to edge).
+        #[serde(default = "one")]
+        scale: f32,
+        #[serde(default)]
+        reverse: bool,
+    },
     Bevel {
         #[serde(default)]
         style: BevelStyle,
@@ -127,6 +189,9 @@ fn one() -> f32 {
 fn thirty() -> f32 {
     30.0
 }
+fn ninety() -> f32 {
+    90.0
+}
 fn three_quarters() -> f32 {
     0.75
 }
@@ -146,7 +211,34 @@ impl EffectKind {
             Self::OuterGlow { .. } => crate::tr("Outer Glow"),
             Self::InnerGlow { .. } => crate::tr("Inner Glow"),
             Self::ColorOverlay { .. } => crate::tr("Color Overlay"),
+            Self::GradientOverlay { .. } => crate::tr("Gradient Overlay"),
             Self::Bevel { .. } => crate::tr("Bevel & Emboss"),
+        }
+    }
+
+    /// Photoshop's default blend mode for this effect.
+    pub fn default_blend(&self) -> BlendMode {
+        match self {
+            Self::DropShadow { .. } | Self::InnerShadow { .. } => BlendMode::Multiply,
+            Self::OuterGlow { .. } | Self::InnerGlow { .. } => BlendMode::Screen,
+            _ => BlendMode::Normal,
+        }
+    }
+
+    /// The light angle, for effects that have one.
+    pub fn angle(&self) -> Option<f32> {
+        match self {
+            Self::DropShadow { angle, .. } | Self::InnerShadow { angle, .. } | Self::Bevel { angle, .. } => Some(*angle),
+            _ => None,
+        }
+    }
+
+    /// Mutable light angle and (bevels) altitude.
+    pub fn light_mut(&mut self) -> Option<(&mut f32, Option<&mut f32>)> {
+        match self {
+            Self::DropShadow { angle, .. } | Self::InnerShadow { angle, .. } => Some((angle, None)),
+            Self::Bevel { angle, altitude, .. } => Some((angle, Some(altitude))),
+            _ => None,
         }
     }
 
@@ -188,6 +280,15 @@ impl EffectKind {
             Self::ColorOverlay {
                 color: [0.8, 0.1, 0.1],
                 opacity: 1.0,
+            },
+            Self::GradientOverlay {
+                start: [0.0; 3],
+                end: [1.0; 3],
+                opacity: 1.0,
+                angle: 90.0,
+                style: GradientStyle::Linear,
+                scale: 1.0,
+                reverse: false,
             },
             Self::Bevel {
                 style: BevelStyle::Inner,
@@ -582,6 +683,64 @@ fn blend_into(dst: &mut [Px], src_rgb: [f32; 3], src_alpha: &[f32], mode: BlendM
         });
 }
 
+/// Like [`blend_into`] but keeps the content's coverage (an overlay clipped
+/// to the shape); `color(i)` gives the overlay colour per pixel.
+fn blend_atop(dst: &mut [Px], color: &(dyn Fn(usize) -> [f32; 3] + Sync), src_alpha: &[f32], mode: BlendMode) {
+    dst.par_iter_mut().enumerate().zip(src_alpha.par_iter()).for_each(|((i, d), &sa)| {
+        let sa = sa.clamp(0.0, 1.0);
+        if sa <= 0.0 || d[3] <= 0.0 {
+            return;
+        }
+        let c = color(i);
+        // Blend against the content at full coverage, then mix by `sa`.
+        let da = d[3];
+        let opaque = [d[0] / da, d[1] / da, d[2] / da, 1.0];
+        let b = crate::blend::composite(opaque, [c[0], c[1], c[2], 1.0], mode, crate::blend::BlendSpace::Srgb);
+        let k = sa / da;
+        for ch in 0..3 {
+            let mixed = opaque[ch] + (b[ch] - opaque[ch]) * k;
+            d[ch] = mixed * da;
+        }
+    });
+}
+
+/// Gradient position 0…1 per pixel over the content's bounding box.
+fn gradient_positions(w: usize, h: usize, alpha: &[f32], angle: f32, style: GradientStyle, scale: f32, reverse: bool) -> Vec<f32> {
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for (i, &a) in alpha.iter().enumerate() {
+        if a > 0.0 {
+            let (x, y) = (i % w, i / w);
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x + 1);
+            y1 = y1.max(y + 1);
+        }
+    }
+    if x1 <= x0 {
+        return vec![0.0; w * h];
+    }
+    let (cx, cy) = ((x0 + x1) as f32 * 0.5, (y0 + y1) as f32 * 0.5);
+    let (bw, bh) = ((x1 - x0) as f32, (y1 - y0) as f32);
+    let scale = scale.max(0.01);
+    let a = angle.to_radians();
+    // Screen y points down: 90° runs from the bottom up.
+    let dir = (a.cos(), -a.sin());
+    let half = 0.5 * (bw * dir.0.abs() + bh * dir.1.abs()) * scale;
+    let radius = 0.5 * bw.hypot(bh) * scale;
+    (0..w * h)
+        .into_par_iter()
+        .map(|i| {
+            let (x, y) = ((i % w) as f32 + 0.5 - cx, (i / w) as f32 + 0.5 - cy);
+            let t = match style {
+                GradientStyle::Linear => 0.5 + (x * dir.0 + y * dir.1) / (2.0 * half.max(1e-3)),
+                GradientStyle::Radial => x.hypot(y) / radius.max(1e-3),
+            }
+            .clamp(0.0, 1.0);
+            if reverse { 1.0 - t } else { t }
+        })
+        .collect()
+}
+
 // ---- the effects ----------------------------------------------------------------
 
 /// Applies `effects` to `content` (premultiplied linear). The region must
@@ -589,11 +748,9 @@ fn blend_into(dst: &mut [Px], src_rgb: [f32; 3], src_alpha: &[f32], mode: BlendM
 pub fn apply(effects: &[Effect], content: &Region) -> Styled {
     let (w, h) = (content.w, content.h);
     let alpha = content.alpha();
-    let active: Vec<&EffectKind> = effects
-        .iter()
-        .filter(|e| e.enabled)
-        .map(|e| &e.kind)
-        .collect();
+    let enabled: Vec<&Effect> = effects.iter().filter(|e| e.enabled).collect();
+    let active: Vec<&EffectKind> = enabled.iter().map(|e| &e.kind).collect();
+    let modes: Vec<BlendMode> = enabled.iter().map(|e| e.mode()).collect();
     let needs_sdf = active.iter().any(|k| match k {
         EffectKind::Stroke { .. } | EffectKind::Bevel { .. } => true,
         EffectKind::OuterGlow { spread, .. } | EffectKind::DropShadow { spread, .. } => {
@@ -617,7 +774,7 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
     let mut below: Vec<(BlendMode, Region)> = Vec::new();
     let mut out = content.clone();
     // Underneath (in Photoshop's order, bottom first): drop shadow, outer glow, outside stroke.
-    for k in &active {
+    for (k, &mode) in active.iter().zip(&modes) {
         match **k {
             EffectKind::DropShadow {
                 color,
@@ -629,7 +786,7 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
             } => {
                 let (dx, dy) = away(angle, distance);
                 let a = blur(w, h, &shift(w, h, &grown(spread), dx, dy, 0.0), size);
-                below.push((BlendMode::Multiply, solid(&a, color, opacity, w, h)));
+                below.push((mode, solid(&a, color, opacity, w, h)));
             }
             EffectKind::OuterGlow {
                 color,
@@ -638,21 +795,38 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 spread,
             } => {
                 let a = blur(w, h, &grown(spread), size);
-                below.push((BlendMode::Screen, solid(&a, color, opacity, w, h)));
+                below.push((mode, solid(&a, color, opacity, w, h)));
             }
             _ => {}
         }
     }
-    // Inside the shape: overlay, glows, shadows, bevel, then inside/centre strokes on top.
-    for k in &active {
+    // Inside the shape: overlays, glows, shadows, bevel, then inside/centre strokes on top.
+    for (k, &mode) in active.iter().zip(&modes) {
         match **k {
             EffectKind::ColorOverlay { color, opacity } => {
-                // Normal blend clipped to the shape: the alpha stays.
-                out.px.par_iter_mut().for_each(|p| {
-                    for c in 0..3 {
-                        p[c] = p[c] * (1.0 - opacity) + color[c] * p[3] * opacity;
-                    }
-                });
+                let a: Vec<f32> = alpha.iter().map(|a| a * opacity).collect();
+                blend_atop(&mut out.px, &|_| color, &a, mode);
+            }
+            EffectKind::GradientOverlay {
+                start,
+                end,
+                opacity,
+                angle,
+                style,
+                scale,
+                reverse,
+            } => {
+                let t = gradient_positions(w, h, &alpha, angle, style, scale, reverse);
+                // Interpolated like Photoshop: in sRGB-encoded values.
+                let enc = |c: [f32; 3]| c.map(crate::color::linear_to_srgb);
+                let (s, e) = (enc(start), enc(end));
+                let a: Vec<f32> = alpha.iter().map(|a| a * opacity).collect();
+                blend_atop(
+                    &mut out.px,
+                    &|i| std::array::from_fn(|c| crate::color::srgb_to_linear(s[c] + (e[c] - s[c]) * t[i])),
+                    &a,
+                    mode,
+                );
             }
             EffectKind::InnerGlow {
                 color,
@@ -667,7 +841,7 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                     .zip(&alpha)
                     .map(|(g, a)| (g * 2.0).min(1.0) * a * opacity)
                     .collect();
-                blend_into(&mut out.px, color, &a, BlendMode::Screen);
+                blend_into(&mut out.px, color, &a, mode);
             }
             EffectKind::InnerShadow {
                 color,
@@ -680,7 +854,7 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 let inv: Vec<f32> = alpha.iter().map(|a| 1.0 - a).collect();
                 let b = blur(w, h, &shift(w, h, &inv, dx, dy, 1.0), size);
                 let a: Vec<f32> = b.iter().zip(&alpha).map(|(s, a)| s * a * opacity).collect();
-                blend_into(&mut out.px, color, &a, BlendMode::Multiply);
+                blend_into(&mut out.px, color, &a, mode);
             }
             _ => {}
         }
@@ -761,7 +935,7 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
             blend_into(&mut out.px, shadow, &lo, BlendMode::Multiply);
         }
     }
-    for k in &active {
+    for (k, &mode) in active.iter().zip(&modes) {
         if let EffectKind::Stroke {
             size,
             position,
@@ -784,18 +958,18 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 })
                 .collect();
             if position == StrokePosition::Outside {
-                below.push((BlendMode::Normal, solid(&band, color, 1.0, w, h)));
+                below.push((mode, solid(&band, color, 1.0, w, h)));
             } else {
                 // Inside the shape: on top of the content; the outer half of a centre stroke goes under it.
                 let inside: Vec<f32> = band.iter().zip(&alpha).map(|(b, a)| b * a).collect();
-                blend_into(&mut out.px, color, &inside, BlendMode::Normal);
+                blend_into(&mut out.px, color, &inside, mode);
                 if position == StrokePosition::Center {
                     let outside: Vec<f32> = band
                         .iter()
                         .zip(&alpha)
                         .map(|(b, a)| b * (1.0 - a))
                         .collect();
-                    below.push((BlendMode::Normal, solid(&outside, color, 1.0, w, h)));
+                    below.push((mode, solid(&outside, color, 1.0, w, h)));
                 }
             }
         }
@@ -826,6 +1000,8 @@ mod tests {
         vec![Effect {
             enabled: true,
             kind,
+            blend: None,
+            global_light: false,
         }]
     }
 
@@ -946,6 +1122,8 @@ mod tests {
             .map(|kind| Effect {
                 enabled: true,
                 kind,
+                blend: None,
+                global_light: false,
             })
             .collect();
         assert!(reach(&all) > 15.0);
@@ -982,5 +1160,58 @@ mod tests {
             worst < 0.1,
             "largest coverage error at the outer edge {worst}"
         );
+    }
+
+    #[test]
+    fn gradient_overlay_runs_across_the_content() {
+        let n = 64;
+        let mut reg = Region::new(n, n);
+        for p in reg.px.iter_mut() {
+            *p = [1.0, 1.0, 1.0, 1.0];
+        }
+        let g = |angle: f32, reverse: bool| {
+            apply(
+                &fx(EffectKind::GradientOverlay { start: [0.0; 3], end: [1.0; 3], opacity: 1.0, angle, style: GradientStyle::Linear, scale: 1.0, reverse }),
+                &reg,
+            )
+        };
+        // 0°: left (start, black) → right (end, white).
+        let s = g(0.0, false);
+        let (l, r) = (s.content.px[32 * n][0], s.content.px[32 * n + n - 1][0]);
+        assert!(l < 0.01 && r > 0.95, "{l} {r}");
+        // 90°: from the bottom up.
+        let s = g(90.0, false);
+        assert!(s.content.px[(n - 1) * n + 32][0] < 0.01 && s.content.px[32][0] > 0.95);
+        // Reverse swaps.
+        let s = g(0.0, true);
+        assert!(s.content.px[32 * n][0] > 0.95);
+        // Alpha untouched.
+        assert!(s.content.px.iter().all(|p| (p[3] - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn effect_blend_mode_overrides_the_default() {
+        let reg = disc(64, 12.0);
+        let shadow = EffectKind::DropShadow { color: [1.0, 0.0, 0.0], opacity: 1.0, angle: 90.0, distance: 0.0, size: 2.0, spread: 0.0 };
+        let mut e = fx(shadow);
+        assert_eq!(apply(&e, &reg).below[0].0, BlendMode::Multiply);
+        e[0].blend = Some(BlendMode::Normal);
+        assert_eq!(apply(&e, &reg).below[0].0, BlendMode::Normal);
+        // Stored by key, read back.
+        let j = serde_json::to_string(&e[0]).unwrap();
+        assert!(j.contains("\"blend\":\"normal\""), "{j}");
+        assert_eq!(serde_json::from_str::<Effect>(&j).unwrap(), e[0]);
+    }
+
+    #[test]
+    fn colour_overlay_keeps_soft_edges() {
+        let reg = disc(64, 12.0);
+        let s = apply(&fx(EffectKind::ColorOverlay { color: [1.0, 0.0, 0.0], opacity: 1.0 }), &reg);
+        for (a, b) in reg.px.iter().zip(&s.content.px) {
+            assert!((a[3] - b[3]).abs() < 1e-6, "alpha kept");
+            if b[3] > 0.0 {
+                assert!((b[0] / b[3] - 1.0).abs() < 1e-3 && b[1] < 1e-3, "red: {b:?}");
+            }
+        }
     }
 }
