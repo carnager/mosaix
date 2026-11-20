@@ -109,6 +109,11 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             state.file = Some(super::files::FileDialog::new(super::files::FileMode::Open, home.join("Pictures"), String::new()));
         }
         Ok("new") => state.new_doc = Some(Default::default()),
+        Ok("export") => {
+            let mut d = super::files::FileDialog::new(super::files::FileMode::ExportAs, std::env::temp_dir(), "bild.jpg".into());
+            d.export.space = imagine_io::export::ColorSpace::DisplayP3;
+            state.file = Some(d);
+        }
         Ok("confirm") => state.confirm = Some("Beim Beenden gehen sie verloren.".into()),
         Ok("filter") => state.open_filter(imagine_core::Filter::GaussianBlur { radius: 25.0 }),
         _ => {}

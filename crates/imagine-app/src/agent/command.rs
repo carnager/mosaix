@@ -196,7 +196,7 @@ pub enum Command {
     Undo,
     Redo,
     Save { path: Option<PathBuf> },
-    Export { path: PathBuf },
+    Export { path: PathBuf, color_space: Option<imagine_io::export::ColorSpace>, bit_depth: Option<u8>, quality: Option<u8> },
 }
 
 impl Command {
@@ -903,9 +903,20 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 "path": r.path, "tiles_written": r.tiles_written, "bytes": r.bytes, "incremental": r.incremental
             })))
         }
-        Command::Export { path } => {
-            let ms = s.export(&path)?;
-            Ok(Output::json(json!({ "path": path, "ms": ms.round() })))
+        Command::Export { path, color_space, bit_depth, quality } => {
+            let d = imagine_io::export::ExportOptions::default();
+            let opts = imagine_io::export::ExportOptions {
+                space: color_space.unwrap_or(d.space),
+                sixteen_bit: match bit_depth {
+                    None | Some(8) => false,
+                    Some(16) => true,
+                    Some(b) => anyhow::bail!("bit_depth {b}: 8 oder 16"),
+                },
+                quality: quality.unwrap_or(d.quality).clamp(1, 100),
+            };
+            let sixteen = opts.sixteen_bit && imagine_io::export::supports_16bit(&path);
+            let ms = s.export(&path, &opts)?;
+            Ok(Output::json(json!({ "path": path, "ms": ms.round(), "color_space": opts.space, "bit_depth": if sixteen { 16 } else { 8 } })))
         }
     }
 }

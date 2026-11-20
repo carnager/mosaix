@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use egui::{Color32, RichText, Vec2};
 
+use imagine_io::export::{ColorSpace, ExportOptions};
+
 use super::panels::Action;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +48,8 @@ pub struct FileDialog {
     entries: Vec<Entry>,
     error: Option<String>,
     selected: Option<usize>,
+    /// Export options (export mode).
+    pub export: ExportOptions,
 }
 
 fn list(dir: &Path, mode: FileMode) -> Result<Vec<Entry>, String> {
@@ -89,6 +93,7 @@ impl FileDialog {
             entries: Vec::new(),
             error: None,
             selected: None,
+            export: ExportOptions::default(),
         };
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| "/".into());
         d.go(if start.is_dir() { start } else { home });
@@ -126,10 +131,40 @@ impl FileDialog {
                 if path.extension().is_none() {
                     path.set_extension("png");
                 }
-                out.push(Action::ExportAs(path));
+                out.push(Action::ExportAs(path, self.export));
             }
         }
         true
+    }
+
+    fn export_options(&mut self, ui: &mut egui::Ui) {
+        let name = Path::new(self.name.trim());
+        let ext = name.extension().and_then(|e| e.to_str()).unwrap_or("png").to_ascii_lowercase();
+        let o = &mut self.export;
+        ui.horizontal(|ui| {
+            ui.label("Farbraum");
+            egui::ComboBox::from_id_salt("export space").selected_text(o.space.name()).show_ui(ui, |ui| {
+                for sp in ColorSpace::ALL {
+                    ui.selectable_value(&mut o.space, sp, sp.name());
+                }
+            });
+            ui.add_space(12.0);
+            let deep = imagine_io::export::supports_16bit(Path::new(&format!("x.{ext}")));
+            ui.add_enabled_ui(deep, |ui| {
+                let mut v = o.sixteen_bit && deep;
+                if ui.checkbox(&mut v, "16 Bit").on_disabled_hover_text("nur PNG und TIFF").changed() {
+                    o.sixteen_bit = v;
+                }
+            });
+            if matches!(ext.as_str(), "jpg" | "jpeg") {
+                ui.add_space(12.0);
+                ui.label("Qualität");
+                ui.add(egui::Slider::new(&mut o.quality, 1..=100));
+            }
+        });
+        if o.space == ColorSpace::Rec2020 && !(o.sixteen_bit && imagine_io::export::supports_16bit(name)) {
+            ui.label(RichText::new("Rec. 2020 mit 8 Bit kann Streifen in Verläufen zeigen.").weak().small());
+        }
     }
 
     /// Shows the dialog; returns false once it is closed.
@@ -162,7 +197,7 @@ impl FileDialog {
                     ui.colored_label(Color32::from_rgb(255, 120, 100), e);
                 }
                 ui.separator();
-                let footer = 64.0;
+                let footer = if self.mode == FileMode::ExportAs { 96.0 } else { 64.0 };
                 ui.horizontal_top(|ui| {
                     if self.mode == FileMode::Open && !recent.is_empty() {
                         ui.vertical(|ui| {
@@ -230,6 +265,9 @@ impl FileDialog {
                         done = self.finish(out);
                     }
                 });
+                if self.mode == FileMode::ExportAs {
+                    self.export_options(ui);
+                }
                 ui.label(RichText::new(self.mode.extensions().join(", ")).weak().small());
             });
         open && !done
@@ -356,6 +394,6 @@ mod tests {
         d.mode = FileMode::ExportAs;
         d.name = "x".into();
         d.finish(&mut out);
-        assert!(matches!(&out[1], Action::ExportAs(p) if p.ends_with("x.png")));
+        assert!(matches!(&out[1], Action::ExportAs(p, _) if p.ends_with("x.png")));
     }
 }

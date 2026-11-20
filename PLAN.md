@@ -396,7 +396,8 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 - **Filter (GPU):** Gaußscher Weichzeichner (separabel; ab 10 px Radius auf einer verkleinerten Kopie, deckungsgleich mit der analytischen Sprungantwort), Unscharf maskieren, Hochpass, Rauschen. Sie wirken durch die Auswahl, als ein Undo-Schritt, mit Live-Vorschau des sichtbaren Bereichs.
 - **Farbmanagement beim Import:** Eingebettete ICC-Profile (z. B. Display P3, Adobe RGB) werden mit moxcms nach linearem sRGB im erweiterten Bereich umgerechnet. Farben außerhalb von sRGB bleiben in f16 erhalten, statt abgeschnitten zu werden.
 - **Histogramm** in Tonwertkorrektur (mit ziehbaren Reglern für Tiefen, Gamma, Lichter) und Kurven. Es zeigt das Bild unterhalb der Einstellungsebene: Dieser Teil wird stapelweise in temporäre Kacheln geflattet, eine Mip-Stufe gelesen und gezählt; zwischengespeichert, bis sich darunter etwas ändert.
-- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`, `histogram`.
+- **Export mit Farbprofil:** sRGB, Display P3, Adobe RGB oder Rec. 2020, 8 oder 16 Bit (PNG/TIFF), JPEG-Qualität. Weite Farbräume betten ihr ICC-Profil ein (PNG, JPEG, WebP, TIFF), die Umrechnung geht vom linearen Arbeitsfarbraum aus, also bleiben P3-Farben aus dem Import erhalten. Die Einstellungen merkt sich das Programm.
+- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`, `histogram`; `export` mit `color_space`, `bit_depth`, `quality`.
 
 | Messung (100 MP, RX 6700 XT) | Ergebnis |
 |---|---|
@@ -406,16 +407,16 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 | Kurven-Einstellungsebene (kompletter Neuaufbau) | 42 ms |
 | 24-MP-PNG mit Display-P3-Profil laden | 133 ms (ohne Profil 67 ms) |
 | Histogramm unter einer Ebene | 36 ms, danach aus dem Cache 0,08 ms |
+| 24-MP-TIFF exportieren: sRGB / Display P3 / P3 16 Bit | 65 / 112 / 118 ms |
 
 **Noch offen in Phase 4:**
 - Smart-Filter (nicht-destruktive Filterebenen)
 - Verflüssigen
-- Export mit ICC-Profil / in weitem Farbraum
 - Monitorprofil (Wayland color-management)
 
 ## Nächster konkreter Schritt
 
-Rest von Phase 4: Smart-Filter, Export mit Profil, Verflüssigen. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
+Rest von Phase 4: Smart-Filter, Verflüssigen. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

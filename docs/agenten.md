@@ -60,7 +60,7 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 | `adjustment_add`, `adjustment_set` | Einstellungsebenen (Kurven, Tonwerte, Farbton/Sättigung, Belichtung, …) hinzufügen und ändern; mit Auswahl wird sie zur Maske |
 | `filter_apply` | Filter: Gaußscher Weichzeichner, Unscharf maskieren, Hochpass, Rauschen (durch die Auswahl) |
 | `undo`, `redo` | Verlauf |
-| `save`, `export` | `.imagine` (mit Ebenen, inkrementell) bzw. PNG/JPEG/WebP/TIFF |
+| `save`, `export` | `.imagine` (mit Ebenen, inkrementell) bzw. PNG/JPEG/WebP/TIFF; `export` optional in Display P3, Adobe RGB oder Rec. 2020 (Profil eingebettet), mit 16 Bit (PNG/TIFF) und JPEG-Qualität |
 
 Die vollständigen JSON-Schemata liefert der Server per `tools/list`.
 

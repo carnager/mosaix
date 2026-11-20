@@ -88,6 +88,7 @@ pub struct Settings {
     pub smudge_strength: f32,
     pub recent: Vec<PathBuf>,
     pub last_dir: Option<PathBuf>,
+    pub export: imagine_io::export::ExportOptions,
 }
 
 impl Default for Settings {
@@ -100,6 +101,7 @@ impl Default for Settings {
             smudge_strength: 0.7,
             recent: Vec::new(),
             last_dir: None,
+            export: Default::default(),
         }
     }
 }

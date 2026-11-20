@@ -916,6 +916,7 @@ dependencies = [
  "half",
  "image",
  "imagine-core",
+ "moxcms",
  "rayon",
  "serde",
  "serde_json",

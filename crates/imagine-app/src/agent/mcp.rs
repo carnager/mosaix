@@ -256,8 +256,11 @@ pub fn tools() -> Vec<Value> {
         tool("redo", "Redo the last undone edit.", json!({}), &[], false),
         tool("save", "Save as .imagine (keeps layers; incremental when saving to the same file again).",
             json!({ "path": { "type": "string", "description": "Default: next to the source file" } }), &[], false),
-        tool("export", "Export the flattened image; format by extension: png, jpg, webp, tif.",
-            json!({ "path": { "type": "string" } }), &["path"], false),
+        tool("export", "Export the flattened image; format by extension: png, jpg, webp, tif. Wide-gamut colour spaces embed their ICC profile; 16 bit works for png and tif.",
+            json!({ "path": { "type": "string" },
+                    "color_space": { "type": "string", "enum": ["srgb", "display_p3", "adobe_rgb", "rec2020"], "description": "default srgb" },
+                    "bit_depth": { "type": "integer", "enum": [8, 16] },
+                    "quality": { "type": "integer", "description": "JPEG quality 1–100 (default 92)" } }), &["path"], false),
     ]
 }
 
@@ -425,6 +428,7 @@ mod tests {
                 a.insert("cmd".into(), name.into());
                 if !a.contains_key(prop) {
                     let v = match (prop.as_str(), schema["type"].as_str()) {
+                        ("color_space", _) => json!("display_p3"),
                         (p, _) if p.starts_with("color") => json!("#123456"),
                         ("target", _) => json!("pixels"),
                         ("mode", _) => json!("add"),

@@ -1153,7 +1153,9 @@ impl App {
         }
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_default();
-        self.ui_state.file = Some(ui::files::FileDialog::new(mode, dir, name));
+        let mut d = ui::files::FileDialog::new(mode, dir, name);
+        d.export = self.settings.export;
+        self.ui_state.file = Some(d);
         self.ui_state.hidden = false;
     }
 
@@ -1279,14 +1281,18 @@ impl App {
         }
     }
 
-    fn export_to(&mut self, path: std::path::PathBuf) {
+    fn export_to(&mut self, path: std::path::PathBuf, opts: imagine_io::export::ExportOptions) {
+        if self.settings.export != opts {
+            self.settings.export = opts;
+            self.store_settings();
+        }
         let Some(s) = &mut self.session else { return };
         if self.export_job.is_some() {
             tracing::warn!("Export läuft noch.");
             return;
         }
-        tracing::info!("Exportiere {} im Hintergrund …", path.display());
-        self.export_job = Some(s.start_export(&path));
+        tracing::info!("Exportiere {} ({}) im Hintergrund …", path.display(), opts.space.name());
+        self.export_job = Some(s.start_export(&path, &opts));
         self.bg_running += 1;
     }
 
@@ -1297,8 +1303,9 @@ impl App {
             return;
         }
         let path = s.default_export_path();
-        tracing::info!("Exportiere {} im Hintergrund …", path.display());
-        self.export_job = Some(s.start_export(&path));
+        let opts = self.settings.export;
+        tracing::info!("Exportiere {} ({}) im Hintergrund …", path.display(), opts.space.name());
+        self.export_job = Some(s.start_export(&path, &opts));
         self.bg_running += 1;
     }
 
@@ -2117,7 +2124,7 @@ impl App {
                 Action::OpenFile(p) => self.guard_unsaved(Pending::Open(p)),
                 Action::NewDocument { w, h, white } => self.guard_unsaved(Pending::New { w, h, white }),
                 Action::SaveAs(p) => self.save_to(Some(p)),
-                Action::ExportAs(p) => self.export_to(p),
+                Action::ExportAs(p, opts) => self.export_to(p, opts),
                 Action::Unsaved(a) => self.answer_unsaved(a),
                 Action::ImageSize { w, h } => {
                     self.engine_op(|e| e.resize_image(w, h, Interp::Bicubic, "Bildgröße"));

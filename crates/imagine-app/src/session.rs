@@ -16,6 +16,7 @@ use imagine_core::mask::CpuMask;
 use imagine_core::{Document, LayerId, MaskTile, TileCoord};
 use imagine_gpu::{Engine, PoolKind, Readback, Tile};
 use imagine_io::native::{Writer, compress_mask, compress_tile, live_bytes};
+use imagine_io::export::ExportOptions;
 use imagine_io::{BlobRef, export};
 use rayon::prelude::*;
 
@@ -287,8 +288,8 @@ impl Session {
     }
 
     /// Flattens and exports to png/jpg/webp/tiff. Returns milliseconds taken.
-    pub fn export(&mut self, path: &Path) -> anyhow::Result<f64> {
-        let job = self.start_export(path);
+    pub fn export(&mut self, path: &Path, opts: &ExportOptions) -> anyhow::Result<f64> {
+        let job = self.start_export(path, opts);
         while !job.ready(self.engine.device()) {
             let _ = self.engine.device().poll(wgpu::PollType::wait_indefinitely());
         }
@@ -297,20 +298,21 @@ impl Session {
 
     /// Starts exporting the flattened image: an asynchronous GPU readback;
     /// conversion and encoding then run via [`ExportJob::into_writer`].
-    pub fn start_export(&mut self, path: &Path) -> ExportJob {
+    pub fn start_export(&mut self, path: &Path, opts: &ExportOptions) -> ExportJob {
         let t0 = Instant::now();
         self.engine.flush();
         let size = self.engine.size();
         let tiles = self.engine.composite_tiles();
         let handles: Vec<Tile> = tiles.iter().map(|(_, t)| t.clone()).collect();
         let readback = (!handles.is_empty()).then(|| self.engine.begin_readback(PoolKind::Composite, &handles));
-        ExportJob { path: path.to_path_buf(), t0, size, coords: tiles.into_iter().map(|(c, _)| c).collect(), readback }
+        ExportJob { path: path.to_path_buf(), opts: *opts, t0, size, coords: tiles.into_iter().map(|(c, _)| c).collect(), readback }
     }
 }
 
 /// An export whose GPU readback is in flight.
 pub struct ExportJob {
     pub path: PathBuf,
+    opts: ExportOptions,
     t0: Instant,
     size: (u32, u32),
     coords: Vec<TileCoord>,
@@ -325,14 +327,11 @@ impl ExportJob {
     /// Conversion, encoding and writing (any thread). Returns the total time in ms.
     pub fn into_writer(self) -> impl FnOnce() -> anyhow::Result<f64> + Send + 'static {
         let data = self.readback.map(Readback::take).unwrap_or_default();
-        let (path, t0, (w, h), coords) = (self.path, self.t0, self.size, self.coords);
+        let (path, opts, t0, size, coords) = (self.path, self.opts, self.t0, self.size, self.coords);
         move || {
-            let mut img = image::RgbaImage::new(w, h);
             let tiles: Vec<(TileCoord, Vec<half::f16>)> =
                 coords.into_iter().zip(data.into_iter().map(|raw| bytemuck::pod_collect_to_vec(&raw))).collect();
-            export::blit(&mut img, &tiles);
-            drop(tiles);
-            export::save(&img, &path).with_context(|| format!("{} exportieren", path.display()))?;
+            export::write(&path, size, &tiles, &opts).with_context(|| format!("{} exportieren", path.display()))?;
             Ok(t0.elapsed().as_secs_f64() * 1e3)
         }
     }

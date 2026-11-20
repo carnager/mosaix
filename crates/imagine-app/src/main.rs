@@ -186,7 +186,7 @@ fn headless(source: Source, save: Option<PathBuf>, export: Option<PathBuf>, benc
         tracing::info!("gespeichert: {} ({} Kacheln, {:.1} MB, {:.0} ms)", r.path.display(), r.tiles_written, r.bytes as f64 / 1e6, r.ms);
     }
     if let Some(p) = export {
-        let ms = s.export(&p)?;
+        let ms = s.export(&p, &Default::default())?;
         tracing::info!("exportiert: {} ({ms:.0} ms)", p.display());
     }
     if bench {

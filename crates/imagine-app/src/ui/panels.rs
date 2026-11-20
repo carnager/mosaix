@@ -126,7 +126,7 @@ pub enum Action {
     ImageSize { w: u32, h: u32 },
     OpenFile(std::path::PathBuf),
     SaveAs(std::path::PathBuf),
-    ExportAs(std::path::PathBuf),
+    ExportAs(std::path::PathBuf, imagine_io::export::ExportOptions),
     NewDocument { w: u32, h: u32, white: bool },
     Unsaved(super::files::Answer),
     AddAdjustment(imagine_core::Adjustment),
