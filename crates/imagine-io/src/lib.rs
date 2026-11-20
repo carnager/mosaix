@@ -1,6 +1,7 @@
 //! imagine-io: the native `.imagine` format and image export.
 
 pub mod abr;
+pub mod gbr;
 pub mod export;
 pub mod native;
 pub mod psd;

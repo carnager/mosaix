@@ -1394,7 +1394,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                         }
                     }
                     ui.separator();
-                    if ui.button(tr("Import Brushes …")).on_hover_text(tr("Photoshop brushes (.abr) or an image (dark or opaque = paint)")).clicked() {
+                    if ui.button(tr("Import Brushes …")).on_hover_text(tr("Photoshop (.abr) or GIMP brushes (.gbr, .gih), or an image (dark or opaque = paint)")).clicked() {
                         out.push(Action::Command(palette::find("Import Brushes …")));
                     }
                 })

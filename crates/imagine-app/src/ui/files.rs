@@ -35,7 +35,7 @@ impl FileMode {
                 "imagine", "psd", "psb", "png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "exr",
             ],
             FileMode::SaveAs => &["imagine"],
-            FileMode::ImportBrushes => &["abr", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
+            FileMode::ImportBrushes => &["abr", "gbr", "gih", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
             FileMode::ExportAs => &["png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "psd", "psb"],
         }
     }

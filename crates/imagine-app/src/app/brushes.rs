@@ -70,8 +70,11 @@ fn unique(dir: &Path, name: &str) -> PathBuf {
 pub fn import(path: &Path, dir: &Path) -> Result<Vec<String>> {
     std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tip".into());
-    let tips = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("abr")) {
+    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let tips = if ext == "abr" {
         imagine_io::abr::read(&std::fs::read(path).with_context(|| path.display().to_string())?, &stem)?
+    } else if ext == "gbr" || ext == "gih" {
+        imagine_io::gbr::read(&std::fs::read(path).with_context(|| path.display().to_string())?, &stem)?
     } else {
         let mut t = coverage(&image::open(path).with_context(|| path.display().to_string())?);
         t.name = stem.clone();

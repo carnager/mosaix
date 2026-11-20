@@ -1232,6 +1232,9 @@ msgstr "Nicht-destruktiv: bleibt an der Ebene, jederzeit änderbar oder abschalt
 msgid "None"
 msgstr "Keiner"
 
+msgid "not a GIMP brush"
+msgstr "kein GIMP-Pinsel"
+
 msgid "not a Photoshop file"
 msgstr "keine Photoshop-Datei"
 
@@ -1370,8 +1373,8 @@ msgstr "Zeichenstift: klicken = Ecke, ziehen = Kurve, auf den Startpunkt = schli
 msgid "Photo 6000×4000"
 msgstr "Foto 6000×4000"
 
-msgid "Photoshop brushes (.abr) or an image (dark or opaque = paint)"
-msgstr "Photoshop-Pinsel (.abr) oder ein Bild (dunkel bzw. deckend = Farbe)"
+msgid "Photoshop (.abr) or GIMP brushes (.gbr, .gih), or an image (dark or opaque = paint)"
+msgstr "Photoshop- (.abr) oder GIMP-Pinsel (.gbr, .gih) oder ein Bild (dunkel bzw. deckend = Farbe)"
 
 msgid "Pillow Emboss"
 msgstr "Kissen"
