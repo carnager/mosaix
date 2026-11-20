@@ -356,13 +356,53 @@ impl State {
 }
 
 pub fn style(ctx: &egui::Context) {
-    ctx.set_visuals(egui::Visuals::dark());
+    use egui::{CornerRadius, Stroke as S};
+    // "Graphite": panels a step lighter than the canvas surround, readable
+    // secondary text, one blue accent for selection and active controls.
+    let gray = Color32::from_gray;
+    let mut v = egui::Visuals::dark();
+    v.panel_fill = Color32::from_rgb(40, 42, 47);
+    v.window_fill = Color32::from_rgb(46, 48, 54);
+    v.window_stroke = S::new(1.0, Color32::from_rgb(62, 65, 72));
+    v.extreme_bg_color = Color32::from_rgb(27, 28, 32);
+    v.text_edit_bg_color = Some(Color32::from_rgb(30, 31, 35));
+    v.faint_bg_color = Color32::from_rgb(47, 49, 55);
+    v.code_bg_color = Color32::from_rgb(30, 31, 35);
+    v.weak_text_color = Some(gray(150));
+    v.hyperlink_color = ACCENT;
+    v.selection.bg_fill = Color32::from_rgb(52, 98, 196);
+    v.selection.stroke = S::new(1.0, Color32::WHITE);
+    v.slider_trailing_fill = true;
+    v.window_corner_radius = CornerRadius::same(8);
+    v.menu_corner_radius = CornerRadius::same(6);
+    let r = CornerRadius::same(4);
+    let w = &mut v.widgets;
+    w.noninteractive.bg_fill = v.panel_fill;
+    w.noninteractive.weak_bg_fill = v.panel_fill;
+    w.noninteractive.bg_stroke = S::new(1.0, Color32::from_rgb(58, 61, 68));
+    w.noninteractive.fg_stroke = S::new(1.0, gray(205));
+    w.noninteractive.corner_radius = r;
+    w.inactive.bg_fill = Color32::from_rgb(58, 61, 69);
+    w.inactive.weak_bg_fill = Color32::from_rgb(54, 57, 64);
+    w.inactive.bg_stroke = S::NONE;
+    w.inactive.fg_stroke = S::new(1.0, gray(215));
+    w.inactive.corner_radius = r;
+    w.hovered.bg_fill = Color32::from_rgb(70, 74, 84);
+    w.hovered.weak_bg_fill = Color32::from_rgb(66, 70, 80);
+    w.hovered.bg_stroke = S::new(1.0, Color32::from_rgb(92, 97, 110));
+    w.hovered.fg_stroke = S::new(1.5, gray(240));
+    w.hovered.corner_radius = r;
+    w.active.bg_fill = Color32::from_rgb(80, 85, 97);
+    w.active.weak_bg_fill = Color32::from_rgb(76, 81, 93);
+    w.active.bg_stroke = S::new(1.0, ACCENT);
+    w.active.fg_stroke = S::new(2.0, Color32::WHITE);
+    w.active.corner_radius = r;
+    w.open = w.hovered;
+    ctx.set_visuals(v);
     ctx.all_styles_mut(|s| {
-        s.spacing.item_spacing = Vec2::new(6.0, 4.0);
+        s.spacing.item_spacing = Vec2::new(6.0, 5.0);
+        s.spacing.button_padding = Vec2::new(7.0, 3.0);
         s.spacing.slider_width = 150.0;
-        s.visuals.selection.bg_fill = ACCENT.linear_multiply(0.6);
-        s.visuals.panel_fill = Color32::from_rgb(30, 31, 35);
-        s.visuals.window_fill = Color32::from_rgb(36, 37, 42);
     });
 }
 
@@ -809,9 +849,16 @@ fn dock(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
         .min_size(140.0)
         .max_size((ui.available_height() - 120.0).max(140.0))
         .show(ui, |ui| {
-            ui.add_space(4.0);
-            ui.label(RichText::new(tr("Layers")).strong());
-            layer_section(ui, m, st, out);
+            // Lay out in a fixed child: egui stores a panel's size from what
+            // its content used, so a few pixels of overflow per frame would
+            // make it creep up.
+            let rect = ui.available_rect_before_wrap();
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            child.set_clip_rect(rect.intersect(ui.clip_rect()));
+            child.add_space(4.0);
+            child.label(RichText::new(tr("Layers")).strong());
+            layer_section(&mut child, m, st, out);
+            ui.allocate_rect(rect, Sense::hover());
         });
     let fx = m.active_effects.as_ref().map_or(0, Vec::len);
     let styles = if fx > 0 {
@@ -1332,7 +1379,8 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
         });
         ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
             egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
+                .auto_shrink([false, true])
+                .max_height((ui.available_height() - 8.0).max(0.0))
                 .show(ui, |ui| {
                     let row_h = 34.0;
                     for row in &m.layers {

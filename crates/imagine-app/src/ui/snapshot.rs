@@ -289,7 +289,11 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     // A few passes so that egui's layout settles.
     // Enough passes (and time) for layout and fade-in animations to settle.
     let mut ui_ms = Vec::new();
-    for _ in 0..30 {
+    let frames = std::env::var("IMAGINE_SNAPSHOT_FRAMES")
+        .ok()
+        .and_then(|f| f.parse().ok())
+        .unwrap_or(30);
+    for _ in 0..frames {
         std::thread::sleep(std::time::Duration::from_millis(15));
         let _ = match &state.filter_preview {
             Some(panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
@@ -319,7 +323,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
         ui_ms.push(t0.elapsed().as_secs_f64() * 1e3);
     }
-    let tail = &ui_ms[10..];
+    let tail = &ui_ms[ui_ms.len().min(10)..];
     println!(
         "{}",
         tr!(
