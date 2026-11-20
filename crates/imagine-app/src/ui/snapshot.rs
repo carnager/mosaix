@@ -161,7 +161,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         if let Ok(q) = std::env::var("IMAGINE_SNAPSHOT_FONTS") {
             state.vec_editor.open_font_list(&q);
         }
-        model.fonts = std::sync::Arc::new(imagine_vector::font_families());
+        model.fonts = std::sync::Arc::new(imagine_vector::font_groups());
         model.layers = panels::layer_rows(s.engine.doc());
         model.active = s.engine.doc().active;
     }

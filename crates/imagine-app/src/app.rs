@@ -286,7 +286,7 @@ pub struct App {
     clone_all: bool,
     clone_aligned: bool,
     /// Font families for the text properties (loaded on first use).
-    fonts: std::sync::Arc<Vec<String>>,
+    fonts: std::sync::Arc<Vec<imagine_vector::FontGroup>>,
     liq_tool: LiquifyTool,
     /// Liquify brush diameter (document px) and strength 0…1.
     liq_size: f32,
@@ -1642,7 +1642,7 @@ impl App {
     fn ensure_fonts(&mut self) {
         if self.fonts.is_empty() {
             let t0 = Instant::now();
-            self.fonts = std::sync::Arc::new(imagine_vector::font_families());
+            self.fonts = std::sync::Arc::new(imagine_vector::font_groups());
             tracing::debug!("{} Schriftfamilien in {:.0} ms", self.fonts.len(), t0.elapsed().as_secs_f64() * 1e3);
         }
     }

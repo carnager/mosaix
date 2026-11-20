@@ -43,11 +43,112 @@ pub fn font_families() -> Vec<String> {
     v
 }
 
+/// One installable face of a font group: render it with `family` + `weight`
+/// + `italic`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FontFace {
+    pub family: String,
+    pub weight: f32,
+    pub italic: bool,
+    pub label: String,
+}
+
+/// A font family as users think of it ("IBM Plex Mono"), with all its faces
+/// even when the system lists them as separate families ("… Medm", "… SmBld").
+#[derive(Debug, Clone, PartialEq)]
+pub struct FontGroup {
+    pub name: String,
+    /// Sorted by weight, upright before italic.
+    pub faces: Vec<FontFace>,
+}
+
+impl FontGroup {
+    /// The face to show by default (closest to regular, upright).
+    pub fn regular(&self) -> Option<&FontFace> {
+        self.faces.iter().min_by(|a, b| {
+            let k = |f: &FontFace| (f.italic as u8, (f.weight - 400.0).abs() as u32);
+            k(a).cmp(&k(b))
+        })
+    }
+
+    /// The face of this group closest to (family, weight, italic).
+    pub fn face(&self, family: &str, weight: f32, italic: bool) -> Option<&FontFace> {
+        self.faces.iter().min_by(|a, b| {
+            let k = |f: &FontFace| (f.family != family) as u32 * 2000 + (f.italic != italic) as u32 * 1000 + (f.weight - weight).abs() as u32;
+            k(a).cmp(&k(b))
+        })
+    }
+}
+
+/// Style words that some fonts put into the family name.
+const STYLE_WORDS: &[&str] = &[
+    "thin", "hairline", "extralight", "extlt", "ultralight", "light", "lt", "text", "regular", "book", "normal", "medium", "medm", "md",
+    "semibold", "smbld", "demibold", "demi", "bold", "bd", "extrabold", "extbd", "ultrabold", "heavy", "black", "blk", "italic", "oblique",
+];
+
+fn base_name(family: &str) -> String {
+    let mut words: Vec<&str> = family.split_whitespace().collect();
+    while words.len() > 1 && STYLE_WORDS.contains(&words.last().unwrap().to_lowercase().as_str()) {
+        words.pop();
+    }
+    words.join(" ")
+}
+
+fn weight_label(w: f32) -> &'static str {
+    match w.round() as i32 {
+        ..=149 => "Thin",
+        150..=249 => "ExtraLight",
+        250..=349 => "Light",
+        350..=424 => "Regular",
+        425..=474 => "Text",
+        475..=549 => "Medium",
+        550..=649 => "SemiBold",
+        650..=749 => "Bold",
+        750..=849 => "ExtraBold",
+        _ => "Black",
+    }
+}
+
+/// Installed fonts grouped into families with their faces, sorted by name.
+pub fn font_groups() -> Vec<FontGroup> {
+    let mut f = fonts().lock().unwrap();
+    let ids: Vec<_> = f.font.collection.family_ids().collect();
+    let mut groups: std::collections::BTreeMap<String, (String, Vec<FontFace>)> = Default::default();
+    for id in ids {
+        let Some(fam) = f.font.collection.family(id) else { continue };
+        let name = fam.name().to_string();
+        let base = base_name(&name);
+        let entry = groups.entry(base.to_lowercase()).or_insert_with(|| (base.clone(), Vec::new()));
+        for info in fam.fonts() {
+            let weight = info.weight().value();
+            let italic = !matches!(info.style(), parley::FontStyle::Normal);
+            // Same weight and slope from another alias ("Medm" vs "Medium"): keep one.
+            if entry.1.iter().any(|x| (x.weight - weight).abs() < 1.0 && x.italic == italic) {
+                continue;
+            }
+            let label = format!("{}{}", weight_label(weight), if italic { " Italic" } else { "" });
+            entry.1.push(FontFace { family: name.clone(), weight, italic, label });
+        }
+    }
+    let mut out: Vec<FontGroup> = groups
+        .into_values()
+        .filter(|(_, faces)| !faces.is_empty())
+        .map(|(name, mut faces)| {
+            faces.sort_by(|a, b| a.weight.total_cmp(&b.weight).then(a.italic.cmp(&b.italic)));
+            FontGroup { name, faces }
+        })
+        .collect();
+    out.sort_by_key(|g| g.name.to_lowercase());
+    out
+}
+
 /// A small preview of `text` in `family` (white on transparent, straight
 /// RGBA 8 bit): width, height, pixels. For font lists.
-pub fn font_preview(family: &str, text: &str, size: f32, max_width: u16) -> Option<(u16, u16, Vec<u8>)> {
+pub fn font_preview(family: &str, weight: f32, italic: bool, text: &str, size: f32, max_width: u16) -> Option<(u16, u16, Vec<u8>)> {
     let mut spec = TextSpec::new(text, 0.0, 0.0, size, [1.0; 4]);
     spec.font = family.into();
+    spec.weight = weight;
+    spec.italic = italic;
     let l = layout_text(&spec);
     if l.runs.is_empty() {
         return None;
@@ -343,6 +444,20 @@ mod tests {
         assert_eq!(px(&t, 1050, 1000), blue, "ring at radius 50");
         assert_eq!(px(&t, 1000, 1000)[3], 0.0, "hollow");
         assert_ne!(v.transform, IDENTITY);
+    }
+
+    #[test]
+    fn groups_fold_style_families() {
+        assert_eq!(base_name("IBM Plex Mono SmBld"), "IBM Plex Mono");
+        assert_eq!(base_name("IBM Plex Sans Condensed Light"), "IBM Plex Sans Condensed");
+        assert_eq!(base_name("Black"), "Black");
+        let groups = font_groups();
+        assert!(!groups.is_empty());
+        let names: std::collections::HashSet<_> = groups.iter().map(|g| g.name.to_lowercase()).collect();
+        assert_eq!(names.len(), groups.len(), "no duplicate groups");
+        for g in &groups {
+            assert!(g.regular().is_some());
+        }
     }
 
     #[test]

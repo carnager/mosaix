@@ -142,7 +142,7 @@ pub struct Model {
     /// Layer styles of the active layer (`None` for groups and adjustments).
     pub active_effects: Option<Vec<imagine_core::style::Effect>>,
     /// Installed font families (loaded when first needed).
-    pub fonts: std::sync::Arc<Vec<String>>,
+    pub fonts: std::sync::Arc<Vec<imagine_vector::FontGroup>>,
     /// Shape tool: ellipse instead of rectangle.
     pub shape_ellipse: bool,
     /// Histogram of what is below the active adjustment (levels and curves).

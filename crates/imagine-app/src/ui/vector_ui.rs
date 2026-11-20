@@ -32,36 +32,32 @@ impl EditorState {
 const PREVIEW_TEXT: &str = "Imagine 123";
 const ROW_H: f32 = 26.0;
 
-/// Font picker: the current font (shown in itself); click opens a search
-/// field and a list where every family is previewed in its own face.
-/// Returns the chosen family.
-fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[String], st: &mut EditorState) -> Option<String> {
+/// The open font list: a search field and every family previewed in its
+/// own face. Returns the chosen face (the family's regular one).
+fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[imagine_vector::FontGroup], st: &mut EditorState) -> Option<imagine_vector::FontFace> {
     let mut chosen = None;
-    // Closed: a button with the current font's preview.
-    let r = ui.add_sized([ui.available_width().min(220.0), 22.0], egui::Button::new(current).truncate()).on_hover_text("Schrift wählen");
-    if r.clicked() {
-        st.font_open = !st.font_open;
-        st.font_query.clear();
-        st.font_sel = 0;
-    }
     if !st.font_open {
         return None;
     }
     let q = ui.add(egui::TextEdit::singleline(&mut st.font_query).hint_text("Schrift suchen …").desired_width(f32::INFINITY));
-    if r.clicked() || std::mem::take(&mut st.focus_query) {
+    if std::mem::take(&mut st.focus_query) {
         q.request_focus();
     }
     if q.changed() {
         st.font_sel = 0;
     }
-    // Entries: recent and generic first (without a query), then all matches.
+    // Entries (family groups): recent and generic first (without a query), then all matches.
     let query = st.font_query.to_lowercase();
-    let mut list: Vec<(String, bool)> = Vec::new();
+    let generic = |n: &str| imagine_vector::FontGroup {
+        name: n.into(),
+        faces: vec![imagine_vector::FontFace { family: n.into(), weight: 400.0, italic: false, label: "Regular".into() }],
+    };
+    let mut list: Vec<(imagine_vector::FontGroup, bool)> = Vec::new();
     if query.is_empty() {
-        list.extend(st.recent.iter().map(|f| (f.clone(), true)));
-        list.extend(["sans-serif", "serif", "monospace"].iter().map(|f| (f.to_string(), false)));
+        list.extend(st.recent.iter().filter_map(|r| fonts.iter().find(|g| &g.name == r)).map(|g| (g.clone(), true)));
+        list.extend(["sans-serif", "serif", "monospace"].iter().map(|f| (generic(f), false)));
     }
-    list.extend(fonts.iter().filter(|f| query.is_empty() || f.to_lowercase().contains(&query)).map(|f| (f.clone(), false)));
+    list.extend(fonts.iter().filter(|g| query.is_empty() || g.name.to_lowercase().contains(&query)).map(|g| (g.clone(), false)));
     // Keyboard: arrows move, Enter picks, Escape closes.
     let (up, down, enter, esc) = ui.input(|i| {
         (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape))
@@ -74,7 +70,7 @@ fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[String], st: &mut Edit
             st.font_sel = st.font_sel.saturating_sub(1);
         }
         if enter {
-            chosen = Some(list[st.font_sel.min(list.len() - 1)].0.clone());
+            chosen = list[st.font_sel.min(list.len() - 1)].0.regular().cloned();
         }
     }
     if esc {
@@ -85,9 +81,11 @@ fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[String], st: &mut Edit
     let ctx = ui.ctx().clone();
     egui::ScrollArea::vertical().id_salt("font list").max_height(ROW_H * 10.0).auto_shrink([false, true]).show_rows(ui, ROW_H, list.len(), |ui, rows| {
         for i in rows {
-            let (name, recent) = &list[i];
+            let (group, recent) = &list[i];
+            let name = &group.name;
+            let face = group.regular();
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), egui::Sense::click());
-            let selected = i == st.font_sel || name == current;
+            let selected = i == st.font_sel || group.faces.iter().any(|f| f.family == current);
             if i == st.font_sel {
                 ui.painter().rect_filled(rect, 3.0, egui::Color32::from_rgb(60, 90, 140));
                 if up || down {
@@ -97,17 +95,21 @@ fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[String], st: &mut Edit
                 ui.painter().rect_filled(rect, 3.0, egui::Color32::from_white_alpha(12));
             }
             let text_col = if selected { egui::Color32::WHITE } else { egui::Color32::from_gray(200) };
-            ui.painter().text(
+            // Right part: the preview; left part: the name, clipped before it.
+            let preview_w = (rect.width() * 0.45).min(150.0);
+            let name_clip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x - preview_w - 8.0, rect.max.y));
+            let label = if group.faces.len() > 1 { format!("{name}{}  ({})", if *recent { " ·" } else { "" }, group.faces.len()) } else { name.clone() };
+            ui.painter().with_clip_rect(name_clip).text(
                 rect.left_center() + egui::vec2(6.0, 0.0),
                 egui::Align2::LEFT_CENTER,
-                if *recent { format!("{name}  ·") } else { name.clone() },
+                label,
                 egui::FontId::proportional(12.5),
                 text_col,
             );
             // Preview in the font itself (rendered once, a few per frame).
             if !st.previews.contains_key(name) && rendered < 12 {
                 rendered += 1;
-                let tex = imagine_vector::font_preview(name, PREVIEW_TEXT, 17.0, 150).map(|(w, h, px)| {
+                let tex = face.and_then(|f| imagine_vector::font_preview(&f.family, f.weight, f.italic, PREVIEW_TEXT, 17.0, 150)).map(|(w, h, px)| {
                     let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &px);
                     ctx.load_texture(format!("font:{name}"), img, egui::TextureOptions::LINEAR)
                 });
@@ -116,7 +118,7 @@ fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[String], st: &mut Edit
             match st.previews.get(name) {
                 Some(Some(tex)) => {
                     let size = tex.size_vec2();
-                    let scale = ((ROW_H - 4.0) / size.y).min(1.0);
+                    let scale = ((ROW_H - 4.0) / size.y).min(preview_w / size.x).min(1.0);
                     let s = size * scale;
                     let r = egui::Rect::from_min_size(egui::pos2(rect.max.x - s.x - 6.0, rect.center().y - s.y / 2.0), s);
                     ui.painter().image(tex.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), text_col);
@@ -125,17 +127,21 @@ fn font_picker(ui: &mut egui::Ui, current: &str, fonts: &[String], st: &mut Edit
                 None => ctx.request_repaint(),
             }
             if resp.clicked() {
-                chosen = Some(name.clone());
+                chosen = face.cloned();
             }
         }
     });
     if list.is_empty() {
         ui.label(RichText::new("keine passende Schrift").weak());
     }
-    if let Some(f) = &chosen {
-        st.recent.retain(|r| r != f);
-        st.recent.insert(0, f.clone());
+    if let Some(f) = &chosen
+        && let Some(g) = fonts.iter().find(|g| g.faces.iter().any(|x| x.family == f.family))
+    {
+        st.recent.retain(|r| r != &g.name);
+        st.recent.insert(0, g.name.clone());
         st.recent.truncate(6);
+    }
+    if chosen.is_some() {
         st.font_open = false;
     }
     chosen
@@ -180,7 +186,7 @@ fn color_button(ui: &mut egui::Ui, c: &mut [f32; 4]) -> egui::Response {
     r
 }
 
-pub fn editor(ui: &mut egui::Ui, v: &VectorLayer, fonts: &[String], brush: [f32; 3], st: &mut EditorState) -> Option<(VectorLayer, bool)> {
+pub fn editor(ui: &mut egui::Ui, v: &VectorLayer, fonts: &[imagine_vector::FontGroup], brush: [f32; 3], st: &mut EditorState) -> Option<(VectorLayer, bool)> {
     let mut out = v.clone();
     let mut t = Track::default();
     match &mut out.kind {
@@ -191,29 +197,61 @@ pub fn editor(ui: &mut egui::Ui, v: &VectorLayer, fonts: &[String], brush: [f32;
                 r.request_focus();
             }
             t.add(&r);
-            ui.horizontal_top(|ui| {
+            ui.horizontal(|ui| {
                 ui.add_sized([86.0, 18.0], egui::Label::new("Schrift"));
-                ui.vertical(|ui| {
-                    if let Some(f) = font_picker(ui, &s.font.clone(), fonts, st) {
-                        s.font = f;
-                        t.changed = true;
-                        t.done = true;
-                    }
-                });
+                // The family name (the face is chosen below).
+                let shown = fonts.iter().find(|g| g.faces.iter().any(|f| f.family == s.font)).map_or(s.font.clone(), |g| g.name.clone());
+                let r = ui.add_sized([ui.available_width().min(220.0), 22.0], egui::Button::new(shown).truncate()).on_hover_text("Schrift wählen");
+                if r.clicked() {
+                    st.font_open = !st.font_open;
+                    st.font_query.clear();
+                    st.font_sel = 0;
+                    st.focus_query = true;
+                }
             });
+            // The list at full width under the row.
+            if let Some(f) = font_picker(ui, &s.font.clone(), fonts, st) {
+                s.font = f.family;
+                s.weight = f.weight;
+                s.italic = f.italic;
+                t.changed = true;
+                t.done = true;
+            }
             row(ui, "Größe", |ui| ui.add(egui::Slider::new(&mut s.size, 4.0..=2000.0).logarithmic(true).suffix(" px").max_decimals(0)), &mut t);
+            // Faces of the family (all weights and italics), else bold/italic toggles.
+            let group = fonts.iter().find(|g| g.faces.iter().any(|f| f.family == s.font)).filter(|g| g.faces.len() > 1);
             ui.horizontal(|ui| {
                 ui.add_sized([86.0, 18.0], egui::Label::new("Schnitt"));
-                let mut bold = s.weight >= 600.0;
-                let r = ui.toggle_value(&mut bold, RichText::new("F").strong());
-                if r.changed() {
-                    s.weight = if bold { 700.0 } else { 400.0 };
-                    t.changed = true;
-                    t.done = true;
+                match group {
+                    Some(g) => {
+                        let cur = g.face(&s.font, s.weight, s.italic).map(|f| f.label.clone()).unwrap_or_default();
+                        egui::ComboBox::from_id_salt("face").selected_text(cur.clone()).width(150.0).height(400.0).show_ui(ui, |ui| {
+                            for f in &g.faces {
+                                if ui.selectable_label(f.label == cur, &f.label).clicked() {
+                                    s.font = f.family.clone();
+                                    s.weight = f.weight;
+                                    s.italic = f.italic;
+                                    t.changed = true;
+                                    t.done = true;
+                                }
+                            }
+                        });
+                    }
+                    None => {
+                        let mut bold = s.weight >= 600.0;
+                        let r = ui.toggle_value(&mut bold, RichText::new("F").strong()).on_hover_text("fett (künstlich, wenn die Schrift keinen fetten Schnitt hat)");
+                        if r.changed() {
+                            s.weight = if bold { 700.0 } else { 400.0 };
+                            t.changed = true;
+                            t.done = true;
+                        }
+                        let r = ui.toggle_value(&mut s.italic, RichText::new("K").italics());
+                        t.add(&r);
+                    }
                 }
-                let r = ui.toggle_value(&mut s.italic, RichText::new("K").italics());
-                t.add(&r);
-                ui.add_space(8.0);
+            });
+            ui.horizontal(|ui| {
+                ui.add_sized([86.0, 18.0], egui::Label::new("Ausrichtung"));
                 for a in TextAlign::ALL {
                     let label = match a {
                         TextAlign::Left => "links",
