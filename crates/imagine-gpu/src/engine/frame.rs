@@ -293,6 +293,7 @@ impl Engine {
     }
 
     pub(super) fn update_signatures(&mut self) {
+        self.refresh_smart();
         let coords: Vec<TileCoord> = if self.recheck_all {
             let mut s = self.shown().all_tile_coords();
             s.extend(self.comp.keys().copied());
@@ -349,9 +350,10 @@ impl Engine {
             self.dirty.remove(&c);
             let stroke = self.stroke_at(c).map(|(l, t, p)| (l, t.slot(), p));
             let sel = self.sel_slot(c);
-            let shown = match &self.preview {
-                Some(p) => &p.doc,
-                None => &self.doc,
+            let shown = match (&self.render, &self.preview) {
+                (Some(r), _) => r,
+                (None, Some(p)) => &p.doc,
+                (None, None) => &self.doc,
             };
             let program = shown.program(c, stroke.map(|s| s.0));
             if program.is_empty() {

@@ -222,8 +222,15 @@ pub fn tools() -> Vec<Value> {
         tool("filter_apply",
             "Apply a pixel filter to a layer (within the selection, if any). filter is an object with \"kind\": \
              gaussian_blur {radius px}; unsharp_mask {amount % 1…500, radius px, threshold 0…255}; \
-             high_pass {radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}.",
-            json!({ "layer": layer_param(), "filter": { "type": "object" } }), &["filter"], false),
+             high_pass {radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}. \
+             With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
+             listed under smart_filters in document_info and editable with smart_filter_set.",
+            json!({ "layer": layer_param(), "filter": { "type": "object" }, "smart": { "type": "boolean" } }), &["filter"], false),
+        tool("smart_filter_set",
+            "Change a layer's smart filter number `index` (0 = applied first): new parameters (`filter`, same kind), \
+             switch it on/off (`enabled`) or `remove` it. `apply`=true instead writes all smart filters into the pixels and removes them.",
+            json!({ "layer": layer_param(), "index": { "type": "integer" }, "filter": { "type": "object" },
+                    "enabled": { "type": "boolean" }, "remove": { "type": "boolean" }, "apply": { "type": "boolean" } }), &[], false),
         tool("adjustment_set", "Change the parameters of an adjustment layer (same kind; see adjustment_add).",
             json!({ "layer": layer_param(), "adjustment": { "type": "object" } }), &["adjustment"], false),
         tool("layer_bounds", "Pixel-exact bounding box of a layer's visible content (within the selection, if any); null if empty.",
@@ -412,7 +419,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
         for t in tools() {

@@ -172,6 +172,10 @@ pub struct Engine {
     thumbs: Option<thumbs::Thumbs>,
     /// Last histogram and the key of what it was computed from.
     histogram: Option<(u64, std::sync::Arc<Histogram>)>,
+    /// Smart-filter results per layer.
+    smart: HashMap<LayerId, filter::SmartEntry>,
+    /// The composited document when smart filters substitute layer pixels.
+    render: Option<Document<Tile>>,
     pending_dabs: Vec<Dab>,
     pending_mips: Vec<crate::pool::SlotId>,
     visible: (DVec2, DVec2),
@@ -665,6 +669,8 @@ impl Engine {
             merge_key: None,
             thumbs: None,
             histogram: None,
+            smart: HashMap::new(),
+            render: None,
             pending_dabs: Vec::new(),
             pending_mips: Vec::new(),
             visible: (DVec2::ZERO, DVec2::ZERO),

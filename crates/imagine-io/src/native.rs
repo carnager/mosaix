@@ -31,7 +31,7 @@ pub const MAGIC: &[u8; 8] = b"IMAGINE\x01";
 const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
 /// 1: layers. 2: + layer masks and selection.
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
 const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
 
@@ -90,6 +90,8 @@ struct LayerEntry {
     content: ContentEntry,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mask: Option<MaskEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    filters: Vec<imagine_core::SmartFilter>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -159,6 +161,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                     Content::Adjustment(a) => ContentEntry::Adjustment { adjustment: a.clone() },
                 },
                 mask: l.mask.as_ref().map(|m| mask_to_entry(m, l.mask_enabled)),
+                filters: l.filters.clone(),
             })
             .collect()
     }
@@ -206,6 +209,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     content,
                     mask,
                     mask_enabled,
+                    filters: e.filters,
                 })
             })
             .collect()
@@ -425,6 +429,10 @@ mod tests {
         Arc::make_mut(&mut m.tiles).insert(TileCoord::new(1, 0), MaskTile::Solid(0));
         d.find_mut(bg).unwrap().mask = Some(m);
         d.find_mut(bg).unwrap().mask_enabled = false;
+        d.find_mut(bg).unwrap().filters = vec![
+            imagine_core::SmartFilter::new(imagine_core::Filter::GaussianBlur { radius: 3.5 }),
+            imagine_core::SmartFilter { filter: imagine_core::Filter::HighPass { radius: 9.0 }, enabled: false },
+        ];
         d.selection = Some(Mask::filled(255));
         d
     }
@@ -446,6 +454,7 @@ mod tests {
         assert_eq!(decompress_tile(&r.read_blob(blob).unwrap()).unwrap()[5].to_f32(), 0.25);
         let l = loaded.find(bg).unwrap();
         assert!(!l.mask_enabled);
+        assert_eq!(l.filters, doc.find(bg).unwrap().filters);
         let m = l.mask.as_ref().unwrap();
         assert_eq!(m.default, 255);
         assert!(matches!(m.tiles[&TileCoord::new(1, 0)], MaskTile::Solid(0)));

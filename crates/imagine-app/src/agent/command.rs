@@ -161,7 +161,17 @@ pub enum Command {
     },
     LayerBounds { layer: Option<LayerId> },
     Histogram { below: Option<LayerId>, bins: Option<u32> },
-    FilterApply { layer: Option<LayerId>, filter: imagine_core::Filter },
+    FilterApply { layer: Option<LayerId>, filter: imagine_core::Filter, #[serde(default)] smart: bool },
+    SmartFilterSet {
+        layer: Option<LayerId>,
+        index: Option<usize>,
+        filter: Option<imagine_core::Filter>,
+        enabled: Option<bool>,
+        #[serde(default)]
+        remove: bool,
+        #[serde(default)]
+        apply: bool,
+    },
     AdjustmentAdd { adjustment: imagine_core::Adjustment, name: Option<String> },
     AdjustmentSet { layer: Option<LayerId>, adjustment: imagine_core::Adjustment },
     Crop { x: i64, y: i64, width: u32, height: u32 },
@@ -237,6 +247,7 @@ impl Command {
             Self::Histogram { .. } => "histogram",
             Self::AdjustmentAdd { .. } => "adjustment_add",
             Self::FilterApply { .. } => "filter_apply",
+            Self::SmartFilterSet { .. } => "smart_filter_set",
             Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
@@ -778,10 +789,48 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let bounds = s.engine.content_bounds(id).map(bounds_json);
             Ok(Output::json(json!({ "ok": true, "active_layer": id, "bounds": bounds })))
         }
-        Command::FilterApply { layer, filter } => {
+        Command::FilterApply { layer, filter, smart } => {
             pixel_layer(s, layer)?;
             let label = filter.name();
-            s.engine.apply_filter(&filter, label).map_err(engine_err)?;
+            if smart {
+                s.engine.add_smart_filter(&filter, label).map_err(engine_err)?;
+            } else {
+                s.engine.apply_filter(&filter, label).map_err(engine_err)?;
+            }
+            ok(s)
+        }
+        Command::SmartFilterSet { layer, index, filter, enabled, remove, apply } => {
+            let id = pixel_layer(s, layer)?;
+            let n = s.engine.doc().find(id).unwrap().filters.len();
+            ensure!(n > 0, "layer {id} has no smart filters");
+            if apply {
+                s.engine.bake_smart_filters(id, "Smart-Filter anwenden").map_err(engine_err)?;
+                return ok(s);
+            }
+            let i = index.context("index (0 = first filter, applied first) is required")?;
+            ensure!(i < n, "index {i} out of range (layer {id} has {n} smart filters)");
+            if remove {
+                s.engine.edit("Smart-Filter entfernen", |d| {
+                    d.find_mut(id).unwrap().filters.remove(i);
+                    true
+                });
+                return ok(s);
+            }
+            if let Some(f) = filter {
+                ensure!(
+                    std::mem::discriminant(&f) == std::mem::discriminant(&s.engine.doc().find(id).unwrap().filters[i].filter),
+                    "filter kind differs – remove it and add a new one"
+                );
+                s.engine.set_smart_filter(id, i, &f, "Smart-Filter ändern").map_err(engine_err)?;
+            }
+            if let Some(on) = enabled {
+                s.engine.edit("Smart-Filter ein/aus", |d| {
+                    let f = &mut d.find_mut(id).unwrap().filters[i];
+                    let changed = f.enabled != on;
+                    f.enabled = on;
+                    changed
+                });
+            }
             ok(s)
         }
         Command::AdjustmentAdd { adjustment, name } => {
@@ -824,24 +873,25 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             let h = s.engine.histogram(below);
             let channel = |bins: &[f32; 256]| {
-                let total: f32 = bins.iter().sum::<f32>().max(1e-6);
-                let quantile = |q: f32| {
+                let bins: Vec<f64> = bins.iter().map(|&b| b as f64).collect();
+                let total: f64 = bins.iter().sum::<f64>().max(1e-9);
+                let r4 = |v: f64| (v * 1e4).round() / 1e4;
+                let quantile = |q: f64| {
                     let mut acc = 0.0;
-                    bins.iter().position(|b| {
-                        acc += b;
-                        acc >= q * total
-                    }).unwrap_or(255)
+                    bins.iter()
+                        .position(|b| {
+                            acc += b;
+                            acc >= q * total
+                        })
+                        .unwrap_or(255)
                 };
-                let mean = bins.iter().enumerate().map(|(i, b)| i as f32 * b).sum::<f32>() / total;
-                let grouped: Vec<f32> = bins
-                    .chunks(256 / n as usize)
-                    .map(|c| (c.iter().sum::<f32>() / total * 1e4).round() / 1e4)
-                    .collect();
+                let mean = bins.iter().enumerate().map(|(i, b)| i as f64 * b).sum::<f64>() / total;
+                let grouped: Vec<f64> = bins.chunks(256 / n as usize).map(|c| r4(c.iter().sum::<f64>() / total)).collect();
                 json!({
                     "mean": (mean * 10.0).round() / 10.0,
                     "median": quantile(0.5), "p1": quantile(0.01), "p99": quantile(0.99),
-                    "clipped_black": (bins[0] / total * 1e4).round() / 1e4,
-                    "clipped_white": (bins[255] / total * 1e4).round() / 1e4,
+                    "clipped_black": r4(bins[0] / total),
+                    "clipped_white": r4(bins[255] / total),
                     "bins": grouped,
                 })
             };
@@ -936,6 +986,9 @@ pub fn info(s: &Session) -> Value {
                 });
                 if let Some(m) = &l.mask {
                     v["mask"] = json!({ "enabled": l.mask_enabled, "default": m.default, "tiles": m.tiles.len() });
+                }
+                if !l.filters.is_empty() {
+                    v["smart_filters"] = serde_json::to_value(&l.filters).unwrap_or_default();
                 }
                 match &l.content {
                     Content::Pixels(t) => {

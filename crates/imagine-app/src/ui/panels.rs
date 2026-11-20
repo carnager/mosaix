@@ -49,6 +49,25 @@ pub struct LayerRow {
     /// Thumbnail texture and the used part of it (u, v).
     pub thumb: Option<(egui::TextureId, (f32, f32))>,
     pub adjustment: bool,
+    pub filters: Vec<imagine_core::SmartFilter>,
+}
+
+/// The filter dialog: a new filter (destructive or smart) or an existing
+/// smart filter being edited.
+pub struct FilterDialog {
+    pub filter: imagine_core::Filter,
+    preview: bool,
+    smart: bool,
+    /// Editing smart filter `index` of `layer`.
+    edit: Option<(LayerId, usize)>,
+}
+
+/// What the canvas previews for the filter dialog.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilterPreview {
+    Pixels(imagine_core::Filter),
+    /// Smart filter `Some(index)` replaced, or one added.
+    Smart(Option<usize>, imagine_core::Filter),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -131,6 +150,11 @@ pub enum Action {
     Unsaved(super::files::Answer),
     AddAdjustment(imagine_core::Adjustment),
     ApplyFilter(imagine_core::Filter),
+    AddSmartFilter(imagine_core::Filter),
+    SetSmartFilter { layer: LayerId, index: usize, filter: imagine_core::Filter },
+    ToggleSmartFilter { layer: LayerId, index: usize },
+    RemoveSmartFilter { layer: LayerId, index: usize },
+    BakeSmartFilters(LayerId),
     SetAdjustment { adj: imagine_core::Adjustment, done: bool },
 }
 
@@ -152,10 +176,11 @@ pub struct State {
     /// Unsaved-changes question: what happens if the user discards.
     pub confirm: Option<String>,
     adj_editor: super::adjust_ui::EditorState,
-    /// Open filter dialog: the filter and whether to preview it.
-    filter: Option<(imagine_core::Filter, bool)>,
+    filter: Option<FilterDialog>,
+    /// New filters are added as smart filters (remembered while running).
+    smart_filters: bool,
     /// What the canvas should preview right now (set by the dialog).
-    pub filter_preview: Option<imagine_core::Filter>,
+    pub filter_preview: Option<FilterPreview>,
 }
 
 enum Dialog {
@@ -167,7 +192,7 @@ const ACCENT: Color32 = Color32::from_rgb(90, 150, 255);
 
 impl State {
     pub fn open_filter(&mut self, f: imagine_core::Filter) {
-        self.filter = Some((f, true));
+        self.filter = Some(FilterDialog { filter: f, preview: true, smart: self.smart_filters, edit: None });
     }
 
     /// A palette, dialog or question is open: keys go to the interface.
@@ -281,7 +306,7 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                     ui.menu_button("Filter", |ui| {
                         for f in imagine_core::Filter::defaults() {
                             if ui.button(format!("{} …", f.name())).clicked() {
-                                st.filter = Some((f, true));
+                                st.open_filter(f);
                                 ui.close();
                             }
                         }
@@ -786,6 +811,9 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
                 out.push(Action::MoveLayer { id: *payload, target: row.id, above: t < 0.5, into });
             }
         }
+        if !row.filters.is_empty() {
+            smart_filter_rows(ui, row, row.depth as f32 * 14.0 + 30.0, st, out);
+        }
     }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
@@ -962,6 +990,7 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
                 mask_enabled: l.mask_enabled,
                 thumb: None,
                 adjustment: l.adjustment().is_some(),
+                filters: l.filters.clone(),
             })
         })
         .collect()
@@ -969,14 +998,16 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
 
 fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
     use imagine_core::Filter;
-    let Some((f, preview)) = &mut st.filter else {
+    let Some(d) = &mut st.filter else {
         st.filter_preview = None;
         return;
     };
     let mut open = true;
     let mut apply = false;
     let mut cancel = false;
-    egui::Window::new(f.name())
+    let title = if d.edit.is_some() { format!("{} (Smart-Filter)", d.filter.name()) } else { d.filter.name().to_string() };
+    egui::Window::new(title)
+        .id(egui::Id::unique("filter dialog"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
@@ -988,7 +1019,7 @@ fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
                     ui.add(egui::Slider::new(v, r).logarithmic(log).suffix(suffix).max_decimals(1));
                 });
             };
-            match f {
+            match &mut d.filter {
                 Filter::GaussianBlur { radius } => s(ui, "Radius", radius, 0.1..=1000.0, true, " px"),
                 Filter::UnsharpMask { amount, radius, threshold } => {
                     s(ui, "Stärke", amount, 1.0..=500.0, false, " %");
@@ -1005,9 +1036,14 @@ fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
                     *seed = sd as u32;
                 }
             }
-            ui.checkbox(preview, "Vorschau");
+            ui.checkbox(&mut d.preview, "Vorschau");
+            if d.edit.is_none() {
+                ui.checkbox(&mut d.smart, "Als Smart-Filter")
+                    .on_hover_text("Nicht-destruktiv: bleibt an der Ebene, jederzeit änderbar oder abschaltbar (wirkt auf die ganze Ebene)");
+            }
             ui.horizontal(|ui| {
-                if ui.button("Anwenden").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                let label = if d.edit.is_some() { "Übernehmen" } else { "Anwenden" };
+                if ui.button(label).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     apply = true;
                 }
                 if ui.button("Abbrechen").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1016,12 +1052,86 @@ fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
             });
         });
     if apply {
-        out.push(Action::ApplyFilter(f.clone()));
+        let f = d.filter.clone();
+        out.push(match d.edit {
+            Some((layer, index)) => Action::SetSmartFilter { layer, index, filter: f },
+            None if d.smart => Action::AddSmartFilter(f),
+            None => Action::ApplyFilter(f),
+        });
+    }
+    if d.edit.is_none() {
+        st.smart_filters = d.smart;
     }
     if apply || cancel || !open {
         st.filter = None;
         st.filter_preview = None;
     } else {
-        st.filter_preview = preview.then(|| f.clone());
+        st.filter_preview = d.preview.then(|| match d.edit {
+            Some((_, i)) => FilterPreview::Smart(Some(i), d.filter.clone()),
+            None if d.smart => FilterPreview::Smart(None, d.filter.clone()),
+            None => FilterPreview::Pixels(d.filter.clone()),
+        });
+    }
+}
+
+/// The smart filters under a layer row: a header with "apply" and one row
+/// per filter (eye, name: click to edit, remove).
+fn smart_filter_rows(ui: &mut egui::Ui, row: &LayerRow, indent: f32, st: &mut State, out: &mut Vec<Action>) {
+    let h = 22.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.text(
+        egui::pos2(rect.min.x + indent, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "Smart-Filter",
+        egui::FontId::proportional(12.0),
+        Color32::from_gray(150),
+    );
+    let bake = egui::Rect::from_min_max(egui::pos2(rect.max.x - 74.0, rect.min.y + 2.0), egui::pos2(rect.max.x - 4.0, rect.max.y - 2.0));
+    if ui
+        .put(bake, egui::Button::new(RichText::new("Anwenden").small()))
+        .on_hover_text("Filter in die Pixel der Ebene übernehmen und entfernen")
+        .clicked()
+    {
+        out.push(Action::BakeSmartFilters(row.id));
+    }
+    for (index, sf) in row.filters.iter().enumerate() {
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click());
+        let painter = ui.painter_at(rect);
+        if resp.hovered() {
+            painter.rect_filled(rect, 3.0, Color32::from_white_alpha(8));
+        }
+        let eye = egui::Rect::from_center_size(egui::pos2(rect.min.x + indent + 7.0, rect.center().y), Vec2::splat(14.0));
+        let eye_resp = ui.interact(eye, resp.id.with("eye"), Sense::click());
+        icons::paint(
+            &painter,
+            eye,
+            if sf.enabled { Icon::Eye } else { Icon::EyeClosed },
+            if sf.enabled { Color32::from_gray(200) } else { Color32::from_gray(100) },
+        );
+        if eye_resp.on_hover_text("Filter ein-/ausschalten").clicked() {
+            out.push(Action::ToggleSmartFilter { layer: row.id, index });
+        }
+        painter.text(
+            egui::pos2(eye.max.x + 8.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            sf.filter.name(),
+            egui::FontId::proportional(12.5),
+            if sf.enabled { Color32::from_gray(215) } else { Color32::from_gray(120) },
+        );
+        let del = egui::Rect::from_center_size(egui::pos2(rect.max.x - 12.0, rect.center().y), Vec2::splat(16.0));
+        let del_resp = ui.interact(del, resp.id.with("del"), Sense::click());
+        if del_resp.hovered() || resp.hovered() {
+            let c = if del_resp.hovered() { Color32::from_rgb(255, 120, 100) } else { Color32::from_gray(140) };
+            let r = del.shrink(4.0);
+            painter.line_segment([r.left_top(), r.right_bottom()], Stroke::new(1.5, c));
+            painter.line_segment([r.right_top(), r.left_bottom()], Stroke::new(1.5, c));
+        }
+        if del_resp.on_hover_text("Smart-Filter entfernen").clicked() {
+            out.push(Action::RemoveSmartFilter { layer: row.id, index });
+        } else if resp.on_hover_text("Klicken zum Bearbeiten").clicked() {
+            out.push(Action::SelectLayer(row.id));
+            st.filter = Some(FilterDialog { filter: sf.filter.clone(), preview: true, smart: true, edit: Some((row.id, index)) });
+        }
     }
 }

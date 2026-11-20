@@ -28,6 +28,21 @@ pub enum Filter {
     },
 }
 
+/// A filter kept on a pixel layer and applied when compositing
+/// (non-destructive; the layer's own pixels stay untouched).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SmartFilter {
+    pub filter: Filter,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+impl SmartFilter {
+    pub fn new(filter: Filter) -> Self {
+        Self { filter, enabled: true }
+    }
+}
+
 fn yes() -> bool {
     true
 }

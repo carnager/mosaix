@@ -821,3 +821,61 @@ fn adjustment_blend_modes_match_layer_semantics() {
         }
     }
 }
+
+#[test]
+fn smart_filters_are_live_toggle_and_bake() {
+    use imagine_core::Filter;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1024, 512));
+    e.select_shape(&Shape::Rect { x: 512.0, y: 0.0, w: 512.0, h: 512.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0; 4], 1.0, "Weiß").unwrap();
+    e.deselect("x").unwrap();
+    let layer = e.doc().active;
+    let edge = |e: &mut Engine| {
+        e.flush();
+        [508, 511, 512, 516].map(|x| composite_px(e, TileCoord::new(x / 256, 0), x as usize % 256, 100)[3])
+    };
+    let raw = edge(&mut e);
+    assert_eq!(raw, [0.0, 0.0, 1.0, 1.0]);
+    let blur = Filter::GaussianBlur { radius: 4.0 };
+    // Reference: the destructive filter.
+    e.apply_filter(&blur, "Weichzeichnen").unwrap();
+    let want = edge(&mut e);
+    e.undo();
+    assert_eq!(edge(&mut e), raw);
+
+    e.add_smart_filter(&blur, "Smart-Filter").unwrap();
+    let got = edge(&mut e);
+    assert!(got.iter().zip(&want).all(|(a, b)| (a - b).abs() < 1e-3), "{got:?} vs {want:?}");
+    // The layer's own pixels are untouched.
+    assert_eq!(e.doc().find(layer).unwrap().tiles().unwrap().len(), 4);
+    // Switched off → raw; on again → filtered (from the cache).
+    e.edit("Aus", |d| {
+        d.find_mut(layer).unwrap().filters[0].enabled = false;
+        true
+    });
+    assert_eq!(edge(&mut e), raw);
+    e.undo();
+    assert_eq!(edge(&mut e), got);
+    // Undo removes it, redo brings it back.
+    e.undo();
+    assert_eq!(edge(&mut e), raw);
+    e.redo();
+    assert_eq!(edge(&mut e), got);
+    // Baking writes the result into the pixels.
+    e.bake_smart_filters(layer, "Anwenden").unwrap();
+    let l = e.doc().find(layer).unwrap();
+    assert!(l.filters.is_empty() && l.tiles().unwrap().len() > 4, "blur spreads into new tiles");
+    assert_eq!(edge(&mut e), got);
+    // Preview of a smart filter shows it without changing the document.
+    e.undo();
+    e.set_smart_filter_preview(Some((Some(0), &Filter::GaussianBlur { radius: 8.0 }))).unwrap();
+    let wider = edge(&mut e);
+    assert!(wider[1] > got[1] + 0.02, "{wider:?} vs {got:?}");
+    assert_eq!(e.doc().find(layer).unwrap().filters.len(), 1);
+    e.set_smart_filter_preview(None).unwrap();
+    assert_eq!(edge(&mut e), got);
+    e.set_smart_filter(layer, 0, &Filter::GaussianBlur { radius: 8.0 }, "Ändern").unwrap();
+    assert_eq!(edge(&mut e), wider);
+    assert!(e.set_smart_filter(layer, 3, &blur, "x").is_err());
+}

@@ -85,9 +85,12 @@ impl Engine {
     /// Histogram of the image underneath layer `below` (the whole image if
     /// `None`). Cached until what is underneath changes.
     pub fn histogram(&mut self, below: Option<LayerId>) -> Arc<Histogram> {
+        self.refresh_smart();
+        // With smart filters, what is composited (not the raw pixels).
+        let src = self.render.as_ref().filter(|_| self.preview.is_none()).unwrap_or(&self.doc);
         let doc = match below {
-            Some(id) => self.doc.below(id),
-            None => self.doc.clone(),
+            Some(id) => src.below(id),
+            None => src.clone(),
         };
         let coords: Vec<TileCoord> = self.all_doc_coords();
         // Key: the compositing program of every tile.

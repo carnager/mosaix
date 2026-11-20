@@ -13,7 +13,7 @@ pub mod tile;
 pub mod view;
 
 pub use adjust::Adjustment;
-pub use filter::Filter;
+pub use filter::{Filter, SmartFilter};
 pub use blend::{BlendMode, BlendSpace};
 pub use brush::{BrushSettings, Dab, InputSample, Stroke, TIP_NAMES, tip_from_name};
 pub use doc::{Content, Document, Layer, LayerId, Mask, MaskRef, MaskTile, Op};

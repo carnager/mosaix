@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::adjust::Adjustment;
+use crate::filter::{Filter, SmartFilter};
 use crate::blend::{BlendMode, BlendSpace};
 use crate::tile::TileCoord;
 
@@ -96,6 +97,8 @@ pub struct Layer<T> {
     pub content: Content<T>,
     pub mask: Option<Mask<T>>,
     pub mask_enabled: bool,
+    /// Smart filters on a pixel layer, applied in order when compositing.
+    pub filters: Vec<SmartFilter>,
 }
 
 impl<T> Layer<T> {
@@ -417,6 +420,7 @@ impl<T: Clone> Document<T> {
             content: Content::Group(vec![inner]),
             mask: None,
             mask_enabled: true,
+            filters: Vec::new(),
         };
         list.insert(i, group);
         self.active = gid;
@@ -586,6 +590,7 @@ impl<T: Clone> Document<T> {
                     },
                     mask: l.mask.as_ref().map(|m| m.map(f)),
                     mask_enabled: l.mask_enabled,
+                    filters: l.filters.clone(),
                 })
                 .collect()
         }
@@ -641,7 +646,13 @@ impl<T> Layer<T> {
             content: Content::Pixels(Arc::new(TileMap::new())),
             mask: None,
             mask_enabled: true,
+            filters: Vec::new(),
         }
+    }
+
+    /// The smart filters that are switched on.
+    pub fn active_filters(&self) -> impl Iterator<Item = &Filter> {
+        self.filters.iter().filter(|f| f.enabled).map(|f| &f.filter)
     }
 }
 

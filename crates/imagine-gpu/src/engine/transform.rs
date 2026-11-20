@@ -197,6 +197,8 @@ pub fn is_integer_translation(fwd: DAffine2) -> bool {
 pub(super) enum PreviewKind {
     Transform(DAffine2, Interp),
     Filter(imagine_core::Filter),
+    /// The active layer with a smart filter replaced (`Some(index)`) or added.
+    SmartFilter(Option<usize>, imagine_core::Filter),
 }
 
 pub(super) struct Preview {
@@ -218,7 +220,10 @@ struct BoundsJob {
 impl Engine {
     /// The document shown on screen: the transform preview, if any.
     pub(super) fn shown(&self) -> &Document<Tile> {
-        self.preview.as_ref().map_or(&self.doc, |p| &p.doc)
+        match &self.render {
+            Some(r) => r,
+            None => self.preview.as_ref().map_or(&self.doc, |p| &p.doc),
+        }
     }
 
     /// Computes the transformed document. `only` restricts the work to
@@ -493,6 +498,16 @@ impl Engine {
         let doc = match &kind {
             PreviewKind::Transform(fwd, interp) => self.transformed_doc(*fwd, *interp, true, Some(rect))?.1,
             PreviewKind::Filter(f) => self.filtered_doc(f, Some(rect))?,
+            PreviewKind::SmartFilter(index, f) => {
+                let layer = self.check_target(StrokeTarget::Pixels)?;
+                let mut d = self.doc.clone();
+                let fs = &mut d.find_mut(layer).unwrap().filters;
+                match index.and_then(|i| fs.get_mut(i)) {
+                    Some(sf) => sf.filter = f.clone(),
+                    None => fs.push(imagine_core::SmartFilter::new(f.clone())),
+                }
+                d
+            }
         };
         self.preview = Some(Preview { kind, rect, doc });
         self.recheck_all = true;

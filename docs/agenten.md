@@ -50,6 +50,7 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 | `layer_translate` | ganze Ebene samt Maske um ganze Pixel verschieben (ignoriert die Auswahl) |
 | `layer_transform` | skalieren, drehen (Grad, im Uhrzeigersinn), verschieben um einen Drehpunkt (Standard: Mitte des Inhalts); mit Auswahl nur die ausgewählten Pixel; `interp` bicubic/bilinear/nearest |
 | `layer_bounds` | pixelgenaue Grenzen des sichtbaren Inhalts einer Ebene |
+| `filter_apply` mit `smart: true`, `smart_filter_set` | Smart-Filter: nicht-destruktiv an der Ebene, ändern, ein/aus, entfernen, in die Pixel übernehmen (`apply`); `document_info` listet sie unter `smart_filters` |
 | `histogram` | Histogramm je Kanal mit Mittelwert, Median, 1./99. Perzentil und Clipping, wahlweise von dem, was unter einer Ebene liegt |
 | `crop`, `canvas_size`, `image_resize` | Zuschneiden (darf über den Rand hinausgehen), Arbeitsfläche mit Anker, Bildgröße; Pixel außerhalb bleiben erhalten |
 | `select_magic_wand`, `select_color_range` | Zauberstab (Toleranz 0–255, zusammenhängend oder nicht, `sample` layer/image) und Farbbereich (Farbe oder Punkt, Unschärfe 0–200) |

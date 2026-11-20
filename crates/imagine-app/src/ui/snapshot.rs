@@ -129,6 +129,17 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         );
         let _ = s.engine.fill(imagine_gpu::StrokeTarget::Pixels, [0.0, 0.0, 0.0, 0.8], 1.0, "Füllen");
         let _ = s.engine.deselect("x");
+        if std::env::var_os("IMAGINE_SNAPSHOT_SMART").is_some() {
+            let _ = s.engine.add_smart_filter(&imagine_core::Filter::GaussianBlur { radius: 40.0 }, "Smart");
+            let _ = s.engine.add_smart_filter(&imagine_core::Filter::AddNoise { amount: 10.0, monochrome: true, gaussian: true, seed: 0 }, "Smart");
+            s.engine.edit("Aus", |d| {
+                let id = d.active;
+                d.find_mut(id).unwrap().filters[1].enabled = false;
+                true
+            });
+            model.layers = panels::layer_rows(s.engine.doc());
+            model.active = id;
+        }
     }
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_ADJ") {
         let adj: imagine_core::Adjustment = serde_json::from_str(&j)?;
@@ -161,7 +172,11 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     let mut ui_ms = Vec::new();
     for _ in 0..30 {
         std::thread::sleep(std::time::Duration::from_millis(15));
-        let _ = s.engine.set_filter_preview(state.filter_preview.as_ref());
+        let _ = match &state.filter_preview {
+            Some(panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
+            Some(panels::FilterPreview::Smart(i, f)) => s.engine.set_smart_filter_preview(Some((*i, f))),
+            None => Ok(()),
+        };
         s.engine.render(&target, &view, &Overlay { checker_px: 8.0, ..Default::default() });
         let t0 = std::time::Instant::now();
         gui.run((w, h), ppp, |ctx| {

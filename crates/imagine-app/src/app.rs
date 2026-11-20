@@ -2121,6 +2121,20 @@ impl App {
                     self.engine_op(|e| e.apply_filter(&f, label));
                     tracing::info!("{label}: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
                 }
+                Action::AddSmartFilter(f) => {
+                    let label = f.name();
+                    self.engine_op(|e| e.add_smart_filter(&f, label));
+                }
+                Action::SetSmartFilter { layer, index, filter } => {
+                    self.engine_op(|e| e.set_smart_filter(layer, index, &filter, "Smart-Filter ändern"));
+                }
+                Action::ToggleSmartFilter { layer, index } => self.edit("Smart-Filter ein/aus", |d| {
+                    d.find_mut(layer).and_then(|l| l.filters.get_mut(index)).map(|f| f.enabled = !f.enabled).is_some()
+                }),
+                Action::RemoveSmartFilter { layer, index } => self.edit("Smart-Filter entfernen", |d| {
+                    d.find_mut(layer).filter(|l| index < l.filters.len()).map(|l| l.filters.remove(index)).is_some()
+                }),
+                Action::BakeSmartFilters(layer) => self.engine_op(|e| e.bake_smart_filters(layer, "Smart-Filter anwenden")),
                 Action::OpenFile(p) => self.guard_unsaved(Pending::Open(p)),
                 Action::NewDocument { w, h, white } => self.guard_unsaved(Pending::New { w, h, white }),
                 Action::SaveAs(p) => self.save_to(Some(p)),
@@ -2241,7 +2255,8 @@ impl App {
                 self.upload_failures = 0;
             }
             let result = match &self.ui_state.filter_preview {
-                Some(f) => s.engine.set_filter_preview(Some(f)),
+                Some(ui::panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
+                Some(ui::panels::FilterPreview::Smart(i, f)) => s.engine.set_smart_filter_preview(Some((*i, f))),
                 None => s.engine.set_transform_preview(preview.map(|f| (f, Interp::Bicubic))),
             };
             if let Err(e) = result {
