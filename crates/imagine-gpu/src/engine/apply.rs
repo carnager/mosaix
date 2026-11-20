@@ -285,7 +285,13 @@ impl Engine {
             let (layer, opacity) = (stroke.layer, stroke.params.opacity);
             let footprint = stroke.footprint;
             drop(stroke.tiles);
-            self.heal_stroke(layer, src, &footprint, opacity, label);
+            if src.spot {
+                // Spot healing has no opacity (like Photoshop); the stroke's opacity only dims the preview.
+                let _ = opacity;
+                self.spot_heal(layer, src.all_layers, &footprint, 1.0, label);
+            } else {
+                self.heal_stroke(layer, src, &footprint, opacity, label);
+            }
             return;
         }
         let mut enc = self.device.create_command_encoder(&Default::default());

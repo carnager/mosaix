@@ -8,7 +8,7 @@ use super::icons::{self, Icon};
 use super::palette::{self, Cmd, COMMANDS, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut).
-pub const TOOLS: [(ToolId, &str, &str); 13] = [
+pub const TOOLS: [(ToolId, &str, &str); 14] = [
     (ToolId::Move, "Verschieben", "V"),
     (ToolId::Marquee, "Auswahlrechteck", "M"),
     (ToolId::Ellipse, "Auswahlellipse", "M"),
@@ -18,6 +18,7 @@ pub const TOOLS: [(ToolId, &str, &str); 13] = [
     (ToolId::Brush, "Pinsel", "B"),
     (ToolId::Smudge, "Wischfinger", "U"),
     (ToolId::Clone, "Kopierstempel", "S"),
+    (ToolId::SpotHeal, "Bereichsreparatur", "J"),
     (ToolId::Heal, "Reparaturpinsel", "J"),
     (ToolId::Eraser, "Radierer", "E"),
     (ToolId::Gradient, "Verlauf linear", "G"),
@@ -36,6 +37,7 @@ pub enum ToolId {
     Smudge,
     Clone,
     Heal,
+    SpotHeal,
     Eraser,
     Gradient,
     Radial,
@@ -636,7 +638,7 @@ fn slider(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInc
 
 fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     match m.tool {
-        ToolId::Brush | ToolId::Eraser | ToolId::Smudge | ToolId::Clone | ToolId::Heal => {
+        ToolId::Brush | ToolId::Eraser | ToolId::Smudge | ToolId::Clone | ToolId::Heal | ToolId::SpotHeal => {
             let mut b = m.brush;
             let mut changed = false;
             ui.horizontal(|ui| {
@@ -656,6 +658,13 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             if b.tip == 0 {
                 changed |= slider(ui, "Härte", &mut b.hardness, 0.0..=1.0, true);
             }
+            if m.tool == ToolId::SpotHeal {
+                let (mut all, aligned) = (m.clone_all, m.clone_aligned);
+                if ui.checkbox(&mut all, "Alle Ebenen aufnehmen").on_hover_text("Auf einer leeren Ebene reparieren").changed() {
+                    out.push(Action::CloneOptions { all, aligned });
+                }
+                ui.label(RichText::new("Über den Fleck malen – die Quelle wird automatisch gesucht").weak().small());
+            }
             if matches!(m.tool, ToolId::Clone | ToolId::Heal) {
                 let (mut all, mut aligned) = (m.clone_all, m.clone_aligned);
                 let a = ui.checkbox(&mut all, "Alle Ebenen aufnehmen").on_hover_text("Quelle ist das ganze Bild – zum Stempeln auf eine leere Ebene");
@@ -672,7 +681,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                 if slider(ui, "Stärke", &mut s, 0.0..=1.0, true) {
                     out.push(Action::SmudgeStrength(s));
                 }
-            } else {
+            } else if m.tool != ToolId::SpotHeal {
                 changed |= slider(ui, "Deckkraft", &mut b.opacity, 0.0..=1.0, true);
                 changed |= slider(ui, "Fluss", &mut b.flow, 0.01..=1.0, true);
             }

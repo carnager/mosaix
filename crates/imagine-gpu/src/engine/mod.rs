@@ -133,12 +133,15 @@ pub struct CloneSource {
     pub all_layers: bool,
     /// Healing brush: blend the result into its surroundings when the stroke ends.
     pub heal: bool,
+    /// Spot healing: no source; the stroke is painted as a plain preview and
+    /// the source offset is found automatically when it ends (`offset` unused).
+    pub spot: bool,
 }
 
 impl StrokeParams {
     /// Stroke tiles are a working copy of the layer that replaces it (smudge, clone).
     pub fn working_copy(&self) -> bool {
-        self.smudge || self.clone.is_some()
+        self.smudge || self.clone.is_some_and(|c| !c.spot)
     }
 }
 

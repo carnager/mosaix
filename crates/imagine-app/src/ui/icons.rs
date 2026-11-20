@@ -98,6 +98,13 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.add(Shape::convex_polygon(vec![at(3.5, 12.0), at(16.5, 12.0), at(16.5, 15.0), at(3.5, 15.0)], color, Stroke::NONE));
             p.line_segment([at(4.0, 17.5), at(16.0, 17.5)], thin);
         }
+        Icon::Tool(ToolId::SpotHeal) => {
+            // A plaster with a dotted spot next to it.
+            let band = [at(6.0, 15.0), at(15.0, 6.0), at(18.0, 9.0), at(9.0, 18.0)];
+            p.add(Shape::convex_polygon(band.to_vec(), color.gamma_multiply(0.55), Stroke::NONE));
+            p.add(Shape::convex_polygon(vec![at(9.5, 11.5), at(11.5, 9.5), at(14.5, 12.5), at(12.5, 14.5)], color, Stroke::NONE));
+            dashed_poly(p, &circle_pts(at(5.5, 5.5), vec2(3.2 * u, 3.2 * u), 10), thin);
+        }
         Icon::Tool(ToolId::Heal) => {
             // A plaster: rotated band with a pad.
             let band = [at(4.0, 13.0), at(13.0, 4.0), at(16.0, 7.0), at(7.0, 16.0)];

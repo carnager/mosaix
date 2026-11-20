@@ -126,4 +126,120 @@ impl Engine {
         self.replace_tiles(layer, changes, label);
         tracing::debug!("Reparieren {w}×{h}: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
     }
+
+    /// Spot healing: finds a source offset whose surroundings match the
+    /// surroundings of the painted area, then heals from there.
+    pub(super) fn spot_heal(&mut self, layer: LayerId, all_layers: bool, dabs: &[[f32; 3]], opacity: f32, label: &str) {
+        if dabs.is_empty() {
+            return;
+        }
+        match self.find_spot_source(layer, all_layers, dabs) {
+            Some(offset) => {
+                tracing::debug!("Bereichsreparatur: Quelle bei {offset:?}");
+                let src = CloneSource { offset, all_layers, heal: true, spot: false };
+                self.heal_stroke(layer, src, dabs, opacity, label);
+            }
+            None => tracing::warn!("Bereichsreparatur: keine passende Quelle im Bild gefunden"),
+        }
+    }
+
+    /// Picks the offset (from a ring of candidates around the area) whose
+    /// band around the shifted area has the most similar detail (gradients)
+    /// to the band around the area itself.
+    fn find_spot_source(&mut self, layer: LayerId, all_layers: bool, dabs: &[[f32; 3]]) -> Option<[i32; 2]> {
+        let (dw, dh) = (self.doc.width as i64, self.doc.height as i64);
+        let (mut a, mut b) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+        for d in dabs {
+            a = (a.0.min(d[0] - d[2]), a.1.min(d[1] - d[2]));
+            b = (b.0.max(d[0] + d[2]), b.1.max(d[1] + d[2]));
+        }
+        let size = (b.0 - a.0).max(b.1 - a.1).max(4.0) as f64;
+        let band = (size / 6.0).clamp(3.0, 40.0) as f32;
+        // Candidate distances (in area sizes); fewer for huge areas.
+        let scales: &[f64] = if size > 700.0 { &[1.15, 1.6] } else { &[1.15, 1.6, 2.3, 3.2] };
+        let reach = (size * scales[scales.len() - 1]).ceil() as i64 + band as i64 + 2;
+        // Search window: the area plus `reach` around it, clipped to the canvas.
+        let wx0 = (a.0.floor() as i64 - reach).max(0);
+        let wy0 = (a.1.floor() as i64 - reach).max(0);
+        let wx1 = (b.0.ceil() as i64 + reach).min(dw);
+        let wy1 = (b.1.ceil() as i64 + reach).min(dh);
+        if wx0 >= wx1 || wy0 >= wy1 {
+            return None;
+        }
+        let (ww, wh) = ((wx1 - wx0) as usize, (wy1 - wy0) as usize);
+        let (img, _) = self.read_region(if all_layers { None } else { Some(layer) }, wx0, wy0, ww, wh);
+        // Band pixels (window coordinates): within `band` of a dab, not inside one.
+        let step = ((size / 48.0).floor() as usize).max(1);
+        let (bx0, by0) = (((a.0 - band).floor() as i64 - wx0).max(1), ((a.1 - band).floor() as i64 - wy0).max(1));
+        let (bx1, by1) = (
+            ((b.0 + band).ceil() as i64 - wx0).min(ww as i64 - 1),
+            ((b.1 + band).ceil() as i64 - wy0).min(wh as i64 - 1),
+        );
+        let mut ring = Vec::new();
+        let mut y = by0;
+        while y < by1 {
+            let mut x = bx0;
+            while x < bx1 {
+                let (px, py) = ((x + wx0) as f32 + 0.5, (y + wy0) as f32 + 0.5);
+                let mut near = false;
+                let mut inside = false;
+                for d in dabs {
+                    let dist = (px - d[0]).hypot(py - d[1]);
+                    inside |= dist < d[2];
+                    near |= dist < d[2] + band;
+                }
+                if near && !inside {
+                    ring.push((x as usize, y as usize));
+                }
+                x += step as i64;
+            }
+            y += step as i64;
+        }
+        if ring.is_empty() {
+            return None;
+        }
+        let grad = |x: usize, y: usize| -> [f32; 8] {
+            let p = |x: usize, y: usize| img[y * ww + x];
+            let (c, r, d) = (p(x, y), p(x + 1, y), p(x, y + 1));
+            [r[0] - c[0], r[1] - c[1], r[2] - c[2], r[3] - c[3], d[0] - c[0], d[1] - c[1], d[2] - c[2], d[3] - c[3]]
+        };
+        let here: Vec<[f32; 8]> = ring.iter().map(|&(x, y)| grad(x, y)).collect();
+        // Mean colour of the band, to prefer similar tone among equal textures.
+        let mean = |pts: &mut dyn Iterator<Item = (usize, usize)>| {
+            let (mut s, mut n) = ([0.0f32; 4], 0.0f32);
+            for (x, y) in pts {
+                let v = img[y * ww + x];
+                for c in 0..4 {
+                    s[c] += v[c];
+                }
+                n += 1.0;
+            }
+            s.map(|v| v / n.max(1.0))
+        };
+        let here_mean = mean(&mut ring.iter().copied());
+        let mut best: Option<(f32, [i32; 2])> = None;
+        for &k in scales {
+            for i in 0..16 {
+                let t = i as f64 / 16.0 * std::f64::consts::TAU;
+                let (ox, oy) = ((t.cos() * size * k).round() as i64, (t.sin() * size * k).round() as i64);
+                // The shifted area and its band must lie in the window (= canvas).
+                if bx0 + ox < 0 || by0 + oy < 0 || bx1 + ox + 1 >= ww as i64 || by1 + oy + 1 >= wh as i64 {
+                    continue;
+                }
+                let mut score = 0.0f32;
+                for (j, &(x, y)) in ring.iter().enumerate() {
+                    let g = grad((x as i64 + ox) as usize, (y as i64 + oy) as usize);
+                    score += g.iter().zip(&here[j]).map(|(a, b)| (a - b) * (a - b)).sum::<f32>();
+                }
+                let there = mean(&mut ring.iter().map(|&(x, y)| ((x as i64 + ox) as usize, (y as i64 + oy) as usize)));
+                let tone: f32 = here_mean.iter().zip(&there).map(|(a, b)| (a - b) * (a - b)).sum();
+                // Detail matters most; tone is corrected by healing anyway.
+                let score = score / ring.len() as f32 + 0.05 * tone + 1e-4 * k as f32;
+                if best.is_none_or(|(s, _)| score < s) {
+                    best = Some((score, [ox as i32, oy as i32]));
+                }
+            }
+        }
+        best.map(|(_, o)| o)
+    }
 }

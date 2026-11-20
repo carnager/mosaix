@@ -148,7 +148,8 @@ pub fn tools() -> Vec<Value> {
                 "clone_offset": { "type": "array", "items": { "type": "integer" },
                                   "description": "Clone stamp: paint the pixels found at point + [dx, dy] (exact copy); colour not needed" },
                 "clone_all_layers": { "type": "boolean", "description": "Clone from the flattened image instead of the layer (stamp onto an empty layer)" },
-                "heal": { "type": "boolean", "description": "With clone_offset: healing brush – texture from the source, colour and brightness matched to the surroundings when the stroke ends" }
+                "heal": { "type": "boolean", "description": "With clone_offset: healing brush – texture from the source, colour and brightness matched to the surroundings when the stroke ends" },
+                "spot_heal": { "type": "boolean", "description": "Spot healing brush: paint over a blemish, a matching source is found automatically (no clone_offset, no colour)" }
             }), &["points", "size"], false),
         tool("fill", "Fill the selection (or the whole layer if nothing is selected) with a colour; respects soft selection edges.",
             json!({ "layer": layer_param(), "color": color_param("Fill colour"), "opacity": { "type": "number", "minimum": 0, "maximum": 1 }, "target": target_param() }),

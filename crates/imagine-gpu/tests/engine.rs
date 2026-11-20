@@ -980,7 +980,7 @@ fn clone_stamp_copies_exactly_from_layer_and_image() {
     e.flush();
     let before = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new(0, 0), x, y);
     let want = before(&e, 60, 150);
-    let params = |all| StrokeParams { clone: Some(CloneSource { offset: [-300, 0], all_layers: all, heal: false }), ..Default::default() };
+    let params = |all| StrokeParams { clone: Some(CloneSource { offset: [-300, 0], all_layers: all, heal: false, spot: false }), ..Default::default() };
     // Stamp at x = 360 → copies x = 60 exactly (hard brush centre).
     stroke(&mut e, DVec2::new(360.0, 150.0), params(false));
     let got = composite_px(&e, TileCoord::new(1, 0), 360 - 256, 150);
@@ -1022,7 +1022,7 @@ fn healing_matches_the_surroundings() {
     let at = |e: &Engine, x: usize| composite_px(e, TileCoord::new((x / 256) as i32, 0), x % 256, 150)[0];
     assert!(at(&e, 400) < 0.01);
     // Source 250 px to the left: much darker, but clean.
-    let heal = StrokeParams { clone: Some(CloneSource { offset: [-250, 0], all_layers: false, heal: true }), ..Default::default() };
+    let heal = StrokeParams { clone: Some(CloneSource { offset: [-250, 0], all_layers: false, heal: true, spot: false }), ..Default::default() };
     stroke(&mut e, DVec2::new(400.0, 150.0), heal);
     for x in [395, 400, 405] {
         let (got, want) = (at(&e, x), ramp(x));
@@ -1030,7 +1030,58 @@ fn healing_matches_the_surroundings() {
     }
     // A plain clone would have brought the darker source along.
     e.undo();
-    let clone = StrokeParams { clone: Some(CloneSource { offset: [-250, 0], all_layers: false, heal: false }), ..Default::default() };
+    let clone = StrokeParams { clone: Some(CloneSource { offset: [-250, 0], all_layers: false, heal: false, spot: false }), ..Default::default() };
     stroke(&mut e, DVec2::new(400.0, 150.0), clone);
     assert!((at(&e, 400) - ramp(150)).abs() < 0.01);
+}
+
+#[test]
+fn spot_healing_finds_a_matching_source() {
+    use imagine_gpu::CloneSource;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    // Vertical stripes (8 px light, 8 px dark) on a vertical brightness ramp.
+    let want = |x: usize, y: usize| 0.2 + 0.5 * y as f32 / 512.0 + if (x / 8) % 2 == 0 { 0.15 } else { 0.0 };
+    let layer = e.doc().active;
+    let ts = TILE_SIZE as usize;
+    let tiles: Vec<(TileCoord, Option<Vec<f16>>)> = (0..2)
+        .flat_map(|ty| (0..2).map(move |tx| (tx, ty)))
+        .map(|(tx, ty)| {
+            let mut px = vec![f16::ONE; ts * ts * 4];
+            for y in 0..ts {
+                for x in 0..ts {
+                    let v = f16::from_f32(want(tx * ts + x, ty * ts + y));
+                    px[(y * ts + x) * 4..][..3].fill(v);
+                }
+            }
+            (TileCoord::new(tx as i32, ty as i32), Some(px))
+        })
+        .collect();
+    assert!(e.replace_tiles(layer, tiles, "Muster"));
+    e.select_shape(&Shape::Ellipse { cx: 260.0, cy: 250.0, rx: 10.0, ry: 10.0 }, CombineOp::Replace, "A").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Fleck").unwrap();
+    e.deselect("x").unwrap();
+    e.flush();
+    let at = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), x % 256, y % 256);
+    assert_eq!(at(&e, 260, 250)[1], 0.0);
+    let spot = StrokeParams {
+        opacity: 0.5,
+        clone: Some(CloneSource { offset: [0, 0], all_layers: false, heal: true, spot: true }),
+        ..Default::default()
+    };
+    e.begin_stroke(spot).unwrap();
+    let mut s = Stroke::new(BrushSettings { size: 34.0, hardness: 1.0, flow: 1.0, smoothing: 0.0, color: [0.35; 3], ..Default::default() });
+    let dabs = s.add(InputSample { pos: DVec2::new(260.0, 250.0), pressure: 1.0 });
+    e.stroke_dabs(&dabs);
+    e.end_stroke("Bereichsreparatur");
+    e.flush();
+    // The stripes continue through the former blemish.
+    let mut worst = 0.0f32;
+    for y in [244, 250, 256] {
+        for x in 252..268 {
+            let p = at(&e, x, y);
+            worst = worst.max((p[1] - want(x, y)).abs()).max((p[0] - want(x, y)).abs());
+        }
+    }
+    assert!(worst < 0.03, "max deviation {worst}");
 }

@@ -109,6 +109,9 @@ pub enum Command {
         /// Healing brush (with clone_offset): blend into the surroundings.
         #[serde(default)]
         heal: bool,
+        /// Spot healing: no source needed, it is found automatically.
+        #[serde(default)]
+        spot_heal: bool,
     },
     Fill { layer: Option<LayerId>, color: ColorSpec, opacity: Option<f32>, target: Option<String> },
     Clear { layer: Option<LayerId> },
@@ -561,6 +564,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             clone_offset,
             clone_all_layers,
             heal,
+            spot_heal,
         } => {
             pixel_layer(s, layer)?;
             not_painting(s)?;
@@ -569,7 +573,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             ensure!(size > 0.0 && size <= 5000.0, "size must be 0–5000 px");
             let (mut color, alpha) = match &color {
                 Some(c) => c.linear()?,
-                None if eraser || smudge.is_some() || clone_offset.is_some() => ([0.0; 3], 1.0),
+                None if eraser || smudge.is_some() || clone_offset.is_some() || spot_heal => ([0.35; 3], 1.0),
                 None => bail!("color is required unless eraser, smudge or clone_offset is set"),
             };
             if target == StrokeTarget::Mask {
@@ -607,7 +611,11 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             s.engine
-                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target, smudge: smudge.is_some() && clone_offset.is_none(), clone: clone_offset.map(|offset| imagine_gpu::CloneSource { offset, all_layers: clone_all_layers, heal }) })
+                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target, smudge: smudge.is_some() && clone_offset.is_none(), clone: if spot_heal {
+                    Some(imagine_gpu::CloneSource { offset: [0, 0], all_layers: clone_all_layers, heal: true, spot: true })
+                } else {
+                    clone_offset.map(|offset| imagine_gpu::CloneSource { offset, all_layers: clone_all_layers, heal, spot: false })
+                } })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);
             let mut dabs = 0;
@@ -619,7 +627,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let d = stroke.finish(*samples.last().unwrap());
             dabs += d.len();
             s.engine.stroke_dabs(&d);
-            s.engine.end_stroke(if heal && clone_offset.is_some() {
+            s.engine.end_stroke(if spot_heal {
+                "Bereichsreparatur"
+            } else if heal && clone_offset.is_some() {
                 "Reparaturpinsel"
             } else if clone_offset.is_some() {
                 "Kopierstempel"

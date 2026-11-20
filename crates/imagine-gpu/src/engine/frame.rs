@@ -221,7 +221,7 @@ impl Engine {
         }
         let stroke = self.stroke.as_mut().unwrap();
         let smudge = stroke.params.working_copy();
-        let clone = stroke.params.clone;
+        let clone = stroke.params.clone.filter(|c| !c.spot);
         let mut fresh = Vec::new();
         for c in touched {
             if let Some((tile, needs_clear)) = stroke.tiles.get_mut(&c) {

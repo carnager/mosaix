@@ -167,6 +167,8 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "wand" => ToolId::Wand,
             "smudge" => ToolId::Smudge,
             "clone" => ToolId::Clone,
+            "heal" => ToolId::Heal,
+            "spot_heal" => ToolId::SpotHeal,
             "move" => ToolId::Move,
             _ => ToolId::Brush,
         };
