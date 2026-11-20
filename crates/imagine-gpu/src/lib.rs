@@ -3,7 +3,7 @@
 pub mod engine;
 pub mod pool;
 
-pub use engine::{Engine, Overlay, RenderStats, StrokeParams};
+pub use engine::{Engine, GradientKind, Overlay, OverlayLine, PoolKind, Readback, RenderStats, StrokeParams, StrokeTarget};
 pub use pool::Tile;
 
 pub struct GpuContext {

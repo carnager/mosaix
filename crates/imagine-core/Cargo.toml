@@ -8,3 +8,4 @@ license.workspace = true
 glam.workspace = true
 half.workspace = true
 bytemuck.workspace = true
+rayon.workspace = true

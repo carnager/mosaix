@@ -37,6 +37,14 @@ fn color_param(desc: &str) -> Value {
     })
 }
 
+fn target_param() -> Value {
+    json!({ "type": "string", "enum": ["pixels", "mask"], "description": "Edit the layer's pixels (default) or its mask (white reveals, black hides)" })
+}
+
+fn mode_param() -> Value {
+    json!({ "type": "string", "enum": ["replace", "add", "subtract", "intersect"], "description": "How to combine with the current selection (default replace)" })
+}
+
 fn rect_props() -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("x".into(), json!({ "type": "integer" }));
@@ -72,6 +80,16 @@ pub fn tools() -> Vec<Value> {
     let mut prev = rect_props();
     prev.insert("max_size".into(), json!({ "type": "integer", "minimum": 16, "maximum": 4096, "description": "Longest side of the returned image in px (default 1024)" }));
     prev.insert("checkerboard".into(), json!({ "type": "boolean", "description": "Show transparency as a checkerboard (default true)" }));
+    prev.insert("show_selection".into(), json!({ "type": "boolean", "description": "Tint unselected areas red so you can see the selection (default false)" }));
+    let sel_rect = |what: &str| {
+        let mut m = Map::new();
+        for k in ["x", "y", "width", "height"] {
+            m.insert(k.into(), json!({ "type": "number" }));
+        }
+        m.insert("mode".into(), mode_param());
+        let _ = what;
+        Value::Object(m)
+    };
     prev.insert("output".into(), json!({ "type": "string", "description": "Optional path to also write the PNG to" }));
     vec![
         tool("document_new", "Create a new empty document (replaces the open one).",
@@ -114,8 +132,42 @@ pub fn tools() -> Vec<Value> {
                 "opacity": { "type": "number", "minimum": 0, "maximum": 1, "description": "Maximum coverage of the stroke (default 1)" },
                 "flow": { "type": "number", "minimum": 0, "maximum": 1, "description": "Coverage per dab, builds up to opacity (default 1)" },
                 "spacing": { "type": "number", "minimum": 0.01, "description": "Dab spacing as fraction of diameter (default 0.1)" },
-                "eraser": { "type": "boolean" }
+                "eraser": { "type": "boolean" },
+                "target": target_param()
             }), &["points", "size"], false),
+        tool("fill", "Fill the selection (or the whole layer if nothing is selected) with a colour; respects soft selection edges.",
+            json!({ "layer": layer_param(), "color": color_param("Fill colour"), "opacity": { "type": "number", "minimum": 0, "maximum": 1 }, "target": target_param() }),
+            &["color"], false),
+        tool("clear", "Make the selected pixels (or the whole layer if nothing is selected) transparent.",
+            json!({ "layer": layer_param() }), &[], false),
+        tool("gradient", "Draw a linear or radial gradient from (x0, y0) to (x1, y1) into the selection (or whole layer). color1 defaults to transparent.",
+            json!({
+                "layer": layer_param(),
+                "kind": { "type": "string", "enum": ["linear", "radial"] },
+                "x0": { "type": "number" }, "y0": { "type": "number" }, "x1": { "type": "number" }, "y1": { "type": "number" },
+                "color0": color_param("Start colour"), "color1": color_param("End colour (default transparent)"),
+                "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+                "target": target_param()
+            }), &["x0", "y0", "x1", "y1", "color0"], false),
+        tool("select_rect", "Select a rectangle (anti-aliased). Painting, fill, clear and gradient only affect the selection.",
+            sel_rect("rect"), &["x", "y", "width", "height"], false),
+        tool("select_ellipse", "Select the ellipse inscribed in the given rectangle.", sel_rect("ellipse"), &["x", "y", "width", "height"], false),
+        tool("select_polygon", "Select a closed polygon (lasso), even-odd fill.",
+            json!({ "points": { "type": "array", "minItems": 3, "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 } }, "mode": mode_param() }),
+            &["points"], false),
+        tool("select_all", "Select the whole document.", json!({}), &[], false),
+        tool("select_none", "Remove the selection (everything becomes editable).", json!({}), &[], false),
+        tool("select_invert", "Invert the selection.", json!({}), &[], false),
+        tool("select_feather", "Soften the selection edge by a radius in px.",
+            json!({ "radius": { "type": "number", "minimum": 0, "maximum": 1000 } }), &["radius"], false),
+        tool("layer_mask_add", "Add a mask to a layer or group: from the selection (default when one exists) or revealing everything.",
+            json!({ "layer": layer_param(), "from_selection": { "type": "boolean" } }), &[], false),
+        tool("layer_mask_delete", "Remove a layer's mask.", json!({ "layer": layer_param() }), &[], false),
+        tool("layer_mask_set", "Enable or disable a layer's mask.",
+            json!({ "layer": layer_param(), "enabled": { "type": "boolean" } }), &["enabled"], false),
+        tool("layer_mask_apply", "Bake a layer's mask into its pixels and remove the mask.", json!({ "layer": layer_param() }), &[], false),
+        tool("layer_translate", "Move a layer's pixels and mask by whole pixels (content leaving the canvas is cut off).",
+            json!({ "layer": layer_param(), "dx": { "type": "integer" }, "dy": { "type": "integer" } }), &["dx", "dy"], false),
         tool("fill_rect", "Fill a rectangle on a pixel layer with a colour (normal blending onto existing pixels).",
             Value::Object(fill), &["x", "y", "width", "height", "color"], false),
         tool("clear_rect", "Make a rectangle on a pixel layer fully transparent.",
@@ -241,7 +293,7 @@ mod tests {
 
         let list = handle(&mut b, &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).unwrap();
         let tools = list["result"]["tools"].as_array().unwrap();
-        assert!(tools.len() >= 20);
+        assert!(tools.len() >= 37);
         // Every tool schema parses as a command when given its required fields? At least: names are unique.
         let mut names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         names.sort();
@@ -273,7 +325,12 @@ mod tests {
             "paint_stroke": {"points": [[0, 0]], "size": 3, "color": "#000000"},
             "fill_rect": {"x": 0, "y": 0, "width": 1, "height": 1, "color": "#fff"},
             "clear_rect": {"x": 0, "y": 0, "width": 1, "height": 1}, "place_image": {"path": "x.png"},
-            "sample_color": {"x": 0, "y": 0}, "render_preview": {}, "undo": {}, "redo": {}, "save": {}, "export": {"path": "x.png"}
+            "sample_color": {"x": 0, "y": 0}, "render_preview": {}, "undo": {}, "redo": {}, "save": {}, "export": {"path": "x.png"},
+            "fill": {"color": "#ff0000"}, "clear": {}, "gradient": {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "color0": "#000000"},
+            "select_rect": {"x": 0, "y": 0, "width": 1, "height": 1}, "select_ellipse": {"x": 0, "y": 0, "width": 1, "height": 1},
+            "select_polygon": {"points": [[0, 0], [1, 0], [0, 1]]}, "select_all": {}, "select_none": {}, "select_invert": {},
+            "select_feather": {"radius": 2}, "layer_mask_add": {}, "layer_mask_delete": {}, "layer_mask_set": {"enabled": true},
+            "layer_mask_apply": {}, "layer_translate": {"dx": 1, "dy": 0}
         });
         for t in tools() {
             let name = t["name"].as_str().unwrap();
@@ -281,9 +338,27 @@ mod tests {
             args.insert("cmd".into(), name.into());
             let cmd = Command::parse(Value::Object(args)).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(cmd.name(), name);
-            // Schema properties must be accepted by the command (deny_unknown_fields).
-            for prop in t["inputSchema"]["properties"].as_object().unwrap().keys() {
-                assert!(!prop.is_empty());
+            // Every schema property must be accepted by the command (deny_unknown_fields
+            // would reject it otherwise): try each one with a plausible value.
+            for (prop, schema) in t["inputSchema"]["properties"].as_object().unwrap() {
+                let mut a = samples[name].as_object().unwrap().clone();
+                a.insert("cmd".into(), name.into());
+                if !a.contains_key(prop) {
+                    let v = match (prop.as_str(), schema["type"].as_str()) {
+                        (p, _) if p.starts_with("color") => json!("#123456"),
+                        ("target", _) => json!("pixels"),
+                        ("mode", _) => json!("add"),
+                        ("kind", _) => json!("radial"),
+                        ("blend", _) => json!("screen"),
+                        ("space", _) => json!("linear"),
+                        ("points", _) => json!([[0, 0], [1, 1], [2, 0]]),
+                        (_, Some("boolean")) => json!(true),
+                        (_, Some("string")) => json!("x"),
+                        _ => json!(1),
+                    };
+                    a.insert(prop.clone(), v);
+                }
+                Command::parse(Value::Object(a)).unwrap_or_else(|e| panic!("{name}.{prop}: {e}"));
             }
         }
     }

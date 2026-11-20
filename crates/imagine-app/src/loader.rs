@@ -11,7 +11,10 @@ use imagine_core::color::{Pixels, extract_tile};
 use imagine_core::tile::grid_size;
 use imagine_core::{Document, LayerId, TILE_SIZE, TileCoord};
 use imagine_io::BlobRef;
-use imagine_io::native::{Reader, decompress_tile};
+use imagine_core::mask::MaskData;
+use imagine_core::MaskTile;
+use imagine_io::native::{Reader, decompress_mask, decompress_tile};
+use std::collections::HashMap;
 use rayon::prelude::*;
 
 pub enum Source {
@@ -24,6 +27,15 @@ pub enum Source {
 
 pub type TileData = (TileCoord, Vec<f16>, Option<BlobRef>);
 
+/// A layer mask (`layer: Some`) or the selection (`None`) read from a file.
+pub struct MaskLoad {
+    pub layer: Option<LayerId>,
+    pub default: u8,
+    pub enabled: bool,
+    pub tiles: HashMap<TileCoord, MaskData>,
+    pub blobs: HashMap<TileCoord, BlobRef>,
+}
+
 pub enum LoaderMsg {
     /// Document structure (no pixels yet). Sent before decoding starts.
     Structure {
@@ -35,6 +47,7 @@ pub enum LoaderMsg {
         expected_tiles: u64,
     },
     Tiles { layer: LayerId, tiles: Vec<TileData> },
+    Mask(MaskLoad),
     Done { decode_ms: f64, total_ms: f64 },
     Error(String),
 }
@@ -109,15 +122,16 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                     jobs.extend(t.iter().map(|(c, b)| (l.id, *c, *b)));
                 }
             });
-            let structure = doc.map_tiles(&mut |_| ());
-            // Structure without tiles: strip the tile maps.
-            let mut empty = structure.clone();
+            // Structure without pixel data and masks (those follow as messages).
+            let mut empty = doc.map_tiles(&mut |_| ());
             let ids = empty.display_order();
-            for id in ids {
-                if let Some(t) = empty.tiles_mut(id) {
+            for id in &ids {
+                if let Some(t) = empty.tiles_mut(*id) {
                     t.clear();
                 }
+                empty.find_mut(*id).unwrap().mask = None;
             }
+            empty.selection = None;
             send(LoaderMsg::Structure {
                 doc: empty,
                 name,
@@ -135,6 +149,30 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                         .collect::<anyhow::Result<Vec<_>>>()?;
                     send(LoaderMsg::Tiles { layer, tiles })?;
                 }
+            }
+            let mut masks: Vec<(Option<LayerId>, imagine_core::Mask<BlobRef>, bool)> = Vec::new();
+            doc.for_each(&mut |l, _| {
+                if let Some(m) = &l.mask {
+                    masks.push((Some(l.id), m.clone(), l.mask_enabled));
+                }
+            });
+            if let Some(sel) = &doc.selection {
+                masks.push((None, sel.clone(), true));
+            }
+            for (layer, m, enabled) in masks {
+                let entries: Vec<_> = m.tiles.iter().map(|(c, t)| (*c, t.clone())).collect();
+                let decoded = entries
+                    .par_iter()
+                    .map(|(c, t)| {
+                        Ok(match t {
+                            MaskTile::Solid(v) => (*c, MaskData::Solid(*v), None),
+                            MaskTile::Pixels(b) => (*c, MaskData::Pixels(decompress_mask(&reader.read_blob(*b)?)?), Some(*b)),
+                        })
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                let blobs = decoded.iter().filter_map(|(c, _, b)| b.map(|b| (*c, b))).collect();
+                let tiles = decoded.into_iter().map(|(c, d, _)| (c, d)).collect();
+                send(LoaderMsg::Mask(MaskLoad { layer, default: m.default, enabled, tiles, blobs }))?;
             }
             send(LoaderMsg::Done { decode_ms: 0.0, total_ms: ms(t0) })?;
         }

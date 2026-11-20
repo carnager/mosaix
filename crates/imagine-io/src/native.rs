@@ -21,7 +21,7 @@ use std::sync::Arc;
 use anyhow::{Context, bail, ensure};
 use half::f16;
 use imagine_core::doc::{Content, Layer, TileMap};
-use imagine_core::{BlendMode, BlendSpace, Document, TILE_SIZE, TileCoord};
+use imagine_core::{BlendMode, BlendSpace, Document, Mask, MaskTile, TILE_SIZE, TileCoord};
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_endian = "big")]
@@ -30,8 +30,10 @@ compile_error!("the .imagine tile encoding assumes a little-endian host");
 pub const MAGIC: &[u8; 8] = b"IMAGINE\x01";
 const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
-const FORMAT_VERSION: u32 = 1;
+/// 1: layers. 2: + layer masks and selection.
+const FORMAT_VERSION: u32 = 2;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
+const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
 
 /// Location of a blob inside the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -48,6 +50,33 @@ struct Manifest {
     blend_space: String,
     active: u32,
     layers: Vec<LayerEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selection: Option<MaskEntry>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize)]
+struct MaskEntry {
+    default: u8,
+    #[serde(default = "yes")]
+    enabled: bool,
+    tiles: Vec<MaskTileEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MaskTileEntry {
+    x: i32,
+    y: i32,
+    /// Uniform tile (no blob).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    solid: Option<u8>,
+    #[serde(default)]
+    offset: u64,
+    #[serde(default)]
+    len: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -59,6 +88,8 @@ struct LayerEntry {
     visible: bool,
     #[serde(flatten)]
     content: ContentEntry,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mask: Option<MaskEntry>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -74,6 +105,34 @@ struct TileEntry {
     y: i32,
     offset: u64,
     len: u64,
+}
+
+fn mask_to_entry(m: &Mask<BlobRef>, enabled: bool) -> MaskEntry {
+    let mut tiles: Vec<MaskTileEntry> = m
+        .tiles
+        .iter()
+        .map(|(c, t)| match t {
+            MaskTile::Solid(v) => MaskTileEntry { x: c.x, y: c.y, solid: Some(*v), offset: 0, len: 0 },
+            MaskTile::Pixels(b) => MaskTileEntry { x: c.x, y: c.y, solid: None, offset: b.offset, len: b.len },
+        })
+        .collect();
+    tiles.sort_by_key(|t| (t.y, t.x));
+    MaskEntry { default: m.default, enabled, tiles }
+}
+
+fn entry_to_mask(e: MaskEntry, file_len: u64) -> anyhow::Result<(Mask<BlobRef>, bool)> {
+    let mut tiles = TileMap::new();
+    for t in e.tiles {
+        let v = match t.solid {
+            Some(v) => MaskTile::Solid(v),
+            None => {
+                ensure!(t.offset + t.len <= file_len, "Maskenkachel außerhalb der Datei");
+                MaskTile::Pixels(BlobRef { offset: t.offset, len: t.len })
+            }
+        };
+        tiles.insert(TileCoord::new(t.x, t.y), v);
+    }
+    Ok((Mask { tiles: Arc::new(tiles), default: e.default }, e.enabled))
 }
 
 fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
@@ -96,6 +155,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                     }
                     Content::Group(c) => ContentEntry::Group { children: layers(c) },
                 },
+                mask: l.mask.as_ref().map(|m| mask_to_entry(m, l.mask_enabled)),
             })
             .collect()
     }
@@ -106,6 +166,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
         blend_space: doc.blend_space.key().into(),
         active: doc.active,
         layers: layers(&doc.layers),
+        selection: doc.selection.as_ref().map(|m| mask_to_entry(m, true)),
     }
 }
 
@@ -125,6 +186,13 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     }
                     ContentEntry::Group { children } => Content::Group(layers(children, file_len)?),
                 };
+                let (mask, mask_enabled) = match e.mask {
+                    Some(m) => {
+                        let (m, en) = entry_to_mask(m, file_len)?;
+                        (Some(m), en)
+                    }
+                    None => (None, true),
+                };
                 Ok(Layer {
                     id: e.id,
                     name: e.name,
@@ -132,6 +200,8 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     blend: BlendMode::from_key(&e.blend).unwrap_or_default(),
                     visible: e.visible,
                     content,
+                    mask,
+                    mask_enabled,
                 })
             })
             .collect()
@@ -139,6 +209,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
     let mut doc = Document::empty(m.width, m.height);
     doc.blend_space = BlendSpace::from_key(&m.blend_space).unwrap_or_default();
     doc.layers = layers(m.layers, file_len)?;
+    doc.selection = m.selection.map(|e| entry_to_mask(e, file_len).map(|m| m.0)).transpose()?;
     ensure!(!doc.layers.is_empty(), "Dokument ohne Ebenen");
     doc.active = if doc.find(m.active).is_some() { m.active } else { doc.display_order()[0] };
     doc.fix_next_id();
@@ -157,17 +228,23 @@ pub fn decompress_tile(data: &[u8]) -> anyhow::Result<Vec<f16>> {
     Ok(out)
 }
 
-/// Bytes referenced by the document (tiles only).
+pub fn compress_mask(values: &[u8]) -> Vec<u8> {
+    zstd::bulk::compress(values, 1).expect("zstd compress")
+}
+
+pub fn decompress_mask(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let raw = zstd::bulk::decompress(data, MASK_VALUES)?;
+    ensure!(raw.len() == MASK_VALUES, "Maskenkachel hat falsche Größe");
+    Ok(raw)
+}
+
+/// Bytes referenced by the document (tile and mask blobs).
 pub fn live_bytes(doc: &Document<BlobRef>) -> u64 {
     let mut seen = std::collections::HashSet::new();
     let mut n = 0;
-    doc.for_each(&mut |l, _| {
-        if let Some(t) = l.tiles() {
-            for b in t.values() {
-                if seen.insert(b.offset) {
-                    n += b.len;
-                }
-            }
+    doc.for_each_tile(&mut |b| {
+        if seen.insert(b.offset) {
+            n += b.len;
         }
     });
     n
@@ -338,6 +415,13 @@ mod tests {
         d.find_mut(top).unwrap().opacity = 0.5;
         d.group_active();
         d.blend_space = BlendSpace::Linear;
+        let mb = w.write_blob(&compress_mask(&vec![77u8; MASK_VALUES])).unwrap();
+        let mut m = Mask::filled(255);
+        Arc::make_mut(&mut m.tiles).insert(TileCoord::new(0, 0), MaskTile::Pixels(mb));
+        Arc::make_mut(&mut m.tiles).insert(TileCoord::new(1, 0), MaskTile::Solid(0));
+        d.find_mut(bg).unwrap().mask = Some(m);
+        d.find_mut(bg).unwrap().mask_enabled = false;
+        d.selection = Some(Mask::filled(255));
         d
     }
 
@@ -356,6 +440,14 @@ mod tests {
         let bg = loaded.layers[0].id;
         let blob = loaded.find(bg).unwrap().tiles().unwrap()[&TileCoord::new(1, 0)];
         assert_eq!(decompress_tile(&r.read_blob(blob).unwrap()).unwrap()[5].to_f32(), 0.25);
+        let l = loaded.find(bg).unwrap();
+        assert!(!l.mask_enabled);
+        let m = l.mask.as_ref().unwrap();
+        assert_eq!(m.default, 255);
+        assert!(matches!(m.tiles[&TileCoord::new(1, 0)], MaskTile::Solid(0)));
+        let MaskTile::Pixels(mb) = m.tiles[&TileCoord::new(0, 0)] else { panic!("pixel mask tile") };
+        assert_eq!(decompress_mask(&r.read_blob(mb).unwrap()).unwrap()[100], 77);
+        assert_eq!(loaded.selection.as_ref().unwrap().default, 255);
 
         // Append a tile without rewriting the existing one.
         let mut w = Writer::append(&path, len).unwrap();

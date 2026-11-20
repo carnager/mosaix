@@ -12,7 +12,7 @@ use anyhow::{Context, bail};
 use loader::Source;
 
 const HELP: &str = "\
-imagine – GPU-Bildeditor (Phase 1: Engine)
+imagine – GPU-Bildeditor (Phase 2: Auswahl & Masken)
 
 Aufruf:
   imagine [DATEI]               Bild öffnen (PNG, JPEG, WebP, TIFF, EXR, .imagine)
@@ -35,15 +35,29 @@ Ansicht:
   Drehen          R halten + Ziehen, Umschalt + Mausrad, Stifttaste 2; Umschalt+R zurücksetzen
   Einpassen/100 % Strg+0 / Strg+1
 
+Werkzeuge:
+  B Pinsel   E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
+  G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
+
 Malen:
-  Malen           linke Maustaste / Stift (Druck = Größe & Fluss)
-  Radierer        E umschalten (B = Pinsel), oder Radierer-Ende des Stifts
+  Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts
   Größe           [ / ], Strg + Mausrad
   Deckkraft       Ziffern 1…9, 0 (10 … 100 %)
-  Härte/Glättung  H / S       Farbe  C
+  Härte/Glättung  H / S       Farbe  C (Palette), X (Schwarz ↔ Weiß)
+  Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)
+
+Auswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):
+  Alles / nichts  Strg+A / Strg+D        Umkehren   Strg+Umschalt+I
+  Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf (Pixel in der Auswahl)
+  Maskierungsmodus-Ansicht  Q (rot = nicht ausgewählt)
+
+Ebenenmasken:
+  Neue Maske      Strg+Umschalt+M (aus der Auswahl, sonst alles sichtbar)
+  Maske bemalen   \\ (umschalten Pixel ↔ Maske; Weiß zeigt, Schwarz verbirgt)
+  Ein/Aus         Strg+Alt+M             Anwenden   Strg+Alt+Umschalt+M
 
 Ebenen (Photoshop-Tastenkürzel):
-  Neue Ebene      Strg+Umschalt+N      Duplizieren   Strg+J      Löschen  Entf
+  Neue Ebene      Strg+Umschalt+N      Duplizieren   Strg+J      Löschen  Entf (ohne Auswahl)
   Auswählen       Alt+[ / Alt+]        Verschieben   Strg+[ / Strg+]
   Gruppieren      Strg+G               Aufheben      Strg+Umschalt+G
   Deckkraft       Umschalt + Ziffer    Füllmethode   Umschalt + Plus/Minus
@@ -51,7 +65,7 @@ Ebenen (Photoshop-Tastenkürzel):
 
 Datei & Verlauf:
   Rückgängig      Strg+Z               Wiederholen   Strg+Umschalt+Z / Strg+Y
-  Speichern       Strg+S (.imagine, inkrementell)
+  Speichern       Strg+S (.imagine, inkrementell, im Hintergrund)
   Exportieren     Strg+Umschalt+E (PNG neben der Datei)
   Sonstiges       F12 Benchmark, F1 Hilfe, Strg+Q beenden
 ";
@@ -187,7 +201,7 @@ fn offscreen_bench(gpu: &imagine_gpu::GpuContext, engine: &mut imagine_gpu::Engi
     let mut base = imagine_core::View { viewport: glam::DVec2::new(w as f64, h as f64), ..Default::default() };
     let (dw, dh) = engine.size();
     base.fit(dw, dh);
-    let overlay = imagine_gpu::Overlay { cursor: None, checker_px: 8.0 };
+    let overlay = imagine_gpu::Overlay { checker_px: 8.0, ..Default::default() };
     let mut times = Vec::with_capacity(FRAMES as usize);
     for f in 0..FRAMES {
         let t0 = Instant::now();

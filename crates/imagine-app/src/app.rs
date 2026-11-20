@@ -10,8 +10,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use glam::DVec2;
+use imagine_core::color::linear_to_srgb;
+use imagine_core::mask::{CombineOp, Shape};
 use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View};
-use imagine_gpu::{Engine, GpuContext, Overlay, StrokeParams};
+use imagine_gpu::{Engine, GpuContext, GradientKind, Overlay, OverlayLine, StrokeParams, StrokeTarget};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
@@ -54,7 +56,7 @@ use wayland_protocols::wp::{
 
 use crate::agent::{command, ipc};
 use crate::loader::{self, LoaderMsg, Source, TileData};
-use crate::session::Session;
+use crate::session::{SaveDone, SaveJob, Session};
 use crate::tablet::{self, TabletFrame};
 
 const BTN_LEFT: u32 = 0x110;
@@ -75,13 +77,47 @@ const PALETTE: [[f32; 3]; 6] = [
     [1.0, 1.0, 1.0],
 ];
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Drag {
     None,
     Paint,
     Pan { last: DVec2 },
     Rotate { last: DVec2 },
     Zoom { last: DVec2, anchor: DVec2 },
+    /// Document coordinates.
+    Marquee { start: DVec2, end: DVec2, op: CombineOp, ellipse: bool },
+    Lasso { points: Vec<DVec2>, op: CombineOp },
+    Gradient { start: DVec2, end: DVec2 },
+    Move { start: DVec2, end: DVec2, bounds: Option<(DVec2, DVec2)> },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Tool {
+    Brush,
+    Eraser,
+    Marquee { ellipse: bool },
+    Lasso,
+    Gradient { radial: bool },
+    Move,
+}
+
+impl Tool {
+    fn name(self) -> &'static str {
+        match self {
+            Tool::Brush => "Pinsel",
+            Tool::Eraser => "Radierer",
+            Tool::Marquee { ellipse: false } => "Auswahlrechteck",
+            Tool::Marquee { ellipse: true } => "Auswahlellipse",
+            Tool::Lasso => "Lasso",
+            Tool::Gradient { radial: false } => "Verlauf linear",
+            Tool::Gradient { radial: true } => "Verlauf radial",
+            Tool::Move => "Verschieben",
+        }
+    }
+
+    fn paints(self) -> bool {
+        matches!(self, Tool::Brush | Tool::Eraser)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -148,6 +184,18 @@ pub struct App {
     brush: BrushSettings,
     palette_idx: usize,
     tablet_contact: bool,
+    tool: Tool,
+    /// Paint into the active layer's mask instead of its pixels.
+    mask_edit: bool,
+    quick_mask: bool,
+    started: Instant,
+
+    // Saving
+    save_job: Option<SaveJob>,
+    saving: bool,
+    save_tx: channel::Sender<anyhow::Result<SaveDone>>,
+    edit_count: u64,
+    save_mark: u64,
 
     // Agents
     socket: Option<ipc::SocketGuard>,
@@ -240,6 +288,15 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         })
         .map_err(|e| anyhow::anyhow!("loader channel: {e}"))?;
     loader::spawn(source, tx);
+    let (save_tx, save_rx) = channel::channel::<anyhow::Result<SaveDone>>();
+    event_loop
+        .handle()
+        .insert_source(save_rx, |ev, _, app: &mut App| {
+            if let channel::Event::Msg(r) = ev {
+                app.on_save_done(r);
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("save channel: {e}"))?;
 
     let mut app = App {
         surface,
@@ -282,6 +339,15 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         brush: BrushSettings::default(),
         palette_idx: 0,
         tablet_contact: false,
+        tool: Tool::Brush,
+        mask_edit: false,
+        quick_mask: false,
+        started: Instant::now(),
+        save_job: None,
+        saving: false,
+        save_tx,
+        edit_count: 0,
+        save_mark: 0,
         socket: None,
         bench: None,
         bench_on_load: bench,
@@ -318,7 +384,20 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     }
 
     while !app.exit {
-        event_loop.dispatch(None, &mut app)?;
+        // Wake up periodically while a save is in flight or ants are marching.
+        let ants = app.session.as_ref().is_some_and(|s| s.engine.has_selection());
+        let timeout = if app.save_job.is_some() {
+            Some(Duration::from_millis(10))
+        } else if ants {
+            Some(Duration::from_millis(100))
+        } else {
+            None
+        };
+        event_loop.dispatch(timeout, &mut app)?;
+        app.poll_save();
+        if ants {
+            app.needs_redraw = true;
+        }
         if app.configured && app.needs_redraw && !app.frame_pending {
             app.draw();
         }
@@ -411,6 +490,14 @@ impl App {
                 self.pending_uploads.extend(tiles.into_iter().map(|t| (layer, t)));
                 self.needs_redraw = true;
             }
+            LoaderMsg::Mask(m) => {
+                if let Some(s) = &mut self.session
+                    && let Err(e) = s.add_mask(m)
+                {
+                    tracing::warn!("Maske nicht geladen: {e:#}");
+                }
+                self.needs_redraw = true;
+            }
             LoaderMsg::Done { decode_ms, total_ms } => {
                 tracing::info!("Laden fertig: Dekodieren {decode_ms:.0} ms, gesamt {total_ms:.0} ms");
                 self.loading = false;
@@ -435,17 +522,63 @@ impl App {
             Button::Primary if self.space && self.mods.ctrl => Drag::Zoom { last: pos, anchor: pos },
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
-            Button::Primary => self.begin_stroke(pos, pressure, eraser_tool),
+            Button::Primary => self.begin_tool(pos, pressure, eraser_tool),
         };
         self.needs_redraw = true;
     }
 
-    fn begin_stroke(&mut self, pos: DVec2, pressure: f32, eraser_tool: bool) -> Drag {
+    /// Selection combine mode from the modifiers held when a selection starts (Photoshop).
+    fn combine_op(&self) -> CombineOp {
+        match (self.mods.shift, self.mods.alt) {
+            (true, true) => CombineOp::Intersect,
+            (true, false) => CombineOp::Add,
+            (false, true) => CombineOp::Subtract,
+            (false, false) => CombineOp::Replace,
+        }
+    }
+
+    fn begin_tool(&mut self, pos: DVec2, pressure: f32, eraser_tool: bool) -> Drag {
+        let doc = self.view.screen_to_doc(pos);
+        let op = self.combine_op();
+        match self.tool {
+            Tool::Brush | Tool::Eraser => self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser),
+            Tool::Marquee { ellipse } => Drag::Marquee { start: doc, end: doc, op, ellipse },
+            Tool::Lasso => Drag::Lasso { points: vec![doc], op },
+            Tool::Gradient { .. } => Drag::Gradient { start: doc, end: doc },
+            Tool::Move => Drag::Move { start: doc, end: doc, bounds: self.active_bounds() },
+        }
+    }
+
+    /// Coarse bounds (whole tiles) of the active layer's pixels.
+    fn active_bounds(&self) -> Option<(DVec2, DVec2)> {
+        let l = self.session.as_ref()?.engine.doc().active_layer()?;
+        let t = l.tiles()?;
+        let ts = imagine_core::TILE_SIZE as f64;
+        let x0 = t.keys().map(|c| c.x).min()? as f64 * ts;
+        let y0 = t.keys().map(|c| c.y).min()? as f64 * ts;
+        let x1 = (t.keys().map(|c| c.x).max()? + 1) as f64 * ts;
+        let y1 = (t.keys().map(|c| c.y).max()? + 1) as f64 * ts;
+        Some((DVec2::new(x0, y0), DVec2::new(x1, y1)))
+    }
+
+    fn stroke_target(&self) -> StrokeTarget {
+        if self.mask_edit { StrokeTarget::Mask } else { StrokeTarget::Pixels }
+    }
+
+    fn begin_stroke(&mut self, pos: DVec2, pressure: f32, eraser: bool) -> Drag {
         let mut settings = self.brush;
-        settings.eraser |= eraser_tool;
+        settings.eraser = eraser;
+        let target = self.stroke_target();
+        if target == StrokeTarget::Mask {
+            // Masks are grey: paint the (perceptual) luminance of the brush colour.
+            let [r, g, b] = settings.color;
+            let lum = linear_to_srgb(0.2126 * r + 0.7152 * g + 0.0722 * b);
+            settings.color = [lum; 3];
+        }
         let doc_pos = self.view.screen_to_doc(pos);
         let Some(engine) = self.engine() else { return Drag::None };
-        if let Err(e) = engine.begin_stroke(StrokeParams { opacity: settings.opacity, erase: settings.eraser }) {
+        let params = StrokeParams { opacity: settings.opacity, erase: settings.eraser, target };
+        if let Err(e) = engine.begin_stroke(params) {
             tracing::warn!("Malen nicht möglich: {e}");
             return Drag::None;
         }
@@ -485,21 +618,90 @@ impl App {
                 let anchor = *anchor;
                 self.view.zoom_at(anchor, f);
             }
+            Drag::Marquee { end, .. } | Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
+                *end = self.view.screen_to_doc(pos);
+            }
+            Drag::Lasso { points, .. } => {
+                let doc = self.view.screen_to_doc(pos);
+                if points.last().is_none_or(|p| p.distance(doc) * self.view.zoom >= 2.0) {
+                    points.push(doc);
+                }
+            }
         }
         self.needs_redraw = true;
     }
 
     fn release(&mut self, pos: DVec2, pressure: f32) {
-        if let Drag::Paint = self.drag {
-            let doc_pos = self.view.screen_to_doc(pos);
-            if let (Some(mut stroke), Some(s)) = (self.stroke.take(), &mut self.session) {
-                s.engine.stroke_dabs(&stroke.finish(InputSample { pos: doc_pos, pressure }));
-                s.engine.end_stroke(if stroke.settings.eraser { "Radieren" } else { "Pinselstrich" });
-                self.modified = true;
+        let drag = std::mem::replace(&mut self.drag, Drag::None);
+        let target = self.stroke_target();
+        let tool = self.tool;
+        let color = self.brush.color;
+        let opacity = self.brush.opacity;
+        let zoom = self.view.zoom;
+        let doc_pos = self.view.screen_to_doc(pos);
+        let Some(s) = &mut self.session else { return };
+        let e = &mut s.engine;
+        let result: Result<bool, &str> = match drag {
+            Drag::Paint => match self.stroke.take() {
+                Some(mut stroke) => {
+                    e.stroke_dabs(&stroke.finish(InputSample { pos: doc_pos, pressure }));
+                    e.end_stroke(if stroke.settings.eraser { "Radieren" } else { "Pinselstrich" });
+                    Ok(true)
+                }
+                None => Ok(false),
+            },
+            Drag::Marquee { start, end, op, ellipse } => {
+                let (min, max) = (start.min(end), start.max(end));
+                let size = max - min;
+                if size.min_element() * zoom < 2.0 {
+                    // A click without dragging deselects (Photoshop).
+                    if op == CombineOp::Replace { e.deselect("Auswahl aufheben").map(|_| true) } else { Ok(false) }
+                } else {
+                    let shape = if ellipse {
+                        let c = (min + max) * 0.5;
+                        Shape::Ellipse { cx: c.x, cy: c.y, rx: size.x * 0.5, ry: size.y * 0.5 }
+                    } else {
+                        Shape::Rect { x: min.x, y: min.y, w: size.x, h: size.y }
+                    };
+                    e.select_shape(&shape, op, "Auswahl").map(|_| true)
+                }
             }
+            Drag::Lasso { points, op } => {
+                if points.len() >= 3 {
+                    let poly = points.iter().map(|p| (p.x, p.y)).collect();
+                    e.select_shape(&Shape::Polygon(poly), op, "Lasso-Auswahl").map(|_| true)
+                } else if op == CombineOp::Replace {
+                    e.deselect("Auswahl aufheben").map(|_| true)
+                } else {
+                    Ok(false)
+                }
+            }
+            Drag::Gradient { start, end } if start.distance(end) * zoom >= 2.0 => {
+                let kind = if tool == (Tool::Gradient { radial: true }) { GradientKind::Radial } else { GradientKind::Linear };
+                let (c0, c1) = match target {
+                    StrokeTarget::Pixels => ([color[0], color[1], color[2], 1.0], [0.0; 4]),
+                    StrokeTarget::Mask => ([1.0; 4], [0.0, 0.0, 0.0, 1.0]),
+                };
+                e.gradient(target, kind, (start.x, start.y), (end.x, end.y), c0, c1, opacity, "Verlauf").map(|_| true)
+            }
+            Drag::Move { start, end, .. } => {
+                let d = (end - start).round();
+                e.translate_active(d.x as i64, d.y as i64, "Verschieben").map(|_| d != DVec2::ZERO)
+            }
+            _ => Ok(false),
+        };
+        match result {
+            Ok(true) => self.touch(),
+            Ok(false) => {}
+            Err(err) => tracing::warn!("{err}"),
         }
-        self.drag = Drag::None;
         self.needs_redraw = true;
+    }
+
+    /// Marks the document as changed.
+    fn touch(&mut self) {
+        self.modified = true;
+        self.edit_count += 1;
     }
 
     pub fn on_tablet_frame(&mut self, f: TabletFrame) {
@@ -538,12 +740,16 @@ impl App {
     fn edit(&mut self, label: &str, f: impl FnOnce(&mut imagine_core::Document<imagine_gpu::Tile>) -> bool) {
         let Some(engine) = self.engine() else { return };
         if engine.edit(label, f) {
-            self.modified = true;
+            self.touch();
             self.print_layers();
         }
     }
 
     fn request_quit(&mut self) {
+        if self.save_job.is_some() || self.saving {
+            tracing::warn!("Speichern läuft noch – bitte einen Moment warten.");
+            return;
+        }
         if !self.modified || self.quit_armed.is_some_and(|t| t.elapsed() < QUIT_CONFIRM) {
             self.exit = true;
             return;
@@ -554,12 +760,49 @@ impl App {
     }
 
     fn save(&mut self) {
+        if self.save_job.is_some() || self.saving {
+            tracing::warn!("Speichern läuft noch.");
+            return;
+        }
         let Some(s) = &mut self.session else { return };
-        match s.save(None) {
-            Ok(r) => {
-                self.modified = false;
+        match s.start_save(None) {
+            Ok(job) => {
+                self.save_job = Some(job);
+                self.save_mark = self.edit_count;
+                tracing::info!("Speichern …");
+            }
+            Err(e) => tracing::error!("Speichern fehlgeschlagen: {e:#}"),
+        }
+        self.update_title();
+    }
+
+    /// Hands a finished readback to a worker thread (compress + write).
+    fn poll_save(&mut self) {
+        let ready = self.save_job.as_ref().is_some_and(|j| j.ready(&self.gpu.device));
+        if ready {
+            let writer = self.save_job.take().unwrap().into_writer();
+            let tx = self.save_tx.clone();
+            self.saving = true;
+            std::thread::Builder::new()
+                .name("save".into())
+                .spawn(move || {
+                    let _ = tx.send(writer());
+                })
+                .expect("spawn save thread");
+        }
+    }
+
+    fn on_save_done(&mut self, result: anyhow::Result<SaveDone>) {
+        self.saving = false;
+        let Some(s) = &mut self.session else { return };
+        match result {
+            Ok(done) => {
+                let r = s.complete_save(done);
+                if self.edit_count == self.save_mark {
+                    self.modified = false;
+                }
                 tracing::info!(
-                    "Gespeichert: {} ({} Kacheln geschrieben, {}, {:.1} MB, {:.0} ms)",
+                    "Gespeichert: {} ({} Kacheln geschrieben, {}, {:.1} MB, {:.0} ms im Hintergrund)",
                     r.path.display(),
                     r.tiles_written,
                     if r.incremental { "inkrementell" } else { "komplett" },
@@ -569,6 +812,7 @@ impl App {
             }
             Err(e) => tracing::error!("Speichern fehlgeschlagen: {e:#}"),
         }
+        self.update_title();
     }
 
     fn export(&mut self) {
@@ -627,7 +871,55 @@ impl App {
             Keysym::j if ctrl => self.edit("Ebene duplizieren", |d| d.duplicate_active().is_some()),
             Keysym::g | Keysym::G if ctrl && shift => self.edit("Gruppierung aufheben", |d| d.ungroup_active()),
             Keysym::g if ctrl => self.edit("Gruppieren", |d| d.group_active().is_some()),
+            Keysym::Delete if self.session.as_ref().is_some_and(|s| s.engine.has_selection()) => {
+                self.engine_op(|e| e.clear_selected("Löschen").map(|_| ()))
+            }
             Keysym::Delete => self.edit("Ebene löschen", |d| d.remove_active()),
+            Keysym::BackSpace if alt => {
+                let [r, g, b] = self.brush.color;
+                let (target, opacity) = (self.stroke_target(), self.brush.opacity);
+                let color = if target == StrokeTarget::Mask {
+                    let l = linear_to_srgb(0.2126 * r + 0.7152 * g + 0.0722 * b);
+                    [l, l, l, 1.0]
+                } else {
+                    [r, g, b, 1.0]
+                };
+                self.engine_op(|e| e.fill(target, color, opacity, "Füllen").map(|_| ()))
+            }
+            Keysym::a if ctrl => self.engine_op(|e| e.select_all("Alles auswählen")),
+            Keysym::d if ctrl => self.engine_op(|e| e.deselect("Auswahl aufheben")),
+            Keysym::i | Keysym::I if ctrl && shift => self.engine_op(|e| e.invert_selection("Auswahl umkehren")),
+            Keysym::F6 if shift => self.engine_op(|e| e.feather_selection(10.0, "Weiche Auswahlkante (10 px)")),
+            Keysym::m | Keysym::M if ctrl && alt && shift => {
+                self.mask_edit = false;
+                self.engine_op(|e| e.apply_layer_mask("Ebenenmaske anwenden"))
+            }
+            Keysym::m | Keysym::M if ctrl && alt => self.edit("Ebenenmaske ein/aus", |d| {
+                let id = d.active;
+                let l = d.find_mut(id).unwrap();
+                l.mask_enabled = !l.mask_enabled;
+                l.mask.is_some()
+            }),
+            Keysym::m | Keysym::M if ctrl && shift => self.engine_op(|e| e.add_layer_mask("Ebenenmaske")),
+            Keysym::backslash => {
+                let has_mask = self.session.as_ref().and_then(|s| s.engine.doc().active_layer()).is_some_and(|l| l.mask.is_some());
+                if self.mask_edit || has_mask {
+                    self.mask_edit = !self.mask_edit;
+                    tracing::info!("Ziel: {}", if self.mask_edit { "Ebenenmaske" } else { "Pixel" });
+                } else {
+                    tracing::warn!("Die Ebene hat keine Maske (Strg+Umschalt+M legt eine an).");
+                }
+            }
+            Keysym::Left | Keysym::Right | Keysym::Up | Keysym::Down if self.tool == Tool::Move => {
+                let step = if shift { 10 } else { 1 };
+                let (dx, dy) = match sym {
+                    Keysym::Left => (-step, 0),
+                    Keysym::Right => (step, 0),
+                    Keysym::Up => (0, -step),
+                    _ => (0, step),
+                };
+                self.engine_op(|e| e.translate_active(dx, dy, "Verschieben"))
+            }
             Keysym::comma if ctrl => self.edit("Sichtbarkeit", |d| {
                 let id = d.active;
                 let l = d.find_mut(id).unwrap();
@@ -660,8 +952,28 @@ impl App {
             }
             Keysym::bracketleft => self.brush.size = (self.brush.size / 1.2).max(1.0),
             Keysym::bracketright => self.brush.size = (self.brush.size * 1.2).min(5000.0),
-            Keysym::e => self.brush.eraser = !self.brush.eraser,
-            Keysym::b => self.brush.eraser = false,
+            Keysym::e => self.set_tool(Tool::Eraser),
+            Keysym::b => self.set_tool(Tool::Brush),
+            Keysym::m => {
+                let ellipse = matches!(self.tool, Tool::Marquee { ellipse: false });
+                self.set_tool(Tool::Marquee { ellipse })
+            }
+            Keysym::l => self.set_tool(Tool::Lasso),
+            Keysym::g => {
+                let radial = matches!(self.tool, Tool::Gradient { radial: false });
+                self.set_tool(Tool::Gradient { radial })
+            }
+            Keysym::v => self.set_tool(Tool::Move),
+            Keysym::q => {
+                self.quick_mask = !self.quick_mask;
+                tracing::info!("Maskierungsmodus-Ansicht {}", if self.quick_mask { "an" } else { "aus" });
+            }
+            Keysym::x => {
+                let [r, g, b] = self.brush.color;
+                let dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.2;
+                self.brush.color = if dark { [1.0; 3] } else { [0.0; 3] };
+                tracing::info!("Farbe: {}", if dark { "Weiß" } else { "Schwarz" });
+            }
             Keysym::c => {
                 self.palette_idx = (self.palette_idx + 1) % PALETTE.len();
                 self.brush.color = PALETTE[self.palette_idx];
@@ -685,10 +997,29 @@ impl App {
         self.needs_redraw = true;
     }
 
+    fn set_tool(&mut self, tool: Tool) {
+        self.tool = tool;
+        self.brush.eraser = tool == Tool::Eraser;
+        tracing::info!("Werkzeug: {}", tool.name());
+        self.update_title();
+    }
+
+    /// Runs an engine operation, reporting errors and marking the document changed.
+    fn engine_op(&mut self, f: impl FnOnce(&mut Engine) -> Result<(), &'static str>) {
+        let Some(e) = self.engine() else { return };
+        match f(e) {
+            Ok(()) => {
+                self.touch();
+                self.print_layers();
+            }
+            Err(err) => tracing::warn!("{err}"),
+        }
+    }
+
     fn undo(&mut self) {
         if let Some(label) = self.engine().and_then(|e| e.undo()) {
             tracing::info!("Rückgängig: {label}");
-            self.modified = true;
+            self.touch();
             self.print_layers();
         }
     }
@@ -696,7 +1027,7 @@ impl App {
     fn redo(&mut self) {
         if let Some(label) = self.engine().and_then(|e| e.redo()) {
             tracing::info!("Wiederholen: {label}");
-            self.modified = true;
+            self.touch();
             self.print_layers();
         }
     }
@@ -774,7 +1105,7 @@ impl App {
                 self.fit_if_needed();
                 self.modified = false;
             } else if mutates {
-                self.modified = true;
+                self.touch();
             }
             if mutates {
                 self.print_layers();
@@ -867,12 +1198,17 @@ impl App {
         };
         let target = frame.texture.create_view(&Default::default());
 
-        let show_ring = !matches!(self.drag, Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. })
+        let show_ring = self.tool.paints()
+            && !matches!(self.drag, Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. })
             && !self.space
             && self.bench.is_none();
         let overlay = Overlay {
             cursor: self.cursor.filter(|_| show_ring).map(|p| (p, self.brush.size * 0.5 * self.view.zoom as f32)),
             checker_px: (8.0 * self.scale) as f32,
+            lines: self.overlay_lines(),
+            show_selection: self.bench.is_none(),
+            quick_mask: self.quick_mask,
+            time: self.started.elapsed().as_secs_f32(),
         };
         if let Some(s) = &mut self.session {
             let mut batch: Vec<(LayerId, TileData)> = Vec::new();
@@ -924,11 +1260,44 @@ impl App {
         }
     }
 
+    /// Rubber bands for the drag in progress, in screen pixels.
+    fn overlay_lines(&self) -> Vec<OverlayLine> {
+        let v = &self.view;
+        let rect = |a: DVec2, b: DVec2| {
+            let (min, max) = (a.min(b), a.max(b));
+            [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)].map(|p| v.doc_to_screen(p)).to_vec()
+        };
+        match &self.drag {
+            Drag::Marquee { start, end, ellipse: false, .. } => vec![OverlayLine { points: rect(*start, *end), closed: true }],
+            Drag::Marquee { start, end, ellipse: true, .. } => {
+                let (c, r) = ((*start + *end) * 0.5, (*end - *start).abs() * 0.5);
+                let points = (0..96)
+                    .map(|i| {
+                        let t = i as f64 / 96.0 * std::f64::consts::TAU;
+                        v.doc_to_screen(c + DVec2::new(r.x * t.cos(), r.y * t.sin()))
+                    })
+                    .collect();
+                vec![OverlayLine { points, closed: true }]
+            }
+            Drag::Lasso { points, .. } => {
+                vec![OverlayLine { points: points.iter().map(|p| v.doc_to_screen(*p)).collect(), closed: true }]
+            }
+            Drag::Gradient { start, end } => {
+                vec![OverlayLine { points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)], closed: false }]
+            }
+            Drag::Move { start, end, bounds: Some((a, b)) } => {
+                let d = (*end - *start).round();
+                vec![OverlayLine { points: rect(*a + d, *b + d), closed: true }]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     fn update_title(&self) {
         let Some(s) = &self.session else { return };
         let e = &s.engine;
         let (w, h) = e.size();
-        let tool = if self.brush.eraser { "Radierer" } else { "Pinsel" };
+        let tool = format!("{}{}", self.tool.name(), if self.mask_edit { " → Maske" } else { "" });
         let layer = e
             .doc()
             .active_layer()
@@ -944,6 +1313,8 @@ impl App {
             .unwrap_or_default();
         let status = if self.quit_armed.is_some_and(|t| t.elapsed() < QUIT_CONFIRM) {
             " – NOCHMAL Strg+Q ZUM VERWERFEN"
+        } else if self.save_job.is_some() || self.saving {
+            " – speichert …"
         } else if self.loading || !self.pending_uploads.is_empty() {
             " – lädt …"
         } else {

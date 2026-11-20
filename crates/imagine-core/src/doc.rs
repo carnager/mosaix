@@ -22,6 +22,67 @@ pub enum Content<T> {
     Group(Vec<Layer<T>>),
 }
 
+/// One tile of a GPU-side mask.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MaskTile<T> {
+    Solid(u8),
+    Pixels(T),
+}
+
+/// A sparse 8-bit mask (selection or layer mask). Tiles not in the map have
+/// the value `default` (0 = hidden / not selected, 255 = visible / selected).
+#[derive(Debug, Clone)]
+pub struct Mask<T> {
+    pub tiles: Arc<TileMap<MaskTile<T>>>,
+    pub default: u8,
+}
+
+/// The mask value relevant for one tile.
+#[derive(Debug, PartialEq)]
+pub enum MaskRef<'a, T> {
+    Solid(u8),
+    Tile(&'a T),
+}
+
+impl<T> Clone for MaskRef<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for MaskRef<'_, T> {}
+
+impl<T> Mask<T> {
+    pub fn filled(v: u8) -> Self {
+        Self { tiles: Arc::new(TileMap::new()), default: v }
+    }
+
+    pub fn at(&self, c: TileCoord) -> MaskRef<'_, T> {
+        match self.tiles.get(&c) {
+            Some(MaskTile::Solid(v)) => MaskRef::Solid(*v),
+            Some(MaskTile::Pixels(t)) => MaskRef::Tile(t),
+            None => MaskRef::Solid(self.default),
+        }
+    }
+
+    pub fn map<U>(&self, f: &mut impl FnMut(&T) -> U) -> Mask<U> {
+        Mask {
+            tiles: Arc::new(
+                self.tiles
+                    .iter()
+                    .map(|(c, t)| {
+                        (*c, match t {
+                            MaskTile::Solid(v) => MaskTile::Solid(*v),
+                            MaskTile::Pixels(p) => MaskTile::Pixels(f(p)),
+                        })
+                    })
+                    .collect(),
+            ),
+            default: self.default,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Layer<T> {
     pub id: LayerId,
@@ -30,6 +91,8 @@ pub struct Layer<T> {
     pub blend: BlendMode,
     pub visible: bool,
     pub content: Content<T>,
+    pub mask: Option<Mask<T>>,
+    pub mask_enabled: bool,
 }
 
 impl<T> Layer<T> {
@@ -43,6 +106,11 @@ impl<T> Layer<T> {
             Content::Group(_) => None,
         }
     }
+
+    /// The active mask's value at a tile, `None` if the layer has no (enabled) mask.
+    pub fn mask_at(&self, c: TileCoord) -> Option<MaskRef<'_, T>> {
+        self.mask.as_ref().filter(|_| self.mask_enabled).map(|m| m.at(c))
+    }
 }
 
 /// One step of the per-tile compositing program.
@@ -51,11 +119,12 @@ pub enum Op<'a, T> {
     /// Composite a pixel layer. `tile` is `None` if the layer has no tile at
     /// this coordinate (only emitted when `extra` asked for it, e.g. for a
     /// stroke on an empty area).
-    Layer { id: LayerId, tile: Option<&'a T>, opacity: f32, blend: BlendMode },
+    /// `mask` is `None` when the layer is not masked here (no mask, or fully revealing).
+    Layer { id: LayerId, tile: Option<&'a T>, opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
     /// Start an isolated group.
     Push,
     /// Composite the group onto what is below.
-    Pop { opacity: f32, blend: BlendMode },
+    Pop { opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +135,8 @@ pub struct Document<T> {
     /// Top-level layers, bottom → top.
     pub layers: Vec<Layer<T>>,
     pub active: LayerId,
+    /// `None` = nothing selected, everything is editable.
+    pub selection: Option<Mask<T>>,
     next_id: LayerId,
 }
 
@@ -81,7 +152,15 @@ impl<T: Clone> Document<T> {
 
     /// Document without layers (for building from files).
     pub fn empty(width: u32, height: u32) -> Self {
-        Self { width, height, blend_space: BlendSpace::default(), layers: Vec::new(), active: 0, next_id: 1 }
+        Self {
+            width,
+            height,
+            blend_space: BlendSpace::default(),
+            layers: Vec::new(),
+            active: 0,
+            selection: None,
+            next_id: 1,
+        }
     }
 
     pub fn alloc_id(&mut self) -> LayerId {
@@ -262,6 +341,8 @@ impl<T: Clone> Document<T> {
             blend: BlendMode::Normal,
             visible: true,
             content: Content::Group(vec![inner]),
+            mask: None,
+            mask_enabled: true,
         };
         list.insert(i, group);
         self.active = gid;
@@ -339,19 +420,30 @@ impl<T: Clone> Document<T> {
     }
 
     /// Builds the compositing program for one tile. Invisible layers, empty
-    /// groups and zero-opacity layers are skipped. `force` names a layer that is
-    /// emitted even without a tile here (the target of an active stroke).
+    /// groups, zero-opacity layers and layers fully hidden by their mask are
+    /// skipped. `force` names a layer that is emitted even without a tile here
+    /// (the target of an active stroke).
     pub fn program(&self, coord: TileCoord, force: Option<LayerId>) -> Vec<Op<'_, T>> {
+        /// `None` = no masking needed here.
+        fn mask<T>(l: &Layer<T>, c: TileCoord) -> Option<MaskRef<'_, T>> {
+            l.mask_at(c).filter(|m| !matches!(m, MaskRef::Solid(255)))
+        }
         fn walk<'a, T>(ls: &'a [Layer<T>], c: TileCoord, force: Option<LayerId>, out: &mut Vec<Op<'a, T>>) {
             for l in ls {
                 if !l.visible || l.opacity <= 0.0 {
                     continue;
                 }
+                let m = mask(l, c);
+                // Fully masked out – unless a stroke is being painted into this layer (or its mask).
+                if matches!(m, Some(MaskRef::Solid(0))) && force != Some(l.id) {
+                    continue;
+                }
+                let opacity = l.opacity;
                 match &l.content {
                     Content::Pixels(tiles) => {
                         let tile = tiles.get(&c);
                         if tile.is_some() || force == Some(l.id) {
-                            out.push(Op::Layer { id: l.id, tile, opacity: l.opacity, blend: l.blend });
+                            out.push(Op::Layer { id: l.id, tile, opacity, blend: l.blend, mask: m });
                         }
                     }
                     Content::Group(children) => {
@@ -361,7 +453,7 @@ impl<T: Clone> Document<T> {
                         if out.len() == start + 1 {
                             out.pop(); // empty group
                         } else {
-                            out.push(Op::Pop { opacity: l.opacity, blend: l.blend });
+                            out.push(Op::Pop { opacity, blend: l.blend, mask: m });
                         }
                     }
                 }
@@ -370,6 +462,29 @@ impl<T: Clone> Document<T> {
         let mut out = Vec::new();
         walk(&self.layers, coord, force, &mut out);
         out
+    }
+
+    /// Visits every tile handle: layer pixels, layer masks and the selection.
+    pub fn for_each_tile(&self, f: &mut impl FnMut(&T)) {
+        self.for_each(&mut |l, _| {
+            if let Some(t) = l.tiles() {
+                t.values().for_each(&mut *f);
+            }
+            if let Some(m) = &l.mask {
+                for t in m.tiles.values() {
+                    if let MaskTile::Pixels(p) = t {
+                        f(p);
+                    }
+                }
+            }
+        });
+        if let Some(sel) = &self.selection {
+            for t in sel.tiles.values() {
+                if let MaskTile::Pixels(p) = t {
+                    f(p);
+                }
+            }
+        }
     }
 
     /// Converts tile handles, keeping structure and ids.
@@ -388,6 +503,8 @@ impl<T: Clone> Document<T> {
                         }
                         Content::Group(c) => Content::Group(map(c, f)),
                     },
+                    mask: l.mask.as_ref().map(|m| m.map(f)),
+                    mask_enabled: l.mask_enabled,
                 })
                 .collect()
         }
@@ -397,6 +514,7 @@ impl<T: Clone> Document<T> {
             blend_space: self.blend_space,
             layers: map(&self.layers, f),
             active: self.active,
+            selection: self.selection.as_ref().map(|m| m.map(f)),
             next_id: self.next_id,
         }
     }
@@ -409,7 +527,12 @@ impl<T: Clone> Document<T> {
             let marker = if id == self.active { "▶" } else { " " };
             let vis = if l.visible { "●" } else { "○" };
             let icon = if l.is_group() { "▾ " } else { "" };
-            let name = format!("{}{icon}{}", "  ".repeat(depth), l.name);
+            let mask = match (&l.mask, l.mask_enabled) {
+                (Some(_), true) => " [Maske]",
+                (Some(_), false) => " [Maske aus]",
+                (None, _) => "",
+            };
+            let name = format!("{}{icon}{}{mask}", "  ".repeat(depth), l.name);
             s += &format!(
                 " {marker} {vis} {name:<28} {:<26} {:>3} %\n",
                 l.blend.name(),
@@ -429,6 +552,8 @@ impl<T> Layer<T> {
             blend: BlendMode::Normal,
             visible: true,
             content: Content::Pixels(Arc::new(TileMap::new())),
+            mask: None,
+            mask_enabled: true,
         }
     }
 }
@@ -437,20 +562,30 @@ impl<T> Layer<T> {
 pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl Hasher) {
     for op in ops {
         match op {
-            Op::Layer { id, tile, opacity, blend } => {
+            Op::Layer { id, tile, opacity, blend, mask } => {
                 0u8.hash(h);
                 id.hash(h);
                 tile.map(&key).hash(h);
                 opacity.to_bits().hash(h);
                 (*blend as u32).hash(h);
+                hash_mask(mask, &key, h);
             }
             Op::Push => 1u8.hash(h),
-            Op::Pop { opacity, blend } => {
+            Op::Pop { opacity, blend, mask } => {
                 2u8.hash(h);
                 opacity.to_bits().hash(h);
                 (*blend as u32).hash(h);
+                hash_mask(mask, &key, h);
             }
         }
+    }
+}
+
+fn hash_mask<T>(m: &Option<MaskRef<'_, T>>, key: impl Fn(&T) -> u64, h: &mut impl Hasher) {
+    match m {
+        None => 0u8.hash(h),
+        Some(MaskRef::Solid(v)) => (1u8, *v).hash(h),
+        Some(MaskRef::Tile(t)) => (2u8, key(t)).hash(h),
     }
 }
 
@@ -516,6 +651,19 @@ mod tests {
         assert!(matches!(p[0], Op::Layer { id, .. } if id == bg));
         assert!(matches!(p[1], Op::Push));
         assert!(matches!(p[3], Op::Pop { opacity, .. } if opacity == 0.5));
+        // Masks: solid 0 hides, a pixel tile becomes part of the op, solid 255 is a no-op.
+        let mut m = Mask::filled(255);
+        Arc::make_mut(&mut m.tiles).insert(TileCoord::new(0, 0), MaskTile::Pixels(42));
+        d.find_mut(top).unwrap().mask = Some(m);
+        let p = d.program(TileCoord::new(0, 0), None);
+        assert!(matches!(p[2], Op::Layer { mask: Some(MaskRef::Tile(&42)), .. }));
+        d.find_mut(top).unwrap().mask = Some(Mask::filled(0));
+        assert_eq!(d.program(TileCoord::new(0, 0), None).len(), 1, "group with fully hidden layer vanishes");
+        let forced = d.program(TileCoord::new(0, 0), Some(top));
+        assert!(matches!(forced[2], Op::Layer { mask: Some(MaskRef::Solid(0)), .. }), "mask painting needs the op");
+        d.find_mut(top).unwrap().mask_enabled = false;
+        assert_eq!(d.program(TileCoord::new(0, 0), None).len(), 4, "disabled mask is ignored");
+        d.find_mut(top).unwrap().mask = None;
         // Empty coordinate inside the group: group disappears from the program.
         assert!(d.program(TileCoord::new(3, 3), None).is_empty());
         // Forced layer appears without a tile.
@@ -551,7 +699,16 @@ mod tests {
     #[test]
     fn map_preserves_structure() {
         let d = doc();
+        let mut d = d;
+        let mut sel = Mask::filled(0);
+        Arc::make_mut(&mut sel.tiles).insert(TileCoord::new(1, 1), MaskTile::Pixels(5));
+        d.selection = Some(sel);
+        let mut all = Vec::new();
+        d.for_each_tile(&mut |t| all.push(*t));
+        all.sort();
+        assert_eq!(all, vec![5, 7]);
         let m = d.map_tiles(&mut |v| *v as u64 * 2);
+        assert!(matches!(m.selection.as_ref().unwrap().at(TileCoord::new(1, 1)), MaskRef::Tile(&10)));
         assert_eq!(m.find(d.active).unwrap().tiles().unwrap()[&TileCoord::new(0, 0)], 14);
     }
 }

@@ -10,8 +10,11 @@ use std::sync::{Arc, Mutex};
 
 use imagine_core::TILE_SIZE;
 
+/// Layer pixels: premultiplied linear RGBA.
 pub const TILE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub const BYTES_PER_PIXEL: u32 = 8;
+/// Masks (selection, layer masks): one 8-bit channel.
+pub const MASK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
 /// Position of a tile: chunk index and array layer within the chunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -74,6 +77,7 @@ pub struct Chunk {
 
 pub struct PoolConfig {
     pub label: &'static str,
+    pub format: wgpu::TextureFormat,
     pub mip_levels: u32,
     pub chunk_layers: u32,
     pub max_chunks: u32,
@@ -118,7 +122,7 @@ impl Pool {
             mip_level_count: self.cfg.mip_levels,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: TILE_FORMAT,
+            format: self.cfg.format,
             usage: self.cfg.usage,
             view_formats: &[],
         });
@@ -198,11 +202,18 @@ impl Pool {
         self.cfg.max_chunks as u64 * self.cfg.chunk_layers as u64
     }
 
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.cfg.format
+    }
+
+    pub fn bytes_per_pixel(&self) -> u32 {
+        self.cfg.format.block_copy_size(None).expect("plain colour format")
+    }
+
     /// Bytes of GPU memory allocated by this pool.
     pub fn allocated_bytes(&self) -> u64 {
-        let per_layer: u64 = (0..self.cfg.mip_levels)
-            .map(|m| ((TILE_SIZE >> m) as u64).pow(2) * BYTES_PER_PIXEL as u64)
-            .sum();
+        let bpp = self.bytes_per_pixel() as u64;
+        let per_layer: u64 = (0..self.cfg.mip_levels).map(|m| ((TILE_SIZE >> m) as u64).pow(2) * bpp).sum();
         per_layer * self.cfg.chunk_layers as u64 * self.chunks.len() as u64
     }
 }

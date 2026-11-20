@@ -309,9 +309,31 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 
 **Regel für alle folgenden Phasen:** Jedes neue Werkzeug bekommt sofort seinen Befehl und sein MCP-Tool. Die Tastaturkürzel der App laufen mittelfristig ebenfalls über die Befehlsschicht, dann gibt es Makros und Aufzeichnung gratis.
 
+## Stand Phase 2a (20.11.2026) – Auswahl & Masken
+
+- **Masken-Infrastruktur:** eigener R8-Kachel-Pool; einheitliche Kacheln bleiben `Solid` (kein Speicher) – eine Rechteckauswahl über 100 MP belegt nur die Randkacheln
+- **Auswahl:** Rechteck, Ellipse, Lasso/Polygon mit Kantenglättung (4× vertikal, analytisch horizontal); hinzufügen/abziehen/Schnittmenge (Photoshop-Modifier), alles/nichts/umkehren, weiche Kante (3× Box ≈ Gauß); Ameisenlinie über eine Bildschirm-Maske (immer 1 px scharf, animiert), Maskierungsmodus-Ansicht
+- **Auswahl begrenzt alles:** Pinsel (schon in der Live-Vorschau), Füllen, Löschen, Verlauf – auch weiche Auswahlkanten
+- **Ebenenmasken** für Ebenen und Gruppen: anlegen (aus Auswahl), bemalen (Live-Vorschau), ein/aus, anwenden; im Zusammensetz-Programm, Masken-Tile mit Wert 0 überspringt die Ebene ganz
+- **Apply-Kernel:** ein GPU-Pfad für Strich übernehmen, Füllen, Verlauf (sRGB-Interpolation wie Photoshop), Löschen, Verschieben (Pixel + Maske), Maske anwenden – immer als neue Kacheln, also ein Undo-Schritt
+- **Werkzeuge im Fenster:** M/L/G/V/B/E, Overlays für Rahmen, Lasso, Verlaufslinie und Verschiebe-Umriss
+- **Speichern im Hintergrund:** Schnappschuss + asynchroner GPU-Readback, Komprimieren/Schreiben im Worker-Thread; Weiterarbeiten währenddessen
+- **Format v2:** Ebenenmasken und Auswahl werden gespeichert (v1-Dateien bleiben lesbar)
+- **Agenten:** 15 neue Befehle (Auswahl, Füllen, Verlauf, Masken, Verschieben), Vorschau mit Auswahl-Einfärbung
+
+| Messung (100 MP, RX 6700 XT, headless) | Ergebnis |
+|---|---|
+| Füllen / Verlauf (1600 Kacheln) | 27 ms / 19 ms |
+| Ellipse auswählen / Rechteck abziehen | 49 ms / 15 ms |
+| Weiche Kante 40 px | 428 ms (CPU) |
+| Ebene samt Maske verschieben | 27 ms |
+| Darstellung (Regression) | Ø 0,14 ms/Frame, unverändert |
+
+**Bekannte Grenzen:** Verschieben zeigt beim Ziehen nur den Umriss (Inhalt springt beim Loslassen); weiche Kante und Auswahl-Kombination laufen auf der CPU; Inhalte, die über den Rand geschoben werden, werden abgeschnitten; Ameisen und Werkzeug-Overlays sind nur per Offscreen-Test abgesichert (niri zeigt das Testfenster nicht an) – bitte von Hand ausprobieren.
+
 ## Nächster konkreter Schritt
 
-**Phase 2 – Malen & Auswählen:** Auswahlwerkzeuge (Rechteck, Ellipse, Lasso, Zauberstab per GPU-Floodfill) als Masken-Kacheln, Ebenenmasken, Transformieren, Füllen/Verlauf, Pinsel-Engine v1 (Textur-Spitzen, Smudge). Parallel: Render-Thread vom UI-Thread trennen, Speichern im Hintergrund.
+**Phase 2b:** Zauberstab (GPU-Floodfill) und Farbbereich, freies Transformieren (Skalieren/Drehen mit Live-Vorschau), Verschieben mit Live-Inhalt, Zuschneiden, Pinsel-Engine v1 (Textur-Spitzen, Smudge), Render-Thread vom UI-Thread trennen.
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

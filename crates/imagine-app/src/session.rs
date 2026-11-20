@@ -1,18 +1,25 @@
 //! An open document: the engine plus its file state (incremental saving,
 //! export). Used by the window and by the headless CLI.
+//!
+//! Saving runs in the background: [`Session::start_save`] snapshots the
+//! document (cheap – tiles are shared and immutable) and starts an
+//! asynchronous GPU readback of the tiles not yet in the file; once the data
+//! arrived, compression and writing happen on a worker thread. Editing can
+//! continue meanwhile.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, bail};
-use imagine_core::{LayerId, TileCoord};
-use imagine_gpu::{Engine, Tile};
-use imagine_io::native::{Writer, compress_tile, live_bytes};
+use imagine_core::mask::CpuMask;
+use imagine_core::{Document, LayerId, MaskTile, TileCoord};
+use imagine_gpu::{Engine, PoolKind, Readback, Tile};
+use imagine_io::native::{Writer, compress_mask, compress_tile, live_bytes};
 use imagine_io::{BlobRef, export};
 use rayon::prelude::*;
 
-use crate::loader::{self, LoaderMsg, Source, TileData};
+use crate::loader::{self, LoaderMsg, MaskLoad, Source, TileData};
 
 const READBACK_BATCH: usize = 256;
 
@@ -22,6 +29,65 @@ pub struct SaveReport {
     pub bytes: u64,
     pub incremental: bool,
     pub ms: f64,
+}
+
+/// Result of the worker thread, applied with [`Session::complete_save`].
+pub struct SaveDone {
+    report: SaveReport,
+    refs: HashMap<u64, BlobRef>,
+}
+
+/// A save whose GPU readback is still in flight.
+pub struct SaveJob {
+    path: PathBuf,
+    t0: Instant,
+    incremental: bool,
+    file_len: Option<u64>,
+    /// Document with tiles replaced by their serials.
+    doc: Document<u64>,
+    refs: HashMap<u64, BlobRef>,
+    layer_tiles: Vec<Tile>,
+    mask_tiles: Vec<Tile>,
+    layer_rb: Option<Readback>,
+    mask_rb: Option<Readback>,
+}
+
+impl SaveJob {
+    /// True once all tile data has arrived (non-blocking).
+    pub fn ready(&self, device: &wgpu::Device) -> bool {
+        self.layer_rb.as_ref().is_none_or(|r| r.poll(device)) && self.mask_rb.as_ref().is_none_or(|r| r.poll(device))
+    }
+
+    /// Takes the data and returns the CPU part (compress + write) as a closure
+    /// that can run on any thread.
+    pub fn into_writer(self) -> impl FnOnce() -> anyhow::Result<SaveDone> + Send + 'static {
+        let layer_data = self.layer_rb.map(Readback::take).unwrap_or_default();
+        let mask_data = self.mask_rb.map(Readback::take).unwrap_or_default();
+        let layer_serials: Vec<u64> = self.layer_tiles.iter().map(Tile::serial).collect();
+        let mask_serials: Vec<u64> = self.mask_tiles.iter().map(Tile::serial).collect();
+        let (path, t0, incremental, file_len, doc, mut refs) =
+            (self.path, self.t0, self.incremental, self.file_len, self.doc, self.refs);
+        move || {
+            let mut writer = if incremental {
+                Writer::append(&path, file_len.expect("incremental save has a length"))?
+            } else {
+                Writer::create(&path)?
+            };
+            let layer_blobs: Vec<Vec<u8>> =
+                layer_data.par_iter().map(|raw| compress_tile(&bytemuck::pod_collect_to_vec(raw))).collect();
+            let mask_blobs: Vec<Vec<u8>> = mask_data.par_iter().map(|raw| compress_mask(raw)).collect();
+            let tiles_written = layer_blobs.len() + mask_blobs.len();
+            for (serial, blob) in layer_serials.iter().zip(layer_blobs).chain(mask_serials.iter().zip(mask_blobs)) {
+                refs.insert(*serial, writer.write_blob(&blob)?);
+            }
+            let doc_blobs = doc.map_tiles(&mut |s| refs[s]);
+            let len = writer.finish(&doc_blobs).with_context(|| format!("{} speichern", path.display()))?;
+            debug_assert!(live_bytes(&doc_blobs) <= len);
+            let report =
+                SaveReport { path, tiles_written, bytes: len, incremental, ms: t0.elapsed().as_secs_f64() * 1e3 };
+            Ok(SaveDone { report, refs })
+        }
+    }
 }
 
 pub struct Session {
@@ -44,7 +110,7 @@ pub fn load(gpu: &imagine_gpu::GpuContext, format: wgpu::TextureFormat, source: 
     for msg in rx {
         match msg {
             LoaderMsg::Structure { doc, name, source, native_len, .. } => {
-                let engine = Engine::new(&gpu.device, &gpu.queue, format, &doc);
+                let engine = imagine_gpu::Engine::new(&gpu.device, &gpu.queue, format, &doc);
                 session = Some(Session::new(engine, name, source, native_len));
             }
             LoaderMsg::Tiles { layer, tiles } => {
@@ -53,6 +119,10 @@ pub fn load(gpu: &imagine_gpu::GpuContext, format: wgpu::TextureFormat, source: 
                 if failed > 0 {
                     bail!("{failed} Kacheln passen nicht in den GPU-Speicher");
                 }
+            }
+            LoaderMsg::Mask(m) => {
+                let s = session.as_mut().context("Maske vor Dokumentstruktur")?;
+                s.add_mask(m)?;
             }
             LoaderMsg::Done { .. } => break,
             LoaderMsg::Error(e) => bail!("Laden fehlgeschlagen: {e}"),
@@ -85,6 +155,18 @@ impl Session {
         failed
     }
 
+    /// Installs a loaded layer mask or selection.
+    pub fn add_mask(&mut self, m: MaskLoad) -> anyhow::Result<()> {
+        let cpu = CpuMask { tiles: m.tiles, default: m.default };
+        let uploaded = self.engine.load_mask(m.layer, cpu, m.enabled).context("GPU-Speicher voll")?;
+        for (c, t) in uploaded {
+            if let Some(b) = m.blobs.get(&c) {
+                self.saved.insert(t.serial(), *b);
+            }
+        }
+        Ok(())
+    }
+
     pub fn default_save_path(&self) -> PathBuf {
         if let Some(p) = &self.save_path {
             return p.clone();
@@ -101,9 +183,10 @@ impl Session {
         base.with_file_name(format!("{stem}-export.png"))
     }
 
-    /// Saves to `.imagine`. Appends only new tiles when the file is unchanged
-    /// since our last write; rewrites (compacts) when it carries too much dead data.
-    pub fn save(&mut self, path: Option<&Path>) -> anyhow::Result<SaveReport> {
+    /// Starts saving to `.imagine`. Appends only new tiles when the file is
+    /// unchanged since our last write; rewrites (compacts) when it carries too
+    /// much dead data.
+    pub fn start_save(&mut self, path: Option<&Path>) -> anyhow::Result<SaveJob> {
         if self.engine.stroke_active() {
             bail!("während eines Pinselstrichs kann nicht gespeichert werden");
         }
@@ -111,48 +194,82 @@ impl Session {
         let path = path.map(Path::to_path_buf).unwrap_or_else(|| self.default_save_path());
         let doc = self.engine.doc().clone();
 
-        let mut tiles: HashMap<u64, Tile> = HashMap::new();
+        // All referenced tiles, by pool.
+        let mut layer_tiles: HashMap<u64, Tile> = HashMap::new();
+        let mut mask_tiles: HashMap<u64, Tile> = HashMap::new();
         doc.for_each(&mut |l, _| {
             if let Some(t) = l.tiles() {
                 for tile in t.values() {
-                    tiles.entry(tile.serial()).or_insert_with(|| tile.clone());
+                    layer_tiles.entry(tile.serial()).or_insert_with(|| tile.clone());
+                }
+            }
+            if let Some(m) = &l.mask {
+                for t in m.tiles.values() {
+                    if let MaskTile::Pixels(tile) = t {
+                        mask_tiles.entry(tile.serial()).or_insert_with(|| tile.clone());
+                    }
                 }
             }
         });
+        if let Some(sel) = &doc.selection {
+            for t in sel.tiles.values() {
+                if let MaskTile::Pixels(tile) = t {
+                    mask_tiles.entry(tile.serial()).or_insert_with(|| tile.clone());
+                }
+            }
+        }
 
         let same_file = self.save_path.as_deref() == Some(path.as_path())
             && self.file_len.is_some()
             && std::fs::metadata(&path).ok().map(|m| m.len()) == self.file_len;
-        let reusable: u64 = tiles.keys().filter_map(|s| self.saved.get(s)).map(|b| b.len).sum();
+        let reusable: u64 = layer_tiles.keys().chain(mask_tiles.keys()).filter_map(|s| self.saved.get(s)).map(|b| b.len).sum();
         let compact = same_file && self.file_len.unwrap_or(0) > 2 * reusable + (64 << 20);
         let incremental = same_file && !compact;
-
-        let (mut writer, mut refs) = if incremental {
-            let refs: HashMap<u64, BlobRef> =
-                tiles.keys().filter_map(|s| self.saved.get(s).map(|b| (*s, *b))).collect();
-            (Writer::append(&path, self.file_len.unwrap())?, refs)
+        let refs: HashMap<u64, BlobRef> = if incremental {
+            layer_tiles.keys().chain(mask_tiles.keys()).filter_map(|s| self.saved.get(s).map(|b| (*s, *b))).collect()
         } else {
-            (Writer::create(&path)?, HashMap::new())
+            HashMap::new()
         };
+        let missing = |m: HashMap<u64, Tile>| {
+            let mut v: Vec<Tile> = m.into_values().filter(|t| !refs.contains_key(&t.serial())).collect();
+            v.sort_by_key(Tile::serial);
+            v
+        };
+        let layer_missing = missing(layer_tiles);
+        let mask_missing = missing(mask_tiles);
+        let start = |kind, tiles: &[Tile]| (!tiles.is_empty()).then(|| self.engine.begin_readback(kind, tiles));
+        let layer_rb = start(PoolKind::Layer, &layer_missing);
+        let mask_rb = start(PoolKind::Mask, &mask_missing);
+        Ok(SaveJob {
+            path,
+            t0,
+            incremental,
+            file_len: self.file_len,
+            doc: doc.map_tiles(&mut |t| t.serial()),
+            refs,
+            layer_tiles: layer_missing,
+            mask_tiles: mask_missing,
+            layer_rb,
+            mask_rb,
+        })
+    }
 
-        let mut missing: Vec<Tile> = tiles.values().filter(|t| !refs.contains_key(&t.serial())).cloned().collect();
-        missing.sort_by_key(Tile::serial);
-        let tiles_written = missing.len();
-        for batch in missing.chunks(READBACK_BATCH) {
-            let pixels = self.engine.read_layer_tiles(batch);
-            let blobs: Vec<Vec<u8>> = pixels.par_iter().map(|p| compress_tile(p)).collect();
-            for (t, blob) in batch.iter().zip(blobs) {
-                refs.insert(t.serial(), writer.write_blob(&blob)?);
-            }
+    /// Records a finished save (call on the thread that owns the session).
+    pub fn complete_save(&mut self, done: SaveDone) -> SaveReport {
+        self.saved = done.refs;
+        self.file_len = Some(done.report.bytes);
+        self.save_path = Some(done.report.path.clone());
+        done.report
+    }
+
+    /// Saves synchronously (headless, agents, tests).
+    pub fn save(&mut self, path: Option<&Path>) -> anyhow::Result<SaveReport> {
+        let job = self.start_save(path)?;
+        while !job.ready(self.engine.device()) {
+            let _ = self.engine.device().poll(wgpu::PollType::wait_indefinitely());
         }
-        let doc_blobs = doc.map_tiles(&mut |t| refs[&t.serial()]);
-        let len = writer.finish(&doc_blobs).with_context(|| format!("{} speichern", path.display()))?;
-        debug_assert!(live_bytes(&doc_blobs) <= len);
-
-        self.saved = refs;
-        self.file_len = Some(len);
-        self.save_path = Some(path.clone());
-        Ok(SaveReport { path, tiles_written, bytes: len, incremental, ms: t0.elapsed().as_secs_f64() * 1e3 })
+        let done = job.into_writer()()?;
+        Ok(self.complete_save(done))
     }
 
     /// Flattens and exports to png/jpg/webp/tiff. Returns milliseconds taken.
@@ -203,7 +320,7 @@ mod tests {
         assert_eq!(r1.tiles_written, 16);
 
         // One small stroke inside tile (1,1).
-        s.engine.begin_stroke(StrokeParams { opacity: 1.0, erase: false }).unwrap();
+        s.engine.begin_stroke(StrokeParams::default()).unwrap();
         let mut st = Stroke::new(BrushSettings { size: 10.0, smoothing: 0.0, ..Default::default() });
         s.engine.stroke_dabs(&st.add(InputSample { pos: DVec2::new(380.0, 380.0), pressure: 1.0 }));
         s.engine.end_stroke("Pinselstrich");
@@ -224,5 +341,40 @@ mod tests {
         let i = ((380 - 256) * TILE_SIZE as usize + (380 - 256)) * 4;
         assert!(t[i].to_f32() < 0.4, "painted dark: {}", t[i].to_f32());
         assert_eq!(reader.len, r3.bytes);
+    }
+
+    #[test]
+    fn background_save_snapshot_while_editing() {
+        let Ok(g) = pollster::block_on(GpuContext::new(GpuContext::create_instance(), None)) else {
+            eprintln!("skipping: no GPU");
+            return;
+        };
+        let doc = Document::<()>::new(TILE_SIZE * 2, TILE_SIZE * 2);
+        let engine = Engine::new(&g.device, &g.queue, wgpu::TextureFormat::Rgba8UnormSrgb, &doc);
+        let mut s = Session::new(engine, "t".into(), None, None);
+        s.engine.fill(imagine_gpu::StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Füllen").unwrap();
+        s.engine
+            .select_shape(&imagine_core::mask::Shape::Rect { x: 10.0, y: 10.0, w: 100.0, h: 50.0 }, imagine_core::mask::CombineOp::Replace, "Auswahl")
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bg.imagine");
+
+        let job = s.start_save(Some(&path)).unwrap();
+        // Keep editing while the save is in flight: the snapshot must not change.
+        s.engine.clear_selected("Löschen").unwrap();
+        s.engine.deselect("Auswahl aufheben").unwrap();
+        while !job.ready(s.engine.device()) {
+            std::thread::yield_now();
+        }
+        let done = std::thread::spawn(job.into_writer()).join().unwrap().unwrap();
+        let r = s.complete_save(done);
+        assert_eq!(r.tiles_written, 4 + 1, "4 layer tiles + 1 selection edge tile");
+
+        let (reader, loaded) = Reader::open(&path).unwrap();
+        assert!(loaded.selection.is_some(), "snapshot had a selection");
+        let layer = loaded.layers[0].tiles().unwrap().clone();
+        let t = imagine_io::native::decompress_tile(&reader.read_blob(layer[&TileCoord::new(0, 0)]).unwrap()).unwrap();
+        let i = (20 * TILE_SIZE as usize + 20) * 4 + 3;
+        assert_eq!(t[i].to_f32(), 1.0, "pixel cleared after the snapshot is still there in the file");
     }
 }

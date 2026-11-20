@@ -150,4 +150,61 @@ mod tests {
         assert_eq!(call(&mut b, json!({"cmd": "sample_color", "x": 250, "y": 200})).result["hex"], "#0000ff");
         assert_eq!(call(&mut b, json!({"cmd": "document_info"})).result["layers_top_to_bottom"].as_array().unwrap().len(), 4);
     }
+
+    /// Selections, masks, gradients – and that all of it survives save/load.
+    #[test]
+    fn agent_selection_and_mask_workflow() {
+        let mut b = match Local::new(None) {
+            Ok(b) => b,
+            Err(e) => return eprintln!("skipping: {e}"),
+        };
+        call(&mut b, json!({"cmd": "document_new", "width": 800, "height": 400}));
+        call(&mut b, json!({"cmd": "fill", "color": "#ffffff"}));
+        let top = call(&mut b, json!({"cmd": "layer_add", "name": "Verlauf"})).result["layer"].clone();
+        call(&mut b, json!({"cmd": "gradient", "x0": 0, "y0": 0, "x1": 800, "y1": 0, "color0": "#ff0000", "color1": "#0000ff"}));
+        let rgb = call(&mut b, json!({"cmd": "sample_color", "x": 1, "y": 200})).result["rgb"].clone();
+        assert!(rgb[0].as_u64().unwrap() >= 250 && rgb[2].as_u64().unwrap() <= 5, "gradient starts red: {rgb}");
+
+        // Mask: only an ellipse of the gradient layer stays visible.
+        let sel = call(&mut b, json!({"cmd": "select_ellipse", "x": 200, "y": 100, "width": 400, "height": 200})).result;
+        assert!(sel["selection"]["edge_tiles"].as_u64().unwrap() > 0);
+        call(&mut b, json!({"cmd": "layer_mask_add", "layer": top}));
+        call(&mut b, json!({"cmd": "select_none"}));
+        assert_eq!(call(&mut b, json!({"cmd": "sample_color", "x": 10, "y": 10})).result["hex"], "#ffffff", "masked out");
+        assert_ne!(call(&mut b, json!({"cmd": "sample_color", "x": 400, "y": 200})).result["hex"], "#ffffff", "inside ellipse");
+
+        // Paint black into the mask at the centre → hidden there.
+        call(&mut b, json!({"cmd": "paint_stroke", "points": [[400, 200]], "size": 40, "hardness": 1, "color": "#000000", "target": "mask"}));
+        assert_eq!(call(&mut b, json!({"cmd": "sample_color", "x": 400, "y": 200})).result["hex"], "#ffffff");
+
+        // Selection-limited fill + preview with selection tint.
+        call(&mut b, json!({"cmd": "select_rect", "x": 0, "y": 0, "width": 100, "height": 100}));
+        call(&mut b, json!({"cmd": "select_rect", "x": 50, "y": 50, "width": 100, "height": 100, "mode": "add"}));
+        let bg = call(&mut b, json!({"cmd": "document_info"})).result["layers_top_to_bottom"][1]["id"].clone();
+        call(&mut b, json!({"cmd": "fill", "layer": bg, "color": "#00ff00"}));
+        assert_eq!(call(&mut b, json!({"cmd": "sample_color", "x": 120, "y": 120})).result["hex"], "#00ff00");
+        assert_eq!(call(&mut b, json!({"cmd": "sample_color", "x": 120, "y": 20})).result["hex"], "#ffffff");
+        let p = call(&mut b, json!({"cmd": "render_preview", "max_size": 200, "show_selection": true}));
+        let img = image::load_from_memory(p.image_png.as_ref().unwrap()).unwrap().to_rgba8();
+        let outside = img.get_pixel(150, 90).0; // doc (600, 360): unselected → reddish
+        assert!(outside[0] > outside[1] + 50, "tinted: {outside:?}");
+
+        // Save with mask + selection, reopen, verify.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("masken.imagine");
+        call(&mut b, json!({"cmd": "save", "path": file}));
+        call(&mut b, json!({"cmd": "document_open", "path": file}));
+        let info = call(&mut b, json!({"cmd": "document_info"})).result;
+        assert_eq!(info["layers_top_to_bottom"][0]["mask"]["enabled"], true);
+        assert!(info["selection"]["tiles"].as_u64().unwrap() > 0, "selection restored");
+        assert_eq!(call(&mut b, json!({"cmd": "sample_color", "x": 400, "y": 200})).result["hex"], "#ffffff");
+        assert_eq!(call(&mut b, json!({"cmd": "sample_color", "x": 10, "y": 10})).result["hex"], "#00ff00");
+
+        // Move the masked layer and bake its mask.
+        call(&mut b, json!({"cmd": "layer_translate", "layer": top, "dx": 100, "dy": 0}));
+        call(&mut b, json!({"cmd": "layer_mask_apply", "layer": top}));
+        let info = call(&mut b, json!({"cmd": "document_info"})).result;
+        assert!(info["layers_top_to_bottom"][0].get("mask").is_none());
+        assert!(b.call(json!({"cmd": "fill", "color": "#000", "target": "mask"})).is_err(), "no mask anymore");
+    }
 }

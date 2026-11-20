@@ -40,9 +40,21 @@ impl Drop for SocketGuard {
     }
 }
 
+/// Removes sockets of windows that are gone (crashed or killed).
+fn remove_stale(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.extension().is_some_and(|x| x == "sock") && UnixStream::connect(&p).is_err() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+}
+
 pub fn bind() -> anyhow::Result<(UnixListener, SocketGuard)> {
     let dir = socket_dir();
     std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+    remove_stale(&dir);
     let path = dir.join(format!("{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("{} binden", path.display()))?;

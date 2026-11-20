@@ -42,11 +42,16 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 | `layer_add`, `layer_duplicate`, `layer_delete`, `layer_select`, `layer_move`, `layer_group`, `layer_ungroup` | Ebenenverwaltung |
 | `layer_set` | Name, Deckkraft, Füllmethode (`multiply`, `screen`, `overlay`, … 19 Stück), Sichtbarkeit |
 | `set_blend_space` | `srgb` (Photoshop-artig) oder `linear` |
-| `paint_stroke` | Pinselstrich entlang einer Punktliste, optional mit Druck pro Punkt; Größe, Härte, Deckkraft, Fluss, Radierer |
-| `fill_rect`, `clear_rect` | Rechteck füllen bzw. transparent machen |
+| `paint_stroke` | Pinselstrich entlang einer Punktliste, optional mit Druck pro Punkt; Größe, Härte, Deckkraft, Fluss, Radierer; `target: "mask"` malt in die Ebenenmaske |
+| `select_rect`, `select_ellipse`, `select_polygon` | Auswahl mit Kantenglättung; `mode`: `replace`, `add`, `subtract`, `intersect` |
+| `select_all`, `select_none`, `select_invert`, `select_feather` | Auswahl verwalten, weiche Kante |
+| `fill`, `clear`, `gradient` | Auswahl (oder ganze Ebene) füllen, löschen, Verlauf linear/radial; Ebene oder Maske |
+| `layer_mask_add`, `layer_mask_delete`, `layer_mask_set`, `layer_mask_apply` | Ebenenmasken: anlegen (aus Auswahl), löschen, ein/aus, in Pixel übernehmen |
+| `layer_translate` | Ebene samt Maske verschieben |
+| `fill_rect`, `clear_rect` | Rechteck füllen bzw. transparent machen (unabhängig von der Auswahl) |
 | `place_image` | Bilddatei als neue Ebene an Position (x, y) |
 | `sample_color` | Farbe des Gesamtbilds an einem Punkt |
-| `render_preview` | **Das Ergebnis ansehen:** Gesamtbild oder Ausschnitt als PNG, optional zusätzlich als Datei (`output`) |
+| `render_preview` | **Das Ergebnis ansehen:** Gesamtbild oder Ausschnitt als PNG, optional zusätzlich als Datei (`output`); `show_selection` färbt nicht Ausgewähltes rot |
 | `undo`, `redo` | Verlauf |
 | `save`, `export` | `.imagine` (mit Ebenen, inkrementell) bzw. PNG/JPEG/WebP/TIFF |
 
@@ -72,8 +77,9 @@ imagine run --attach nacht.jsonl   # im offenen Fenster
 
 Jede Zeile erzeugt eine JSON-Ergebniszeile auf stdout. Beim ersten Fehler bricht das Skript mit Exit-Code 1 ab. Logs gehen nach stderr.
 
-## Grenzen (Stand Phase 1)
+## Grenzen (Stand Phase 2a)
 
-- Es gibt noch keine Auswahlen, Masken, Filter oder Transformationen; diese Werkzeuge kommen mit Phase 2 und 4 dazu.
+- Noch nicht vorhanden: Zauberstab, freies Transformieren (Skalieren/Drehen), Filter und Korrekturen. Diese Werkzeuge kommen mit Phase 2b und 4.
+- Alle Auswahl-, Füll- und Malbefehle respektieren die aktuelle Auswahl, auch eine weiche.
 - `render_preview` zeigt das Bild, nicht die Fensteransicht (kein Zoom, keine Drehung).
 - `document_open`/`document_new` ersetzen im Live-Modus das offene Dokument ohne Rückfrage. Ungespeicherte Änderungen gehen dabei verloren.

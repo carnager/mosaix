@@ -5,7 +5,8 @@ use glam::DVec2;
 use half::f16;
 use imagine_core::blend::composite;
 use imagine_core::{BlendMode, BlendSpace, BrushSettings, Document, InputSample, Stroke, TILE_SIZE, TileCoord, View};
-use imagine_gpu::{Engine, GpuContext, Overlay, StrokeParams};
+use imagine_core::mask::{CombineOp, Shape};
+use imagine_gpu::{Engine, GpuContext, GradientKind, Overlay, OverlayLine, StrokeParams, StrokeTarget};
 
 const FMT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const TS: usize = TILE_SIZE as usize;
@@ -69,7 +70,7 @@ fn composite_px(e: &Engine, c: TileCoord, x: usize, y: usize) -> [f32; 4] {
 fn paint_undo_redo_and_sparsity() {
     let Some(g) = gpu() else { return };
     let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1000, 1000));
-    let paint = StrokeParams { opacity: 1.0, erase: false };
+    let paint = StrokeParams { opacity: 1.0, erase: false, ..Default::default() };
     stroke(&mut e, DVec2::new(256.0, 256.0), paint);
     assert_eq!(e.layer_tiles_live(), 4, "corner stroke touches exactly 4 tiles");
     assert_eq!(e.composite_coords().len(), 4);
@@ -77,7 +78,7 @@ fn paint_undo_redo_and_sparsity() {
     let p = composite_px(&e, c, 2, 2);
     assert!(p[0] > 0.99 && p[3] > 0.99 && p[1] < 0.01, "red: {p:?}");
 
-    stroke(&mut e, DVec2::new(256.0, 256.0), StrokeParams { opacity: 1.0, erase: true });
+    stroke(&mut e, DVec2::new(256.0, 256.0), StrokeParams { opacity: 1.0, erase: true, ..Default::default() });
     assert!(composite_px(&e, c, 2, 2)[3] < 0.01, "erased");
 
     assert_eq!(e.undo().as_deref(), Some("Pinselstrich"));
@@ -89,7 +90,7 @@ fn paint_undo_redo_and_sparsity() {
 
     // Erasing where nothing exists allocates nothing.
     let before = e.layer_tiles_live();
-    stroke(&mut e, DVec2::new(900.0, 900.0), StrokeParams { opacity: 1.0, erase: true });
+    stroke(&mut e, DVec2::new(900.0, 900.0), StrokeParams { opacity: 1.0, erase: true, ..Default::default() });
     assert_eq!(e.layer_tiles_live(), before);
 
     // Dropping the history frees the tiles only it referenced.
@@ -102,7 +103,7 @@ fn stroke_opacity_caps_buildup() {
     let Some(g) = gpu() else { return };
     let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
     // 20 overlapping dabs at full flow would be opaque; stroke opacity caps at 50 %.
-    stroke(&mut e, DVec2::new(100.0, 100.0), StrokeParams { opacity: 0.5, erase: false });
+    stroke(&mut e, DVec2::new(100.0, 100.0), StrokeParams { opacity: 0.5, erase: false, ..Default::default() });
     let p = composite_px(&e, TileCoord::new(0, 0), 100, 100);
     assert!((p[3] - 0.5).abs() < 0.01, "alpha capped at stroke opacity: {p:?}");
 }
@@ -230,9 +231,169 @@ fn many_tiles_span_chunks_and_duplicates_share() {
     let mut view = View { viewport: DVec2::new(640.0, 480.0), ..Default::default() };
     let (w, h) = e.size();
     view.fit(w, h);
-    let stats = e.render(&tv, &view, &Overlay { cursor: Some((DVec2::splat(10.0), 5.0)), checker_px: 8.0 });
+    let stats = e.render(&tv, &view, &Overlay { cursor: Some((DVec2::splat(10.0), 5.0)), checker_px: 8.0, ..Default::default() });
     assert_eq!(stats.visible_tiles, 600);
     view.set_zoom_at(view.viewport * 0.5, 8.0);
     assert!(e.render(&tv, &view, &Overlay::default()).visible_tiles <= 4);
+    g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+fn alpha_at(e: &mut Engine, x: i64, y: i64) -> f32 {
+    e.flush();
+    let c = TileCoord::containing(x as f64, y as f64);
+    let (ox, oy) = c.origin();
+    composite_px(e, c, (x - ox) as usize, (y - oy) as usize)[3]
+}
+
+#[test]
+fn selection_clips_strokes_fills_and_clears() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1000, 600));
+    // Select the left half, then paint a stroke across the whole width.
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 500.0, h: 600.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.begin_stroke(StrokeParams::default()).unwrap();
+    let mut s = Stroke::new(red_brush());
+    let mut dabs = s.add(InputSample { pos: DVec2::new(100.0, 300.0), pressure: 1.0 });
+    dabs.extend(s.add(InputSample { pos: DVec2::new(900.0, 300.0), pressure: 1.0 }));
+    dabs.extend(s.finish(InputSample { pos: DVec2::new(900.0, 300.0), pressure: 1.0 }));
+    e.stroke_dabs(&dabs);
+    // Live preview already respects the selection …
+    assert!(alpha_at(&mut e, 300, 300) > 0.99);
+    assert!(alpha_at(&mut e, 700, 300) < 0.01);
+    e.end_stroke("Pinselstrich");
+    // … and so does the committed result.
+    assert!(alpha_at(&mut e, 300, 300) > 0.99);
+    assert!(alpha_at(&mut e, 700, 300) < 0.01);
+
+    // Fill an ellipse added to the selection, with 50 % opacity.
+    e.select_shape(&Shape::Ellipse { cx: 800.0, cy: 300.0, rx: 100.0, ry: 100.0 }, CombineOp::Add, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 0.5, "Füllen").unwrap();
+    assert!((alpha_at(&mut e, 800, 300) - 0.5).abs() < 0.01);
+    assert!(alpha_at(&mut e, 950, 50) < 0.01, "outside selection untouched");
+
+    // Invert and clear: only the unselected part remains … i.e. clearing the inverse removes nothing selected.
+    e.invert_selection("Umkehren").unwrap();
+    e.clear_selected("Löschen").unwrap();
+    assert!(alpha_at(&mut e, 300, 300) > 0.99, "inside original selection kept");
+    e.deselect("Auswahl aufheben").unwrap();
+    assert!(!e.has_selection());
+
+    // Undo walks back through all of it.
+    for _ in 0..3 {
+        e.undo();
+    }
+    assert!(e.has_selection());
+}
+
+#[test]
+fn gradient_and_feather() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 64));
+    e.gradient(
+        StrokeTarget::Pixels,
+        GradientKind::Linear,
+        (0.0, 0.0),
+        (512.0, 0.0),
+        [1.0, 1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0],
+        1.0,
+        "Verlauf",
+    )
+    .unwrap();
+    let a0 = alpha_at(&mut e, 2, 10);
+    let a1 = alpha_at(&mut e, 256, 10);
+    let a2 = alpha_at(&mut e, 509, 10);
+    assert!(a0 > 0.98 && (a1 - 0.5).abs() < 0.02 && a2 < 0.02, "{a0} {a1} {a2}");
+
+    // Feathered selection gives a soft fill edge.
+    e.select_shape(&Shape::Rect { x: 100.0, y: 0.0, w: 300.0, h: 64.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.feather_selection(20.0, "Weiche Kante").unwrap();
+    let m = e.selection_cpu().unwrap();
+    let edge = m.value_at(100, 32);
+    assert!((90..=165).contains(&edge), "feathered edge ≈ 50 %: {edge}");
+}
+
+#[test]
+fn layer_mask_paint_toggle_and_apply() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 300));
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Füllen").unwrap();
+    // Mask from a selection: only the left 200 px stay visible.
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 200.0, h: 300.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.add_layer_mask("Maske").unwrap();
+    e.deselect("Auswahl aufheben").unwrap();
+    assert!(alpha_at(&mut e, 100, 100) > 0.99);
+    assert!(alpha_at(&mut e, 400, 100) < 0.01);
+
+    // Paint white into the mask at x = 400 → revealed there.
+    e.begin_stroke(StrokeParams { target: StrokeTarget::Mask, ..Default::default() }).unwrap();
+    let mut s = Stroke::new(BrushSettings { color: [1.0; 3], ..red_brush() });
+    e.stroke_dabs(&s.add(InputSample { pos: DVec2::new(400.0, 100.0), pressure: 1.0 }));
+    assert!(alpha_at(&mut e, 400, 100) > 0.99, "live mask preview");
+    e.end_stroke("Maske malen");
+    assert!(alpha_at(&mut e, 400, 100) > 0.99);
+    assert!(alpha_at(&mut e, 500, 100) < 0.01);
+
+    // Disable the mask → everything visible; enable and bake it.
+    let id = e.doc().active;
+    e.edit("Maske aus", |d| {
+        d.find_mut(id).unwrap().mask_enabled = false;
+        true
+    });
+    assert!(alpha_at(&mut e, 500, 100) > 0.99);
+    e.undo();
+    e.apply_layer_mask("Maske anwenden").unwrap();
+    assert!(e.doc().active_layer().unwrap().mask.is_none());
+    assert!(alpha_at(&mut e, 100, 100) > 0.99);
+    assert!(alpha_at(&mut e, 400, 100) > 0.99);
+    assert!(alpha_at(&mut e, 500, 100) < 0.01);
+}
+
+#[test]
+fn translate_moves_pixels_and_mask() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1000, 1000));
+    e.select_shape(&Shape::Rect { x: 10.0, y: 10.0, w: 100.0, h: 100.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 1.0, 0.0, 1.0], 1.0, "Füllen").unwrap();
+    e.deselect("Auswahl aufheben").unwrap();
+    e.add_layer_mask("Maske").unwrap(); // reveal all
+    e.translate_active(300, 250, "Verschieben").unwrap();
+    assert!(alpha_at(&mut e, 50, 50) < 0.01, "old place empty");
+    assert!(alpha_at(&mut e, 350, 300) > 0.99, "moved by (300, 250)");
+    assert!(alpha_at(&mut e, 309, 259) < 0.01 && alpha_at(&mut e, 310, 260) > 0.99, "exact edge");
+    // Moving off the canvas cuts off.
+    e.translate_active(-2000, 0, "Verschieben").unwrap();
+    e.flush();
+    assert!(e.composite_coords().is_empty());
+    e.undo();
+    assert!(alpha_at(&mut e, 350, 300) > 0.99);
+}
+
+#[test]
+fn renders_selection_overlay_and_lines() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(800, 600));
+    e.select_shape(&Shape::Ellipse { cx: 400.0, cy: 300.0, rx: 200.0, ry: 150.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    let target = g.device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: 320, height: 240, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FMT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let tv = target.create_view(&Default::default());
+    let mut view = View { viewport: DVec2::new(320.0, 240.0), ..Default::default() };
+    view.fit(800, 600);
+    let overlay = Overlay {
+        show_selection: true,
+        quick_mask: true,
+        time: 1.5,
+        lines: vec![OverlayLine { points: vec![DVec2::ZERO, DVec2::new(100.0, 50.0), DVec2::new(30.0, 200.0)], closed: true }],
+        ..Default::default()
+    };
+    e.render(&tv, &view, &overlay);
     g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }

@@ -2,7 +2,7 @@
 
 GPU-first Bildeditor für Linux/Wayland – siehe [PLAN.md](PLAN.md).
 
-Aktueller Stand: **Phase 1 – Engine** (Ebenen, Undo, Füllmethoden, natives Format). Siehe Stand in PLAN.md.
+Aktueller Stand: **Phase 2a – Auswahl & Masken** (dazu Ebenen, Undo, Füllmethoden, natives Format, Agenten-Schnittstelle). Siehe Stand in PLAN.md.
 
 ## Bauen & Starten
 
@@ -34,12 +34,15 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 
 | Aktion | Eingabe |
 |---|---|
-| Malen / Radieren | linke Maustaste / Stift; `E` Radierer, `B` Pinsel, Radierer-Ende des Stifts |
-| Pinsel | `[` `]` Größe, Ziffern `1`…`0` Deckkraft, `H` Härte, `S` Glättung, `C` Farbe |
-| Ansicht | Leertaste+Ziehen schwenken, Mausrad zoomen, `R`+Ziehen drehen, Strg+`0` einpassen, Strg+`1` 100 % |
-| Ebenen | Strg+Umschalt+`N` neu, Strg+`J` duplizieren, `Entf` löschen, Alt+`[` `]` auswählen, Strg+`[` `]` verschieben |
+| Werkzeuge | `B` Pinsel, `E` Radierer, `M` Auswahlrechteck/-ellipse, `L` Lasso, `G` Verlauf linear/radial, `V` Verschieben |
+| Malen | linke Maustaste / Stift; Radierer-Ende des Stifts; `[` `]` Größe, Ziffern Deckkraft, `H` Härte, `S` Glättung, `C` Farbe, `X` Schwarz↔Weiß |
+| Ansicht | Leertaste+Ziehen schwenken, Mausrad zoomen, `R`+Ziehen drehen, Strg+`0` einpassen, Strg+`1` 100 %, `Q` Maskierungsmodus-Ansicht |
+| Auswahl | Aufziehen mit Umschalt/Alt/beidem = hinzufügen/abziehen/Schnittmenge; Strg+`A` / Strg+`D` / Strg+Umschalt+`I`; Umschalt+`F6` weiche Kante |
+| Füllen & Löschen | Alt+Rücktaste füllt Auswahl (bzw. Ebene), `Entf` löscht ausgewählte Pixel |
+| Ebenen | Strg+Umschalt+`N` neu, Strg+`J` duplizieren, `Entf` (ohne Auswahl) löschen, Alt+`[` `]` auswählen, Strg+`[` `]` verschieben |
 | Ebenen-Eigenschaften | Umschalt+Ziffer Deckkraft, Umschalt+`+`/`-` Füllmethode, Strg+`,` ein/aus, Strg+`G` gruppieren, Strg+Umschalt+`G` aufheben, `F7` Blend-Raum |
-| Verlauf & Datei | Strg+`Z` / Strg+Umschalt+`Z` / Strg+`Y`, Strg+`S` speichern, Strg+Umschalt+`E` PNG exportieren |
+| Ebenenmasken | Strg+Umschalt+`M` neu (aus Auswahl), `\` Maske bemalen ↔ Pixel, Strg+Alt+`M` ein/aus, Strg+Alt+Umschalt+`M` anwenden |
+| Verlauf & Datei | Strg+`Z` / Strg+Umschalt+`Z` / Strg+`Y`, Strg+`S` speichern (im Hintergrund), Strg+Umschalt+`E` PNG exportieren |
 | Sonstiges | `F12` Benchmark, `F1` Hilfe, Strg+`Q` beenden |
 
 ## Aufbau

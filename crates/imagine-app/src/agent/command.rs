@@ -16,8 +16,9 @@ use image::RgbaImage;
 use imagine_core::color::{Pixels, extract_region, srgb_to_linear, linear_to_srgb};
 use imagine_core::doc::Content;
 use imagine_core::tile::tiles_in_rect;
+use imagine_core::mask::{CombineOp, Shape};
 use imagine_core::{BlendMode, BlendSpace, BrushSettings, Document, InputSample, LayerId, Stroke, TILE_SIZE, TileCoord};
-use imagine_gpu::{GpuContext, StrokeParams, Tile};
+use imagine_gpu::{GpuContext, GradientKind, StrokeParams, StrokeTarget, Tile};
 use imagine_io::export::blit_region;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -89,7 +90,34 @@ pub enum Command {
         spacing: Option<f32>,
         #[serde(default)]
         eraser: bool,
+        target: Option<String>,
     },
+    Fill { layer: Option<LayerId>, color: ColorSpec, opacity: Option<f32>, target: Option<String> },
+    Clear { layer: Option<LayerId> },
+    Gradient {
+        layer: Option<LayerId>,
+        kind: Option<String>,
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+        color0: ColorSpec,
+        color1: Option<ColorSpec>,
+        opacity: Option<f32>,
+        target: Option<String>,
+    },
+    SelectRect { x: f64, y: f64, width: f64, height: f64, mode: Option<String> },
+    SelectEllipse { x: f64, y: f64, width: f64, height: f64, mode: Option<String> },
+    SelectPolygon { points: Vec<Vec<f64>>, mode: Option<String> },
+    SelectAll,
+    SelectNone,
+    SelectInvert,
+    SelectFeather { radius: f64 },
+    LayerMaskAdd { layer: Option<LayerId>, from_selection: Option<bool> },
+    LayerMaskDelete { layer: Option<LayerId> },
+    LayerMaskSet { layer: Option<LayerId>, enabled: bool },
+    LayerMaskApply { layer: Option<LayerId> },
+    LayerTranslate { layer: Option<LayerId>, dx: i64, dy: i64 },
     FillRect {
         layer: Option<LayerId>,
         x: i64,
@@ -110,6 +138,9 @@ pub enum Command {
         height: Option<i64>,
         #[serde(default = "default_true")]
         checkerboard: bool,
+        /// Tint unselected areas red (like quick mask).
+        #[serde(default)]
+        show_selection: bool,
         /// Also write the PNG to this path.
         output: Option<PathBuf>,
     },
@@ -135,6 +166,21 @@ impl Command {
             Self::LayerUngroup { .. } => "layer_ungroup",
             Self::SetBlendSpace { .. } => "set_blend_space",
             Self::PaintStroke { .. } => "paint_stroke",
+            Self::Fill { .. } => "fill",
+            Self::Clear { .. } => "clear",
+            Self::Gradient { .. } => "gradient",
+            Self::SelectRect { .. } => "select_rect",
+            Self::SelectEllipse { .. } => "select_ellipse",
+            Self::SelectPolygon { .. } => "select_polygon",
+            Self::SelectAll => "select_all",
+            Self::SelectNone => "select_none",
+            Self::SelectInvert => "select_invert",
+            Self::SelectFeather { .. } => "select_feather",
+            Self::LayerMaskAdd { .. } => "layer_mask_add",
+            Self::LayerMaskDelete { .. } => "layer_mask_delete",
+            Self::LayerMaskSet { .. } => "layer_mask_set",
+            Self::LayerMaskApply { .. } => "layer_mask_apply",
+            Self::LayerTranslate { .. } => "layer_translate",
             Self::FillRect { .. } => "fill_rect",
             Self::ClearRect { .. } => "clear_rect",
             Self::PlaceImage { .. } => "place_image",
@@ -193,10 +239,56 @@ fn target_layer(s: &mut Session, layer: Option<LayerId>) -> anyhow::Result<Layer
     Ok(id)
 }
 
+fn pixel_or_group(s: &mut Session, layer: Option<LayerId>) -> anyhow::Result<LayerId> {
+    target_layer(s, layer)
+}
+
+/// Selection summary for agents.
+fn selection_info(s: &Session) -> Value {
+    match &s.engine.doc().selection {
+        None => json!({ "selection": null }),
+        Some(m) => {
+            let partial = m.tiles.values().filter(|t| matches!(t, imagine_core::MaskTile::Pixels(_))).count();
+            json!({ "selection": { "default": m.default, "tiles": m.tiles.len(), "edge_tiles": partial } })
+        }
+    }
+}
+
 fn pixel_layer(s: &mut Session, layer: Option<LayerId>) -> anyhow::Result<LayerId> {
     let id = target_layer(s, layer)?;
     ensure!(!s.engine.doc().find(id).unwrap().is_group(), "layer {id} is a group – pick a pixel layer");
     Ok(id)
+}
+
+fn parse_target(t: &Option<String>) -> anyhow::Result<StrokeTarget> {
+    match t.as_deref() {
+        None | Some("pixels") => Ok(StrokeTarget::Pixels),
+        Some("mask") => Ok(StrokeTarget::Mask),
+        Some(o) => bail!("target must be \"pixels\" or \"mask\", got {o:?}"),
+    }
+}
+
+fn parse_mode(m: &Option<String>) -> anyhow::Result<CombineOp> {
+    match m.as_deref() {
+        None => Ok(CombineOp::Replace),
+        Some(k) => CombineOp::from_key(k).with_context(|| format!("mode must be replace, add, subtract or intersect, got {k:?}")),
+    }
+}
+
+/// Premultiplied linear colour; for mask targets the grey value is the sRGB luminance.
+fn premul(c: &ColorSpec, target: StrokeTarget) -> anyhow::Result<[f32; 4]> {
+    let (rgb, a) = c.linear()?;
+    Ok(match target {
+        StrokeTarget::Pixels => [rgb[0] * a, rgb[1] * a, rgb[2] * a, a],
+        StrokeTarget::Mask => {
+            let l = linear_to_srgb(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]);
+            [l * a, l * a, l * a, a]
+        }
+    })
+}
+
+fn engine_err(e: &str) -> anyhow::Error {
+    anyhow::anyhow!("{e}")
 }
 
 fn not_painting(s: &Session) -> anyhow::Result<()> {
@@ -337,16 +429,21 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             })?;
             ok(s)
         }
-        Command::PaintStroke { layer, points, color, size, hardness, opacity, flow, spacing, eraser } => {
+        Command::PaintStroke { layer, points, color, size, hardness, opacity, flow, spacing, eraser, target } => {
             pixel_layer(s, layer)?;
             not_painting(s)?;
+            let target = parse_target(&target)?;
             ensure!(!points.is_empty(), "points must not be empty");
             ensure!(size > 0.0 && size <= 5000.0, "size must be 0–5000 px");
-            let (color, alpha) = match &color {
+            let (mut color, alpha) = match &color {
                 Some(c) => c.linear()?,
                 None if eraser => ([0.0; 3], 1.0),
                 None => bail!("color is required unless eraser is true"),
             };
+            if target == StrokeTarget::Mask {
+                let l = linear_to_srgb(0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]);
+                color = [l; 3];
+            }
             let settings = BrushSettings {
                 size,
                 hardness: hardness.unwrap_or(0.8).clamp(0.0, 1.0),
@@ -366,7 +463,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             s.engine
-                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser })
+                .begin_stroke(StrokeParams { opacity: settings.opacity, erase: eraser, target })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);
             let mut dabs = 0;
@@ -392,14 +489,120 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 px[3] = a + px[3] * (1.0 - a);
             })
         }
+        Command::Fill { layer, color, opacity, target } => {
+            pixel_layer(s, layer)?;
+            let target = parse_target(&target)?;
+            let n = s.engine.fill(target, premul(&color, target)?, opacity.unwrap_or(1.0).clamp(0.0, 1.0), "Füllen").map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "tiles": n })))
+        }
+        Command::Clear { layer } => {
+            pixel_layer(s, layer)?;
+            let n = s.engine.clear_selected("Löschen").map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "tiles": n })))
+        }
+        Command::Gradient { layer, kind, x0, y0, x1, y1, color0, color1, opacity, target } => {
+            pixel_layer(s, layer)?;
+            let target = parse_target(&target)?;
+            let kind = match kind.as_deref() {
+                None | Some("linear") => GradientKind::Linear,
+                Some("radial") => GradientKind::Radial,
+                Some(k) => bail!("kind must be \"linear\" or \"radial\", got {k:?}"),
+            };
+            let c0 = premul(&color0, target)?;
+            let c1 = match &color1 {
+                Some(c) => premul(c, target)?,
+                None => [0.0; 4],
+            };
+            let n = s
+                .engine
+                .gradient(target, kind, (x0, y0), (x1, y1), c0, c1, opacity.unwrap_or(1.0).clamp(0.0, 1.0), "Verlauf")
+                .map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "tiles": n })))
+        }
+        Command::SelectRect { x, y, width, height, mode } => {
+            ensure!(width > 0.0 && height > 0.0, "width and height must be > 0");
+            let op = parse_mode(&mode)?;
+            s.engine.select_shape(&Shape::Rect { x, y, w: width, h: height }, op, "Auswahl").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectEllipse { x, y, width, height, mode } => {
+            ensure!(width > 0.0 && height > 0.0, "width and height must be > 0");
+            let op = parse_mode(&mode)?;
+            let shape = Shape::Ellipse { cx: x + width / 2.0, cy: y + height / 2.0, rx: width / 2.0, ry: height / 2.0 };
+            s.engine.select_shape(&shape, op, "Auswahl").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectPolygon { points, mode } => {
+            ensure!(points.len() >= 3, "a polygon needs at least 3 points");
+            ensure!(points.iter().all(|p| p.len() == 2), "each point is [x, y]");
+            let op = parse_mode(&mode)?;
+            let poly = points.iter().map(|p| (p[0], p[1])).collect();
+            s.engine.select_shape(&Shape::Polygon(poly), op, "Lasso-Auswahl").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectAll => {
+            s.engine.select_all("Alles auswählen").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectNone => {
+            s.engine.deselect("Auswahl aufheben").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectInvert => {
+            s.engine.invert_selection("Auswahl umkehren").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectFeather { radius } => {
+            ensure!((0.0..=1000.0).contains(&radius), "radius must be 0–1000 px");
+            s.engine.feather_selection(radius, "Weiche Auswahlkante").map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::LayerMaskAdd { layer, from_selection } => {
+            let id = pixel_or_group(s, layer)?;
+            let use_sel = from_selection.unwrap_or(true);
+            let mask = match (use_sel, s.engine.selection_cpu()) {
+                (true, Some(sel)) => sel,
+                _ => imagine_core::mask::CpuMask::filled(255),
+            };
+            ensure!(s.engine.doc().find(id).unwrap().mask.is_none(), "layer {id} already has a mask");
+            s.engine.set_layer_mask(id, Some(mask), "Ebenenmaske").map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "layer": id })))
+        }
+        Command::LayerMaskDelete { layer } => {
+            let id = pixel_or_group(s, layer)?;
+            ensure!(s.engine.doc().find(id).unwrap().mask.is_some(), "layer {id} has no mask");
+            s.engine.set_layer_mask(id, None, "Ebenenmaske löschen").map_err(engine_err)?;
+            ok(s)
+        }
+        Command::LayerMaskSet { layer, enabled } => {
+            let id = pixel_or_group(s, layer)?;
+            ensure!(s.engine.doc().find(id).unwrap().mask.is_some(), "layer {id} has no mask");
+            edit(s, "Ebenenmaske ein/aus", |d| {
+                let l = d.find_mut(id).unwrap();
+                let changed = l.mask_enabled != enabled;
+                l.mask_enabled = enabled;
+                changed
+            })?;
+            ok(s)
+        }
+        Command::LayerMaskApply { layer } => {
+            pixel_layer(s, layer)?;
+            s.engine.apply_layer_mask("Ebenenmaske anwenden").map_err(engine_err)?;
+            ok(s)
+        }
+        Command::LayerTranslate { layer, dx, dy } => {
+            pixel_layer(s, layer)?;
+            s.engine.translate_active(dx, dy, "Verschieben").map_err(engine_err)?;
+            ok(s)
+        }
         Command::ClearRect { layer, x, y, width, height } => {
             let id = pixel_layer(s, layer)?;
             modify_rect(s, id, (x, y, width, height), "Fläche löschen", |px| *px = [0.0; 4])
         }
         Command::PlaceImage { path, x, y, name } => place_image(s, &path, x.unwrap_or(0), y.unwrap_or(0), name),
         Command::SampleColor { x, y } => sample(s, x, y),
-        Command::RenderPreview { max_size, x, y, width, height, checkerboard, output } => {
-            let mut out = preview(s, max_size.unwrap_or(1024), (x, y, width, height), checkerboard)?;
+        Command::RenderPreview { max_size, x, y, width, height, checkerboard, show_selection, output } => {
+            let mut out = preview(s, max_size.unwrap_or(1024), (x, y, width, height), checkerboard, show_selection)?;
             if let (Some(path), Some(png)) = (&output, &out.image_png) {
                 std::fs::write(path, png).with_context(|| format!("cannot write {}", path.display()))?;
                 out.result["output"] = json!(path);
@@ -440,6 +643,9 @@ pub fn info(s: &Session) -> Value {
                     "opacity": l.opacity,
                     "visible": l.visible,
                 });
+                if let Some(m) = &l.mask {
+                    v["mask"] = json!({ "enabled": l.mask_enabled, "default": m.default, "tiles": m.tiles.len() });
+                }
                 match &l.content {
                     Content::Pixels(t) => {
                         v["type"] = "pixels".into();
@@ -478,6 +684,7 @@ pub fn info(s: &Session) -> Value {
         "active_layer": d.active,
         "layers_top_to_bottom": layers(&d.layers),
         "history": { "undo_steps": undo, "redo_steps": redo },
+        "selection": selection_info(s)["selection"],
         "source": s.source,
         "save_path": s.default_save_path(),
     })
@@ -579,6 +786,7 @@ fn preview(
     max_size: u32,
     region: (Option<i64>, Option<i64>, Option<i64>, Option<i64>),
     checkerboard: bool,
+    show_selection: bool,
 ) -> anyhow::Result<Output> {
     let max_size = max_size.clamp(16, 4096);
     let (dw, dh) = s.engine.size();
@@ -616,6 +824,18 @@ fn preview(
             let a = p[3] as u32;
             let mix = |c: u8| ((c as u32 * a + bg * (255 - a)) / 255) as u8;
             *p = image::Rgba([mix(p[0]), mix(p[1]), mix(p[2]), 255]);
+        }
+    }
+    if show_selection && let Some(sel) = s.engine.selection_cpu() {
+        // Quick-mask style: unselected areas tinted red.
+        let (w, h) = (img.width() as f64, img.height() as f64);
+        for (px, py, p) in img.enumerate_pixels_mut() {
+            let dx = rx + ((px as f64 + 0.5) / w * rw as f64) as i64;
+            let dy = ry + ((py as f64 + 0.5) / h * rh as f64) as i64;
+            let a = (255 - sel.value_at(dx, dy)) as u32 / 2;
+            for (i, tint) in [204u32, 0, 0].iter().enumerate() {
+                p[i] = ((p[i] as u32 * (255 - a) + tint * a) / 255) as u8;
+            }
         }
     }
     let mut png = Vec::new();
