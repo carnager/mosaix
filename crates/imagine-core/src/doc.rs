@@ -141,7 +141,7 @@ pub enum Op<'a, T> {
     /// Composite the group onto what is below.
     Pop { opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
     /// Apply an adjustment to what is below (mixed by opacity × mask).
-    Adjust { id: LayerId, adj: &'a Adjustment, opacity: f32, mask: Option<MaskRef<'a, T>> },
+    Adjust { id: LayerId, adj: &'a Adjustment, opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
 }
 
 #[derive(Debug, Clone)]
@@ -523,7 +523,7 @@ impl<T: Clone> Document<T> {
                     Content::Adjustment(adj) => {
                         // Nothing below in this group: nothing to adjust.
                         if !out.is_empty() && !matches!(out.last(), Some(Op::Push)) {
-                            out.push(Op::Adjust { id: l.id, adj, opacity, mask: m });
+                            out.push(Op::Adjust { id: l.id, adj, opacity, blend: l.blend, mask: m });
                         }
                     }
                     Content::Group(children) => {
@@ -658,12 +658,13 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 hash_mask(mask, &key, h);
             }
             Op::Push => 1u8.hash(h),
-            Op::Adjust { id, adj, opacity, mask } => {
+            Op::Adjust { id, adj, opacity, blend, mask } => {
                 3u8.hash(h);
                 id.hash(h);
                 // Parameters change the result: hash their serialised form.
                 format!("{adj:?}").hash(h);
                 opacity.to_bits().hash(h);
+                (*blend as u32).hash(h);
                 hash_mask(mask, &key, h);
             }
             Op::Pop { opacity, blend, mask } => {

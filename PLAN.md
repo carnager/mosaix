@@ -391,6 +391,7 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 - **Einstellungsebenen:** Helligkeit/Kontrast, Tonwertkorrektur, Gradationskurven (monoton-kubisch), Belichtung (linear), Dynamik, Farbton/Sättigung (inkl. Färben), Schwarzweiß, Umkehren, Tontrennung, Schwellenwert.
   - Kanalweise Arten werden zu einer 256er-Tabelle gebacken, die übrigen rechnet der Flatten-Shader direkt. Eine CPU-Referenz prüft jede Art auf der GPU.
   - Jede Einstellungsebene hat eine Maske (aus der Auswahl), die live bemalt werden kann. Deckkraft mischt.
+  - Füllmethoden wirken wie bei einer Ebene, die das eingestellte Bild enthält und auf das Darunterliegende beschnitten ist (z. B. Kurven im Modus Luminanz).
   - Eigenschaften-Panel mit Kurven-Editor, Dateiformat v3.
 - **Filter (GPU):** Gaußscher Weichzeichner (separabel; ab 10 px Radius auf einer verkleinerten Kopie, deckungsgleich mit der analytischen Sprungantwort), Unscharf maskieren, Hochpass, Rauschen. Sie wirken durch die Auswahl, als ein Undo-Schritt, mit Live-Vorschau des sichtbaren Bereichs.
 - **Farbmanagement beim Import:** Eingebettete ICC-Profile (z. B. Display P3, Adobe RGB) werden mit moxcms nach linearem sRGB im erweiterten Bereich umgerechnet. Farben außerhalb von sRGB bleiben in f16 erhalten, statt abgeschnitten zu werden.
@@ -411,7 +412,6 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 - Verflüssigen
 - Export mit ICC-Profil / in weitem Farbraum
 - Monitorprofil (Wayland color-management)
-- Füllmethoden für Einstellungsebenen (bisher nur Normal)
 
 ## Nächster konkreter Schritt
 

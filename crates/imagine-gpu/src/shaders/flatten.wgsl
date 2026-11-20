@@ -17,7 +17,7 @@ struct Op {
     mask_const: f32,
     sel_slot: u32,       // selection clipping the stroke, or NONE → sel_const
     sel_const: f32,
-    _pad: u32,
+    adj_blend: u32,      // adjustments: blend mode of the result onto what is below
 };
 
 struct Job {
@@ -95,7 +95,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let w = m * op.opacity;
             let d = stack[sp];
             if w > 0.0 && d.a > 0.0 {
-                stack[sp] = mix(d, adjust_premul(d, op.blend, op.slot), w);
+                let adj = adjust_premul(d, op.blend, op.slot);
+                if op.adj_blend == 0u {
+                    stack[sp] = mix(d, adj, w);
+                } else {
+                    // Like a layer holding the adjusted image, clipped to what is below.
+                    let a = d.a;
+                    let cb = enc(d.rgb / a, params.blend_space);
+                    let cs = enc(adj.rgb / a, params.blend_space);
+                    let o = mix(cb, blend_rgb(cb, cs, op.adj_blend), w);
+                    stack[sp] = vec4<f32>(dec(o, params.blend_space) * a, a);
+                }
             }
         } else if op.kind == 1u {
             sp = min(sp + 1u, MAX_DEPTH);

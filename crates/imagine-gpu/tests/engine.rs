@@ -788,3 +788,36 @@ fn histogram_speed_100mp() {
     let _ = e.histogram(None);
     eprintln!("cached: {:?} ({} px)", t.elapsed(), h.bins[1].iter().sum::<f32>());
 }
+
+#[test]
+fn adjustment_blend_modes_match_layer_semantics() {
+    use imagine_core::Adjustment;
+    let Some(g) = gpu() else { return };
+    let base = [0.6f32, 0.25, 0.05];
+    for space in [BlendSpace::Srgb, BlendSpace::Linear] {
+        let mut doc = Document::<()>::new(256, 256);
+        doc.blend_space = space;
+        let mut e = Engine::new(&g.device, &g.queue, FMT, &doc);
+        e.fill(StrokeTarget::Pixels, [base[0], base[1], base[2], 1.0], 1.0, "Füllen").unwrap();
+        let adj = Adjustment::HueSaturation { hue: 120.0, saturation: 30.0, lightness: 0.0, colorize: false };
+        let a = adj.apply(base);
+        e.edit("Einstellung", |d| {
+            let id = d.add_adjustment(adj.clone());
+            d.find_mut(id).unwrap().opacity = 0.7;
+            true
+        });
+        for mode in [BlendMode::Multiply, BlendMode::Screen, BlendMode::Luminosity, BlendMode::Color, BlendMode::Overlay] {
+            e.edit("Modus", |d| {
+                let id = d.active;
+                d.find_mut(id).unwrap().blend = mode;
+                true
+            });
+            e.flush();
+            let got = composite_px(&e, TileCoord::new(0, 0), 5, 5);
+            // A layer holding the adjusted image at 70 %.
+            let want = composite([base[0], base[1], base[2], 1.0], [a[0] * 0.7, a[1] * 0.7, a[2] * 0.7, 0.7], mode, space);
+            let ok = (0..4).all(|i| (got[i] - want[i]).abs() < 0.004 + want[i] * 0.01);
+            assert!(ok, "{mode:?} in {space:?}: GPU {got:?} vs CPU {want:?}");
+        }
+    }
+}

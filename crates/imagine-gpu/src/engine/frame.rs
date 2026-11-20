@@ -33,7 +33,8 @@ struct GpuOp {
     mask_const: f32,
     sel_slot: u32,
     sel_const: f32,
-    _pad: u32,
+    /// Adjustments: blend mode of the adjusted result onto what is below.
+    adj_blend: u32,
 }
 
 #[repr(C)]
@@ -94,10 +95,10 @@ impl FlattenBatch {
                         mask_const,
                         sel_slot,
                         sel_const,
-                        _pad: 0,
+                        adj_blend: 0,
                     }
                 }
-                Op::Adjust { id, adj, opacity, mask } => {
+                Op::Adjust { id, adj, opacity, blend, mask } => {
                     let adjust = &mut self.adjust;
                     let (off, kind) = *self.adjust_at.entry(id).or_insert_with(|| {
                         let off = adjust.len() as u32;
@@ -128,7 +129,7 @@ impl FlattenBatch {
                         stroke_mode: st.map_or(0, |s| if s.2.erase { 4 } else { 3 }),
                         sel_slot,
                         sel_const,
-                        ..Zeroable::zeroed()
+                        adj_blend: blend as u32,
                     }
                 }
                 Op::Push => {
