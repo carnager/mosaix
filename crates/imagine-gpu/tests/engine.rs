@@ -1062,12 +1062,30 @@ fn adjustment_layers_match_cpu_reference() {
             saturation: 40.0,
             lightness: -20.0,
             colorize: false,
+            ranges: Vec::new(),
+        },
+        // Colour ranges: reds desaturated and darker, blues shifted and brighter.
+        Adjustment::HueSaturation {
+            hue: 0.0,
+            saturation: 10.0,
+            lightness: 0.0,
+            colorize: false,
+            ranges: {
+                let mut r = imagine_core::adjust::HueRange::defaults();
+                r[0].saturation = -70.0;
+                r[0].lightness = -30.0;
+                r[4].hue = 40.0;
+                r[4].saturation = 60.0;
+                r[4].lightness = 20.0;
+                r
+            },
         },
         Adjustment::HueSaturation {
             hue: 200.0,
             saturation: -30.0,
             lightness: 10.0,
             colorize: true,
+            ranges: Vec::new(),
         },
         Adjustment::Vibrance {
             vibrance: 60.0,
@@ -1329,6 +1347,7 @@ fn adjustment_blend_modes_match_layer_semantics() {
             saturation: 30.0,
             lightness: 0.0,
             colorize: false,
+            ranges: Vec::new(),
         };
         let a = adj.apply(base);
         e.edit("Adjustment", |d| {

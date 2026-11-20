@@ -467,7 +467,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 - **Einstellungen rechnen wie Photoshop** (gemessen an Photoshops eigenen Renderings, `scripts/psd-reference.sh`): Kurven als natürlicher kubischer Spline, Kanal vor Gesamt bei Tonwert/Kurven, Helligkeit/Kontrast nach psd-tools (modern) bzw. Gerade (Legacy), Farbton/Sättigung in Photoshops Reihenfolge, Schwellenwert/Tontrennung in 8-Bit-Schritten. Abweichung (RMSE) jetzt 0,001–0,004, modern Helligkeit/Kontrast 0,013. Farbton/Sättigung für einzelne Farbbereiche fehlt noch (Hinweis beim Import).
 - PSD-Masken mit Vektormaske (Kanal −3) werden gelesen.
 
-**Noch offen in Phase 7:** Farbbereiche in Farbton/Sättigung, editierbarer Text im PSD-Export, JPEG XL/AVIF, ABR-Pinsel.
+- **Farbton/Sättigung mit Farbbereichen** (Rottöne … Magentatöne, wie Photoshop: Trapez-Gewichtung auf dem Farbton, Helligkeit in HSV, Sättigungen über Photoshops gemessene Kombinationstabelle von psd-tools), CPU und GPU identisch; PSD liest und schreibt die Bereiche. Abweichung zu Photoshop jetzt 0,002–0,007 (vorher bis 0,085).
+
+**Noch offen in Phase 7:** editierbarer Text im PSD-Export, JPEG XL/AVIF, ABR-Pinsel.
 
 ## Nächster konkreter Schritt
 

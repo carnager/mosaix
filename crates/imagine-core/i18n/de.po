@@ -590,6 +590,9 @@ msgstr "Bearbeiten"
 msgid "Edit Adjustment"
 msgstr "Einstellung ändern"
 
+msgid "Edit all colors, or only one color range"
+msgstr "Alle Farben bearbeiten oder nur einen Farbbereich"
+
 msgid "Edit Path"
 msgstr "Pfad bearbeiten"
 
@@ -1078,6 +1081,9 @@ msgstr "Maskenkachel außerhalb der Datei"
 
 msgid "Mask: click to switch between painting the mask and the pixels"
 msgstr "Maske: klicken wechselt zwischen Maske bemalen und Pixel"
+
+msgid "Master"
+msgstr "Standard"
 
 msgid "Messages"
 msgstr "Meldungen"

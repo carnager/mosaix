@@ -56,11 +56,6 @@ fn versioned_desc(b: &[u8]) -> Option<Desc> {
     read_desc(b.get(4..)?).ok()
 }
 
-thread_local! {
-    /// Hue/saturation layers with colour-range edits seen while reading (for a warning).
-    pub(crate) static RANGED_HUE_SAT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
     let mut b = B { b: data, p: 0 };
     Some(match key {
@@ -150,17 +145,18 @@ pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
             b.u8()?;
             let (ch, cs, cl) = (b.i16()?, b.i16()?, b.i16()?);
             let (mh, ms, ml) = (b.i16()?, b.i16()?, b.i16()?);
-            // Per-colour-range edits (Reds, Yellows …) are not supported yet.
-            let mut ranged = false;
+            // Six colour ranges (Reds, Yellows …): four hue points and the edits.
+            let mut ranges = Vec::with_capacity(6);
             for _ in 0..6 {
-                for _ in 0..4 {
-                    b.i16()?;
+                let mut r = [0.0f32; 4];
+                for v in &mut r {
+                    *v = b.i16()? as f32;
                 }
                 let (h, s, l) = (b.i16()?, b.i16()?, b.i16()?);
-                ranged |= h != 0 || s != 0 || l != 0;
+                ranges.push(imagine_core::adjust::HueRange { range: r, hue: h as f32, saturation: s as f32, lightness: l as f32 });
             }
-            if ranged && !colorize {
-                RANGED_HUE_SAT.with(|c| c.set(c.get() + 1));
+            if ranges.iter().all(|r| r.is_identity()) {
+                ranges.clear();
             }
             if colorize {
                 // imagine's colorize saturation: 0 → 25 %, 100 → 100 %.
@@ -170,14 +166,15 @@ pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
                     saturation: sat,
                     lightness: cl as f32,
                     colorize: true,
+                    ranges,
                 }
             } else {
-                // Per-colour ranges are not supported: master only.
                 Adjustment::HueSaturation {
                     hue: mh as f32,
                     saturation: ms as f32,
                     lightness: ml as f32,
                     colorize: false,
+                    ranges,
                 }
             }
         }
@@ -313,6 +310,7 @@ pub(crate) fn adjustment_blocks(a: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             saturation,
             lightness,
             colorize,
+            ranges,
         } => {
             be16(&mut o, 2);
             o.push(*colorize as u8);
@@ -332,20 +330,15 @@ pub(crate) fn adjustment_blocks(a: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
                 o.extend(i(*saturation));
                 o.extend(i(*lightness));
             }
-            // Six colour ranges (Photoshop's defaults), no changes.
-            let ranges: [[i16; 4]; 6] = [
-                [315, 345, 15, 45],
-                [15, 45, 75, 105],
-                [75, 105, 135, 165],
-                [135, 165, 195, 225],
-                [195, 225, 255, 285],
-                [255, 285, 315, 345],
-            ];
-            for r in ranges {
-                for v in r {
-                    o.extend(v.to_be_bytes());
+            // Six colour ranges (Photoshop's defaults where none are set).
+            let all = if ranges.is_empty() { imagine_core::adjust::HueRange::defaults() } else { ranges.clone() };
+            for r in all.iter().chain(imagine_core::adjust::HueRange::defaults().iter().skip(all.len())).take(6) {
+                for v in r.range {
+                    o.extend((v.round() as i16).to_be_bytes());
                 }
-                o.extend([0u8; 6]);
+                o.extend(i(r.hue));
+                o.extend(i(r.saturation));
+                o.extend(i(r.lightness));
             }
             out.push((*b"hue2", o));
         }
@@ -511,6 +504,12 @@ mod tests {
                 saturation: -20.0,
                 lightness: 10.0,
                 colorize: false,
+                ranges: {
+                    let mut r = imagine_core::adjust::HueRange::defaults();
+                    r[2].saturation = 45.0;
+                    r[5].hue = -20.0;
+                    r
+                },
             },
             Adjustment::BlackWhite {
                 weights: [40.0, 60.0, 40.0, 60.0, 20.0, 80.0],

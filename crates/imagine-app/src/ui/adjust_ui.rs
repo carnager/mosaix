@@ -12,6 +12,8 @@ pub struct EditorState {
     /// 0 = RGB, 1–3 = red, green, blue.
     channel: usize,
     dragging: Option<usize>,
+    /// Hue/Saturation: 0 = Master, 1–6 = Reds … Magentas.
+    hue_range: usize,
 }
 
 const CHANNELS: [&str; 4] = ["RGB", "Red", "Green", "Blue"];
@@ -184,12 +186,47 @@ pub fn editor(
             saturation,
             lightness,
             colorize,
+            ranges,
         } => {
-            let r = ui.checkbox(colorize, tr("Colorize"));
-            t.add(&r);
-            row(ui, "Hue", slider(hue, -180.0..=180.0).suffix("°"), &mut t);
-            row(ui, "Saturation", slider(saturation, -100.0..=100.0), &mut t);
-            row(ui, "Lightness", slider(lightness, -100.0..=100.0), &mut t);
+            const RANGES: [&str; 7] = ["Master", "Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas"];
+            if *colorize {
+                st.hue_range = 0;
+            }
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(!*colorize, |ui| {
+                    egui::ComboBox::from_id_salt("hue range")
+                        .selected_text(tr(RANGES[st.hue_range]))
+                        .show_ui(ui, |ui| {
+                            for (i, n) in RANGES.iter().enumerate() {
+                                let edited = i > 0 && ranges.get(i - 1).is_some_and(|r| !r.is_identity());
+                                let label = if edited { format!("{} •", tr(n)) } else { tr(n).to_string() };
+                                ui.selectable_value(&mut st.hue_range, i, label);
+                            }
+                        })
+                        .response
+                        .on_hover_text(tr("Edit all colors, or only one color range"));
+                });
+                let r = ui.checkbox(colorize, tr("Colorize"));
+                t.add(&r);
+            });
+            if st.hue_range == 0 {
+                row(ui, "Hue", slider(hue, -180.0..=180.0).suffix("°"), &mut t);
+                row(ui, "Saturation", slider(saturation, -100.0..=100.0), &mut t);
+                row(ui, "Lightness", slider(lightness, -100.0..=100.0), &mut t);
+            } else {
+                if ranges.len() < 6 {
+                    *ranges = imagine_core::adjust::HueRange::defaults();
+                }
+                let r = &mut ranges[st.hue_range - 1];
+                row(ui, "Hue", slider(&mut r.hue, -180.0..=180.0).suffix("°"), &mut t);
+                row(ui, "Saturation", slider(&mut r.saturation, -100.0..=100.0), &mut t);
+                row(ui, "Lightness", slider(&mut r.lightness, -100.0..=100.0), &mut t);
+                // Where the range lies on the hue wheel (fade-in, full, fade-out).
+                hue_range_bar(ui, r.range);
+                if ranges.iter().all(|r| r.is_identity()) {
+                    ranges.clear();
+                }
+            }
         }
         Adjustment::Vibrance {
             vibrance,
@@ -533,4 +570,31 @@ pub fn wants_histogram(adj: Option<&Adjustment>) -> bool {
         adj,
         Some(Adjustment::Levels { .. } | Adjustment::Curves { .. })
     )
+}
+
+/// A hue strip with the range marked: full strength bright, fades dimmer.
+fn hue_range_bar(ui: &mut egui::Ui, r: [f32; 4]) {
+    let w = ui.available_width().min(260.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 14.0), egui::Sense::hover());
+    let p = ui.painter();
+    let steps = 72;
+    for i in 0..steps {
+        let h0 = i as f32 / steps as f32;
+        let x0 = rect.left() + h0 * w;
+        let deg = h0 * 360.0;
+        // Weight of this hue in the range (as Photoshop's trapezoid).
+        let rel = |v: f32| (v - r[0]).rem_euclid(360.0);
+        let (c, ls, cs, rs) = (rel(deg), rel(r[1]), rel(r[2]), rel(r[3]));
+        let m = if c >= ls && c <= cs {
+            1.0
+        } else if c < ls {
+            c / ls.max(1e-3)
+        } else if c <= rs {
+            (rs - c) / (rs - cs).max(1e-3)
+        } else {
+            0.0
+        };
+        let col: egui::Color32 = egui::ecolor::Hsva::new(h0, 1.0, 0.25 + 0.75 * m, 1.0).into();
+        p.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, rect.top()), egui::pos2(x0 + w / steps as f32 + 0.5, rect.bottom())), 0.0, col);
+    }
 }

@@ -187,6 +187,9 @@ pub enum Adjustment {
         lightness: f32,
         #[serde(default)]
         colorize: bool,
+        /// Edits for single colour ranges (Photoshop's Reds, Yellows …).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ranges: Vec<HueRange>,
     },
     /// −100…100 each.
     Vibrance {
@@ -236,12 +239,76 @@ fn four() -> f32 {
 }
 
 /// How the GPU evaluates an adjustment.
+/// A colour range of Hue/Saturation: four hue points in degrees (start of
+/// the fade-in, full range from … to, end of the fade-out) and its edits
+/// (hue −180…180, saturation and lightness −100…100).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct HueRange {
+    pub range: [f32; 4],
+    #[serde(default)]
+    pub hue: f32,
+    #[serde(default)]
+    pub saturation: f32,
+    #[serde(default)]
+    pub lightness: f32,
+}
+
+impl HueRange {
+    /// Photoshop's six default ranges.
+    pub const DEFAULTS: [[f32; 4]; 6] = [
+        [315.0, 345.0, 15.0, 45.0],
+        [15.0, 45.0, 75.0, 105.0],
+        [75.0, 105.0, 135.0, 165.0],
+        [135.0, 165.0, 195.0, 225.0],
+        [195.0, 225.0, 255.0, 285.0],
+        [255.0, 285.0, 315.0, 345.0],
+    ];
+
+    pub fn defaults() -> Vec<HueRange> {
+        Self::DEFAULTS.iter().map(|r| HueRange { range: *r, hue: 0.0, saturation: 0.0, lightness: 0.0 }).collect()
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.hue == 0.0 && self.saturation == 0.0 && self.lightness == 0.0
+    }
+}
+
+/// How Photoshop combines saturation edits of overlapping ranges (measured by
+/// psd-tools): 21 × 21 values over (accumulated, contribution) in −1…1.
+pub const HUE_SAT_GRID: [f32; 441] = [-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-0.89,-0.76,-0.58,-0.35,-0.01,0.32,0.56,0.74,0.88,1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-0.99,-0.90,-0.79,-0.66,-0.48,-0.25,0.09,0.36,0.58,0.75,0.88,1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-0.99,-0.89,-0.80,-0.69,-0.56,-0.38,-0.15,0.17,0.41,0.59,0.76,0.88,1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-0.99,-0.90,-0.79,-0.70,-0.59,-0.46,-0.28,-0.05,0.22,0.44,0.61,0.76,0.89,1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-0.99,-0.89,-0.79,-0.70,-0.60,-0.49,-0.36,-0.18,0.05,0.28,0.47,0.62,0.77,0.89,1.00,-1.00,-1.00,-1.00,-1.00,-1.00,-0.99,-0.90,-0.79,-0.70,-0.60,-0.49,-0.39,-0.26,-0.08,0.13,0.33,0.49,0.64,0.77,0.89,1.00,-1.00,-1.00,-1.00,-1.00,-0.99,-0.90,-0.79,-0.70,-0.60,-0.50,-0.40,-0.29,-0.16,0.02,0.21,0.37,0.52,0.65,0.78,0.89,1.00,-1.00,-1.00,-1.00,-0.99,-0.89,-0.79,-0.70,-0.59,-0.50,-0.40,-0.30,-0.19,-0.06,0.11,0.26,0.41,0.54,0.66,0.78,0.89,1.00,-1.00,-1.00,-0.99,-0.90,-0.79,-0.70,-0.60,-0.50,-0.40,-0.30,-0.20,-0.09,0.04,0.19,0.31,0.44,0.56,0.67,0.79,0.89,1.00,-1.00,-0.99,-0.89,-0.79,-0.70,-0.60,-0.50,-0.40,-0.30,-0.19,-0.10,0.01,0.13,0.24,0.36,0.47,0.58,0.68,0.79,0.89,1.00,-1.00,-0.90,-0.80,-0.70,-0.60,-0.49,-0.40,-0.30,-0.20,-0.10,0.00,0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90,1.00,-0.89,-0.79,-0.69,-0.59,-0.49,-0.39,-0.29,-0.19,-0.09,0.01,0.10,0.17,0.26,0.35,0.43,0.52,0.61,0.70,0.80,0.90,1.00,-0.76,-0.66,-0.56,-0.46,-0.36,-0.26,-0.16,-0.06,0.04,0.13,0.20,0.26,0.33,0.39,0.47,0.55,0.63,0.71,0.81,0.90,1.00,-0.58,-0.48,-0.38,-0.28,-0.18,-0.08,0.02,0.11,0.19,0.24,0.30,0.35,0.39,0.46,0.52,0.59,0.65,0.73,0.81,0.90,1.00,-0.35,-0.25,-0.15,-0.05,0.05,0.13,0.21,0.26,0.31,0.36,0.40,0.43,0.47,0.52,0.57,0.62,0.68,0.74,0.82,0.90,1.00,-0.01,0.09,0.17,0.22,0.28,0.33,0.37,0.41,0.44,0.47,0.50,0.52,0.55,0.59,0.62,0.66,0.71,0.77,0.83,0.90,1.00,0.32,0.36,0.41,0.44,0.47,0.49,0.52,0.54,0.56,0.58,0.60,0.61,0.63,0.65,0.68,0.71,0.75,0.79,0.84,0.91,1.00,0.56,0.58,0.59,0.61,0.62,0.64,0.65,0.66,0.67,0.68,0.70,0.70,0.71,0.73,0.74,0.77,0.79,0.82,0.86,0.91,1.00,0.74,0.75,0.76,0.76,0.77,0.77,0.78,0.78,0.79,0.79,0.80,0.80,0.81,0.81,0.82,0.83,0.84,0.86,0.89,0.92,1.00,0.88,0.88,0.88,0.89,0.89,0.89,0.89,0.89,0.89,0.89,0.90,0.90,0.90,0.90,0.90,0.90,0.91,0.91,0.92,0.94,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00];
+
+fn hue_sat_grid(a: f32, b: f32) -> f32 {
+    let (x, y) = ((a.clamp(-1.0, 1.0) + 1.0) * 10.0, (b.clamp(-1.0, 1.0) + 1.0) * 10.0);
+    let (i, j) = ((x.floor() as usize).min(19), (y.floor() as usize).min(19));
+    let (fx, fy) = (x - i as f32, y - j as f32);
+    let g = |i: usize, j: usize| HUE_SAT_GRID[i * 21 + j];
+    let top = g(i, j) * (1.0 - fy) + g(i, j + 1) * fy;
+    let bot = g(i + 1, j) * (1.0 - fy) + g(i + 1, j + 1) * fy;
+    top * (1.0 - fx) + bot * fx
+}
+
+/// Trapezoid weight of `hue` (0…1) in a range given in degrees.
+fn range_mask(hue: f32, r: [f32; 4]) -> f32 {
+    let [bl, tl, tr, br] = r.map(|v| v / 360.0);
+    let c = (hue - bl).rem_euclid(1.0);
+    let (ls, cs, rs) = ((tl - bl).rem_euclid(1.0), (tr - bl).rem_euclid(1.0), (br - bl).rem_euclid(1.0));
+    if c >= ls && c <= cs {
+        1.0
+    } else if c < ls {
+        if ls > 1e-9 { c / ls } else { 0.0 }
+    } else if c <= rs {
+        if rs - cs > 1e-9 { (rs - c) / (rs - cs) } else { 0.0 }
+    } else {
+        0.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GpuAdjust {
     /// Per-channel table on sRGB values: `LUT_SIZE` entries of [r, g, b].
     Lut(Vec<[f32; 3]>),
-    /// Kind (see `adjust.wgsl`) and up to 8 parameters.
-    Shader(u32, [f32; 8]),
+    /// Kind (see `adjust.wgsl`), up to 8 parameters and more (hue ranges).
+    Shader(u32, [f32; 8], Vec<[f32; 4]>),
 }
 
 pub const KIND_LUT: u32 = 0;
@@ -286,6 +353,7 @@ impl Adjustment {
                 saturation: 0.0,
                 lightness: 0.0,
                 colorize: false,
+                ranges: Vec::new(),
             },
             Adjustment::BlackWhite {
                 weights: bw_default(),
@@ -401,12 +469,14 @@ impl Adjustment {
             );
         }
         let mut p = [0.0f32; 8];
+        let mut extra = Vec::new();
         let kind = match self {
             Adjustment::HueSaturation {
                 hue,
                 saturation,
                 lightness,
                 colorize,
+                ranges,
             } => {
                 p[..4].copy_from_slice(&[
                     *hue / 360.0,
@@ -414,6 +484,13 @@ impl Adjustment {
                     *lightness / 100.0,
                     *colorize as u8 as f32,
                 ]);
+                // Ranges follow: [bl, tl, tr, br] (degrees), [h, s, l, 0] (normalised).
+                let used: Vec<&HueRange> = ranges.iter().filter(|r| !r.is_identity()).take(6).collect();
+                p[4] = used.len() as f32;
+                for r in used {
+                    extra.push(r.range);
+                    extra.push([r.hue / 360.0, r.saturation / 100.0, r.lightness / 100.0, 0.0]);
+                }
                 KIND_HSL
             }
             Adjustment::Vibrance {
@@ -447,7 +524,7 @@ impl Adjustment {
             }
             _ => unreachable!("handled by channel_map"),
         };
-        GpuAdjust::Shader(kind, p)
+        GpuAdjust::Shader(kind, p, extra)
     }
 
     /// CPU reference on one straight-alpha linear RGB colour (the shader does
@@ -464,7 +541,7 @@ impl Adjustment {
                 };
                 [look(0, enc[0]), look(1, enc[1]), look(2, enc[2])]
             }
-            GpuAdjust::Shader(kind, p) => match kind {
+            GpuAdjust::Shader(kind, p, extra) => match kind {
                 KIND_EXPOSURE => {
                     return rgb.map(|v| ((v * p[0] + p[1]).max(0.0)).powf(p[2]));
                 }
@@ -474,7 +551,7 @@ impl Adjustment {
                         ((0.3 * enc[0] + 0.59 * enc[1] + 0.11 * enc[2]) * 255.0).round() / 255.0;
                     [if l >= p[0] - 0.5 / 255.0 { 1.0 } else { 0.0 }; 3]
                 }
-                KIND_HSL => hue_sat(enc, p),
+                KIND_HSL => hue_sat(enc, p, &extra),
                 KIND_VIBRANCE => vibrance(enc, p),
                 KIND_BW => {
                     let g = black_white(enc, p);
@@ -537,16 +614,12 @@ fn hsl_to_rgb(h: [f32; 3]) -> [f32; 3] {
 }
 
 /// Hue/saturation/lightness on sRGB values (mirrors `adjust.wgsl`).
-fn hue_sat(c: [f32; 3], p: [f32; 8]) -> [f32; 3] {
-    // Photoshop (as measured by psd-tools): lightness first on RGB, then hue
-    // and saturation in HSL; colorize sets hue and saturation and lightens in HSL.
-    let light = |v: f32, l: f32| {
-        if l > 0.0 {
-            v * (1.0 - l) + l
-        } else {
-            v * (1.0 + l)
-        }
-    };
+fn hue_sat(c: [f32; 3], p: [f32; 8], extra: &[[f32; 4]]) -> [f32; 3] {
+    // Photoshop (as measured by psd-tools): lightness first on RGB, then the
+    // colour ranges (lightness in HSV), then hue and saturation in HSL;
+    // colorize sets hue and saturation and lightens in HSL.
+    let light = |v: f32, l: f32| if l > 0.0 { v * (1.0 - l) + l } else { v * (1.0 + l) };
+    let sat = |s: f32, k: f32| if k > 0.0 { s / (1.0 - k + 0.01) } else { s * (1.0 + k) }.clamp(0.0, 1.0);
     let c = c.map(|v| v.clamp(0.0, 1.0));
     if p[3] > 0.5 {
         let mut hsl = rgb_to_hsl(c);
@@ -556,13 +629,36 @@ fn hue_sat(c: [f32; 3], p: [f32; 8]) -> [f32; 3] {
         return hsl_to_rgb(hsl);
     }
     let mut hsl = rgb_to_hsl(c.map(|v| light(v, p[2]).clamp(0.0, 1.0)));
-    hsl[0] = (hsl[0] + p[0]).rem_euclid(1.0);
-    hsl[1] = if p[1] > 0.0 {
-        hsl[1] / (1.0 - p[1] + 0.01)
-    } else {
-        hsl[1] * (1.0 + p[1])
+    let (mut rh, mut rs, mut rl) = (0.0f32, 0.0f32, 0.0f32);
+    for r in extra.chunks(2).take(p[4] as usize) {
+        let (range, e) = (r[0], r[1]);
+        let m = range_mask(hsl[0], range);
+        rh += e[0] * m;
+        rl = (rl + e[2] * m).clamp(-1.0, 1.0);
+        let k = e[1];
+        let contrib = if k > 0.0 { k * (1.0 - (1.0 - m).powf(1.5 / (1.0 - k.powi(4) + 0.05))) } else { k * m };
+        rs = hue_sat_grid(rs, contrib);
     }
-    .clamp(0.0, 1.0);
+    if rl != 0.0 {
+        // Range lightness in HSV.
+        let (s_l, l) = (hsl[1], hsl[2]);
+        let v = l + s_l * l.min(1.0 - l);
+        let s_v = if v > 0.0 { 2.0 * (1.0 - l / v) } else { 0.0 };
+        let v2 = if rl >= 0.0 { v } else { (v * (1.0 + rl * s_v)).clamp(0.0, 1.0) };
+        let s2 = if rl >= 0.0 {
+            s_v * (1.0 - rl)
+        } else {
+            let div = 1.0 / (s_v + 1e-3);
+            1.0 + (div - 1.0) / (rl.abs() - div + 1e-3)
+        }
+        .clamp(0.0, 1.0);
+        let l2 = v2 * (1.0 - s2 / 2.0);
+        let s3 = if l2 > 0.0 && l2 < 1.0 { (v2 - l2) / l2.min(1.0 - l2) } else { 0.0 };
+        hsl[1] = s3.clamp(0.0, 1.0);
+        hsl[2] = l2.clamp(0.0, 1.0);
+    }
+    hsl[0] = (hsl[0] + rh + p[0]).rem_euclid(1.0);
+    hsl[1] = sat(sat(hsl[1], p[1]), rs);
     hsl_to_rgb(hsl)
 }
 
@@ -656,6 +752,7 @@ mod tests {
             saturation: 0.0,
             lightness: 0.0,
             colorize: false,
+            ranges: Vec::new(),
         };
         assert!(
             close(h.apply([1.0, 0.0, 0.0]), [0.0, 1.0, 0.0], 1e-3),
@@ -666,6 +763,7 @@ mod tests {
             saturation: -100.0,
             lightness: 0.0,
             colorize: false,
+            ranges: Vec::new(),
         };
         let g = d.apply([1.0, 0.0, 0.0]);
         assert!((g[0] - g[1]).abs() < 1e-4 && (g[1] - g[2]).abs() < 1e-4);

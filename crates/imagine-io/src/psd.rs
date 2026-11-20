@@ -821,13 +821,6 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             merged = Some(to_rgba(w * h, depth, mode, &get));
         }
     }
-    let ranged = crate::psd_layers::RANGED_HUE_SAT.with(|c| c.replace(0));
-    if ranged > 0 {
-        warnings.push(imagine_core::tr!(
-            "{n} Hue/Saturation layers change single color ranges (Reds, Blues …): imagine applies only the master values so far",
-            n = ranged
-        ));
-    }
     // Records (bottom → top) → tree.
     let mut stack: Vec<Vec<Node>> = vec![Vec::new()];
     let mut specials = std::collections::BTreeMap::<&str, usize>::new();

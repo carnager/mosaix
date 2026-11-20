@@ -120,9 +120,10 @@ impl FlattenBatch {
                                 adjust.extend(lut.iter().map(|c| [c[0], c[1], c[2], 0.0]));
                                 (off, KIND_LUT)
                             }
-                            GpuAdjust::Shader(kind, p) => {
+                            GpuAdjust::Shader(kind, p, extra) => {
                                 adjust.push([p[0], p[1], p[2], p[3]]);
                                 adjust.push([p[4], p[5], p[6], p[7]]);
+                                adjust.extend(extra);
                                 (off, kind)
                             }
                         }
