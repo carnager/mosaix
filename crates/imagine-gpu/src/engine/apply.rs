@@ -23,6 +23,7 @@ enum Kernel {
     Warp,
     Similar,
     Filter,
+    Liquify,
 }
 
 #[repr(C)]
@@ -109,6 +110,11 @@ impl Engine {
         self.run_tiles(StrokeTarget::Mask, Kernel::Similar, bytemuck::cast_slice(jobs), size_of::<SimilarJob>())
     }
 
+    /// Liquify tiles (grids and the field must be uploaded).
+    pub(super) fn run_liquify(&mut self, jobs: &[super::liquify::LiquifyJob]) -> Option<Vec<Tile>> {
+        self.run_tiles(StrokeTarget::Pixels, Kernel::Liquify, bytemuck::cast_slice(jobs), size_of::<super::liquify::LiquifyJob>())
+    }
+
     pub(super) fn run_filter(&mut self, jobs: &[FilterJob]) -> Option<Vec<Tile>> {
         self.run_tiles(StrokeTarget::Pixels, Kernel::Filter, bytemuck::cast_slice(jobs), size_of::<FilterJob>())
     }
@@ -153,7 +159,7 @@ impl Engine {
                         wgpu::BindGroupEntry { binding: 1, resource: self.params.binding() },
                     ],
                 }),
-                Kernel::Warp | Kernel::Filter => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                Kernel::Warp | Kernel::Filter | Kernel::Liquify => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("warp"),
                     layout: &self.warp_bgl,
                     entries: &[
@@ -171,6 +177,14 @@ impl Engine {
                     entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureViewArray(&comp) }],
                 }));
             }
+            if matches!(kernel, Kernel::Liquify) {
+                let buf = &self.liquify.as_ref()?.buf;
+                extra = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("liquify field"),
+                    layout: &self.liquify_bgl,
+                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() }],
+                }));
+            }
             let pipeline = match (kernel, target) {
                 (Kernel::Apply, StrokeTarget::Pixels) => &self.apply_rgba_pipeline,
                 (Kernel::Apply, StrokeTarget::Mask) => &self.apply_mask_pipeline,
@@ -178,6 +192,7 @@ impl Engine {
                 (Kernel::Warp, StrokeTarget::Mask) => &self.warp_mask_pipeline,
                 (Kernel::Similar, _) => &self.similar_pipeline,
                 (Kernel::Filter, _) => &self.filter_pipeline,
+                (Kernel::Liquify, _) => &self.liquify_pipeline,
             };
             let (views, scratch) = match target {
                 StrokeTarget::Pixels => (&self.scratch_rgba_views, &self.scratch_rgba),

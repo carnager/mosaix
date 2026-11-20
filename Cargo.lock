@@ -903,6 +903,7 @@ dependencies = [
  "half",
  "imagine-core",
  "pollster",
+ "serde",
  "tracing",
  "wgpu",
 ]

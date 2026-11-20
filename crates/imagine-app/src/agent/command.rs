@@ -162,6 +162,7 @@ pub enum Command {
     LayerBounds { layer: Option<LayerId> },
     Histogram { below: Option<LayerId>, bins: Option<u32> },
     FilterApply { layer: Option<LayerId>, filter: imagine_core::Filter, #[serde(default)] smart: bool },
+    Liquify { layer: Option<LayerId>, strokes: Vec<LiquifyStroke> },
     SmartFilterSet {
         layer: Option<LayerId>,
         index: Option<usize>,
@@ -248,6 +249,7 @@ impl Command {
             Self::AdjustmentAdd { .. } => "adjustment_add",
             Self::FilterApply { .. } => "filter_apply",
             Self::SmartFilterSet { .. } => "smart_filter_set",
+            Self::Liquify { .. } => "liquify",
             Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
@@ -799,6 +801,40 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             ok(s)
         }
+        Command::Liquify { layer, strokes } => {
+            pixel_layer(s, layer)?;
+            ensure!(!s.engine.liquify_active(), "liquify is open in the window – apply or cancel it there first");
+            ensure!(!strokes.is_empty(), "no strokes");
+            s.engine.liquify_begin().map_err(engine_err)?;
+            for st in &strokes {
+                let pts: Vec<DVec2> = st.points.iter().map(|p| DVec2::new(p[0], p[1])).collect();
+                if pts.is_empty() {
+                    s.engine.liquify_cancel();
+                    bail!("a stroke needs points");
+                }
+                let r = st.radius.max(1.0);
+                let k = st.strength.unwrap_or(0.7).clamp(0.0, 1.0);
+                s.engine.liquify_stroke_start();
+                if st.tool == imagine_gpu::LiquifyTool::Push {
+                    for w in pts.windows(2) {
+                        let d = w[1] - w[0];
+                        let n = (d.length() / (r * 0.1).max(1.0)).ceil().max(1.0) as usize;
+                        for i in 1..=n {
+                            s.engine.liquify_dab(st.tool, w[0] + d * (i as f64 / n as f64), d / n as f64, r, k, 1.0);
+                        }
+                    }
+                } else {
+                    let steps = st.steps.unwrap_or(10).min(1000);
+                    for p in &pts {
+                        for _ in 0..steps {
+                            s.engine.liquify_dab(st.tool, *p, DVec2::ZERO, r, k, 1.0);
+                        }
+                    }
+                }
+            }
+            s.engine.liquify_commit("Verflüssigen").map_err(engine_err)?;
+            ok(s)
+        }
         Command::SmartFilterSet { layer, index, filter, enabled, remove, apply } => {
             let id = pixel_layer(s, layer)?;
             let n = s.engine.doc().find(id).unwrap().filters.len();
@@ -969,6 +1005,21 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             Ok(Output::json(json!({ "path": path, "ms": ms.round(), "color_space": opts.space, "bit_depth": if sixteen { 16 } else { 8 } })))
         }
     }
+}
+
+/// One liquify stroke for the `liquify` command.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LiquifyStroke {
+    #[serde(default)]
+    pub tool: imagine_gpu::LiquifyTool,
+    /// Document px; push follows the path, the other tools act at each point.
+    pub points: Vec<[f64; 2]>,
+    pub radius: f64,
+    /// 0…1 (default 0.7).
+    pub strength: Option<f64>,
+    /// Continuous tools: dabs per point (default 10; ≈ frames held).
+    pub steps: Option<u32>,
 }
 
 /// Document summary for agents.

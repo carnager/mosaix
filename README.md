@@ -41,6 +41,7 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 | Ansicht | Leertaste+Ziehen schwenken, Mausrad zoomen, `R`+Ziehen drehen, Strg+`0` einpassen, Strg+`1` 100 %, `Q` Maskierungsmodus-Ansicht |
 | Auswahl | Aufziehen mit Umschalt/Alt/beidem = hinzufügen/abziehen/Schnittmenge; Strg+`A` / Strg+`D` / Strg+Umschalt+`I`; Umschalt+`F6` weiche Kante |
 | Transformieren | Strg+`T`: Ecken skalieren (Umschalt frei), Kanten strecken, außen drehen (Umschalt 15°), Alt um die Mitte; Enter übernimmt, Esc bricht ab. Mit Auswahl nur die ausgewählten Pixel (auch `V`) |
+| Verflüssigen | Strg+Umschalt+`X`: `W` schieben, `R` rekonstruieren, `C` Strudel (Alt: links), `S` zusammenziehen, `B` aufblähen (Alt tauscht), `[` `]` Größe; Enter übernimmt, Esc bricht ab, Strg+`Z` nimmt den letzten Strich zurück |
 | Zauberstab | Klick wählt ähnliche Farben, Umschalt/Alt kombinieren, `[` `]` Toleranz, `W` nochmal: zusammenhängend ↔ überall |
 | Zuschneiden | `C`, Rahmen ziehen/anpassen, über den Rand hinaus vergrößert die Arbeitsfläche, Enter / Esc. Nichts wird gelöscht |
 | Füllen & Löschen | Alt+Rücktaste füllt Auswahl (bzw. Ebene), `Entf` oder Rücktaste löscht ausgewählte Pixel |

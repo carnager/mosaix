@@ -199,6 +199,8 @@ pub(super) enum PreviewKind {
     Filter(imagine_core::Filter),
     /// The active layer with a smart filter replaced (`Some(index)`) or added.
     SmartFilter(Option<usize>, imagine_core::Filter),
+    /// Maintained by the liquify session itself.
+    Liquify,
 }
 
 pub(super) struct Preview {
@@ -498,6 +500,7 @@ impl Engine {
         let doc = match &kind {
             PreviewKind::Transform(fwd, interp) => self.transformed_doc(*fwd, *interp, true, Some(rect))?.1,
             PreviewKind::Filter(f) => self.filtered_doc(f, Some(rect))?,
+            PreviewKind::Liquify => return Err("Verflüssigen-Vorschau wird nicht hier berechnet"),
             PreviewKind::SmartFilter(index, f) => {
                 let layer = self.check_target(StrokeTarget::Pixels)?;
                 let mut d = self.doc.clone();

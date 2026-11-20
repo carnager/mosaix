@@ -879,3 +879,88 @@ fn smart_filters_are_live_toggle_and_bake() {
     assert_eq!(edge(&mut e), wider);
     assert!(e.set_smart_filter(layer, 3, &blur, "x").is_err());
 }
+
+#[test]
+fn liquify_push_reconstruct_undo_and_commit() {
+    use imagine_gpu::LiquifyTool;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    // A white vertical stripe x ∈ [200, 260).
+    e.select_shape(&Shape::Rect { x: 200.0, y: 0.0, w: 60.0, h: 512.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0; 4], 1.0, "Weiß").unwrap();
+    e.deselect("x").unwrap();
+    let a = |e: &mut Engine, x: i64, y: i64| {
+        e.flush();
+        composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), (x % 256) as usize, (y % 256) as usize)[3]
+    };
+    assert_eq!((a(&mut e, 230, 300), a(&mut e, 280, 300)), (1.0, 0.0));
+    let steps = e.history_len().0;
+
+    // Push right by 40 px at (230, 300).
+    e.liquify_begin().unwrap();
+    e.liquify_stroke_start();
+    for i in 0..8 {
+        e.liquify_dab(LiquifyTool::Push, DVec2::new(230.0 + i as f64 * 5.0, 300.0), DVec2::new(5.0, 0.0), 100.0, 1.0, 1.0);
+    }
+    e.liquify_tick().unwrap();
+    e.liquify_commit("Verflüssigen").unwrap();
+    assert!(!e.liquify_active());
+    assert_eq!(e.history_len().0, steps + 1);
+    assert!(a(&mut e, 280, 300) > 0.9, "stripe pushed right: {}", a(&mut e, 280, 300));
+    assert!(a(&mut e, 205, 300) < 0.1, "left edge pushed away: {}", a(&mut e, 205, 300));
+    // Far from the brush nothing changes (exact copy).
+    assert_eq!((a(&mut e, 230, 20), a(&mut e, 280, 20)), (1.0, 0.0));
+    e.undo();
+    assert_eq!(a(&mut e, 280, 300), 0.0);
+
+    // Undo inside the session and reconstruct restore the original.
+    for tool in ["undo", "reconstruct"] {
+        e.liquify_begin().unwrap();
+        e.liquify_stroke_start();
+        e.liquify_dab(LiquifyTool::Push, DVec2::new(230.0, 300.0), DVec2::new(40.0, 0.0), 100.0, 1.0, 1.0);
+        if tool == "undo" {
+            assert!(e.liquify_undo());
+        } else {
+            for _ in 0..200 {
+                e.liquify_dab(LiquifyTool::Reconstruct, DVec2::new(230.0, 300.0), DVec2::ZERO, 150.0, 1.0, 1.0);
+            }
+        }
+        e.liquify_commit("Verflüssigen").unwrap();
+        assert!((a(&mut e, 230, 300) - 1.0).abs() < 1e-3 && a(&mut e, 280, 300) < 1e-3, "{tool}");
+        e.undo();
+    }
+
+    // Twirl and bloat move pixels; cancel leaves the layer as it was.
+    e.liquify_begin().unwrap();
+    for _ in 0..30 {
+        e.liquify_dab(LiquifyTool::TwirlCw, DVec2::new(230.0, 300.0), DVec2::ZERO, 120.0, 1.0, 1.0);
+        e.liquify_dab(LiquifyTool::Bloat, DVec2::new(230.0, 300.0), DVec2::ZERO, 120.0, 1.0, 1.0);
+    }
+    e.liquify_tick().unwrap();
+    e.liquify_cancel();
+    assert_eq!((a(&mut e, 230, 300), a(&mut e, 280, 300)), (1.0, 0.0));
+    assert_eq!(e.history_len().0, steps);
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn liquify_speed_100mp() {
+    use imagine_gpu::LiquifyTool;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(10_000, 10_000));
+    e.fill(StrokeTarget::Pixels, [0.3, 0.5, 0.1, 1.0], 1.0, "Füllen").unwrap();
+    e.flush();
+    let t = std::time::Instant::now();
+    e.liquify_begin().unwrap();
+    eprintln!("begin: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    for i in 0..100 {
+        e.liquify_dab(LiquifyTool::Push, DVec2::new(5000.0 + i as f64 * 4.0, 5000.0), DVec2::new(4.0, 0.0), 300.0, 0.8, 1.0);
+    }
+    eprintln!("100 dabs r=300: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    e.liquify_commit("x").unwrap();
+    e.flush();
+    let _ = e.read_composite(&[TileCoord::new(20, 20)]);
+    eprintln!("commit + flush: {:?}", t.elapsed());
+}

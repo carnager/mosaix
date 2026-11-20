@@ -13,7 +13,7 @@ use glam::{DAffine2, DVec2};
 use imagine_core::color::linear_to_srgb;
 use imagine_core::mask::{CombineOp, CpuMask, Shape};
 use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View};
-use imagine_gpu::{Engine, GpuContext, GradientKind, Interp, Overlay, SampleFrom, OverlayLine, StrokeParams, StrokeTarget};
+use imagine_gpu::{Engine, GpuContext, GradientKind, Interp, LiquifyTool, Overlay, SampleFrom, OverlayLine, StrokeParams, StrokeTarget};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
@@ -85,6 +85,8 @@ const PALETTE: [[f32; 3]; 6] = [
 enum Drag {
     None,
     Paint,
+    /// Liquify brush: last position (document px) and pressure.
+    Liquify { last: DVec2, pressure: f32 },
     Pan { last: DVec2 },
     Rotate { last: DVec2 },
     Zoom { last: DVec2, anchor: DVec2 },
@@ -252,6 +254,11 @@ pub struct App {
     boxed: Option<(BoxKind, BoxEdit)>,
     wand_tolerance: f32,
     smudge_strength: f32,
+    liq_tool: LiquifyTool,
+    /// Liquify brush diameter (document px) and strength 0…1.
+    liq_size: f32,
+    liq_strength: f32,
+    liq_tick: Instant,
     wand_contiguous: bool,
     started: Instant,
 
@@ -452,6 +459,10 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         boxed: None,
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
+        liq_tool: LiquifyTool::Push,
+        liq_size: 200.0,
+        liq_strength: 0.6,
+        liq_tick: Instant::now(),
         wand_contiguous: true,
         started: Instant::now(),
         save_job: None,
@@ -688,6 +699,7 @@ impl App {
             Button::Primary if self.space && self.mods.ctrl => Drag::Zoom { last: pos, anchor: pos },
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
+            Button::Primary if self.liquifying() => self.begin_liquify(pos, pressure),
             Button::Primary if self.boxed.is_some() || self.tool == Tool::Crop => self.begin_box(pos),
             Button::Primary => self.begin_tool(pos, pressure, eraser_tool),
         };
@@ -722,6 +734,88 @@ impl App {
                     self.magic_wand(x as u32, y as u32, op);
                 }
                 Drag::None
+            }
+        }
+    }
+
+    fn liquifying(&self) -> bool {
+        self.session.as_ref().is_some_and(|s| s.engine.liquify_active())
+    }
+
+    /// Ctrl+Shift+X: starts liquifying the active layer.
+    fn begin_liquify_mode(&mut self) {
+        if self.liquifying() || self.boxed.is_some() {
+            return;
+        }
+        let Some(e) = self.engine() else { return };
+        match e.liquify_begin() {
+            Ok(()) => tracing::info!(
+                "Verflüssigen: W schieben, R rekonstruieren, C Strudel (Alt: links), S zusammenziehen, B aufblähen (Alt tauscht), [ ] Größe. Enter übernimmt, Esc bricht ab, Strg+Z nimmt den letzten Strich zurück."
+            ),
+            Err(e) => tracing::warn!("Verflüssigen nicht möglich: {e}"),
+        }
+        self.needs_redraw = true;
+    }
+
+    fn commit_liquify(&mut self) {
+        self.engine_op(|e| e.liquify_commit("Verflüssigen"));
+        self.needs_redraw = true;
+    }
+
+    fn cancel_liquify(&mut self) {
+        if let Some(e) = self.engine() {
+            e.liquify_cancel();
+        }
+        tracing::info!("Verflüssigen abgebrochen");
+        self.needs_redraw = true;
+    }
+
+    /// The liquify tool in effect (Alt reverses twirl and pucker/bloat).
+    fn liq_effective(&self) -> LiquifyTool {
+        match (self.liq_tool, self.mods.alt) {
+            (LiquifyTool::TwirlCw, true) => LiquifyTool::TwirlCcw,
+            (LiquifyTool::TwirlCcw, true) => LiquifyTool::TwirlCw,
+            (LiquifyTool::Pucker, true) => LiquifyTool::Bloat,
+            (LiquifyTool::Bloat, true) => LiquifyTool::Pucker,
+            (t, _) => t,
+        }
+    }
+
+    fn begin_liquify(&mut self, pos: DVec2, pressure: f32) -> Drag {
+        let doc = self.view.screen_to_doc(pos);
+        if let Some(e) = self.engine() {
+            e.liquify_stroke_start();
+        }
+        self.liq_tick = Instant::now();
+        self.liquify_continuous(doc, pressure, 1.0);
+        Drag::Liquify { last: doc, pressure }
+    }
+
+    /// One time-based dab of a continuous tool (twirl, pucker, …).
+    fn liquify_continuous(&mut self, at: DVec2, pressure: f32, rate: f64) {
+        let tool = self.liq_effective();
+        if !tool.continuous() {
+            return;
+        }
+        let (r, s) = (self.liq_size as f64 * 0.5, (self.liq_strength * pressure) as f64);
+        if let Some(e) = self.engine() {
+            e.liquify_dab(tool, at, DVec2::ZERO, r, s, rate);
+        }
+    }
+
+    /// Push dabs along the movement from `from` to `to`.
+    fn liquify_push(&mut self, from: DVec2, to: DVec2, pressure: f32) {
+        let tool = self.liq_effective();
+        if tool.continuous() {
+            return;
+        }
+        let (r, s) = (self.liq_size as f64 * 0.5, (self.liq_strength * pressure) as f64);
+        let d = to - from;
+        let n = (d.length() / (r * 0.1).max(1.0)).ceil().max(1.0) as usize;
+        let step = d / n as f64;
+        if let Some(e) = self.engine() {
+            for i in 1..=n {
+                e.liquify_dab(tool, from + step * i as f64, step, r, s, 1.0);
             }
         }
     }
@@ -866,6 +960,12 @@ impl App {
                 if let (Some(stroke), Some(s)) = (&mut self.stroke, &mut self.session) {
                     s.engine.stroke_dabs(&stroke.add(InputSample { pos: doc_pos, pressure }));
                 }
+            }
+            Drag::Liquify { last, pressure: p } => {
+                let (from, to) = (*last, self.view.screen_to_doc(pos));
+                *last = to;
+                *p = pressure;
+                self.liquify_push(from, to, pressure);
             }
             Drag::Pan { last } => {
                 let d = pos - *last;
@@ -1515,6 +1615,38 @@ impl App {
             Keysym::p | Keysym::P if ctrl && shift => self.ui_state.palette = Some((String::new(), 0)),
             Keysym::k if ctrl => self.ui_state.palette = Some((String::new(), 0)),
             Keysym::Tab => self.ui_state.hidden = !self.ui_state.hidden,
+            Keysym::Escape if self.liquifying() => self.cancel_liquify(),
+            Keysym::Return | Keysym::KP_Enter if self.liquifying() => self.commit_liquify(),
+            Keysym::z | Keysym::Z if ctrl && !shift && self.liquifying() => {
+                if !self.engine().is_some_and(|e| e.liquify_undo()) {
+                    tracing::info!("Verflüssigen: nichts mehr zurückzunehmen");
+                }
+            }
+            Keysym::x | Keysym::X if ctrl && shift => self.begin_liquify_mode(),
+            _ if self.liquifying() && !ctrl => {
+                let tool = match sym {
+                    Keysym::w | Keysym::W => Some(LiquifyTool::Push),
+                    Keysym::r | Keysym::R => Some(LiquifyTool::Reconstruct),
+                    Keysym::c | Keysym::C => Some(LiquifyTool::TwirlCw),
+                    Keysym::s | Keysym::S => Some(LiquifyTool::Pucker),
+                    Keysym::b | Keysym::B => Some(LiquifyTool::Bloat),
+                    Keysym::bracketleft => {
+                        self.liq_size = (self.liq_size / 1.2).max(4.0);
+                        None
+                    }
+                    Keysym::bracketright => {
+                        self.liq_size = (self.liq_size * 1.2).min(5000.0);
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(t) = tool {
+                    self.liq_tool = t;
+                    tracing::info!("Verflüssigen: {}", t.name());
+                }
+            }
+            // Other edits wait until liquify is applied or cancelled.
+            _ if self.liquifying() => tracing::info!("Erst Verflüssigen übernehmen (Enter) oder abbrechen (Esc)"),
             Keysym::Escape => self.cancel_box(),
             Keysym::Return | Keysym::KP_Enter => self.commit_box(),
             Keysym::t if ctrl => self.begin_transform(),
@@ -1974,6 +2106,7 @@ impl App {
                 BoxKind::Crop => "Zuschneiden",
             }),
             mask_edit: self.mask_edit,
+            liquify: e.liquify_active().then_some((self.liq_tool, self.liq_size, self.liq_strength)),
             layers: ui::panels::layer_rows(doc),
             active: doc.active,
             active_opacity: active.map_or(1.0, |l| l.opacity),
@@ -2081,6 +2214,18 @@ impl App {
                 Action::HistoryJump(n) => {
                     if self.engine().is_some_and(|e| e.jump_history(n)) {
                         self.touch();
+                    }
+                }
+                Action::Liquify { tool, size, strength } => {
+                    self.liq_tool = tool;
+                    self.liq_size = size;
+                    self.liq_strength = strength;
+                }
+                Action::LiquifyCommit => self.commit_liquify(),
+                Action::LiquifyCancel => self.cancel_liquify(),
+                Action::LiquifyUndo => {
+                    if let Some(e) = self.engine() {
+                        e.liquify_undo();
                     }
                 }
                 Action::CommitBox => self.commit_box(),
@@ -2220,7 +2365,18 @@ impl App {
         };
         let target = frame.texture.create_view(&Default::default());
 
-        let show_ring = self.tool.paints()
+        let liquifying = self.liquifying();
+        if liquifying
+            && let Drag::Liquify { last, pressure } = self.drag
+        {
+            let dt = self.liq_tick.elapsed().as_secs_f64();
+            self.liq_tick = Instant::now();
+            if self.liq_effective().continuous() {
+                self.liquify_continuous(last, pressure, (dt * 60.0).clamp(0.1, 4.0));
+                self.needs_redraw = true;
+            }
+        }
+        let show_ring = (self.tool.paints() || liquifying)
             && !matches!(self.drag, Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. })
             && !self.space
             && self.bench.is_none();
@@ -2228,8 +2384,9 @@ impl App {
             Drag::BrushHud { origin, .. } => Some(origin),
             _ => self.cursor.filter(|_| show_ring),
         };
+        let ring_size = if liquifying { self.liq_size } else { self.brush.size };
         let overlay = Overlay {
-            cursor: ring_at.map(|p| (p, self.brush.size * 0.5 * self.view.zoom as f32)),
+            cursor: ring_at.map(|p| (p, ring_size * 0.5 * self.view.zoom as f32)),
             checker_px: (8.0 * self.scale) as f32,
             lines: self.overlay_lines(),
             show_selection: self.bench.is_none(),
@@ -2255,6 +2412,7 @@ impl App {
                 self.upload_failures = 0;
             }
             let result = match &self.ui_state.filter_preview {
+                _ if s.engine.liquify_active() => s.engine.liquify_tick(),
                 Some(ui::panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
                 Some(ui::panels::FilterPreview::Smart(i, f)) => s.engine.set_smart_filter_preview(Some((*i, f))),
                 None => s.engine.set_transform_preview(preview.map(|f| (f, Interp::Bicubic))),

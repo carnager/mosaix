@@ -34,6 +34,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("Bearbeiten", "Fläche füllen", K::BackSpace, false, false, true),
     c("Bearbeiten", "Auswahl löschen (Pixel)", K::Delete, false, false, false),
     c("Bild", "Zuschneiden", K::c, false, false, false),
+    c("Bild", "Verflüssigen …", K::X, true, true, false),
     c("Bild", "Blend-Raum sRGB / linear", K::F7, false, false, false),
     c("Ebene", "Neue Ebene", K::N, true, true, false),
     c("Ebene", "Ebene duplizieren", K::j, true, false, false),

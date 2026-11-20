@@ -104,6 +104,8 @@ pub struct Model {
     pub wand_tolerance: f32,
     pub wand_contiguous: bool,
     pub boxed: Option<&'static str>,
+    /// Liquify session: tool, brush diameter, strength.
+    pub liquify: Option<(imagine_gpu::LiquifyTool, f32, f32)>,
     pub mask_edit: bool,
     pub layers: Vec<LayerRow>,
     pub active: LayerId,
@@ -155,6 +157,10 @@ pub enum Action {
     ToggleSmartFilter { layer: LayerId, index: usize },
     RemoveSmartFilter { layer: LayerId, index: usize },
     BakeSmartFilters(LayerId),
+    Liquify { tool: imagine_gpu::LiquifyTool, size: f32, strength: f32 },
+    LiquifyCommit,
+    LiquifyCancel,
+    LiquifyUndo,
     SetAdjustment { adj: imagine_core::Adjustment, done: bool },
 }
 
@@ -417,6 +423,44 @@ fn linear_color(c: [f32; 3]) -> Color32 {
 }
 
 fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    if let Some((tool, size, strength)) = m.liquify {
+        ui.group(|ui| {
+            ui.label(RichText::new("Verflüssigen").strong());
+            let (mut t, mut sz, mut st) = (tool, size, strength);
+            ui.horizontal_wrapped(|ui| {
+                for (lt, key) in imagine_gpu::LiquifyTool::ALL.into_iter().zip(["W", "R", "C", "Alt+C", "S", "B"]) {
+                    if ui.selectable_label(t == lt, lt.name()).on_hover_text(key).clicked() {
+                        t = lt;
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add_sized([60.0, 18.0], egui::Label::new("Größe"));
+                ui.add(egui::Slider::new(&mut sz, 4.0..=5000.0).logarithmic(true).suffix(" px").max_decimals(0));
+            });
+            ui.horizontal(|ui| {
+                ui.add_sized([60.0, 18.0], egui::Label::new("Stärke"));
+                let mut pct = st * 100.0;
+                ui.add(egui::Slider::new(&mut pct, 1.0..=100.0).suffix(" %").max_decimals(0));
+                st = pct / 100.0;
+            });
+            if (t, sz, st) != (tool, size, strength) {
+                out.push(Action::Liquify { tool: t, size: sz, strength: st });
+            }
+            ui.label(RichText::new("Enter übernimmt, Esc bricht ab, Strg+Z nimmt den letzten Strich zurück").weak().small());
+            ui.horizontal(|ui| {
+                if ui.button("Übernehmen").clicked() {
+                    out.push(Action::LiquifyCommit);
+                }
+                if ui.button("Zurück").clicked() {
+                    out.push(Action::LiquifyUndo);
+                }
+                if ui.button("Abbrechen").clicked() {
+                    out.push(Action::LiquifyCancel);
+                }
+            });
+        });
+    }
     if let Some(kind) = m.boxed {
         ui.group(|ui| {
             ui.label(RichText::new(kind).strong());

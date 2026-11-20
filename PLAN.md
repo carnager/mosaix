@@ -397,8 +397,9 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 - **Farbmanagement beim Import:** Eingebettete ICC-Profile (z. B. Display P3, Adobe RGB) werden mit moxcms nach linearem sRGB im erweiterten Bereich umgerechnet. Farben außerhalb von sRGB bleiben in f16 erhalten, statt abgeschnitten zu werden.
 - **Histogramm** in Tonwertkorrektur (mit ziehbaren Reglern für Tiefen, Gamma, Lichter) und Kurven. Es zeigt das Bild unterhalb der Einstellungsebene: Dieser Teil wird stapelweise in temporäre Kacheln geflattet, eine Mip-Stufe gelesen und gezählt; zwischengespeichert, bis sich darunter etwas ändert.
 - **Smart-Filter:** Filter können nicht-destruktiv an einer Pixelebene hängen (Option im Filterdialog). Sie stehen unter der Ebene in der Ebenenliste, lassen sich ein- und ausschalten, per Klick bearbeiten (mit Live-Vorschau), entfernen oder in die Pixel übernehmen. Die Engine rechnet die Filterkette einmal pro Änderung über die ganze Ebene und speichert das Ergebnis zwischen. Composite, Histogramm, Pipette und Export sehen das gefilterte Bild; Dateiformat v4.
+- **Verflüssigen** (Strg+Umschalt+X): Schieben, Rekonstruieren, Strudel, Zusammenziehen, Aufblähen. Ein Verschiebungsfeld (alle 8 px ein Stützpunkt, bei Riesenbildern gröber) wird auf der CPU bemalt; die GPU tastet immer die unveränderte Ebene bikubisch an der verschobenen Stelle ab, also kein Schärfeverlust durch wiederholtes Neuabtasten. Die Vorschau rechnet nur berührte, sichtbare Kacheln. Strg+Z nimmt innerhalb der Sitzung Striche zurück; Übernehmen ist ein Undo-Schritt.
 - **Export mit Farbprofil:** sRGB, Display P3, Adobe RGB oder Rec. 2020, 8 oder 16 Bit (PNG/TIFF), JPEG-Qualität. Weite Farbräume betten ihr ICC-Profil ein (PNG, JPEG, WebP, TIFF), die Umrechnung geht vom linearen Arbeitsfarbraum aus, also bleiben P3-Farben aus dem Import erhalten. Die Einstellungen merkt sich das Programm.
-- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`, `histogram`; `export` mit `color_space`, `bit_depth`, `quality`; `filter_apply` mit `smart`, `smart_filter_set`.
+- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`, `histogram`; `export` mit `color_space`, `bit_depth`, `quality`; `filter_apply` mit `smart`, `smart_filter_set`, `liquify`.
 
 | Messung (100 MP, RX 6700 XT) | Ergebnis |
 |---|---|
@@ -407,16 +408,16 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 | Rauschen | 17 ms |
 | Kurven-Einstellungsebene (kompletter Neuaufbau) | 42 ms |
 | 24-MP-PNG mit Display-P3-Profil laden | 133 ms (ohne Profil 67 ms) |
+| Verflüssigen 100 MP: Tupfer r = 300 / Übernehmen | 0,09 ms / 21 ms |
 | Histogramm unter einer Ebene | 36 ms, danach aus dem Cache 0,08 ms |
 | 24-MP-TIFF exportieren: sRGB / Display P3 / P3 16 Bit | 65 / 112 / 118 ms |
 
 **Noch offen in Phase 4:**
-- Verflüssigen
 - Monitorprofil (Wayland color-management)
 
 ## Nächster konkreter Schritt
 
-Rest von Phase 4: Verflüssigen, Monitorprofil. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
+Rest von Phase 4: Monitorprofil. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

@@ -25,6 +25,7 @@ mod display;
 mod filter;
 mod frame;
 mod histogram;
+mod liquify;
 mod magic;
 mod readback;
 mod selection;
@@ -47,6 +48,7 @@ use imagine_core::{Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TI
 pub use apply::GradientKind;
 pub use magic::SampleFrom;
 pub use histogram::Histogram;
+pub use liquify::LiquifyTool;
 pub use readback::{PoolKind, Readback};
 pub use thumbs::THUMB;
 pub use transform::{Interp, is_integer_translation};
@@ -176,6 +178,9 @@ pub struct Engine {
     smart: HashMap<LayerId, filter::SmartEntry>,
     /// The composited document when smart filters substitute layer pixels.
     render: Option<Document<Tile>>,
+    liquify: Option<liquify::Liquify>,
+    liquify_bgl: wgpu::BindGroupLayout,
+    liquify_pipeline: wgpu::RenderPipeline,
     pending_dabs: Vec<Dab>,
     pending_mips: Vec<crate::pool::SlotId>,
     visible: (DVec2, DVec2),
@@ -330,6 +335,7 @@ impl Engine {
         let bounds_shader = shader("bounds", include_str!("../shaders/bounds.wgsl").into());
         let similar_shader = shader("similar", include_str!("../shaders/similar.wgsl").into());
         let filter_shader = shader("filter", include_str!("../shaders/filter.wgsl").into());
+        let liquify_shader = shader("liquify", include_str!("../shaders/liquify.wgsl").into());
 
         // ---- bind group layouts ---------------------------------------------
         use wgpu::ShaderStages as S;
@@ -467,6 +473,8 @@ impl Engine {
         let warp_layout = layout("warp", &[&arrays_bgl, &warp_bgl]);
         let smudge_layout = layout("smudge", &[&arrays_bgl, &warp_bgl, &smudge_tex_bgl]);
         let similar_layout = layout("similar", &[&arrays_bgl, &apply_bgl, &comp_array_bgl]);
+        let liquify_bgl = bgl("liquify field", &[buffer(0, S::FRAGMENT, storage, false)]);
+        let liquify_layout = layout("liquify", &[&arrays_bgl, &warp_bgl, &liquify_bgl]);
 
         // ---- pipelines ------------------------------------------------------
         let tile_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32];
@@ -544,6 +552,8 @@ impl Engine {
         let smudge_write_pipeline =
             rp("smudge write", &smudge_layout, &smudge_shader, ("vs", "fs_write"), &[], TILE_FORMAT, None, TriangleList);
         let filter_pipeline = rp("filter", &warp_layout, &filter_shader, ("vs", "fs"), &[], TILE_FORMAT, None, TriangleList);
+        let liquify_pipeline =
+            rp("liquify", &liquify_layout, &liquify_shader, ("vs", "fs"), &[], TILE_FORMAT, None, TriangleList);
         let similar_pipeline =
             rp("similar", &similar_layout, &similar_shader, ("vs", "fs"), &[], MASK_FORMAT, None, TriangleList);
         let bounds_pipeline = compute_pipeline(
@@ -671,6 +681,9 @@ impl Engine {
             histogram: None,
             smart: HashMap::new(),
             render: None,
+            liquify: None,
+            liquify_bgl,
+            liquify_pipeline,
             pending_dabs: Vec::new(),
             pending_mips: Vec::new(),
             visible: (DVec2::ZERO, DVec2::ZERO),

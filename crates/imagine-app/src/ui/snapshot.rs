@@ -85,6 +85,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         wand_contiguous: true,
         boxed: None,
         mask_edit: false,
+        liquify: std::env::var_os("IMAGINE_SNAPSHOT_LIQUIFY").map(|_| (imagine_gpu::LiquifyTool::TwirlCw, 300.0, 0.6)),
         layers: panels::layer_rows(doc),
         active: active.id,
         active_opacity: active.opacity,
