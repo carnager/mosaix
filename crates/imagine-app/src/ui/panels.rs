@@ -304,6 +304,20 @@ pub struct State {
     smart_filters: bool,
     /// What the canvas should preview right now (set by the dialog).
     pub filter_preview: Option<FilterPreview>,
+    /// Upper tab of the right dock.
+    pub dock_tab: DockTab,
+    /// Whether the active layer had properties last frame (switches the tab).
+    had_props: bool,
+}
+
+/// Tabs above the layers in the right dock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DockTab {
+    #[default]
+    Properties,
+    Styles,
+    Color,
+    History,
 }
 
 enum Dialog {
@@ -317,6 +331,7 @@ impl State {
     /// Expands an effect in the layer-styles section.
     pub fn open_effect(&mut self, i: usize) {
         self.fx_open = Some(i);
+        self.dock_tab = DockTab::Styles;
     }
 
     pub fn open_filter(&mut self, f: imagine_core::Filter) {
@@ -459,18 +474,17 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
         egui::Panel::bottom("status")
             .exact_size(24.0)
             .show(ui, |ui| status_bar(ui, m, st));
+        egui::Panel::top("options")
+            .exact_size(34.0)
+            .show(ui, |ui| options_bar(ui, m, &mut out));
         egui::Panel::left("tools")
             .exact_size(46.0)
             .resizable(false)
-            .show(ui, |ui| toolbar(ui, m, &mut out));
+            .show(ui, |ui| toolbar(ui, m, st, &mut out));
         egui::Panel::right("side")
-            .default_size(280.0)
-            .min_size(220.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| side_panel(ui, m, st, &mut out));
-            });
+            .default_size(300.0)
+            .min_size(240.0)
+            .show(ui, |ui| dock(ui, m, st, &mut out));
         st.canvas = Some(ui.available_rect_before_wrap());
     });
     dialogs(ctx, m, st, &mut out);
@@ -649,7 +663,7 @@ fn status_bar(ui: &mut egui::Ui, m: &Model, st: &mut State) {
     });
 }
 
-fn toolbar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
+fn toolbar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     ui.add_space(4.0);
     ui.vertical_centered(|ui| {
         for (id, name, key) in TOOLS {
@@ -674,7 +688,12 @@ fn toolbar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             Stroke::new(1.0, Color32::from_gray(160)),
             egui::StrokeKind::Outside,
         );
-        resp.on_hover_text(tr("Brush color (X: black/white)"));
+        if resp
+            .on_hover_text(tr("Brush color (X: black/white)"))
+            .clicked()
+        {
+            st.dock_tab = DockTab::Color;
+        }
     });
 }
 
@@ -682,173 +701,191 @@ fn linear_color(c: [f32; 3]) -> Color32 {
     egui::Rgba::from_rgb(c[0], c[1], c[2]).into()
 }
 
-fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
-    if let Some((tool, size, strength)) = m.liquify {
-        ui.group(|ui| {
+/// The bar under the menu: the active tool and its options (or the
+/// options of a running free transform / liquify).
+fn options_bar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().slider_width = 96.0;
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if let Some((tool, size, strength)) = m.liquify {
             ui.label(RichText::new(tr("Liquify")).strong());
+            ui.separator();
             let (mut t, mut sz, mut st) = (tool, size, strength);
-            ui.horizontal_wrapped(|ui| {
-                for (lt, key) in imagine_gpu::LiquifyTool::ALL
-                    .into_iter()
-                    .zip(["W", "R", "C", "Alt+C", "S", "B"])
-                {
-                    if ui
-                        .selectable_label(t == lt, lt.name())
-                        .on_hover_text(key)
-                        .clicked()
-                    {
-                        t = lt;
-                    }
+            for (lt, key) in imagine_gpu::LiquifyTool::ALL
+                .into_iter()
+                .zip(["W", "R", "C", "Alt+C", "S", "B"])
+            {
+                if ui.selectable_label(t == lt, lt.name()).on_hover_text(key).clicked() {
+                    t = lt;
                 }
-            });
-            ui.horizontal(|ui| {
-                ui.add_sized([60.0, 18.0], egui::Label::new(tr("Size")));
-                ui.add(
-                    egui::Slider::new(&mut sz, 4.0..=5000.0)
-                        .logarithmic(true)
-                        .suffix(" px")
-                        .max_decimals(0),
-                );
-            });
-            ui.horizontal(|ui| {
-                ui.add_sized([60.0, 18.0], egui::Label::new(tr("Strength")));
-                let mut pct = st * 100.0;
-                ui.add(
-                    egui::Slider::new(&mut pct, 1.0..=100.0)
-                        .suffix(" %")
-                        .max_decimals(0),
-                );
-                st = pct / 100.0;
-            });
+            }
+            ui.separator();
+            ui.label(tr("Size"));
+            ui.add(egui::Slider::new(&mut sz, 4.0..=5000.0).logarithmic(true).suffix(" px").max_decimals(0));
+            let mut pct = st * 100.0;
+            ui.label(tr("Strength"));
+            ui.add(egui::Slider::new(&mut pct, 1.0..=100.0).suffix(" %").max_decimals(0));
+            st = pct / 100.0;
             if (t, sz, st) != (tool, size, strength) {
-                out.push(Action::Liquify {
-                    tool: t,
-                    size: sz,
-                    strength: st,
-                });
+                out.push(Action::Liquify { tool: t, size: sz, strength: st });
             }
-            ui.label(
-                RichText::new(tr(
-                    "Enter applies, Esc cancels, Ctrl+Z undoes the last stroke",
-                ))
-                .weak()
-                .small(),
-            );
-            ui.horizontal(|ui| {
-                if ui.button(tr("Apply")).clicked() {
-                    out.push(Action::LiquifyCommit);
-                }
-                if ui.button(tr("Step Back")).clicked() {
-                    out.push(Action::LiquifyUndo);
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    out.push(Action::LiquifyCancel);
-                }
-            });
-        });
-    }
-    if let Some(kind) = m.boxed {
-        ui.group(|ui| {
+            ui.separator();
+            if ui.button(tr("Apply")).on_hover_text("Enter").clicked() {
+                out.push(Action::LiquifyCommit);
+            }
+            if ui.button(tr("Step Back")).on_hover_text(tr("Ctrl+Z undoes the last stroke")).clicked() {
+                out.push(Action::LiquifyUndo);
+            }
+            if ui.button(tr("Cancel")).on_hover_text("Esc").clicked() {
+                out.push(Action::LiquifyCancel);
+            }
+            return;
+        }
+        if let Some(kind) = m.boxed {
             ui.label(RichText::new(tr(kind)).strong());
+            ui.separator();
             if let Some(angle) = m.box_angle {
-                ui.label(RichText::new(tr("Drag corners: scale (Shift: free) · drag outside: rotate (Shift: 15°) · Alt: around the center")).weak().small());
-                ui.horizontal(|ui| {
-                    ui.label(tr("Angle"));
-                    let mut a = angle;
-                    let r = ui.add(egui::DragValue::new(&mut a).range(-180.0..=180.0).suffix("°").speed(0.5).max_decimals(1));
-                    if r.changed() {
-                        out.push(Action::BoxAngle(a));
+                ui.label(tr("Angle"));
+                let mut a = angle;
+                if ui.add(egui::DragValue::new(&mut a).range(-180.0..=180.0).suffix("°").speed(0.5).max_decimals(1)).changed() {
+                    out.push(Action::BoxAngle(a));
+                }
+                for (label, deg, tip) in [("90° left", -90.0, "90° counterclockwise"), ("90° right", 90.0, "90° clockwise"), ("180°", 180.0, "half turn")] {
+                    if ui.small_button(tr(label)).on_hover_text(tr(tip)).clicked() {
+                        out.push(Action::BoxRotate(deg));
                     }
-                    for (label, deg, tip) in [("90° left", -90.0, "90° counterclockwise"), ("90° right", 90.0, "90° clockwise"), ("180°", 180.0, "half turn")] {
-                        if ui.small_button(tr(label)).on_hover_text(tr(tip)).clicked() {
-                            out.push(Action::BoxRotate(deg));
-                        }
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label(tr("Flip"));
-                    if ui.small_button(tr("horizontal")).clicked() {
-                        out.push(Action::BoxFlip { x: true, y: false });
-                    }
-                    if ui.small_button(tr("vertical")).clicked() {
-                        out.push(Action::BoxFlip { x: false, y: true });
-                    }
-                });
+                }
+                ui.separator();
+                ui.label(tr("Flip"));
+                if ui.small_button("↔").on_hover_text(tr("horizontal")).clicked() {
+                    out.push(Action::BoxFlip { x: true, y: false });
+                }
+                if ui.small_button("↕").on_hover_text(tr("vertical")).clicked() {
+                    out.push(Action::BoxFlip { x: false, y: true });
+                }
+                ui.separator();
             }
-            ui.label(RichText::new(tr("Enter applies, Esc cancels")).weak());
-            ui.horizontal(|ui| {
-                if ui.button(tr("Apply")).clicked() {
-                    out.push(Action::CommitBox);
-                }
-                if ui.button(tr("Cancel")).clicked() {
-                    out.push(Action::CancelBox);
-                }
-            });
+            if ui.button(tr("Apply")).on_hover_text("Enter").clicked() {
+                out.push(Action::CommitBox);
+            }
+            if ui.button(tr("Cancel")).on_hover_text("Esc").clicked() {
+                out.push(Action::CancelBox);
+            }
+            if m.box_angle.is_some() {
+                hint(ui, tr("Drag corners: scale (Shift: free) · drag outside: rotate (Shift: 15°) · Alt: around the center"));
+            }
+            return;
+        }
+        if let Some((id, name, _)) = TOOLS.iter().find(|t| t.0 == m.tool) {
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+            icons::paint(ui.painter(), r, Icon::Tool(*id), ui.visuals().strong_text_color());
+            ui.label(RichText::new(tr(name)).strong());
+            ui.separator();
+        }
+        tool_section(ui, m, out);
+    });
+}
+
+/// A short explanation at the end of the options bar (cut off when tight,
+/// complete on hover).
+fn hint(ui: &mut egui::Ui, text: &str) {
+    ui.separator();
+    ui.add(egui::Label::new(RichText::new(text).weak()).truncate())
+        .on_hover_text(text);
+}
+
+/// The right dock: tabs (properties, styles, colour, history) above the
+/// layers, which always stay visible; the divider can be dragged.
+fn dock(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    // A newly selected text, shape or adjustment layer shows its properties.
+    let has_props = m.active_vector.is_some() || m.active_adjustment.is_some();
+    if has_props && !st.had_props {
+        st.dock_tab = DockTab::Properties;
+    }
+    st.had_props = has_props;
+    egui::Panel::bottom("layers dock")
+        .resizable(true)
+        .default_size(340.0)
+        .min_size(140.0)
+        .max_size((ui.available_height() - 120.0).max(140.0))
+        .show(ui, |ui| {
+            ui.add_space(4.0);
+            ui.label(RichText::new(tr("Layers")).strong());
+            layer_section(ui, m, st, out);
         });
-    }
-    egui::CollapsingHeader::new(tr("Color"))
-        .default_open(true)
-        .show(ui, |ui| color_section(ui, m, st, out));
-    egui::CollapsingHeader::new(tr("Tool"))
-        .default_open(true)
-        .show(ui, |ui| tool_section(ui, m, out));
+    let fx = m.active_effects.as_ref().map_or(0, Vec::len);
+    let styles = if fx > 0 {
+        tr!("Styles ({n})", n = fx)
+    } else {
+        tr("Styles").to_string()
+    };
+    ui.horizontal(|ui| {
+        for (tab, label) in [
+            (DockTab::Properties, tr("Properties").to_string()),
+            (DockTab::Styles, styles),
+            (DockTab::Color, tr("Color").to_string()),
+            (DockTab::History, tr("History").to_string()),
+        ] {
+            if ui.selectable_label(st.dock_tab == tab, label).clicked() {
+                st.dock_tab = tab;
+            }
+        }
+    });
+    ui.separator();
+    egui::ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| match st.dock_tab {
+            DockTab::Properties => properties_tab(ui, m, st, out),
+            DockTab::Styles => match &m.active_effects {
+                Some(fx) => {
+                    if let Some((effects, done)) = super::style_ui::editor(ui, fx, &mut st.fx_open)
+                    {
+                        out.push(Action::SetEffects { effects, done });
+                    }
+                }
+                None => {
+                    ui.label(RichText::new(tr("Select a layer to add effects.")).weak());
+                }
+            },
+            DockTab::Color => color_section(ui, m, st, out),
+            DockTab::History => history_section(ui, m, out),
+        });
+}
+
+fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     if let Some(v) = &m.active_vector {
-        egui::CollapsingHeader::new(tr("Properties"))
-            .id_salt("vector props")
-            .default_open(true)
-            .show(ui, |ui| {
-                let e = super::vector_ui::editor(
-                    ui,
-                    v,
-                    &m.fonts,
-                    &m.favourite_fonts,
-                    &m.recent_fonts,
-                    m.color,
-                    &mut st.vec_editor,
-                );
-                if let Some((v, done)) = e.change {
-                    out.push(Action::SetVector { v, done });
-                }
-                if let Some(f) = e.font_used {
-                    out.push(Action::FontUsed(f));
-                }
-                if let Some(f) = e.toggle_favourite {
-                    out.push(Action::ToggleFavouriteFont(f));
-                }
-            });
+        let e = super::vector_ui::editor(
+            ui,
+            v,
+            &m.fonts,
+            &m.favourite_fonts,
+            &m.recent_fonts,
+            m.color,
+            &mut st.vec_editor,
+        );
+        if let Some((v, done)) = e.change {
+            out.push(Action::SetVector { v, done });
+        }
+        if let Some(f) = e.font_used {
+            out.push(Action::FontUsed(f));
+        }
+        if let Some(f) = e.toggle_favourite {
+            out.push(Action::ToggleFavouriteFont(f));
+        }
+    } else if let Some(adj) = &m.active_adjustment {
+        if let Some((adj, done)) =
+            super::adjust_ui::editor(ui, adj, &mut st.adj_editor, m.histogram.as_deref())
+        {
+            out.push(Action::SetAdjustment { adj, done });
+        }
+    } else {
+        ui.label(
+            RichText::new(tr(
+                "Pixel layer – text, shape and adjustment layers show their settings here.",
+            ))
+            .weak(),
+        );
     }
-    if let Some(adj) = &m.active_adjustment {
-        egui::CollapsingHeader::new(tr("Properties"))
-            .default_open(true)
-            .show(ui, |ui| {
-                if let Some((adj, done)) =
-                    super::adjust_ui::editor(ui, adj, &mut st.adj_editor, m.histogram.as_deref())
-                {
-                    out.push(Action::SetAdjustment { adj, done });
-                }
-            });
-    }
-    if let Some(fx) = &m.active_effects {
-        let title = if fx.is_empty() {
-            tr("Layer Styles").to_string()
-        } else {
-            tr!("Layer Styles ({n})", n = fx.len())
-        };
-        egui::CollapsingHeader::new(title)
-            .id_salt("layer styles")
-            .default_open(!fx.is_empty())
-            .show(ui, |ui| {
-                if let Some((effects, done)) = super::style_ui::editor(ui, fx, &mut st.fx_open) {
-                    out.push(Action::SetEffects { effects, done });
-                }
-            });
-    }
-    egui::CollapsingHeader::new(tr("Layers"))
-        .default_open(true)
-        .show(ui, |ui| layer_section(ui, m, st, out));
-    egui::CollapsingHeader::new(tr("History"))
-        .default_open(false)
-        .show(ui, |ui| history_section(ui, m, out));
 }
 
 const SWATCHES: [[u8; 3]; 12] = [
@@ -1013,57 +1050,54 @@ fn slider(
     range: std::ops::RangeInclusive<f32>,
     pct: bool,
 ) -> bool {
-    ui.horizontal(|ui| {
-        ui.add_sized([86.0, 18.0], egui::Label::new(label).truncate());
-        let s = egui::Slider::new(v, range).clamping(egui::SliderClamping::Always);
-        let s = if pct {
-            s.custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
-                .custom_parser(|t| {
-                    t.trim_end_matches('%')
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .map(|v| v / 100.0)
-                })
-        } else {
-            s
-        };
-        ui.add(s).changed()
-    })
-    .inner
+    ui.label(label);
+    let s = egui::Slider::new(v, range).clamping(egui::SliderClamping::Always);
+    let s = if pct {
+        s.custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
+            .custom_parser(|t| {
+                t.trim_end_matches('%')
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .map(|v| v / 100.0)
+            })
+    } else {
+        s
+    };
+    ui.add(s).changed()
 }
 
+/// Options of the active tool, laid out in a row (the options bar).
 fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     match m.tool {
-        ToolId::Text => {
-            ui.label(tr(
-                "Click in the image: new text. Click on a text: edit it.",
-            ));
-            ui.label(
-                RichText::new(tr(
-                    "Font, size and color are under Properties; new text uses the brush color.",
-                ))
-                .weak()
-                .small(),
-            );
-        }
-        ToolId::Pen => {
-            ui.label(tr("Click: corner · Drag: curve · Start point: close (filled) · Enter/Esc: finish open (line)"));
-            ui.label(RichText::new(tr("On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag moves one handle, Del deletes the point. Color: brush color.")).weak().small());
-        }
+        ToolId::Text => hint(
+            ui,
+            tr(
+                "Click in the image: new text. Click on a text: edit it. Font, size and color are under Properties; new text uses the brush color.",
+            ),
+        ),
+        ToolId::Pen => hint(
+            ui,
+            tr(
+                "Click: corner · Drag: curve · Start point: close (filled) · Enter/Esc: finish open (line). On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag moves one handle, Del deletes the point.",
+            ),
+        ),
         ToolId::Shape => {
-            ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(!m.shape_ellipse, tr("Rectangle"))
-                    .clicked()
-                {
-                    out.push(Action::ShapeEllipse(false));
-                }
-                if ui.selectable_label(m.shape_ellipse, "Ellipse").clicked() {
-                    out.push(Action::ShapeEllipse(true));
-                }
-            });
-            ui.label(RichText::new(tr("Drag out (Shift: square/circle, Alt: from the center). Fill in the brush color; stroke and corners under Properties.")).weak().small());
+            if ui
+                .selectable_label(!m.shape_ellipse, tr("Rectangle"))
+                .clicked()
+            {
+                out.push(Action::ShapeEllipse(false));
+            }
+            if ui.selectable_label(m.shape_ellipse, "Ellipse").clicked() {
+                out.push(Action::ShapeEllipse(true));
+            }
+            hint(
+                ui,
+                tr(
+                    "Drag out (Shift: square/circle, Alt: from the center). Fill in the brush color; stroke and corners under Properties.",
+                ),
+            );
         }
         ToolId::Brush
         | ToolId::Eraser
@@ -1073,66 +1107,27 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
         | ToolId::SpotHeal => {
             let mut b = m.brush;
             let mut changed = false;
-            ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Size")));
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut b.size, 1.0..=2000.0)
-                            .logarithmic(true)
-                            .suffix(" px")
-                            .max_decimals(0),
-                    )
-                    .changed();
-            });
-            ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Tip")));
-                egui::ComboBox::from_id_salt("tip")
-                    .selected_text(tr(TIP_NAMES[b.tip as usize]))
-                    .show_ui(ui, |ui| {
-                        for (i, n) in TIP_NAMES.iter().enumerate() {
-                            changed |= ui.selectable_value(&mut b.tip, i as u32, tr(n)).changed();
-                        }
-                    });
-            });
+            ui.label(tr("Size"));
+            changed |= ui
+                .add(
+                    egui::Slider::new(&mut b.size, 1.0..=2000.0)
+                        .logarithmic(true)
+                        .suffix(" px")
+                        .max_decimals(0),
+                )
+                .changed();
+            egui::ComboBox::from_id_salt("tip")
+                .selected_text(tr(TIP_NAMES[b.tip as usize]))
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    for (i, n) in TIP_NAMES.iter().enumerate() {
+                        changed |= ui.selectable_value(&mut b.tip, i as u32, tr(n)).changed();
+                    }
+                })
+                .response
+                .on_hover_text(tr("Tip"));
             if b.tip == 0 {
                 changed |= slider(ui, tr("Hardness"), &mut b.hardness, 0.0..=1.0, true);
-            }
-            if m.tool == ToolId::SpotHeal {
-                let (mut all, aligned) = (m.clone_all, m.clone_aligned);
-                if ui
-                    .checkbox(&mut all, tr("Sample All Layers"))
-                    .on_hover_text(tr("Heal on an empty layer"))
-                    .changed()
-                {
-                    out.push(Action::CloneOptions { all, aligned });
-                }
-                ui.label(
-                    RichText::new(tr(
-                        "Paint over the spot – the source is found automatically",
-                    ))
-                    .weak()
-                    .small(),
-                );
-            }
-            if matches!(m.tool, ToolId::Clone | ToolId::Heal) {
-                let (mut all, mut aligned) = (m.clone_all, m.clone_aligned);
-                let a = ui
-                    .checkbox(&mut all, tr("Sample All Layers"))
-                    .on_hover_text(tr(
-                        "The source is the whole image – for stamping onto an empty layer",
-                    ));
-                let b = ui.checkbox(&mut aligned, tr("Aligned")).on_hover_text(tr(
-                    "The offset to the source stays the same across all strokes",
-                ));
-                if a.changed() || b.changed() {
-                    out.push(Action::CloneOptions { all, aligned });
-                }
-                if !m.clone_source {
-                    ui.label(
-                        RichText::new(tr("Alt+click sets the source"))
-                            .color(Color32::from_rgb(255, 200, 120)),
-                    );
-                }
             }
             if m.tool == ToolId::Smudge {
                 let mut s = m.smudge_strength;
@@ -1143,36 +1138,84 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                 changed |= slider(ui, tr("Opacity"), &mut b.opacity, 0.0..=1.0, true);
                 changed |= slider(ui, tr("Flow"), &mut b.flow, 0.01..=1.0, true);
             }
-            changed |= slider(ui, tr("Spacing"), &mut b.spacing, 0.02..=2.0, true);
-            changed |= slider(ui, tr("Smoothing"), &mut b.smoothing, 0.0..=0.95, true);
-            egui::CollapsingHeader::new(tr("Shape & Dynamics"))
-                .default_open(false)
-                .show(ui, |ui| {
-                    changed |= slider(ui, tr("Angle"), &mut b.angle, -180.0..=180.0, false);
-                    changed |= slider(ui, tr("Roundness"), &mut b.roundness, 0.05..=1.0, true);
-                    changed |= ui
-                        .checkbox(&mut b.follow_direction, tr("Follow direction"))
-                        .changed();
-                    changed |= slider(ui, tr("Size ±"), &mut b.size_jitter, 0.0..=1.0, true);
-                    changed |= slider(ui, tr("Angle ±"), &mut b.angle_jitter, 0.0..=180.0, false);
-                    changed |= slider(ui, tr("Scatter"), &mut b.scatter, 0.0..=5.0, false);
-                    changed |= slider(ui, tr("Flow ±"), &mut b.flow_jitter, 0.0..=1.0, true);
-                });
+            ui.menu_button(tr("Brush Settings …"), |ui| {
+                egui::Grid::new("brush settings")
+                    .num_columns(2)
+                    .spacing([10.0, 6.0])
+                    .show(ui, |ui| {
+                        changed |= slider(ui, tr("Spacing"), &mut b.spacing, 0.02..=2.0, true);
+                        ui.end_row();
+                        changed |= slider(ui, tr("Smoothing"), &mut b.smoothing, 0.0..=0.95, true);
+                        ui.end_row();
+                        changed |= slider(ui, tr("Angle"), &mut b.angle, -180.0..=180.0, false);
+                        ui.end_row();
+                        changed |= slider(ui, tr("Roundness"), &mut b.roundness, 0.05..=1.0, true);
+                        ui.end_row();
+                        ui.label("");
+                        changed |= ui
+                            .checkbox(&mut b.follow_direction, tr("Follow direction"))
+                            .changed();
+                        ui.end_row();
+                        changed |= slider(ui, tr("Size ±"), &mut b.size_jitter, 0.0..=1.0, true);
+                        ui.end_row();
+                        changed |=
+                            slider(ui, tr("Angle ±"), &mut b.angle_jitter, 0.0..=180.0, false);
+                        ui.end_row();
+                        changed |= slider(ui, tr("Scatter"), &mut b.scatter, 0.0..=5.0, false);
+                        ui.end_row();
+                        changed |= slider(ui, tr("Flow ±"), &mut b.flow_jitter, 0.0..=1.0, true);
+                        ui.end_row();
+                    });
+            });
             if changed {
                 out.push(Action::Brush(b));
+            }
+            if matches!(m.tool, ToolId::Clone | ToolId::Heal | ToolId::SpotHeal) {
+                ui.separator();
+                let (mut all, mut aligned) = (m.clone_all, m.clone_aligned);
+                let tip = if m.tool == ToolId::SpotHeal {
+                    tr("Heal on an empty layer")
+                } else {
+                    tr("The source is the whole image – for stamping onto an empty layer")
+                };
+                let mut c = ui
+                    .checkbox(&mut all, tr("Sample All Layers"))
+                    .on_hover_text(tip)
+                    .changed();
+                if m.tool != ToolId::SpotHeal {
+                    c |= ui
+                        .checkbox(&mut aligned, tr("Aligned"))
+                        .on_hover_text(tr(
+                            "The offset to the source stays the same across all strokes",
+                        ))
+                        .changed();
+                }
+                if c {
+                    out.push(Action::CloneOptions { all, aligned });
+                }
+                if m.tool == ToolId::SpotHeal {
+                    hint(
+                        ui,
+                        tr("Paint over the spot – the source is found automatically"),
+                    );
+                } else if !m.clone_source {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(tr("Alt+click sets the source"))
+                            .color(Color32::from_rgb(255, 200, 120)),
+                    );
+                }
             }
         }
         ToolId::Wand => {
             let mut t = m.wand_tolerance;
-            ui.horizontal(|ui| {
-                ui.add_sized([86.0, 18.0], egui::Label::new(tr("Tolerance")));
-                if ui
-                    .add(egui::Slider::new(&mut t, 0.0..=255.0).max_decimals(0))
-                    .changed()
-                {
-                    out.push(Action::WandTolerance(t));
-                }
-            });
+            ui.label(tr("Tolerance"));
+            if ui
+                .add(egui::Slider::new(&mut t, 0.0..=255.0).max_decimals(0))
+                .changed()
+            {
+                out.push(Action::WandTolerance(t));
+            }
             let mut c = m.wand_contiguous;
             if ui
                 .checkbox(&mut c, tr("Contiguous"))
@@ -1181,31 +1224,32 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             {
                 out.push(Action::WandContiguous(c));
             }
-            ui.label(RichText::new(tr("Samples all layers. Shift = add, Alt = subtract.")).weak());
+            hint(ui, tr("Samples all layers. Shift = add, Alt = subtract."));
         }
         ToolId::Marquee | ToolId::Ellipse | ToolId::Lasso => {
-            ui.label(RichText::new(tr("Shift = add, Alt = subtract, both = intersect")).weak());
+            hint(ui, tr("Shift = add, Alt = subtract, both = intersect"))
         }
         ToolId::Move => {
-            ui.label(RichText::new(tr("Drag or arrow keys (Shift: 10 px). With a selection, only the selected pixels.")).weak());
             if ui.button(tr("Free Transform (Ctrl+T)")).clicked() {
                 out.push(Action::Command(palette::find("Free Transform")));
             }
-        }
-        ToolId::Crop => {
-            ui.label(
-                RichText::new(tr(
-                    "Drag a frame, adjust the handles. Dragging past the edge enlarges the canvas.",
-                ))
-                .weak(),
+            hint(
+                ui,
+                tr(
+                    "Drag or arrow keys (Shift: 10 px). With a selection, only the selected pixels.",
+                ),
             );
         }
+        ToolId::Crop => hint(
+            ui,
+            tr("Drag a frame, adjust the handles. Dragging past the edge enlarges the canvas."),
+        ),
         ToolId::Gradient | ToolId::Radial => {
-            ui.label(RichText::new(tr("Drag: from the brush color to transparent")).weak());
             let mut o = m.brush;
             if slider(ui, tr("Opacity"), &mut o.opacity, 0.0..=1.0, true) {
                 out.push(Action::Brush(o));
             }
+            hint(ui, tr("Drag: from the brush color to transparent"));
         }
     }
 }
@@ -1252,142 +1296,184 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
     });
     ui.add_space(2.0);
 
-    let row_h = 34.0;
-    for row in &m.layers {
-        let active = row.id == m.active;
-        let (rect, resp) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), row_h),
-            Sense::click_and_drag(),
-        );
-        let painter = ui.painter_at(rect);
-        if active {
-            painter.rect_filled(rect, 3.0, ACCENT.linear_multiply(0.35));
-        } else if resp.hovered() {
-            painter.rect_filled(rect, 3.0, Color32::from_white_alpha(10));
-        }
-        // Eye.
-        let eye = egui::Rect::from_center_size(
-            egui::pos2(rect.min.x + 12.0, rect.center().y),
-            Vec2::splat(18.0),
-        );
-        let eye_resp = ui.interact(eye, resp.id.with("eye"), Sense::click());
-        icons::paint(
-            &painter,
-            eye.shrink(2.0),
-            if row.visible {
-                Icon::Eye
-            } else {
-                Icon::EyeClosed
-            },
-            if row.visible {
-                Color32::from_gray(220)
-            } else {
-                Color32::from_gray(110)
-            },
-        );
-        if eye_resp.on_hover_text(tr("Show/hide")).clicked() {
-            out.push(Action::ToggleVisible(row.id));
-        }
-        let mut x = eye.max.x + 6.0 + row.depth as f32 * 14.0;
-        // Adjustment icon, or thumbnail on a checkerboard.
-        if row.adjustment {
-            let t = egui::Rect::from_min_size(
-                egui::pos2(x, rect.min.y + 3.0),
-                Vec2::splat(row_h - 6.0),
-            );
-            icons::paint(
-                &painter,
-                t.shrink(4.0),
-                Icon::Adjust,
-                Color32::from_gray(210),
-            );
-            x = t.max.x + 8.0;
-        } else if let Some(text) = row.vector {
-            let t = egui::Rect::from_min_size(
-                egui::pos2(x, rect.min.y + 3.0),
-                Vec2::splat(row_h - 6.0),
-            );
-            painter.rect_stroke(
-                t,
-                2.0,
-                Stroke::new(1.0, Color32::from_gray(90)),
-                egui::StrokeKind::Inside,
-            );
-            icons::paint(
-                &painter,
-                t.shrink(5.0),
-                Icon::Tool(if text { ToolId::Text } else { ToolId::Shape }),
-                Color32::from_gray(220),
-            );
-            x = t.max.x + 8.0;
-        } else if !row.group {
-            let t = egui::Rect::from_min_size(
-                egui::pos2(x, rect.min.y + 3.0),
-                Vec2::splat(row_h - 6.0),
-            );
-            let n = 4;
-            let c = t.width() / n as f32;
-            for j in 0..n {
-                for i in 0..n {
-                    let g = if (i + j) % 2 == 0 { 190 } else { 140 };
-                    let r = egui::Rect::from_min_size(
-                        t.min + Vec2::new(i as f32 * c, j as f32 * c),
-                        Vec2::splat(c),
-                    );
-                    painter.rect_filled(r, 0.0, Color32::from_gray(g));
+    // Buttons stay at the bottom; the list scrolls in the space above.
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        ui.horizontal(|ui| {
+            let cmd = palette::find;
+            for (icon, label) in [
+                (Icon::Plus, "New Layer"),
+                (Icon::Folder, "Group Layers"),
+                (Icon::Mask, "Add Layer Mask"),
+                (Icon::Duplicate, "Duplicate Layer"),
+            ] {
+                let c = cmd(label);
+                if icons::button(ui, icon, 24.0, false)
+                    .on_hover_text(format!("{} ({})", c.label_text(), c.shortcut()))
+                    .clicked()
+                {
+                    out.push(Action::Command(c));
                 }
             }
-            if let Some((tex, (u, v))) = row.thumb {
-                let size = Vec2::new(t.width() * u, t.height() * v);
-                let img = egui::Rect::from_center_size(t.center(), size);
-                painter.image(
-                    tex,
-                    img,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(u, v)),
-                    Color32::WHITE,
-                );
+            let r = icons::button(ui, Icon::Adjust, 24.0, false)
+                .on_hover_text(tr("New Adjustment Layer"));
+            egui::Popup::menu(&r).show(|ui| {
+                for a in imagine_core::Adjustment::defaults() {
+                    if ui.button(a.name()).clicked() {
+                        out.push(Action::AddAdjustment(a));
+                    }
+                }
+            });
+            if icons::button(ui, Icon::Trash, 24.0, false)
+                .on_hover_text(tr("Delete Layer"))
+                .clicked()
+            {
+                out.push(Action::DeleteLayer);
             }
-            painter.rect_stroke(
-                t,
-                0.0,
-                Stroke::new(1.0, Color32::from_gray(70)),
-                egui::StrokeKind::Outside,
-            );
-            x = t.max.x + 8.0;
-        }
-        // Mask badge.
-        let name_end =
-            rect.max.x - if row.has_mask { 28.0 } else { 4.0 } - if row.fx { 20.0 } else { 0.0 };
-        if row.fx {
-            let x = rect.max.x - if row.has_mask { 30.0 } else { 6.0 } - 8.0;
-            painter.text(
-                egui::pos2(x, rect.center().y),
-                egui::Align2::CENTER_CENTER,
-                "fx",
-                egui::FontId::proportional(11.0),
-                Color32::from_gray(190),
-            );
-        }
-        if row.has_mask {
-            let badge = egui::Rect::from_center_size(
-                egui::pos2(rect.max.x - 15.0, rect.center().y),
-                Vec2::new(22.0, 16.0),
-            );
-            let b_resp = ui.interact(badge, resp.id.with("mask"), Sense::click());
-            let editing = active && m.mask_edit;
-            painter.rect(
-                badge,
-                3.0,
-                if row.mask_enabled {
-                    Color32::from_gray(200)
-                } else {
-                    Color32::from_gray(80)
-                },
-                Stroke::new(if editing { 2.0 } else { 0.0 }, ACCENT),
-                egui::StrokeKind::Outside,
-            );
-            painter.circle_filled(badge.center(), 4.0, Color32::from_gray(30));
-            if b_resp
+        });
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    let row_h = 34.0;
+                    for row in &m.layers {
+                        let active = row.id == m.active;
+                        let (rect, resp) = ui.allocate_exact_size(
+                            Vec2::new(ui.available_width(), row_h),
+                            Sense::click_and_drag(),
+                        );
+                        let painter = ui.painter_at(rect);
+                        if active {
+                            painter.rect_filled(rect, 3.0, ACCENT.linear_multiply(0.35));
+                        } else if resp.hovered() {
+                            painter.rect_filled(rect, 3.0, Color32::from_white_alpha(10));
+                        }
+                        // Eye.
+                        let eye = egui::Rect::from_center_size(
+                            egui::pos2(rect.min.x + 12.0, rect.center().y),
+                            Vec2::splat(18.0),
+                        );
+                        let eye_resp = ui.interact(eye, resp.id.with("eye"), Sense::click());
+                        icons::paint(
+                            &painter,
+                            eye.shrink(2.0),
+                            if row.visible {
+                                Icon::Eye
+                            } else {
+                                Icon::EyeClosed
+                            },
+                            if row.visible {
+                                Color32::from_gray(220)
+                            } else {
+                                Color32::from_gray(110)
+                            },
+                        );
+                        if eye_resp.on_hover_text(tr("Show/hide")).clicked() {
+                            out.push(Action::ToggleVisible(row.id));
+                        }
+                        let mut x = eye.max.x + 6.0 + row.depth as f32 * 14.0;
+                        // Adjustment icon, or thumbnail on a checkerboard.
+                        if row.adjustment {
+                            let t = egui::Rect::from_min_size(
+                                egui::pos2(x, rect.min.y + 3.0),
+                                Vec2::splat(row_h - 6.0),
+                            );
+                            icons::paint(
+                                &painter,
+                                t.shrink(4.0),
+                                Icon::Adjust,
+                                Color32::from_gray(210),
+                            );
+                            x = t.max.x + 8.0;
+                        } else if let Some(text) = row.vector {
+                            let t = egui::Rect::from_min_size(
+                                egui::pos2(x, rect.min.y + 3.0),
+                                Vec2::splat(row_h - 6.0),
+                            );
+                            painter.rect_stroke(
+                                t,
+                                2.0,
+                                Stroke::new(1.0, Color32::from_gray(90)),
+                                egui::StrokeKind::Inside,
+                            );
+                            icons::paint(
+                                &painter,
+                                t.shrink(5.0),
+                                Icon::Tool(if text { ToolId::Text } else { ToolId::Shape }),
+                                Color32::from_gray(220),
+                            );
+                            x = t.max.x + 8.0;
+                        } else if !row.group {
+                            let t = egui::Rect::from_min_size(
+                                egui::pos2(x, rect.min.y + 3.0),
+                                Vec2::splat(row_h - 6.0),
+                            );
+                            let n = 4;
+                            let c = t.width() / n as f32;
+                            for j in 0..n {
+                                for i in 0..n {
+                                    let g = if (i + j) % 2 == 0 { 190 } else { 140 };
+                                    let r = egui::Rect::from_min_size(
+                                        t.min + Vec2::new(i as f32 * c, j as f32 * c),
+                                        Vec2::splat(c),
+                                    );
+                                    painter.rect_filled(r, 0.0, Color32::from_gray(g));
+                                }
+                            }
+                            if let Some((tex, (u, v))) = row.thumb {
+                                let size = Vec2::new(t.width() * u, t.height() * v);
+                                let img = egui::Rect::from_center_size(t.center(), size);
+                                painter.image(
+                                    tex,
+                                    img,
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(u, v),
+                                    ),
+                                    Color32::WHITE,
+                                );
+                            }
+                            painter.rect_stroke(
+                                t,
+                                0.0,
+                                Stroke::new(1.0, Color32::from_gray(70)),
+                                egui::StrokeKind::Outside,
+                            );
+                            x = t.max.x + 8.0;
+                        }
+                        // Mask badge.
+                        let name_end = rect.max.x
+                            - if row.has_mask { 28.0 } else { 4.0 }
+                            - if row.fx { 20.0 } else { 0.0 };
+                        if row.fx {
+                            let x = rect.max.x - if row.has_mask { 30.0 } else { 6.0 } - 8.0;
+                            painter.text(
+                                egui::pos2(x, rect.center().y),
+                                egui::Align2::CENTER_CENTER,
+                                "fx",
+                                egui::FontId::proportional(11.0),
+                                Color32::from_gray(190),
+                            );
+                        }
+                        if row.has_mask {
+                            let badge = egui::Rect::from_center_size(
+                                egui::pos2(rect.max.x - 15.0, rect.center().y),
+                                Vec2::new(22.0, 16.0),
+                            );
+                            let b_resp = ui.interact(badge, resp.id.with("mask"), Sense::click());
+                            let editing = active && m.mask_edit;
+                            painter.rect(
+                                badge,
+                                3.0,
+                                if row.mask_enabled {
+                                    Color32::from_gray(200)
+                                } else {
+                                    Color32::from_gray(80)
+                                },
+                                Stroke::new(if editing { 2.0 } else { 0.0 }, ACCENT),
+                                egui::StrokeKind::Outside,
+                            );
+                            painter.circle_filled(badge.center(), 4.0, Color32::from_gray(30));
+                            if b_resp
                 .on_hover_text(tr(
                     "Mask: click to switch between painting the mask and the pixels",
                 ))
@@ -1395,118 +1481,95 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
             {
                 out.push(Action::ToggleMaskEdit(row.id));
             }
-        }
-        // Name (double-click: rename).
-        if st.rename.as_ref().is_some_and(|(id, _)| *id == row.id) {
-            let (_, text) = st.rename.as_mut().unwrap();
-            let edit_rect = egui::Rect::from_min_max(
-                egui::pos2(x, rect.min.y + 1.0),
-                egui::pos2(name_end, rect.max.y - 1.0),
-            );
-            let r = ui.put(edit_rect, egui::TextEdit::singleline(text));
-            r.request_focus();
-            if r.lost_focus() {
-                let (id, name) = st.rename.take().unwrap();
-                if ui.input(|i| !i.key_pressed(egui::Key::Escape)) && !name.trim().is_empty() {
-                    out.push(Action::RenameLayer(id, name.trim().to_string()));
-                }
-            }
-        } else {
-            if row.group {
-                let r = egui::Rect::from_center_size(
-                    egui::pos2(x + 7.0, rect.center().y),
-                    Vec2::splat(14.0),
-                );
-                icons::paint(&painter, r, Icon::Folder, Color32::from_gray(190));
-                x += 18.0;
-            }
-            let galley = painter.layout_no_wrap(
-                row.name.clone(),
-                egui::FontId::proportional(13.5),
-                if row.visible {
-                    Color32::from_gray(230)
-                } else {
-                    Color32::from_gray(130)
-                },
-            );
-            painter
-                .with_clip_rect(egui::Rect::from_min_max(
-                    rect.min,
-                    egui::pos2(name_end, rect.max.y),
-                ))
-                .galley(
-                    egui::pos2(x, rect.center().y - galley.size().y / 2.0),
-                    galley,
-                    Color32::WHITE,
-                );
-        }
-        if resp.clicked() {
-            out.push(Action::SelectLayer(row.id));
-        }
-        if resp.double_clicked() {
-            st.rename = Some((row.id, row.name.clone()));
-        }
-        // Drag & drop: drop on the upper/lower third = above/below, middle of a group = into.
-        resp.dnd_set_drag_payload(row.id);
-        if let Some(pointer) = ui.ctx().pointer_interact_pos()
-            && rect.contains(pointer)
-            && let Some(payload) = resp.dnd_hover_payload::<LayerId>()
-            && *payload != row.id
-        {
-            let t = (pointer.y - rect.min.y) / rect.height();
-            let into = row.group && (0.3..0.7).contains(&t);
-            let stroke = Stroke::new(2.0, ACCENT);
-            if into {
-                painter.rect_stroke(rect.shrink(1.0), 3.0, stroke, egui::StrokeKind::Inside);
-            } else {
-                let y = if t < 0.5 { rect.min.y } else { rect.max.y };
-                painter.hline(rect.x_range(), y, stroke);
-            }
-            if let Some(payload) = resp.dnd_release_payload::<LayerId>() {
-                out.push(Action::MoveLayer {
-                    id: *payload,
-                    target: row.id,
-                    above: t < 0.5,
-                    into,
+                        }
+                        // Name (double-click: rename).
+                        if st.rename.as_ref().is_some_and(|(id, _)| *id == row.id) {
+                            let (_, text) = st.rename.as_mut().unwrap();
+                            let edit_rect = egui::Rect::from_min_max(
+                                egui::pos2(x, rect.min.y + 1.0),
+                                egui::pos2(name_end, rect.max.y - 1.0),
+                            );
+                            let r = ui.put(edit_rect, egui::TextEdit::singleline(text));
+                            r.request_focus();
+                            if r.lost_focus() {
+                                let (id, name) = st.rename.take().unwrap();
+                                if ui.input(|i| !i.key_pressed(egui::Key::Escape))
+                                    && !name.trim().is_empty()
+                                {
+                                    out.push(Action::RenameLayer(id, name.trim().to_string()));
+                                }
+                            }
+                        } else {
+                            if row.group {
+                                let r = egui::Rect::from_center_size(
+                                    egui::pos2(x + 7.0, rect.center().y),
+                                    Vec2::splat(14.0),
+                                );
+                                icons::paint(&painter, r, Icon::Folder, Color32::from_gray(190));
+                                x += 18.0;
+                            }
+                            let galley = painter.layout_no_wrap(
+                                row.name.clone(),
+                                egui::FontId::proportional(13.5),
+                                if row.visible {
+                                    Color32::from_gray(230)
+                                } else {
+                                    Color32::from_gray(130)
+                                },
+                            );
+                            painter
+                                .with_clip_rect(egui::Rect::from_min_max(
+                                    rect.min,
+                                    egui::pos2(name_end, rect.max.y),
+                                ))
+                                .galley(
+                                    egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+                                    galley,
+                                    Color32::WHITE,
+                                );
+                        }
+                        if resp.clicked() {
+                            out.push(Action::SelectLayer(row.id));
+                        }
+                        if resp.double_clicked() {
+                            st.rename = Some((row.id, row.name.clone()));
+                        }
+                        // Drag & drop: drop on the upper/lower third = above/below, middle of a group = into.
+                        resp.dnd_set_drag_payload(row.id);
+                        if let Some(pointer) = ui.ctx().pointer_interact_pos()
+                            && rect.contains(pointer)
+                            && let Some(payload) = resp.dnd_hover_payload::<LayerId>()
+                            && *payload != row.id
+                        {
+                            let t = (pointer.y - rect.min.y) / rect.height();
+                            let into = row.group && (0.3..0.7).contains(&t);
+                            let stroke = Stroke::new(2.0, ACCENT);
+                            if into {
+                                painter.rect_stroke(
+                                    rect.shrink(1.0),
+                                    3.0,
+                                    stroke,
+                                    egui::StrokeKind::Inside,
+                                );
+                            } else {
+                                let y = if t < 0.5 { rect.min.y } else { rect.max.y };
+                                painter.hline(rect.x_range(), y, stroke);
+                            }
+                            if let Some(payload) = resp.dnd_release_payload::<LayerId>() {
+                                out.push(Action::MoveLayer {
+                                    id: *payload,
+                                    target: row.id,
+                                    above: t < 0.5,
+                                    into,
+                                });
+                            }
+                        }
+                        if !row.filters.is_empty() {
+                            smart_filter_rows(ui, row, row.depth as f32 * 14.0 + 30.0, st, out);
+                        }
+                    }
                 });
-            }
-        }
-        if !row.filters.is_empty() {
-            smart_filter_rows(ui, row, row.depth as f32 * 14.0 + 30.0, st, out);
-        }
-    }
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        let cmd = palette::find;
-        for (icon, label) in [
-            (Icon::Plus, "New Layer"),
-            (Icon::Folder, "Group Layers"),
-            (Icon::Mask, "Add Layer Mask"),
-            (Icon::Duplicate, "Duplicate Layer"),
-        ] {
-            let c = cmd(label);
-            if icons::button(ui, icon, 24.0, false)
-                .on_hover_text(format!("{} ({})", c.label_text(), c.shortcut()))
-                .clicked()
-            {
-                out.push(Action::Command(c));
-            }
-        }
-        let r =
-            icons::button(ui, Icon::Adjust, 24.0, false).on_hover_text(tr("New Adjustment Layer"));
-        egui::Popup::menu(&r).show(|ui| {
-            for a in imagine_core::Adjustment::defaults() {
-                if ui.button(a.name()).clicked() {
-                    out.push(Action::AddAdjustment(a));
-                }
-            }
         });
-        if icons::button(ui, Icon::Trash, 24.0, false)
-            .on_hover_text(tr("Delete Layer"))
-            .clicked()
-        {
-            out.push(Action::DeleteLayer);
-        }
     });
 }
 

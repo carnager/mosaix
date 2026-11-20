@@ -2234,10 +2234,7 @@ impl App {
                     started,
                 });
             }
-            Err(err) => tracing::warn!(
-                "{}",
-                tr!("Content-Aware Fill: {error}", error = tr(err))
-            ),
+            Err(err) => tracing::warn!("{}", tr!("Content-Aware Fill: {error}", error = tr(err))),
         }
     }
 

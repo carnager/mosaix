@@ -233,6 +233,9 @@ msgstr "Pinsel-Dynamik (Größe, Winkel, Streuung, Fluss zufällig) an"
 msgid "Brush opacity {pct} %"
 msgstr "Pinsel-Deckkraft {pct} %"
 
+msgid "Brush Settings …"
+msgstr "Pinseleinstellungen …"
+
 msgid "Brush Stroke"
 msgstr "Pinselstrich"
 
@@ -290,11 +293,17 @@ msgstr "Klick setzt einen Punkt, Ziehen verschiebt ihn, aus dem Feld ziehen entf
 msgid "Click in the image: new text. Click on a text: edit it."
 msgstr "Klick ins Bild: neuer Text. Klick auf einen Text: bearbeiten."
 
+msgid "Click in the image: new text. Click on a text: edit it. Font, size and color are under Properties; new text uses the brush color."
+msgstr "Klick ins Bild: neuer Text. Klick auf einen Text: bearbeiten. Schrift, Größe und Farbe unter Eigenschaften; neuer Text nimmt die Pinselfarbe."
+
 msgid "Click to edit"
 msgstr "Klicken zum Bearbeiten"
 
 msgid "Click: corner · Drag: curve · Start point: close (filled) · Enter/Esc: finish open (line)"
 msgstr "Klicken: Ecke · Ziehen: Kurve · Startpunkt: schließen (gefüllt) · Enter/Esc: offen beenden (Linie)"
+
+msgid "Click: corner · Drag: curve · Start point: close (filled) · Enter/Esc: finish open (line). On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag moves one handle, Del deletes the point."
+msgstr "Klicken: Ecke · Ziehen: Kurve · Startpunkt: schließen (gefüllt) · Enter/Esc: offen beenden (Linie). Auf einem Pfad: Punkte und Griffe ziehen, Alt+Klick Ecke ↔ Kurve, Alt+Ziehen Griff einzeln, Entf löscht den Punkt."
 
 msgid "Clipboard not available"
 msgstr "Zwischenablage nicht verfügbar"
@@ -431,6 +440,9 @@ msgstr "Strg"
 msgid "Ctrl+T transforms losslessly, Layer › Rasterize turns it into pixels"
 msgstr "Strg+T transformiert verlustfrei, Ebene › Rastern macht Pixel daraus"
 
+msgid "Ctrl+Z undoes the last stroke"
+msgstr "Strg+Z nimmt den letzten Strich zurück"
+
 msgid "Curves"
 msgstr "Gradationskurven"
 
@@ -545,6 +557,9 @@ msgstr "Vektor ändern"
 msgid "Effect"
 msgstr "Effekt"
 
+msgid "Ellipse"
+msgstr "Ellipse"
+
 msgid "Elliptical Marquee"
 msgstr "Auswahlellipse"
 
@@ -635,11 +650,11 @@ msgstr "Datei wurde zwischenzeitlich verändert"
 msgid "Fill"
 msgstr "Füllen"
 
-msgid "Fill Color"
-msgstr "Fläche"
-
 msgid "Fill Area"
 msgstr "Fläche füllen"
+
+msgid "Fill Color"
+msgstr "Fläche"
 
 msgid "first select the area to fill"
 msgstr "erst den Bereich auswählen, der gefüllt werden soll"
@@ -782,6 +797,9 @@ msgstr "Verlauf"
 msgid "Home folder"
 msgstr "persönlicher Ordner"
 
+msgid "horizontal"
+msgstr "horizontal"
+
 msgid "Hue"
 msgstr "Farbton"
 
@@ -850,6 +868,9 @@ msgstr "Block"
 
 msgid "Justify"
 msgstr "Blocksatz"
+
+msgid "Lasso"
+msgstr "Lasso"
 
 msgid "Lasso Selection"
 msgstr "Lasso-Auswahl"
@@ -1043,6 +1064,9 @@ msgstr "keine aktive Ebene"
 msgid "no document loaded"
 msgstr "kein Dokument geladen"
 
+msgid "No effects yet – stroke, shadows, glow, bevel …"
+msgstr "Noch keine Effekte – Kontur, Schatten, Schein, Relief …"
+
 msgid "no histogram"
 msgstr "kein Histogramm"
 
@@ -1187,6 +1211,9 @@ msgstr "Foto 6000×4000"
 msgid "Pillow Emboss"
 msgstr "Kissen"
 
+msgid "Pixel layer – text, shape and adjustment layers show their settings here."
+msgstr "Pixelebene – Text-, Form- und Einstellungsebenen zeigen hier ihre Einstellungen."
+
 msgid "Pixels"
 msgstr "Pixel"
 
@@ -1198,6 +1225,9 @@ msgstr "nur PNG und TIFF"
 
 msgid "point lies outside the image"
 msgstr "Punkt liegt außerhalb des Bildes"
+
+msgid "Position"
+msgstr "Position"
 
 msgid "Posterize"
 msgstr "Tontrennung"
@@ -1400,6 +1430,9 @@ msgstr "Variante"
 msgid "Select"
 msgstr "Auswahl"
 
+msgid "Select a layer to add effects."
+msgstr "Wähle eine Ebene, um Effekte hinzuzufügen."
+
 msgid "Select All"
 msgstr "Alles auswählen"
 
@@ -1444,6 +1477,9 @@ msgstr "Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge"
 
 msgid "Show all messages"
 msgstr "Alle Meldungen anzeigen"
+
+msgid "Show settings"
+msgstr "Einstellungen zeigen"
 
 msgid "Show/hide"
 msgstr "ein-/ausblenden"
@@ -1511,6 +1547,9 @@ msgstr "Bereichsreparatur: keine passende Quelle im Bild gefunden"
 msgid "Spot healing: source at {offset}"
 msgstr "Bereichsreparatur: Quelle bei {offset}"
 
+msgid "spray"
+msgstr "Spray"
+
 msgid "Spread"
 msgstr "Überfüllen"
 
@@ -1543,6 +1582,12 @@ msgstr "Kontur"
 
 msgid "Style"
 msgstr "Schnitt"
+
+msgid "Styles"
+msgstr "Stile"
+
+msgid "Styles ({n})"
+msgstr "Stile ({n})"
 
 msgid "Subtract"
 msgstr "Subtrahieren"
@@ -1678,6 +1723,9 @@ msgstr "Transformieren"
 
 msgid "transformation is too flat (size 0)"
 msgstr "Transformation ist zu flach (Größe 0)"
+
+msgid "Transparent"
+msgstr "Transparent"
 
 msgid "Turn filter on/off"
 msgstr "Filter ein-/ausschalten"

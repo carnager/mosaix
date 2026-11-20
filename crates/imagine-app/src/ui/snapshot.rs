@@ -264,6 +264,14 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             row.thumb = Some((gui.register_texture(&gpu.device, &view), uv));
         }
     }
+    if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TAB") {
+        state.dock_tab = match t.as_str() {
+            "styles" => panels::DockTab::Styles,
+            "color" => panels::DockTab::Color,
+            "history" => panels::DockTab::History,
+            _ => panels::DockTab::Properties,
+        };
+    }
     if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TOOL") {
         model.tool = match t.as_str() {
             "wand" => ToolId::Wand,

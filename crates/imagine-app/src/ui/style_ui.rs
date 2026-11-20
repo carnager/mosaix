@@ -38,16 +38,15 @@ fn slider(
     range: std::ops::RangeInclusive<f32>,
     suffix: &str,
 ) {
-    ui.horizontal(|ui| {
-        ui.add_sized([80.0, 18.0], egui::Label::new(tr(label)));
-        let r = ui.add(
-            egui::Slider::new(v, range)
-                .suffix(suffix)
-                .max_decimals(0)
-                .clamping(egui::SliderClamping::Never),
-        );
-        t.add(&r);
-    });
+    ui.label(tr(label));
+    let r = ui.add(
+        egui::Slider::new(v, range)
+            .suffix(suffix)
+            .max_decimals(0)
+            .clamping(egui::SliderClamping::Never),
+    );
+    t.add(&r);
+    ui.end_row();
 }
 
 fn percent(ui: &mut egui::Ui, t: &mut Track, label: &str, v: &mut f32) {
@@ -57,24 +56,20 @@ fn percent(ui: &mut egui::Ui, t: &mut Track, label: &str, v: &mut f32) {
 }
 
 fn colour(ui: &mut egui::Ui, t: &mut Track, label: &str, c: &mut [f32; 3]) {
-    ui.horizontal(|ui| {
-        ui.add_sized([80.0, 18.0], egui::Label::new(tr(label)));
-        let mut rgb = egui::Rgba::from_rgb(c[0], c[1], c[2]);
-        let r = egui::color_picker::color_edit_button_rgba(
-            ui,
-            &mut rgb,
-            egui::color_picker::Alpha::Opaque,
-        );
-        if r.changed() {
-            *c = [rgb.r(), rgb.g(), rgb.b()];
-        }
-        t.add(&r);
-    });
+    ui.label(tr(label));
+    let mut rgb = egui::Rgba::from_rgb(c[0], c[1], c[2]);
+    let r =
+        egui::color_picker::color_edit_button_rgba(ui, &mut rgb, egui::color_picker::Alpha::Opaque);
+    if r.changed() {
+        *c = [rgb.r(), rgb.g(), rgb.b()];
+    }
+    t.add(&r);
+    ui.end_row();
 }
 
 fn angle(ui: &mut egui::Ui, t: &mut Track, v: &mut f32) {
+    ui.label(tr("Light Angle"));
     ui.horizontal(|ui| {
-        ui.add_sized([80.0, 18.0], egui::Label::new(tr("Light Angle")));
         let r = ui.add(
             egui::DragValue::new(v)
                 .range(-180.0..=180.0)
@@ -84,6 +79,7 @@ fn angle(ui: &mut egui::Ui, t: &mut Track, v: &mut f32) {
         t.add(&r);
         ui.label(RichText::new(tr("90° = from above")).weak().small());
     });
+    ui.end_row();
 }
 
 fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
@@ -95,8 +91,8 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
             opacity,
         } => {
             slider(ui, t, "Size", size, 1.0..=100.0, " px");
+            ui.label(tr("Position"));
             ui.horizontal(|ui| {
-                ui.add_sized([80.0, 18.0], egui::Label::new(tr("Position")));
                 for (p, n) in [
                     (StrokePosition::Outside, tr("Outside")),
                     (StrokePosition::Center, tr("Centered")),
@@ -108,6 +104,7 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
                     }
                 }
             });
+            ui.end_row();
             colour(ui, t, "Color", color);
             percent(ui, t, "Opacity", opacity);
         }
@@ -175,8 +172,8 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
             shadow,
             shadow_opacity,
         } => {
+            ui.label(tr("Type"));
             ui.horizontal(|ui| {
-                ui.add_sized([80.0, 18.0], egui::Label::new(tr("Type")));
                 for (s, n) in [
                     (BevelStyle::Inner, tr("Inner Bevel")),
                     (BevelStyle::Emboss, tr("Emboss")),
@@ -188,6 +185,7 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
                     }
                 }
             });
+            ui.end_row();
             slider(ui, t, "Size", size, 1.0..=100.0, " px");
             let mut d = *depth * 100.0;
             slider(ui, t, "Depth", &mut d, 1.0..=500.0, " %");
@@ -203,6 +201,48 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
     }
 }
 
+/// Colour and a short description for the effect's row (so two strokes
+/// can be told apart without opening them).
+fn summary(k: &EffectKind) -> ([f32; 3], String) {
+    let px = |v: f32| format!("{v:.0} px");
+    match k {
+        EffectKind::Stroke {
+            size,
+            position,
+            color,
+            ..
+        } => {
+            let pos = match position {
+                StrokePosition::Outside => tr("Outside"),
+                StrokePosition::Center => tr("Centered"),
+                StrokePosition::Inside => tr("Inside"),
+            };
+            (*color, format!("{} · {}", px(*size), pos))
+        }
+        EffectKind::DropShadow {
+            color,
+            distance,
+            size,
+            ..
+        } => (*color, format!("{} · {}", px(*distance), px(*size))),
+        EffectKind::InnerShadow {
+            color,
+            distance,
+            size,
+            ..
+        } => (*color, format!("{} · {}", px(*distance), px(*size))),
+        EffectKind::OuterGlow { color, size, .. } | EffectKind::InnerGlow { color, size, .. } => {
+            (*color, px(*size))
+        }
+        EffectKind::ColorOverlay { color, opacity } => {
+            (*color, format!("{:.0} %", opacity * 100.0))
+        }
+        EffectKind::Bevel {
+            highlight, size, ..
+        } => (*highlight, px(*size)),
+    }
+}
+
 /// Shows the effects of the active layer; `Some((new list, done))` on change.
 pub fn editor(
     ui: &mut egui::Ui,
@@ -212,7 +252,12 @@ pub fn editor(
     let mut list = effects.to_vec();
     let mut t = Track::default();
     let mut remove = None;
+    if list.is_empty() {
+        ui.label(RichText::new(tr("No effects yet – stroke, shadows, glow, bevel …")).weak());
+    }
     for (i, e) in list.iter_mut().enumerate() {
+        let expanded = *open == Some(i);
+        let (colour, info) = summary(&e.kind);
         ui.horizontal(|ui| {
             if ui
                 .checkbox(&mut e.enabled, "")
@@ -221,18 +266,73 @@ pub fn editor(
             {
                 t.click();
             }
-            let expanded = *open == Some(i);
-            if ui.selectable_label(expanded, e.kind.name()).clicked() {
+            let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+            ui.painter().rect_filled(
+                r,
+                2.0,
+                egui::Rgba::from_rgb(colour[0], colour[1], colour[2]),
+            );
+            ui.painter().rect_stroke(
+                r,
+                2.0,
+                egui::Stroke::new(1.0, egui::Color32::from_gray(120)),
+                egui::StrokeKind::Outside,
+            );
+            let strong = if e.enabled {
+                ui.visuals().strong_text_color()
+            } else {
+                ui.visuals().weak_text_color()
+            };
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                e.kind.name(),
+                0.0,
+                egui::TextFormat {
+                    color: strong,
+                    ..Default::default()
+                },
+            );
+            job.append(
+                &format!("   {info}"),
+                0.0,
+                egui::TextFormat {
+                    color: ui.visuals().weak_text_color(),
+                    ..Default::default()
+                },
+            );
+            let w = (ui.available_width() - 30.0).max(40.0);
+            let (rect, r) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::click());
+            if expanded || r.hovered() {
+                let fill = if expanded {
+                    egui::Color32::from_gray(58)
+                } else {
+                    egui::Color32::from_gray(44)
+                };
+                ui.painter().rect_filled(rect, 3.0, fill);
+            }
+            let galley = ui.painter().layout_job(job);
+            ui.painter().galley(
+                egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0),
+                galley,
+                strong,
+            );
+            if r.on_hover_text(tr("Show settings")).clicked() {
                 *open = if expanded { None } else { Some(i) };
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(tr("Remove")).clicked() {
-                    remove = Some(i);
-                }
-            });
+            if super::icons::button(ui, super::icons::Icon::Trash, 20.0, false)
+                .on_hover_text(tr("Remove"))
+                .clicked()
+            {
+                remove = Some(i);
+            }
         });
-        if *open == Some(i) {
-            ui.indent(("fx", i), |ui| settings(ui, &mut e.kind, &mut t));
+        if expanded {
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                egui::Grid::new(("fx", i))
+                    .num_columns(2)
+                    .spacing([10.0, 6.0])
+                    .show(ui, |ui| settings(ui, &mut e.kind, &mut t));
+            });
         }
     }
     if let Some(i) = remove {
@@ -240,16 +340,15 @@ pub fn editor(
         *open = None;
         t.click();
     }
+    ui.add_space(4.0);
     let mut add = None;
-    egui::ComboBox::from_id_salt("add effect")
-        .selected_text(tr("Add effect …"))
-        .show_ui(ui, |ui| {
-            for k in EffectKind::defaults() {
-                if ui.selectable_label(false, k.name()).clicked() {
-                    add = Some(k);
-                }
+    ui.menu_button(format!("+ {}", tr("Add effect …")), |ui| {
+        for k in EffectKind::defaults() {
+            if ui.button(k.name()).clicked() {
+                add = Some(k);
             }
-        });
+        }
+    });
     if let Some(kind) = add {
         list.push(Effect {
             enabled: true,
