@@ -1247,6 +1247,9 @@ msgstr "Absatz"
 msgid "Parent folder"
 msgstr "übergeordneter Ordner"
 
+msgid "Pass Through"
+msgstr "Hindurchwirken"
+
 msgid "Paste"
 msgstr "Einfügen"
 
@@ -1726,6 +1729,9 @@ msgstr "die Datei enthält keine Bilddaten"
 
 msgid "the file is truncated"
 msgstr "die Datei ist abgeschnitten"
+
+msgid "The group's layers blend directly with what is below the group"
+msgstr "Die Ebenen der Gruppe wirken direkt auf alles unter der Gruppe"
 
 msgid "the layer already has a mask"
 msgstr "die Ebene hat bereits eine Maske"

@@ -224,6 +224,7 @@ fn blend_modes_match_cpu_reference() {
         let gid = d.group_active().unwrap();
         let grp = d.find_mut(gid).unwrap();
         grp.blend = BlendMode::Multiply;
+        grp.pass_through = false; // a blend mode makes the group isolated
         grp.opacity = 0.6;
         true
     });
@@ -2655,4 +2656,45 @@ fn clipping_mask_limits_to_base_and_uses_base_opacity() {
     });
     e.flush();
     assert!(composite_px(&e, t, 20, 20)[1] > 0.99);
+}
+
+#[test]
+fn pass_through_group_blends_with_what_is_below() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 1.0, "blue").unwrap();
+    e.edit("new", |d| {
+        d.add_pixel_layer();
+        true
+    });
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "red").unwrap();
+    let red = e.doc().active;
+    e.edit("multiply + group", |d| {
+        d.find_mut(red).unwrap().blend = BlendMode::Multiply;
+        d.group_active().is_some()
+    });
+    let group = e.doc().active;
+    assert!(e.doc().find(group).unwrap().pass_through, "new groups are Pass Through");
+    e.flush();
+    let t = TileCoord::new(0, 0);
+    let c = composite_px(&e, t, 10, 10);
+    assert!(c[0] < 0.01 && c[2] < 0.01, "red × blue = black: {c:?}");
+    // Isolated: multiply acts inside the group only → red over blue.
+    e.edit("isolate", |d| {
+        d.find_mut(group).unwrap().pass_through = false;
+        true
+    });
+    e.flush();
+    let c = composite_px(&e, t, 10, 10);
+    assert!(c[0] > 0.99 && c[2] < 0.01, "isolated: red: {c:?}");
+    // Pass Through with group opacity 50 %: halfway between blue and black.
+    e.edit("half", |d| {
+        let l = d.find_mut(group).unwrap();
+        l.pass_through = true;
+        l.opacity = 0.5;
+        true
+    });
+    e.flush();
+    let c = composite_px(&e, t, 10, 10);
+    assert!((c[2] - 0.5).abs() < 0.02 && c[0] < 0.01, "{c:?}");
 }

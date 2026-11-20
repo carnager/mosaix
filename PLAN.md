@@ -461,7 +461,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Schnittmasken** (Strg+Alt+G, Ebene-Menü, Agenten `layer_set clip`): eine Ebene zeigt sich nur, wo die Basisebene darunter Pixel hat; Basis plus geschnittene Ebenen werden als eigene Gruppe berechnet (geschnittene Ebenen „atop“), Deckkraft und Füllmethode der Basis gelten für die Gruppe, ausgeblendete Basis blendet alle aus. Auch Gruppen, Text, Formen und Einstellungsebenen können Basis oder geschnitten sein; Effektebenen erben das. PSD-Import und -Export übernehmen Schnittmasken, `.imagine` speichert sie.
 
-**Noch offen in Phase 7:** Einstellungsebenen und Text als PSD-Ebenen, „Hindurchwirken“-Gruppen, JPEG XL/AVIF, ABR-Pinsel.
+- **Gruppen „Hindurchwirken“** (Photoshops Standard, jetzt auch für neue Gruppen): die Ebenen der Gruppe wirken direkt auf alles darunter (Füllmethoden, Einstellungsebenen), Deckkraft und Maske der Gruppe blenden das Ergebnis über. Im Füllmethoden-Menü einer Gruppe ganz oben; eine andere Füllmethode macht die Gruppe isoliert. Ältere `.imagine`-Dateien bleiben isoliert (unverändertes Aussehen). PSD-Import/-Export übernehmen es; Agenten: `layer_set pass_through`.
+
+**Noch offen in Phase 7:** Einstellungsebenen und Text als PSD-Ebenen, JPEG XL/AVIF, ABR-Pinsel.
 
 ## Nächster konkreter Schritt
 

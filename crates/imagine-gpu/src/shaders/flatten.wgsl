@@ -6,7 +6,7 @@ const NONE: u32 = 0xffffffffu;
 const MAX_DEPTH: u32 = 7u;
 
 struct Op {
-    kind: u32,           // 0 layer, 1 push group, 2 pop group, 3 adjustment (slot = params, blend = kind), 4/5 clipped layer/pop
+    kind: u32,           // 0 layer, 1 push group, 2 pop group, 3 adjustment (slot = params, blend = kind), 4/5 clipped layer/pop, 6/7 pass-through push/pop
     slot: u32,           // packed chunk<<16 | layer, or NONE
     blend: u32,
     opacity: f32,
@@ -119,6 +119,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         } else if op.kind == 1u {
             sp = min(sp + 1u, MAX_DEPTH);
             stack[sp] = vec4<f32>(0.0);
+        } else if op.kind == 6u {
+            // Pass Through: the children start from what is below.
+            let below = stack[sp];
+            sp = min(sp + 1u, MAX_DEPTH);
+            stack[sp] = below;
+        } else if op.kind == 7u {
+            let w = load_mask(op.mask_slot, op.mask_const, p) * op.opacity;
+            let inner = stack[sp];
+            sp = select(sp - 1u, 0u, sp == 0u);
+            stack[sp] = mix(stack[sp], inner, w);
         } else {
             let child = stack[sp] * (load_mask(op.mask_slot, op.mask_const, p) * op.opacity);
             sp = select(sp - 1u, 0u, sp == 0u);

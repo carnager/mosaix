@@ -3098,6 +3098,7 @@ impl App {
             active: doc.active,
             active_opacity: active.map_or(1.0, |l| l.opacity),
             active_blend: active.map_or(imagine_core::BlendMode::Normal, |l| l.blend),
+            active_pass_through: active.filter(|l| l.is_group()).map(|l| l.pass_through),
             history,
             history_done,
             has_selection: doc.selection.is_some(),
@@ -3312,8 +3313,18 @@ impl App {
                 Action::LayerBlend(b) => self.edit(tr("Blend Mode"), |d| {
                     let id = d.active;
                     let l = d.find_mut(id).unwrap();
-                    let c = l.blend != b;
+                    let c = l.blend != b || l.pass_through;
                     l.blend = b;
+                    l.pass_through = false;
+                    c
+                }),
+                Action::PassThrough(on) => self.edit(tr("Blend Mode"), |d| {
+                    let id = d.active;
+                    let l = d.find_mut(id).unwrap();
+                    let c = l.is_group() && l.pass_through != on;
+                    if c {
+                        l.pass_through = on;
+                    }
                     c
                 }),
                 Action::DeleteLayer => self.edit(tr("Delete Layer"), |d| d.remove_active()),

@@ -113,6 +113,10 @@ pub struct Layer<T> {
     /// Clipping mask: shown only where the layers below it (down to the
     /// first unclipped "base" layer) have pixels.
     pub clip: bool,
+    /// Groups: "Pass Through" – the children blend directly with what is
+    /// below the group (Photoshop's default); otherwise the group is
+    /// composited on its own first (isolated, "Normal").
+    pub pass_through: bool,
 }
 
 impl<T> Layer<T> {
@@ -171,14 +175,17 @@ pub enum Op<'a, T> {
         /// Clipped: covers only where something is already drawn (source-atop).
         clip: bool,
     },
-    /// Start an isolated group.
-    Push,
+    /// Start a group: isolated (empty), or `pass` (Pass Through: starts
+    /// from what is below).
+    Push { pass: bool },
     /// Composite the group onto what is below.
     Pop {
         opacity: f32,
         blend: BlendMode,
         mask: Option<MaskRef<'a, T>>,
         clip: bool,
+        /// Pass Through: mix with what was below by opacity × mask.
+        pass: bool,
     },
     /// Apply an adjustment to what is below (mixed by opacity × mask).
     Adjust {
@@ -489,6 +496,7 @@ impl<T: Clone> Document<T> {
             blend: BlendMode::Normal,
             visible: true,
             content: Content::Group(vec![inner]),
+            pass_through: true,
             mask: None,
             mask_enabled: true,
             filters: Vec::new(),
@@ -618,6 +626,7 @@ impl<T: Clone> Document<T> {
             out: &mut Vec<Op<'a, T>>,
             (opacity, blend): (f32, BlendMode),
             clip: bool,
+            base: bool,
         ) {
             let m = mask(l, c);
             // Fully masked out – unless a stroke is being painted into this layer (or its mask).
@@ -641,7 +650,7 @@ impl<T: Clone> Document<T> {
                 Content::Vector(_) => {}
                 Content::Adjustment(adj) => {
                     // Nothing below in this group: nothing to adjust.
-                    if !out.is_empty() && !matches!(out.last(), Some(Op::Push)) {
+                    if !out.is_empty() && !matches!(out.last(), Some(Op::Push { pass: false })) {
                         out.push(Op::Adjust {
                             id: l.id,
                             adj,
@@ -652,8 +661,10 @@ impl<T: Clone> Document<T> {
                     }
                 }
                 Content::Group(children) => {
+                    // A clipping base or a clipped group is composited isolated.
+                    let pass = l.pass_through && !clip && !base;
                     let start = out.len();
-                    out.push(Op::Push);
+                    out.push(Op::Push { pass });
                     walk(children, c, force, out);
                     if out.len() == start + 1 {
                         out.pop(); // empty group
@@ -663,6 +674,7 @@ impl<T: Clone> Document<T> {
                             blend,
                             mask: m,
                             clip,
+                            pass,
                         });
                     }
                 }
@@ -692,15 +704,23 @@ impl<T: Clone> Document<T> {
                     continue;
                 }
                 if clipped.iter().all(|l| !shown(l)) {
-                    emit(base, c, force, out, (base.opacity, base.blend), false);
+                    emit(
+                        base,
+                        c,
+                        force,
+                        out,
+                        (base.opacity, base.blend),
+                        false,
+                        false,
+                    );
                     i = j;
                     continue;
                 }
                 // Clipping group: base plainly, clipped layers atop, then the
                 // base's opacity and blend mode for the whole group.
                 let start = out.len();
-                out.push(Op::Push);
-                emit(base, c, force, out, (1.0, BlendMode::Normal), false);
+                out.push(Op::Push { pass: false });
+                emit(base, c, force, out, (1.0, BlendMode::Normal), false, true);
                 if out.len() == start + 1 {
                     // The base has nothing here: neither do the clipped layers.
                     out.pop();
@@ -708,13 +728,14 @@ impl<T: Clone> Document<T> {
                     continue;
                 }
                 for l in clipped.iter().filter(|l| shown(l)) {
-                    emit(l, c, force, out, (l.opacity, l.blend), true);
+                    emit(l, c, force, out, (l.opacity, l.blend), true, false);
                 }
                 out.push(Op::Pop {
                     opacity: base.opacity,
                     blend: base.blend,
                     mask: None,
                     clip: false,
+                    pass: false,
                 });
                 i = j;
             }
@@ -770,6 +791,7 @@ impl<T: Clone> Document<T> {
                     filters: l.filters.clone(),
                     effects: l.effects.clone(),
                     clip: l.clip,
+                    pass_through: l.pass_through,
                 })
                 .collect()
         }
@@ -829,6 +851,7 @@ impl<T> Layer<T> {
             filters: Vec::new(),
             effects: Vec::new(),
             clip: false,
+            pass_through: false,
         }
     }
 
@@ -863,7 +886,10 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 (*blend as u32).hash(h);
                 hash_mask(mask, &key, h);
             }
-            Op::Push => 1u8.hash(h),
+            Op::Push { pass } => {
+                1u8.hash(h);
+                pass.hash(h);
+            }
             Op::Adjust {
                 id,
                 adj,
@@ -884,9 +910,11 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 blend,
                 mask,
                 clip,
+                pass,
             } => {
                 2u8.hash(h);
                 clip.hash(h);
+                pass.hash(h);
                 opacity.to_bits().hash(h);
                 (*blend as u32).hash(h);
                 hash_mask(mask, &key, h);
@@ -921,9 +949,17 @@ mod adjust_tests {
         ));
         // Nothing below at (1, 0): no adjust op (and no program).
         assert!(d.program(TileCoord::new(1, 0), None).is_empty());
-        // Inside a group as first child: nothing below within the group.
+        // Inside a Pass Through group (the default): still adjusts what is below.
         d.active = adj;
-        d.group_active();
+        let g = d.group_active().unwrap();
+        let p = d.program(TileCoord::new(0, 0), None);
+        assert!(
+            matches!(p.as_slice(), [Op::Layer { .. }, Op::Push { pass: true }, Op::Adjust { .. }, Op::Pop { pass: true, .. }]),
+            "{:?}",
+            p.len()
+        );
+        // In an isolated group as first child: nothing below within the group.
+        d.find_mut(g).unwrap().pass_through = false;
         let p = d.program(TileCoord::new(0, 0), None);
         assert!(matches!(p.as_slice(), [Op::Layer { .. }]), "{:?}", p.len());
     }
@@ -1021,7 +1057,7 @@ mod tests {
         let p = d.program(TileCoord::new(0, 0), None);
         assert_eq!(p.len(), 4);
         assert!(matches!(p[0], Op::Layer { id, .. } if id == bg));
-        assert!(matches!(p[1], Op::Push));
+        assert!(matches!(p[1], Op::Push { .. }));
         assert!(matches!(p[3], Op::Pop { opacity, .. } if opacity == 0.5));
         // Masks: solid 0 hides, a pixel tile becomes part of the op, solid 255 is a no-op.
         let mut m = Mask::filled(255);

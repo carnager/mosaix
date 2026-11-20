@@ -165,6 +165,8 @@ pub struct Model {
     pub active: LayerId,
     pub active_opacity: f32,
     pub active_blend: BlendMode,
+    /// Active layer is a group: whether it is Pass Through.
+    pub active_pass_through: Option<bool>,
     pub history: Vec<String>,
     pub history_done: usize,
     pub has_selection: bool,
@@ -191,6 +193,8 @@ pub enum Action {
     Tool(ToolId),
     Color([f32; 3]),
     BgColor([f32; 3]),
+    /// Groups: Pass Through on/off (choosing a blend mode turns it off).
+    PassThrough(bool),
     SwapColors,
     ResetColors,
     Eyedrop {
@@ -1501,12 +1505,32 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
 
 pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     ui.horizontal(|ui| {
+        let pass = m.active_pass_through == Some(true);
         egui::ComboBox::from_id_salt("blend")
             .width(130.0)
-            .selected_text(m.active_blend.name())
+            .selected_text(if pass {
+                tr("Pass Through")
+            } else {
+                m.active_blend.name()
+            })
             .show_ui(ui, |ui| {
+                if m.active_pass_through.is_some() {
+                    if ui
+                        .selectable_label(pass, tr("Pass Through"))
+                        .on_hover_text(tr(
+                            "The group's layers blend directly with what is below the group",
+                        ))
+                        .clicked()
+                    {
+                        out.push(Action::PassThrough(true));
+                    }
+                    ui.separator();
+                }
                 for b in BlendMode::ALL {
-                    if ui.selectable_label(b == m.active_blend, b.name()).clicked() {
+                    if ui
+                        .selectable_label(!pass && b == m.active_blend, b.name())
+                        .clicked()
+                    {
                         out.push(Action::LayerBlend(b));
                     }
                 }

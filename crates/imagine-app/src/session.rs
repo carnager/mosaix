@@ -508,6 +508,7 @@ impl PsdLayers {
                     blend: l.blend,
                     visible: l.visible,
                     clip: l.clip,
+                    pass_through: l.pass_through,
                     tiles: Vec::new(),
                     mask,
                 };

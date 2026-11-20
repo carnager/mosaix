@@ -738,7 +738,6 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     let mut stack: Vec<Vec<Node>> = vec![Vec::new()];
     let mut specials = std::collections::BTreeMap::<&str, usize>::new();
     let mut unknown_blend = 0;
-    let mut passthrough = 0;
     for (r, data) in records.into_iter().zip(layer_data) {
         let get_mask = |id: i16| data.iter().find(|(i, _)| *i == id).map(|(_, v)| v.clone());
         let mask = r.mask.and_then(|(mr, default, enabled)| {
@@ -779,17 +778,6 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
                 } else {
                     Vec::new()
                 };
-                // Pass-through groups let their children blend with what is
-                // below; imagine groups are isolated. Same result unless a
-                // child uses another blend mode.
-                let blends = |n: &Node| match n {
-                    Node::Layer { info, .. } | Node::Group { info, .. } => {
-                        info.blend != BlendMode::Normal || info.special == Some("adjustment layer")
-                    }
-                };
-                if &r.blend_key == b"pass" && children.iter().any(blends) {
-                    passthrough += 1;
-                }
                 stack.last_mut().unwrap().push(Node::Group {
                     info,
                     children,
@@ -822,12 +810,6 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             "{n} × {what}: only the pixels were taken over",
             n = n,
             what = tr(what)
-        ));
-    }
-    if passthrough > 0 {
-        warnings.push(imagine_core::tr!(
-            "{n} “Pass Through” groups are composited as isolated groups (their blend modes act inside the group only)",
-            n = passthrough
         ));
     }
     if unknown_blend > 0 {
@@ -868,6 +850,8 @@ pub struct WLayer {
     pub blend: BlendMode,
     pub visible: bool,
     pub clip: bool,
+    /// Groups: Pass Through.
+    pub pass_through: bool,
     pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
     pub mask: Option<WMask>,
 }
@@ -1161,8 +1145,11 @@ fn write_record(o: &mut Out, l: &WLayer, e: &Encoded, divider: Option<u32>) {
         o.len(data.len(), true);
     }
     o.b.extend(b"8BIM");
-    // imagine groups are isolated, i.e. Photoshop's "Normal" group mode.
-    o.b.extend(blend_key(l.blend));
+    o.b.extend(if l.pass_through {
+        b"pass"
+    } else {
+        blend_key(l.blend)
+    });
     o.u8((l.opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
     o.u8(l.clip as u8); // clipping: 0 = base, 1 = clipped
     o.u8(if l.visible { 0 } else { 2 } | 8); // bit 3: bit 4 is meaningful
@@ -1208,7 +1195,11 @@ fn write_record(o: &mut Out, l: &WLayer, e: &Encoded, divider: Option<u32>) {
         o.u32(t);
         if t != 3 {
             o.b.extend(b"8BIM");
-            o.b.extend(blend_key(l.blend));
+            o.b.extend(if l.pass_through {
+                b"pass"
+            } else {
+                blend_key(l.blend)
+            });
         }
         o.close(blk, 4);
     }
@@ -1258,6 +1249,7 @@ pub fn write(
         blend: BlendMode::Normal,
         visible: true,
         clip: false,
+        pass_through: false,
         tiles: Vec::new(),
         mask: None,
     };
@@ -1274,6 +1266,7 @@ pub fn write(
                     blend: l.blend,
                     visible: l.visible,
                     clip: false,
+                    pass_through: l.pass_through,
                     tiles: Vec::new(),
                     mask: l.mask.clone(),
                 },
@@ -1337,6 +1330,7 @@ pub fn write(
         blend: BlendMode::Normal,
         visible: true,
         clip: false,
+        pass_through: false,
         tiles: composite.to_vec(),
         mask: None,
     };

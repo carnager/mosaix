@@ -161,7 +161,8 @@ pub fn tools() -> Vec<Value> {
                 "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
                 "blend": { "type": "string", "enum": blend_keys, "description": "Blend mode (Photoshop semantics)" },
                 "visible": { "type": "boolean" },
-                "clip": { "type": "boolean", "description": "Clipping mask: the layer shows only where the layers below it (down to the first unclipped one) have pixels; that base layer's opacity and blend mode apply to the group" }
+                "clip": { "type": "boolean", "description": "Clipping mask: the layer shows only where the layers below it (down to the first unclipped one) have pixels; that base layer's opacity and blend mode apply to the group" },
+                "pass_through": { "type": "boolean", "description": "Groups only: Pass Through (Photoshop's default for groups) – children blend directly with what is below the group; false = isolated group using its own blend mode" }
             }),
             &[],
             false,

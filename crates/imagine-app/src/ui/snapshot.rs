@@ -110,6 +110,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         active: active.id,
         active_opacity: active.opacity,
         active_blend: active.blend,
+        active_pass_through: active.is_group().then_some(active.pass_through),
         history: labels,
         history_done: done,
         has_selection: doc.selection.is_some(),

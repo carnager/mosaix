@@ -103,6 +103,7 @@ mod roundtrip {
             blend: BlendMode::Normal,
             visible: true,
             clip: false,
+            pass_through: false,
             tiles,
             mask: None,
         }
@@ -144,6 +145,7 @@ mod roundtrip {
         });
         let mut group = layer("Gruppe", Vec::new());
         group.visible = false;
+        group.pass_through = true;
         let nodes = vec![
             WNode::Layer(bg),
             WNode::Layer(red),
@@ -187,6 +189,7 @@ mod roundtrip {
             panic!()
         };
         assert_eq!(info.name, "Gruppe");
+        assert_eq!(&info.blend_key, b"pass");
         assert!(!info.visible);
         let Node::Layer {
             info: g, rect: gr, ..

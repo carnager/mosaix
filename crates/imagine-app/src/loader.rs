@@ -353,6 +353,7 @@ fn load_psd(
                         let mut l = Layer::pixels(id, &info.name);
                         info_to_layer(&mut l, &info);
                         l.content = Content::Group(build(children, doc, rasters, masks));
+                        l.pass_through = &info.blend_key == b"pass";
                         if let Some(m) = info.mask {
                             l.mask_enabled = m.enabled;
                             masks.push((id, m));

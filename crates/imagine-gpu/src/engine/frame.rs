@@ -145,7 +145,7 @@ impl FlattenBatch {
                         adj_blend: blend as u32,
                     }
                 }
-                Op::Push => {
+                Op::Push { pass } => {
                     depth += 1;
                     if depth > MAX_GROUP_DEPTH && !self.deep_warned {
                         tracing::warn!(
@@ -158,7 +158,7 @@ impl FlattenBatch {
                         self.deep_warned = true;
                     }
                     GpuOp {
-                        kind: 1,
+                        kind: if pass { 6 } else { 1 },
                         ..Zeroable::zeroed()
                     }
                 }
@@ -167,11 +167,18 @@ impl FlattenBatch {
                     blend,
                     mask,
                     clip,
+                    pass,
                 } => {
                     depth = depth.saturating_sub(1);
                     let (mask_slot, mask_const) = mask_slot(mask);
                     GpuOp {
-                        kind: if clip { 5 } else { 2 },
+                        kind: if pass {
+                            7
+                        } else if clip {
+                            5
+                        } else {
+                            2
+                        },
                         blend: blend as u32,
                         opacity,
                         mask_slot,

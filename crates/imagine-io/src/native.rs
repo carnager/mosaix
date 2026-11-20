@@ -96,6 +96,8 @@ struct LayerEntry {
     effects: Vec<imagine_core::style::Effect>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     clip: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pass_through: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -216,6 +218,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                 filters: l.filters.clone(),
                 effects: l.effects.clone(),
                 clip: l.clip,
+                pass_through: l.pass_through,
             })
             .collect()
     }
@@ -284,6 +287,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     filters: e.filters,
                     effects: e.effects,
                     clip: e.clip,
+                    pass_through: e.pass_through,
                 })
             })
             .collect()

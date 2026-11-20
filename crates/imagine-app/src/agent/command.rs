@@ -99,6 +99,8 @@ pub enum Command {
         visible: Option<bool>,
         /// Clipping mask: show only where the layers below have pixels.
         clip: Option<bool>,
+        /// Groups: Pass Through (children blend with what is below).
+        pass_through: Option<bool>,
     },
     LayerSelect {
         layer: LayerId,
@@ -717,6 +719,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             blend,
             visible,
             clip,
+            pass_through,
         } => {
             let id = target_layer(s, layer)?;
             let blend = blend
@@ -743,6 +746,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 }
                 if let Some(c) = clip {
                     l.clip = c;
+                }
+                if let Some(p) = pass_through {
+                    l.pass_through = p && l.is_group();
                 }
                 if let Some(v) = visible {
                     l.visible = v;
