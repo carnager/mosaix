@@ -19,7 +19,7 @@ pub enum Handle {
     Create,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Modifiers {
     /// Photoshop: toggles proportional scaling, snaps rotation to 15°, constrains moves.
     pub shift: bool,
@@ -43,6 +43,10 @@ pub struct BoxEdit {
     /// Free transform: rotation allowed, corners scale proportionally by default.
     /// Crop: axis-aligned, free aspect ratio, clicking outside draws a new box.
     pub free: bool,
+    /// Transform the content already had when the box was opened (vector
+    /// layers keep their rotation): the box starts there, `delta` is what
+    /// gets applied.
+    pub origin: DAffine2,
     drag: Option<Drag>,
 }
 
@@ -55,8 +59,22 @@ impl BoxEdit {
             base: (min, max),
             fwd: DAffine2::IDENTITY,
             free,
+            origin: DAffine2::IDENTITY,
             drag: None,
         }
+    }
+
+    /// Starts the box in the content's own frame (e.g. a rotated text):
+    /// `min`/`max` are then the untransformed bounds.
+    pub fn with_origin(mut self, m: DAffine2) -> Self {
+        self.fwd = m;
+        self.origin = m;
+        self
+    }
+
+    /// The change made in this box (what to apply to the content).
+    pub fn delta(&self) -> DAffine2 {
+        self.fwd * self.origin.inverse()
     }
 
     fn local_point(&self, sx: i8, sy: i8) -> DVec2 {
@@ -288,6 +306,28 @@ fn nonzero(v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn origin_frame_scales_along_the_rotated_axes() {
+        // A box already turned by 30°: dragging the right edge stretches
+        // along that axis and the angle stays.
+        let m = DAffine2::from_angle(30f64.to_radians());
+        let mut b = BoxEdit::new(DVec2::ZERO, DVec2::new(100.0, 50.0), true).with_origin(m);
+        assert!((b.angle() - 30.0).abs() < 1e-9);
+        assert_eq!(b.delta(), DAffine2::IDENTITY);
+        let edge = m.transform_point2(DVec2::new(100.0, 25.0));
+        b.begin(Handle::Scale { sx: 1, sy: 0 }, edge);
+        b.update(
+            m.transform_point2(DVec2::new(200.0, 25.0)),
+            Modifiers::default(),
+        );
+        assert!((b.angle() - 30.0).abs() < 1e-9, "{}", b.angle());
+        // The delta doubles the width along the rotated x axis.
+        let d = b.delta();
+        let p = d.transform_point2(m.transform_point2(DVec2::new(100.0, 0.0)));
+        let want = m.transform_point2(DVec2::new(200.0, 0.0));
+        assert!(p.distance(want) < 1e-6, "{p} vs {want}");
+    }
 
     const NONE: Modifiers = Modifiers {
         shift: false,

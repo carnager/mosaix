@@ -1166,13 +1166,25 @@ impl App {
             return;
         }
         let id = l.id;
-        match e.content_bounds(id) {
-            Some((x0, y0, x1, y1)) => {
-                let b = BoxEdit::new(
-                    DVec2::new(x0 as f64, y0 as f64),
-                    DVec2::new(x1 as f64, y1 as f64),
-                    true,
-                );
+        // Text and shapes: the box follows their own (rotated, scaled) frame,
+        // like in Photoshop, instead of the axis-aligned bounds.
+        let own_frame = l.vector().and_then(|v| {
+            let m = DAffine2::from_cols_array(&v.transform);
+            let mut plain = v.clone();
+            plain.transform = imagine_core::vector::IDENTITY;
+            let [x0, y0, x1, y1] = imagine_vector::bounds(&plain)?;
+            (m.matrix2.determinant().abs() > 1e-9 && x1 > x0 && y1 > y0)
+                .then(|| BoxEdit::new(DVec2::new(x0, y0), DVec2::new(x1, y1), true).with_origin(m))
+        });
+        let bounds = e.content_bounds(id).map(|(x0, y0, x1, y1)| {
+            BoxEdit::new(
+                DVec2::new(x0 as f64, y0 as f64),
+                DVec2::new(x1 as f64, y1 as f64),
+                true,
+            )
+        });
+        match own_frame.or(bounds) {
+            Some(b) => {
                 self.boxed = Some((BoxKind::Transform, b));
                 tracing::info!(
                     "{}",
@@ -1196,7 +1208,7 @@ impl App {
         };
         match kind {
             BoxKind::Transform => {
-                let fwd = b.fwd;
+                let fwd = b.delta();
                 self.engine_op(|e| e.transform_active(fwd, Interp::Bicubic, tr("Free Transform")));
             }
             BoxKind::Crop => {
@@ -1227,7 +1239,7 @@ impl App {
     /// The transform to show live (free transform, or a move in progress).
     fn preview_transform(&self) -> Option<DAffine2> {
         match (&self.boxed, &self.drag) {
-            (Some((BoxKind::Transform, b)), _) => Some(b.fwd),
+            (Some((BoxKind::Transform, b)), _) => Some(b.delta()),
             (_, Drag::Move { start, end }) => {
                 Some(DAffine2::from_translation(self.move_delta(*start, *end)))
             }
