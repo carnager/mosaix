@@ -597,7 +597,7 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
             ui.menu_button(palette::menu_text(menu), |ui| {
                 for c in COMMANDS.iter().filter(|c| c.menu == menu) {
                     if ui
-                        .add(egui::Button::new(c.label_text()).shortcut_text(palette::shortcut_text(&c, &m.keymap)))
+                        .add(egui::Button::new(c.label_text()).shortcut_text(palette::shortcut_text(c, &m.keymap)))
                         .clicked()
                     {
                         out.push(Action::Command(*c));
