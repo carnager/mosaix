@@ -188,7 +188,7 @@ impl<'a> Cur<'a> {
 
 // --- Decompression -------------------------------------------------------
 
-fn packbits(src: &[u8], out: &mut Vec<u8>, want: usize) -> Result<()> {
+pub(crate) fn packbits(src: &[u8], out: &mut Vec<u8>, want: usize) -> Result<()> {
     let mut i = 0;
     let start = out.len();
     while out.len() - start < want && i < src.len() {
@@ -778,6 +778,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     let mut lm = c.sub(lm_len)?;
     let mut records = Vec::new();
     let mut layer_data: Vec<Vec<(i16, Vec<u8>)>> = Vec::new();
+    let mut patterns: Vec<(String, imagine_core::pattern::Pattern)> = Vec::new();
     let parse_layers = |info: &mut Cur,
                         records: &mut Vec<Record>,
                         layer_data: &mut Vec<Vec<(i16, Vec<u8>)>>|
@@ -822,8 +823,8 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             let g = lm.u32()? as usize;
             lm.skip(g.min(lm.left()))?;
         }
-        // 16/32-bit documents keep their layers in a tagged block.
-        while records.is_empty() && lm.left() >= 12 {
+        // Tagged blocks: the layers of 16/32-bit documents, the patterns.
+        while lm.left() >= 12 {
             let sig = lm.bytes(4)?;
             if sig != b"8BIM" && sig != b"8B64" {
                 break;
@@ -831,8 +832,11 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             let key: [u8; 4] = lm.bytes(4)?.try_into()?;
             let len = lm.len(wide_key(&key))?;
             let mut d = lm.sub(len.min(lm.left()))?;
-            if matches!(&key, b"Lr16" | b"Lr32" | b"Layr") {
+            if matches!(&key, b"Lr16" | b"Lr32" | b"Layr") && records.is_empty() {
                 parse_layers(&mut d, &mut records, &mut layer_data)?;
+            }
+            if matches!(&key, b"Patt" | b"Pat2" | b"Pat3") {
+                patterns.extend(crate::psd_patterns::read(d.bytes(d.left())?));
             }
             // Blocks are padded to 4 bytes.
             let pad = (4 - len % 4) % 4;
@@ -934,7 +938,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         let fill_opacity = r.fill_opacity.map_or(1.0, |f| f as f32 / 255.0);
         let effects = match &r.fx {
             Some(fx) => {
-                let (fx, lost) = crate::psd_fx::read(fx, light);
+                let (fx, lost) = crate::psd_fx::read(fx, light, &patterns);
                 for l in lost {
                     *lost_fx.entry(l).or_default() += 1;
                 }
@@ -1627,6 +1631,26 @@ pub fn write(
     }
     o.close(li, 2);
     o.u32(0); // global layer mask info
+    // The patterns of pattern overlays.
+    let mut pats: Vec<(String, &imagine_core::pattern::Pattern)> = Vec::new();
+    for r in &recs {
+        if let Rec::Layer(w) | Rec::Folder(w) = r {
+            for e in &w.effects {
+                if let imagine_core::style::EffectKind::PatternOverlay { pattern, .. } = &e.kind {
+                    let id = crate::psd_patterns::pattern_id(pattern);
+                    if !pats.iter().any(|(i, _)| *i == id) {
+                        pats.push((id, pattern));
+                    }
+                }
+            }
+        }
+    }
+    if !pats.is_empty() {
+        o.b.extend(b"8BIMPatt");
+        let blk = o.open(false);
+        o.b.extend(crate::psd_patterns::write(&pats));
+        o.close(blk, 4);
+    }
     o.close(lm, 2);
     // Merged image, RLE: all row counts first, then the rows.
     let merged = WLayer {

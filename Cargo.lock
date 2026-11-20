@@ -1368,6 +1368,7 @@ dependencies = [
 name = "imagine-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytemuck",
  "glam",
  "half",

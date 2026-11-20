@@ -98,6 +98,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         wand_contiguous: true,
         bg_color: [1.0; 3],
         custom_tips: Vec::new(),
+        patterns: std::sync::Arc::new(imagine_core::pattern::Pattern::builtin()),
         eyedrop_radius: 0,
         eyedrop_all: true,
         boxed: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| "Free Transform"),

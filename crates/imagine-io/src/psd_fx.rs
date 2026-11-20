@@ -5,6 +5,7 @@
 //! pattern overlay are reported as not carried over.
 
 use imagine_core::BlendMode;
+use imagine_core::pattern::Pattern;
 use imagine_core::color::{linear_to_srgb, srgb_to_linear};
 use imagine_core::style::{BevelStyle, Effect, EffectKind, GradientStyle, StrokePosition};
 
@@ -160,7 +161,7 @@ fn spread_size(d: &Desc, scale: f32) -> (f32, f32) {
 
 /// Reads a layer style. Returns the effects and the names of effects
 /// that are switched on but not carried over.
-pub fn read(fx: &Desc, light: GlobalLight) -> (Vec<Effect>, Vec<&'static str>) {
+pub fn read(fx: &Desc, light: GlobalLight, patterns: &[(String, Pattern)]) -> (Vec<Effect>, Vec<&'static str>) {
     let mut out = Vec::new();
     let mut lost = Vec::new();
     // "Scl " is the style's scale at the time it was saved; Photoshop
@@ -322,9 +323,35 @@ pub fn read(fx: &Desc, light: GlobalLight) -> (Vec<Effect>, Vec<&'static str>) {
             false,
         );
     }
-    for (single, multi, name) in [("ChFX", "satinMulti", "satin"), ("patternFill", "patternFillMulti", "pattern overlay")] {
-        if master && all(fx, single, multi).iter().any(|d| d.bool("enab").unwrap_or(true)) {
-            lost.push(name);
+    for d in all(fx, "patternFill", "patternFillMulti") {
+        // The pattern by ID (else by name) from the file's pattern block.
+        let r = d.desc("Ptrn");
+        let (id, name) = (r.and_then(|r| r.text("Idnt")).unwrap_or(""), r.and_then(|r| r.text("Nm  ")).unwrap_or(""));
+        let found = patterns.iter().find(|(i, _)| i == id).or_else(|| patterns.iter().find(|(_, p)| p.name == name));
+        let Some((_, p)) = found else {
+            if d.bool("enab").unwrap_or(true) {
+                lost.push("pattern overlay");
+            }
+            continue;
+        };
+        let phase = d.desc("phase");
+        push(
+            d,
+            EffectKind::PatternOverlay {
+                pattern: p.clone(),
+                opacity: pct(d, "Opct"),
+                scale: pct(d, "Scl "),
+                offset: [
+                    phase.and_then(|p| p.num("Hrzn")).unwrap_or(0.0) as f32,
+                    phase.and_then(|p| p.num("Vrtc")).unwrap_or(0.0) as f32,
+                ],
+            },
+            false,
+        );
+    }
+    {
+        if master && all(fx, "ChFX", "satinMulti").iter().any(|d| d.bool("enab").unwrap_or(true)) {
+            lost.push("satin");
         }
     }
     (out, lost)
@@ -377,6 +404,11 @@ fn gradient(start: [f32; 3], end: [f32; 3]) -> Value {
 /// The layer style descriptor for `effects` ("lfx2"); `None` if there are none.
 /// `light`: the document's global light (for effects that use it).
 pub fn write(effects: &[Effect], light: GlobalLight) -> Option<Desc> {
+    write_with(effects, light, &|p| crate::psd_patterns::pattern_id(p))
+}
+
+/// [`write`], with the IDs patterns get in the file's pattern block.
+pub fn write_with(effects: &[Effect], light: GlobalLight, pattern_id: &dyn Fn(&Pattern) -> String) -> Option<Desc> {
     if effects.is_empty() {
         return None;
     }
@@ -392,6 +424,26 @@ pub fn write(effects: &[Effect], light: GlobalLight) -> Option<Desc> {
         let mut put = |k: &str, v: Value| items.push((k.into(), v));
         let lit = |a: f32| if e.global_light { light.angle } else { a };
         let (single, multi) = match &e.kind {
+            EffectKind::PatternOverlay { pattern, opacity, scale, offset } => {
+                put("Opct", unit("#Prc", opacity * 100.0));
+                put(
+                    "Ptrn",
+                    Value::Desc(Desc {
+                        class: "Ptrn".into(),
+                        items: vec![("Nm  ".into(), Value::Text(pattern.name.clone())), ("Idnt".into(), Value::Text(pattern_id(pattern)))],
+                    }),
+                );
+                put("Scl ", unit("#Prc", scale * 100.0));
+                put("Algn", Value::Bool(true));
+                put(
+                    "phase",
+                    Value::Desc(Desc {
+                        class: "Pnt ".into(),
+                        items: vec![("Hrzn".into(), Value::Double(offset[0] as f64)), ("Vrtc".into(), Value::Double(offset[1] as f64))],
+                    }),
+                );
+                ("patternFill", "patternFillMulti")
+            }
             EffectKind::DropShadow { color, opacity, angle, distance, size, spread } => {
                 let total = size + spread;
                 put("Clr ", rgb(*color));
@@ -547,7 +599,14 @@ mod tests {
         let mut bytes = Vec::new();
         crate::psd_data::w_desc(&mut bytes, &d);
         let d = crate::psd_data::read_desc(&bytes).unwrap();
-        let (back, lost) = read(&d, light);
+        let pats: Vec<(String, Pattern)> = fx
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EffectKind::PatternOverlay { pattern, .. } => Some((crate::psd_patterns::pattern_id(pattern), pattern.clone())),
+                _ => None,
+            })
+            .collect();
+        let (back, lost) = read(&d, light, &pats);
         assert!(lost.is_empty(), "{lost:?}");
         assert_eq!(back.len(), fx.len());
         for e in &fx {

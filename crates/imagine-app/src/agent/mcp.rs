@@ -460,11 +460,32 @@ pub fn tools() -> Vec<Value> {
              stroke {size, position: outside|inside|center, color, opacity}; drop_shadow {color, opacity, angle, distance, size, spread}; \
              inner_shadow {color, opacity, angle, distance, size}; outer_glow {color, opacity, size, spread, range}; inner_glow {color, opacity, size, range} (range 0…1, default 0.5); \
              color_overlay {color, opacity}; gradient_overlay {start, end, opacity, angle (90 = bottom to top), style: linear|radial, \
-             scale, reverse}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
+             scale, reverse}; pattern_overlay {pattern: a name from pattern_list, opacity, scale (1 = pattern pixels), offset: [x, y]}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
              highlight_opacity, shadow, shadow_opacity}. Optional on every effect: \"blend\" (a blend mode key; default: \
              multiply for shadows, screen for glows, normal otherwise) and \"global_light\": true (shadows/bevel share one light angle).",
             json!({ "layer": layer_param(), "effects": { "type": "array", "items": { "type": "object" } } }),
             &["effects"],
+            false,
+        ),
+        tool(
+            "pattern_list",
+            "The pattern library for pattern overlays: built-in patterns and the user's (folder included).",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "pattern_import",
+            "Add an image or a GIMP pattern (.pat) to the pattern library.",
+            json!({ "path": { "type": "string" } }),
+            &["path"],
+            false,
+        ),
+        tool(
+            "pattern_define",
+            "Make a library pattern from the visible pixels in the selection (or the whole image), like Photoshop's Edit › Define Pattern.",
+            json!({ "name": { "type": "string" } }),
+            &[],
             false,
         ),
         tool(
@@ -794,7 +815,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples
             .as_object_mut()

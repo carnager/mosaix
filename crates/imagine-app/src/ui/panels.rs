@@ -164,6 +164,8 @@ pub struct Model {
     pub bg_color: [f32; 3],
     /// Names of the custom brush tips (tip numbers FIRST_CUSTOM_TIP, …).
     pub custom_tips: Vec<String>,
+    /// Pattern library (built-ins first).
+    pub patterns: std::sync::Arc<Vec<imagine_core::pattern::Pattern>>,
     pub eyedrop_radius: i64,
     pub eyedrop_all: bool,
     pub boxed: Option<&'static str>,
@@ -216,6 +218,7 @@ pub enum Action {
     BgColor([f32; 3]),
     /// Add the tips of an .abr file or an image to the brush library.
     ImportBrushes(std::path::PathBuf),
+    ImportPatterns(std::path::PathBuf),
     /// Keyboard shortcut of a command: `None` removes it, `reset` restores the default.
     Shortcut { id: String, combo: Option<palette::Combo>, reset: bool },
     ResetShortcuts,
@@ -884,7 +887,7 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 pub(super) fn styles_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     match &m.active_effects {
         Some(fx) => {
-            if let Some((effects, done)) = super::style_ui::editor(ui, fx, &mut st.fx_open) {
+            if let Some((effects, done)) = super::style_ui::editor(ui, fx, &mut st.fx_open, &m.patterns) {
                 out.push(Action::SetEffects { effects, done });
             }
         }
@@ -1617,7 +1620,7 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
             r
         };
         percent(ui, m.active_opacity, false).on_hover_text(tr("Opacity (drag or type)"));
-        ui.label(tr("Fill"));
+        ui.label(imagine_core::i18n::tr_ctx("layer", "Fill"));
         percent(ui, m.active_fill, true)
             .on_hover_text(tr("Fill: opacity of the layer's own pixels; its layer style keeps full strength"));
     });

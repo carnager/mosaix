@@ -32,19 +32,25 @@ def quote(s):
 
 
 def parse(path):
-    out, cur, which = {}, {"id": None, "str": None}, None
+    # Entries with a context are keyed "ctx\x04text" (as gettext does).
+    out, cur, which = {}, {"id": None, "str": None, "ctx": None}, None
 
     def flush():
         if cur["id"] and cur["str"]:
-            out.setdefault(cur["id"], cur["str"])
-        cur["id"] = cur["str"] = None
+            key = cur["id"] if cur["ctx"] is None else cur["ctx"] + "\x04" + cur["id"]
+            out.setdefault(key, cur["str"])
+        cur["id"] = cur["str"] = cur["ctx"] = None
 
     for line in open(path, encoding="utf-8"):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith("msgid "):
+        if line.startswith("msgctxt "):
             flush()
+            cur["ctx"], which = unquote(line[8:]), "ctx"
+        elif line.startswith("msgid "):
+            if which != "ctx":
+                flush()
             cur["id"], which = unquote(line[6:]), "id"
         elif line.startswith("msgstr "):
             cur["str"], which = unquote(line[7:]), "str"
@@ -58,7 +64,11 @@ def write(entries):
     with open(CAT, "w", encoding="utf-8") as f:
         f.write(HEADER)
         for k in sorted(entries, key=str.lower):
-            f.write(f"\nmsgid {quote(k)}\nmsgstr {quote(entries[k])}\n")
+            if "\x04" in k:
+                ctx, text = k.split("\x04", 1)
+                f.write(f"\nmsgctxt {quote(ctx)}\nmsgid {quote(text)}\nmsgstr {quote(entries[k])}\n")
+            else:
+                f.write(f"\nmsgid {quote(k)}\nmsgstr {quote(entries[k])}\n")
 
 
 def sources():
@@ -79,6 +89,10 @@ def used():
         for m in re.finditer(r"\btr!?\(\s*" + LIT, s):
             k = bytes(m.group(1), "utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
             keys.setdefault(k, os.path.relpath(p, ROOT))
+        # tr_ctx("context", "text"): keyed like msgctxt entries.
+        for m in re.finditer(r"\btr_ctx\(\s*" + LIT + r"\s*,\s*" + LIT, s):
+            dec = lambda t: bytes(t, "utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
+            keys.setdefault(dec(m.group(1)) + "\x04" + dec(m.group(2)), os.path.relpath(p, ROOT))
     return keys
 
 

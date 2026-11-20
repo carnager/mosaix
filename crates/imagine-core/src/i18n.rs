@@ -43,14 +43,19 @@ pub fn parse_po(text: &str) -> HashMap<String, String> {
     }
     let mut map = HashMap::new();
     let (mut id, mut st) = (None::<String>, None::<String>);
-    // Which string continuation lines belong to: 1 = msgid, 2 = msgstr.
+    // msgctxt: the same English text with different meanings ("ctx\u{4}text").
+    let mut ctx: Option<String> = None;
+    // Which string continuation lines belong to: 1 = msgid, 2 = msgstr, 3 = msgctxt.
     let mut which = 0;
-    let mut flush = |id: &mut Option<String>, st: &mut Option<String>| {
+    let mut flush = |id: &mut Option<String>, st: &mut Option<String>, ctx: &mut Option<String>| {
         if let (Some(i), Some(t)) = (id.take(), st.take())
             && !i.is_empty()
             && !t.is_empty()
         {
-            map.insert(i, t);
+            match ctx.take() {
+                Some(c) => map.insert(format!("{c}\u{4}{i}"), t),
+                None => map.insert(i, t),
+            };
         }
     };
     for line in text.lines() {
@@ -58,8 +63,14 @@ pub fn parse_po(text: &str) -> HashMap<String, String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some(rest) = line.strip_prefix("msgid ") {
-            flush(&mut id, &mut st);
+        if let Some(rest) = line.strip_prefix("msgctxt ") {
+            flush(&mut id, &mut st, &mut ctx);
+            ctx = unquote(rest);
+            which = 3;
+        } else if let Some(rest) = line.strip_prefix("msgid ") {
+            if which != 3 {
+                flush(&mut id, &mut st, &mut ctx);
+            }
             id = unquote(rest);
             which = 1;
         } else if let Some(rest) = line.strip_prefix("msgstr ") {
@@ -69,11 +80,12 @@ pub fn parse_po(text: &str) -> HashMap<String, String> {
             match which {
                 1 => id.get_or_insert_with(String::new).push_str(&more),
                 2 => st.get_or_insert_with(String::new).push_str(&more),
+                3 => ctx.get_or_insert_with(String::new).push_str(&more),
                 _ => {}
             }
         }
     }
-    flush(&mut id, &mut st);
+    flush(&mut id, &mut st, &mut ctx);
     map
 }
 
@@ -134,6 +146,16 @@ pub fn tr(s: &str) -> &str {
     }
 }
 
+/// Translates `s` in a context, for English words with several meanings
+/// ("Fill" the command vs. "Fill" the layer property): the catalog entry
+/// with `msgctxt "ctx"`, else `s` unchanged.
+pub fn tr_ctx<'a>(ctx: &str, s: &'a str) -> &'a str {
+    match ACTIVE.get_or_init(|| None) {
+        Some(map) => map.get(&format!("{ctx}\u{4}{s}")).map_or(s, |t| t.as_str()),
+        None => s,
+    }
+}
+
 /// `tr!("text")` or `tr!("text with {name}", name = value, …)`.
 #[macro_export]
 macro_rules! tr {
@@ -149,6 +171,14 @@ macro_rules! tr {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn context_entries_are_separate() {
+        let m = super::parse_po("msgid \"Fill\"\nmsgstr \"Füllen\"\n\nmsgctxt \"layer\"\nmsgid \"Fill\"\nmsgstr \"Fläche\"\n");
+        assert_eq!(m.get("Fill").map(String::as_str), Some("Füllen"));
+        assert_eq!(m.get("layer\u{4}Fill").map(String::as_str), Some("Fläche"));
+    }
+
     use super::*;
 
     #[test]

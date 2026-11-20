@@ -313,6 +313,16 @@ pub enum Command {
         layer: Option<LayerId>,
         effects: Vec<imagine_core::style::Effect>,
     },
+    /// The pattern library (built-ins and the user's).
+    PatternList,
+    /// Adds an image or GIMP .pat file to the pattern library.
+    PatternImport {
+        path: PathBuf,
+    },
+    /// The visible pixels in the selection (or the image) become a pattern.
+    PatternDefine {
+        name: Option<String>,
+    },
     SmartFilterSet {
         layer: Option<LayerId>,
         index: Option<usize>,
@@ -445,6 +455,9 @@ impl Command {
             Self::ShapeAdd { .. } => "shape_add",
             Self::VectorSet { .. } => "vector_set",
             Self::LayerRasterize { .. } => "layer_rasterize",
+            Self::PatternList => "pattern_list",
+            Self::PatternImport { .. } => "pattern_import",
+            Self::PatternDefine { .. } => "pattern_define",
             Self::LayerEffectsSet { .. } => "layer_effects_set",
             Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
@@ -474,7 +487,8 @@ impl Command {
         )
     }
 
-    pub fn parse(v: Value) -> anyhow::Result<Self> {
+    pub fn parse(mut v: Value) -> anyhow::Result<Self> {
+        resolve_patterns(&mut v)?;
         serde_json::from_value(v).map_err(|e| anyhow::anyhow!("invalid command: {e}"))
     }
 }
@@ -501,6 +515,38 @@ pub struct Ctx<'a> {
     pub gpu: &'a GpuContext,
     pub format: wgpu::TextureFormat,
     pub session: &'a mut Option<Session>,
+}
+
+/// Pattern overlays may name their pattern ("pattern": "Dots"): replaced
+/// by the pattern from the library.
+fn resolve_patterns(v: &mut Value) -> anyhow::Result<()> {
+    if v["cmd"] != "layer_effects_set" {
+        return Ok(());
+    }
+    let Some(list) = v["effects"].as_array_mut() else { return Ok(()) };
+    let mut lib: Option<Vec<imagine_core::pattern::Pattern>> = None;
+    for e in list {
+        if e["effect"] != "pattern_overlay" {
+            continue;
+        }
+        let name = match &e["pattern"] {
+            Value::String(n) => n.clone(),
+            Value::Null => String::new(),
+            _ => continue,
+        };
+        let lib = lib.get_or_insert_with(|| crate::app::patterns::load_library(&crate::app::patterns::pattern_dir()));
+        let p = if name.is_empty() {
+            lib.first().cloned()
+        } else {
+            crate::app::patterns::find(lib, &name)
+        };
+        let p = p.with_context(|| {
+            let names: Vec<&str> = lib.iter().map(|p| p.name.as_str()).collect();
+            format!("unknown pattern {name:?}; available: {}", names.join(", "))
+        })?;
+        e["pattern"] = serde_json::to_value(p)?;
+    }
+    Ok(())
 }
 
 fn session(s: &mut Option<Session>) -> anyhow::Result<&mut Session> {
@@ -662,6 +708,21 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
             let mut out = Output::json(info(session(ctx.session)?));
             out.replaced_document = true;
             Ok(out)
+        }
+        Command::PatternList => {
+            let lib = crate::app::patterns::load_library(&crate::app::patterns::pattern_dir());
+            let builtin = imagine_core::pattern::Pattern::builtin().len();
+            Ok(Output::json(json!({
+                "patterns": lib.iter().enumerate().map(|(i, p)| json!({
+                    "name": p.name, "width": p.width, "height": p.height, "builtin": i < builtin,
+                })).collect::<Vec<_>>(),
+                "folder": crate::app::patterns::pattern_dir(),
+            })))
+        }
+        Command::PatternImport { path } => {
+            ensure!(path.exists(), "{} does not exist", path.display());
+            let names = crate::app::patterns::import(&path, &crate::app::patterns::pattern_dir())?;
+            Ok(Output::json(json!({ "ok": true, "patterns": names })))
         }
         cmd => {
             let s = session(ctx.session)?;
@@ -1437,6 +1498,13 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             });
             ok(s)
         }
+        Command::PatternList | Command::PatternImport { .. } => unreachable!(),
+        Command::PatternDefine { name } => {
+            let c = s.engine.copy_pixels(true).map_err(engine_err)?;
+            let img = crate::app::clipboard::to_rgba8(c.w, c.h, &c.px);
+            let name = crate::app::patterns::save(&crate::app::patterns::pattern_dir(), name.as_deref().unwrap_or("Pattern"), img)?;
+            Ok(Output::json(json!({ "ok": true, "pattern": name, "width": c.w, "height": c.h })))
+        }
         Command::LayerRasterize { layer } => {
             let id = target_layer(s, layer)?;
             s.engine
@@ -2156,3 +2224,24 @@ mod tests {
         assert_eq!(ColorSpec::Rgb(vec![0.0, 0.0, 0.0]).linear().unwrap().1, 1.0);
     }
 }
+
+#[cfg(test)]
+mod pattern_command_tests {
+    use super::*;
+
+    #[test]
+    fn pattern_overlay_by_name() {
+        let name = imagine_core::pattern::Pattern::builtin()[1].name.clone();
+        let c = Command::parse(json!({
+            "cmd": "layer_effects_set",
+            "effects": [{"effect": "pattern_overlay", "pattern": name.to_uppercase(), "opacity": 0.5}]
+        }))
+        .unwrap();
+        let Command::LayerEffectsSet { effects, .. } = c else { panic!() };
+        let imagine_core::style::EffectKind::PatternOverlay { pattern, scale, .. } = &effects[0].kind else { panic!() };
+        assert_eq!((pattern.name.as_str(), *scale), (name.as_str(), 1.0));
+        let err = Command::parse(json!({"cmd": "layer_effects_set", "effects": [{"effect": "pattern_overlay", "pattern": "nope", "opacity": 1}]}));
+        assert!(err.unwrap_err().to_string().contains("available"));
+    }
+}
+

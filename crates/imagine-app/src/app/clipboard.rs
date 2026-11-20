@@ -70,7 +70,7 @@ pub(super) enum PasteTarget {
 }
 
 /// Premultiplied linear pixels → straight sRGB 8 bit.
-fn to_rgba8(w: usize, h: usize, px: &[[f32; 4]]) -> image::RgbaImage {
+pub(crate) fn to_rgba8(w: usize, h: usize, px: &[[f32; 4]]) -> image::RgbaImage {
     let mut img = image::RgbaImage::new(w as u32, h as u32);
     for (o, p) in img.pixels_mut().zip(px) {
         let a = p[3].clamp(0.0, 1.0);

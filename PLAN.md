@@ -469,7 +469,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Wide-Gamut AVIF/JPEG XL** (2026-11-21): JPEG XL in allen Export-Farbräumen (Display P3, Adobe RGB, Rec. 2020; als Farbcodierung signalisiert, 8/16 Bit, verlustfrei bitgenau), AVIF in Display P3 und Rec. 2020 (10 Bit, CICP-Codes im `nclx`-Kasten; Adobe RGB hat keinen Code). Beim Öffnen werden AVIF-`nclx`-Angaben ausgewertet; Profile wie „…_P3_Srgb“ werden nicht mehr fälschlich als sRGB behandelt.
 
-**Noch offen in Phase 6:** Musterüberlagerung (braucht eine Musterbibliothek), Cursor direkt in Text auf Pfad.
+- **Musterüberlagerung** (2026-11-21): Ebenenstil mit Muster, Deckkraft, Skalierung, Versatz (am Dokument ausgerichtet, Füllmethode wie alle Effekte). Musterbibliothek: sechs eingebaute Muster plus PNGs in `$XDG_DATA_HOME/imagine/patterns`; Bearbeiten › Muster festlegen (Strg+Alt+Umschalt+D, sichtbare Pixel der Auswahl) und Muster importieren (Strg+Alt+Umschalt+Y: Bilder, GIMP-.pat). Das Muster steckt im Effekt, Dokumente bleiben vollständig. PSD: Musterblock (`Patt`/`Pat2`/`Pat3`) lesen und schreiben, `patternFill` im Ebenenstil – Photoshops „Wasser“-Muster kommt an, Rundreise pixelgleich. Agent: `pattern_list`, `pattern_import`, `pattern_define`, Muster per Name in `layer_effects_set`. Übersetzungen mit Kontext (`msgctxt`, `tr_ctx`) für mehrdeutige Wörter („Fill“ = Füllen / Fläche).
+
+**Noch offen in Phase 6:** Cursor direkt in Text auf Pfad.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)
 

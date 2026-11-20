@@ -4,8 +4,9 @@
 //! by `wl_surface.frame` callbacks: input is batched per event-loop dispatch
 //! and at most one frame is rendered per compositor refresh.
 
-mod clipboard;
+pub(crate) mod clipboard;
 mod brushes;
+pub(crate) mod patterns;
 pub(crate) mod pen;
 pub(crate) mod textedit;
 
@@ -437,6 +438,8 @@ pub struct App {
     mask_thumbs: HashMap<LayerId, (usize, egui::TextureHandle)>,
     /// Names of the custom brush tips (tips FIRST_CUSTOM_TIP, …).
     custom_tips: Vec<String>,
+    /// Pattern library: built-ins and the user's patterns.
+    patterns: std::sync::Arc<Vec<imagine_core::pattern::Pattern>>,
     /// Status text, refreshed a few times per second (not every frame).
     ui_status: String,
 
@@ -660,6 +663,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         thumb_ids: HashMap::new(),
         mask_thumbs: HashMap::new(),
         custom_tips: Vec::new(),
+        patterns: std::sync::Arc::new(patterns::load_library(&patterns::pattern_dir())),
         ui_status: String::new(),
         socket: None,
         bench: None,
@@ -1812,7 +1816,7 @@ impl App {
         .or_else(|| self.settings.last_dir.clone())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         let name = match mode {
-            ui::files::FileMode::Open | ui::files::FileMode::ImportBrushes => None,
+            ui::files::FileMode::Open | ui::files::FileMode::ImportBrushes | ui::files::FileMode::ImportPatterns => None,
             ui::files::FileMode::SaveAs => s.map(|s| s.default_save_path()),
             ui::files::FileMode::ExportAs => s.map(|s| s.default_export_path()),
         }
@@ -2540,6 +2544,8 @@ impl App {
             Keysym::g | Keysym::G if ctrl && shift => self.edit(tr("Ungroup Layers"), |d| d.ungroup_active()),
             // Ctrl+Alt+G: clipping mask on/off (clips to the layer below).
             Keysym::b | Keysym::B if ctrl && alt && shift => self.file_dialog(ui::files::FileMode::ImportBrushes),
+            Keysym::y | Keysym::Y if ctrl && alt && shift => self.file_dialog(ui::files::FileMode::ImportPatterns),
+            Keysym::d | Keysym::D if ctrl && alt && shift => self.define_pattern(),
             Keysym::k | Keysym::K if ctrl && alt && shift => {
                 self.ui_state.shortcuts = Some(Default::default());
             }
@@ -3138,6 +3144,7 @@ impl App {
             wand_contiguous: self.wand_contiguous,
             bg_color: self.bg_color,
             custom_tips: self.custom_tips.clone(),
+            patterns: self.patterns.clone(),
             eyedrop_radius: self.eyedrop_radius,
             eyedrop_all: self.eyedrop_all,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
@@ -3252,6 +3259,7 @@ impl App {
                 Action::Color(c) => self.brush.color = c,
                 Action::BgColor(c) => self.bg_color = c,
                 Action::ImportBrushes(p) => self.import_brushes(&p),
+                Action::ImportPatterns(p) => self.import_patterns(&p),
                 Action::Shortcut { id, combo, reset } => {
                     ui::palette::rebind(&mut self.settings.keymap, &id, combo, reset);
                     self.store_settings();
@@ -3414,7 +3422,7 @@ impl App {
                 } => self.edit(tr("Move Layer"), |d| d.move_layer(id, target, above, into)),
                 Action::LayerOpacity { value, done, fill } => {
                     if let Some(e) = self.engine() {
-                        let (name, key) = if fill { (tr("Fill"), "layer-fill") } else { (tr("Opacity"), "layer-opacity") };
+                        let (name, key) = if fill { (imagine_core::i18n::tr_ctx("layer", "Fill"), "layer-fill") } else { (tr("Opacity"), "layer-opacity") };
                         let changed = e.edit_merged(name, key, |d| {
                             let id = d.active;
                             let l = d.find_mut(id).unwrap();

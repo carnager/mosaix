@@ -163,6 +163,17 @@ pub enum EffectKind {
         #[serde(default)]
         reverse: bool,
     },
+    /// A repeating pattern over the layer's content (anchored to the document).
+    PatternOverlay {
+        pattern: crate::pattern::Pattern,
+        opacity: f32,
+        /// Size of the pattern (1 = its pixels).
+        #[serde(default = "one")]
+        scale: f32,
+        /// Shift of the pattern, px.
+        #[serde(default)]
+        offset: [f32; 2],
+    },
     Bevel {
         #[serde(default)]
         style: BevelStyle,
@@ -221,6 +232,7 @@ impl EffectKind {
             Self::InnerGlow { .. } => crate::tr("Inner Glow"),
             Self::ColorOverlay { .. } => crate::tr("Color Overlay"),
             Self::GradientOverlay { .. } => crate::tr("Gradient Overlay"),
+            Self::PatternOverlay { .. } => crate::tr("Pattern Overlay"),
             Self::Bevel { .. } => crate::tr("Bevel & Emboss"),
         }
     }
@@ -300,6 +312,12 @@ impl EffectKind {
                 style: GradientStyle::Linear,
                 scale: 1.0,
                 reverse: false,
+            },
+            Self::PatternOverlay {
+                pattern: crate::pattern::Pattern::builtin().swap_remove(1),
+                opacity: 1.0,
+                scale: 1.0,
+                offset: [0.0; 2],
             },
             Self::Bevel {
                 style: BevelStyle::Inner,
@@ -701,7 +719,7 @@ fn blend_into(dst: &mut [Px], src_rgb: [f32; 3], src_alpha: &[f32], mode: BlendM
 /// `color(i)` gives the overlay colour per pixel.
 fn blend_atop(
     dst: &mut [Px],
-    color: &(dyn Fn(usize) -> [f32; 3] + Sync),
+    color: &(dyn Fn(usize) -> [f32; 4] + Sync),
     shape: &[f32],
     opacity: f32,
     mode: BlendMode,
@@ -711,10 +729,14 @@ fn blend_atop(
         if s <= 0.0 || opacity <= 0.0 {
             return;
         }
+        // Colour and its own opacity (patterns with transparency).
         let c = color(i);
         // Inside the shape at full coverage, then scaled back by it.
         let inner = [d[0] / s, d[1] / s, d[2] / s, (d[3] / s).min(1.0)];
-        let o = opacity.clamp(0.0, 1.0);
+        let o = (opacity * c[3]).clamp(0.0, 1.0);
+        if o <= 0.0 {
+            return;
+        }
         let b = crate::blend::composite(inner, [c[0] * o, c[1] * o, c[2] * o, o], mode, crate::blend::BlendSpace::Srgb);
         *d = b.map(|v| v * s);
     });
@@ -769,6 +791,12 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
 /// faded by `fill`, the effects are computed from the full shape and keep
 /// their strength.
 pub fn apply_with_fill(effects: &[Effect], content: &Region, fill: f32) -> Styled {
+    apply_at(effects, content, fill, (0, 0))
+}
+
+/// [`apply_with_fill`] for a region whose top-left pixel is at `origin` in
+/// the document (patterns are anchored to the document).
+pub fn apply_at(effects: &[Effect], content: &Region, fill: f32, origin: (i64, i64)) -> Styled {
     let (w, h) = (content.w, content.h);
     let alpha = content.alpha();
     let enabled: Vec<&Effect> = effects.iter().filter(|e| e.enabled).collect();
@@ -835,7 +863,7 @@ pub fn apply_with_fill(effects: &[Effect], content: &Region, fill: f32) -> Style
     for (k, &mode) in active.iter().zip(&modes) {
         match **k {
             EffectKind::ColorOverlay { color, opacity } => {
-                blend_atop(&mut out.px, &|_| color, &alpha, opacity, mode);
+                blend_atop(&mut out.px, &|_| [color[0], color[1], color[2], 1.0], &alpha, opacity, mode);
             }
             EffectKind::GradientOverlay {
                 start,
@@ -852,7 +880,26 @@ pub fn apply_with_fill(effects: &[Effect], content: &Region, fill: f32) -> Style
                 let (s, e) = (enc(start), enc(end));
                 blend_atop(
                     &mut out.px,
-                    &|i| std::array::from_fn(|c| crate::color::srgb_to_linear(s[c] + (e[c] - s[c]) * t[i])),
+                    &|i| {
+                        let c: [f32; 3] = std::array::from_fn(|c| crate::color::srgb_to_linear(s[c] + (e[c] - s[c]) * t[i]));
+                        [c[0], c[1], c[2], 1.0]
+                    },
+                    &alpha,
+                    opacity,
+                    mode,
+                );
+            }
+            EffectKind::PatternOverlay { ref pattern, opacity, scale, offset } => {
+                let k = 1.0 / scale.max(0.01);
+                let (ox, oy) = (origin.0 as f32 - offset[0], origin.1 as f32 - offset[1]);
+                blend_atop(
+                    &mut out.px,
+                    &|i| {
+                        let (x, y) = ((i % w) as f32 + 0.5 + ox, (i / w) as f32 + 0.5 + oy);
+                        let p = pattern.sample(x * k, y * k);
+                        let l = crate::color::srgb_to_linear;
+                        [l(p[0]), l(p[1]), l(p[2]), p[3]]
+                    },
                     &alpha,
                     opacity,
                     mode,
@@ -1305,5 +1352,39 @@ mod fill_tests {
         assert!(edge[0] > 0.9 && edge[3] > 0.99, "stroke at full strength: {edge:?}");
         // Fill 1 is the plain apply.
         assert_eq!(apply_with_fill(std::slice::from_ref(&overlay), &r, 1.0).content.px, apply(&[overlay], &r).content.px);
+    }
+}
+
+#[cfg(test)]
+mod pattern_tests {
+    use super::*;
+
+    #[test]
+    fn pattern_repeats_in_document_coordinates_inside_the_shape() {
+        // 2×1 pattern: black, white.
+        let p = crate::pattern::Pattern::new("bw", 2, 1, vec![0, 0, 0, 255, 255, 255, 255, 255]).unwrap();
+        let (w, h) = (10, 4);
+        let mut r = Region::new(w, h);
+        for y in 0..h {
+            for x in 2..8 {
+                r.px[y * w + x] = [0.5, 0.0, 0.0, 1.0];
+            }
+        }
+        let fx = vec![Effect::new(EffectKind::PatternOverlay { pattern: p, opacity: 1.0, scale: 1.0, offset: [0.0; 2] })];
+        // Region starts at document x = 1: document column 2 (black) is region column 1 …
+        let s = apply_at(&fx, &r, 1.0, (1, 0));
+        let px = |x: usize| s.content.px[w + x];
+        // … region x 3 = document 4 (even → black), x 4 = document 5 (white).
+        assert!(px(3)[0] < 0.01 && px(4)[0] > 0.99, "{:?} {:?}", px(3), px(4));
+        assert_eq!(px(0), [0.0; 4], "outside the shape untouched");
+        // Scaled ×2: document 4,5 → pattern 2,2.5 → black, black.
+        let fx2 = vec![Effect::new(EffectKind::PatternOverlay {
+            pattern: crate::pattern::Pattern::new("bw", 2, 1, vec![0, 0, 0, 255, 255, 255, 255, 255]).unwrap(),
+            opacity: 1.0,
+            scale: 2.0,
+            offset: [0.0; 2],
+        })];
+        let s2 = apply_at(&fx2, &r, 1.0, (0, 0));
+        assert!(s2.content.px[w + 4][0] < 0.5 && s2.content.px[w + 6][0] > 0.5);
     }
 }

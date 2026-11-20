@@ -10,7 +10,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use half::f16;
-use imagine_core::style::{Effect, Region, apply_with_fill, reach};
+use imagine_core::style::{Effect, Region, apply_at, reach};
 use imagine_core::doc::{Mask, MaskTile};
 use imagine_core::{BlendMode, LayerId, TILE_SIZE, TileCoord};
 
@@ -173,7 +173,7 @@ impl Engine {
         if let Some(m) = mask {
             self.apply_mask(&mut region, (x0, y0), m);
         }
-        let styled = apply_with_fill(effects, &region, fill);
+        let styled = apply_at(effects, &region, fill, (x0, y0));
         let mut upload = |r: &Region| -> Option<Arc<TileSet>> {
             let mut map = TileSet::new();
             for ty in y0.div_euclid(ts)..=(y1 - 1).div_euclid(ts) {

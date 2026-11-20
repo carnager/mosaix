@@ -3,6 +3,7 @@
 
 use egui::RichText;
 use imagine_core::BlendMode;
+use imagine_core::pattern::Pattern;
 use imagine_core::style::{BevelStyle, Effect, EffectKind, GradientStyle, StrokePosition};
 use imagine_core::tr;
 
@@ -115,8 +116,83 @@ fn common(ui: &mut egui::Ui, e: &mut Effect, t: &mut Track) {
     }
 }
 
-fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
+/// A pattern as a UI texture (cached by name and size).
+fn pattern_texture(ui: &egui::Ui, p: &Pattern) -> egui::TextureHandle {
+    let id = egui::Id::unique(("pattern", &p.name, p.width, p.height, p.pixels.len(), p.pixels.get(..64).map(<[u8]>::to_vec)));
+    if let Some(t) = ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let img = egui::ColorImage::from_rgba_unmultiplied([p.width as usize, p.height as usize], &p.pixels);
+    let t = ui.ctx().load_texture(format!("pattern {}", p.name), img, egui::TextureOptions::NEAREST_REPEAT);
+    ui.ctx().data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
+/// A square swatch showing the pattern repeating.
+fn pattern_swatch(ui: &mut egui::Ui, p: &Pattern, size: f32, selected: bool) -> egui::Response {
+    let (rect, r) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    let tex = pattern_texture(ui, p);
+    // Show about 48 pattern pixels across, repeated.
+    let reps = egui::vec2(48.0 / p.width as f32, 48.0 / p.height as f32).max(egui::vec2(1.0, 1.0));
+    ui.painter().image(tex.id(), rect, egui::Rect::from_min_size(egui::Pos2::ZERO, reps), egui::Color32::WHITE);
+    let stroke = if selected {
+        egui::Stroke::new(2.0, ui.visuals().selection.stroke.color)
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_gray(90))
+    };
+    ui.painter().rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Outside);
+    r.on_hover_text(&p.name)
+}
+
+fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track, patterns: &[Pattern]) {
     match k {
+        EffectKind::PatternOverlay { pattern, opacity, scale, offset } => {
+            ui.label(tr("Pattern"));
+            // Rows of swatches (explicit rows: a wrapped layout inside the
+            // grid reports its height a frame late).
+            let mut all: Vec<Option<&Pattern>> = patterns.iter().map(Some).collect();
+            let foreign = !patterns.iter().any(|p| p == pattern);
+            if foreign {
+                // A pattern from a file that is not in the library.
+                all.push(None);
+            }
+            let per_row = ((ui.available_width() + 4.0) / 34.0).floor().max(1.0) as usize;
+            let current = pattern.clone();
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                for row in all.chunks(per_row) {
+                    ui.horizontal(|ui| {
+                        for p in row {
+                            match p {
+                                Some(p) => {
+                                    let sel = !foreign && *p == &current;
+                                    if pattern_swatch(ui, p, 30.0, sel).clicked() && !sel {
+                                        *pattern = (*p).clone();
+                                        t.click();
+                                    }
+                                }
+                                None => {
+                                    pattern_swatch(ui, &current, 30.0, true);
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            ui.end_row();
+            percent(ui, t, "Opacity", opacity);
+            let mut pct = *scale * 100.0;
+            slider(ui, t, "Scale", &mut pct, 10.0..=400.0, " %");
+            *scale = (pct / 100.0).max(0.01);
+            ui.label(tr("Offset"));
+            ui.horizontal(|ui| {
+                for v in offset.iter_mut() {
+                    let r = ui.add(egui::DragValue::new(v).speed(0.5).suffix(" px"));
+                    t.add(&r);
+                }
+            });
+            ui.end_row();
+        }
         EffectKind::GradientOverlay {
             start,
             end,
@@ -317,6 +393,15 @@ fn summary(k: &EffectKind) -> ([f32; 3], String) {
         EffectKind::Bevel {
             highlight, size, ..
         } => (*highlight, px(*size)),
+        EffectKind::PatternOverlay { pattern, scale, .. } => {
+            // Swatch: the pattern's average colour.
+            let n = (pattern.pixels.len() / 4).max(1) as f32;
+            let avg: [f32; 3] = std::array::from_fn(|k| {
+                let mean = pattern.pixels.iter().skip(k).step_by(4).map(|&v| v as f32).sum::<f32>() / n / 255.0;
+                imagine_core::color::srgb_to_linear(mean)
+            });
+            (avg, format!("{} · {:.0} %", pattern.name, scale * 100.0))
+        }
     }
 }
 
@@ -325,6 +410,7 @@ pub fn editor(
     ui: &mut egui::Ui,
     effects: &[Effect],
     open: &mut Option<usize>,
+    patterns: &[Pattern],
 ) -> Option<(Vec<Effect>, bool)> {
     let mut list = effects.to_vec();
     let mut t = Track::default();
@@ -410,7 +496,7 @@ pub fn editor(
                     .spacing([10.0, 6.0])
                     .show(ui, |ui| {
                         common(ui, e, &mut t);
-                        settings(ui, &mut e.kind, &mut t)
+                        settings(ui, &mut e.kind, &mut t, patterns)
                     });
             });
         }
