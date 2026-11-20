@@ -19,10 +19,16 @@ pub fn tiles_to_rgba8(width: u32, height: u32, tiles: &[(TileCoord, Vec<f16>)]) 
 
 /// Converts tiles and writes them into `img` (tiles may be fed in batches).
 pub fn blit(img: &mut RgbaImage, tiles: &[(TileCoord, Vec<f16>)]) {
+    blit_region(img, tiles, TILE_SIZE, (0, 0));
+}
+
+/// Like [`blit`] for tiles of `tile_px` pixels (a mip level), where `img`'s
+/// top-left corresponds to `origin` in that scaled pixel space.
+pub fn blit_region(img: &mut RgbaImage, tiles: &[(TileCoord, Vec<f16>)], tile_px: u32, origin: (i64, i64)) {
     let (width, height) = img.dimensions();
     let lut: Vec<u8> = (0..=4096).map(|i| (linear_to_srgb(i as f32 / 4096.0) * 255.0).round() as u8).collect();
     let to8 = |v: f32| lut[(v.clamp(0.0, 1.0) * 4096.0).round() as usize];
-    let ts = TILE_SIZE as usize;
+    let ts = tile_px as usize;
     let converted: Vec<(TileCoord, Vec<u8>)> = tiles
         .par_iter()
         .map(|(c, px)| {
@@ -43,16 +49,22 @@ pub fn blit(img: &mut RgbaImage, tiles: &[(TileCoord, Vec<f16>)]) {
     let stride = width as usize * 4;
     let buf: &mut [u8] = img;
     for (c, data) in converted {
-        let (x0, y0) = c.origin();
-        if x0 < 0 || y0 < 0 || x0 >= width as i64 || y0 >= height as i64 {
-            continue;
-        }
-        let (x0, y0) = (x0 as usize, y0 as usize);
-        let w = (width as usize - x0).min(ts);
-        let h = (height as usize - y0).min(ts);
-        for row in 0..h {
-            let dst = (y0 + row) * stride + x0 * 4;
-            buf[dst..dst + w * 4].copy_from_slice(&data[row * ts * 4..][..w * 4]);
+        let x0 = c.x as i64 * ts as i64 - origin.0;
+        let y0 = c.y as i64 * ts as i64 - origin.1;
+        for row in 0..ts as i64 {
+            let y = y0 + row;
+            if y < 0 || y >= height as i64 {
+                continue;
+            }
+            let xa = x0.max(0);
+            let xb = (x0 + ts as i64).min(width as i64);
+            if xa >= xb {
+                continue;
+            }
+            let src = (row as usize * ts + (xa - x0) as usize) * 4;
+            let dst = y as usize * stride + xa as usize * 4;
+            let n = (xb - xa) as usize * 4;
+            buf[dst..dst + n].copy_from_slice(&data[src..src + n]);
         }
     }
 }

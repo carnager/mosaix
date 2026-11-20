@@ -18,6 +18,16 @@ cargo test --workspace                       # inkl. Headless-GPU-Tests (Vulkan)
 
 Voraussetzungen: Wayland-Compositor, Vulkan-Treiber mit Descriptor Indexing (RADV, ANV, NVIDIA).
 
+## Für Agenten
+
+imagine ist per **MCP** und JSON-Skript steuerbar, auch live im offenen Fenster:
+
+```sh
+claude mcp add imagine -- /pfad/zu/imagine mcp --attach
+```
+
+Details: [docs/agenten.md](docs/agenten.md)
+
 ## Bedienung
 
 Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) im Terminal, die aktive Ebene im Fenstertitel.
@@ -37,4 +47,4 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 - `crates/imagine-core` – Dokumentmodell, Füllmethoden (CPU-Referenz), Verlauf, Kachel-Mathematik, View, Pinselstrich → Dabs (ohne GPU)
 - `crates/imagine-gpu` – wgpu-Engine: Kachel-Pools, Strich-Puffer, Composite-Cache, WGSL-Shader
 - `crates/imagine-io` – natives `.imagine`-Format (append-only), Export
-- `crates/imagine-app` – Wayland (smithay-client-toolkit), Tablet-Protokoll, Eingabe, Loader, Headless-CLI
+- `crates/imagine-app` – Wayland (smithay-client-toolkit), Tablet-Protokoll, Eingabe, Loader, Headless-CLI, Agenten-Schnittstelle (`src/agent/`: Befehle, MCP, Socket)

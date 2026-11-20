@@ -610,10 +610,52 @@ impl Engine {
     /// Writes premultiplied linear RGBA f16 pixels (TILE_SIZE² × 4) into a
     /// pixel layer, outside of the undo history (used for loading).
     pub fn upload_tile(&mut self, layer: LayerId, c: TileCoord, pixels: &[f16]) -> Option<Tile> {
-        assert_eq!(pixels.len(), (TILE_SIZE * TILE_SIZE * 4) as usize);
         if !self.in_document(c) {
             return None;
         }
+        let tile = self.write_new_tile(pixels)?;
+        self.doc.tiles_mut(layer)?.insert(c, tile.clone());
+        self.recheck.insert(c);
+        self.dirty.insert(c); // content may change under an identical signature
+        Some(tile)
+    }
+
+    /// Replaces (or removes, with `None`) tiles of a pixel layer as one undoable step.
+    /// Returns false if the layer is not a pixel layer, a stroke is active, or memory ran out.
+    pub fn replace_tiles(&mut self, layer: LayerId, tiles: Vec<(TileCoord, Option<Vec<f16>>)>, label: &str) -> bool {
+        if self.stroke.is_some() || self.doc.find(layer).is_none_or(|l| l.is_group()) {
+            return false;
+        }
+        let mut new = Vec::with_capacity(tiles.len());
+        for (c, px) in tiles {
+            if !self.in_document(c) {
+                continue;
+            }
+            match px {
+                Some(px) => match self.write_new_tile(&px) {
+                    Some(t) => new.push((c, Some(t))),
+                    None => return false,
+                },
+                None => new.push((c, None)),
+            }
+        }
+        let coords: Vec<TileCoord> = new.iter().map(|(c, _)| *c).collect();
+        let changed = self.edit(label, |d| {
+            let map = d.tiles_mut(layer).expect("checked above");
+            for (c, t) in new {
+                match t {
+                    Some(t) => map.insert(c, t),
+                    None => map.remove(&c),
+                };
+            }
+            true
+        });
+        self.dirty.extend(coords);
+        changed
+    }
+
+    fn write_new_tile(&mut self, pixels: &[f16]) -> Option<Tile> {
+        assert_eq!(pixels.len(), (TILE_SIZE * TILE_SIZE * 4) as usize);
         let tile = self.layer_pool.alloc()?;
         let slot = tile.slot();
         self.queue.write_texture(
@@ -626,10 +668,13 @@ impl Engine {
             },
             wgpu::Extent3d { width: TILE_SIZE, height: TILE_SIZE, depth_or_array_layers: 1 },
         );
-        self.doc.tiles_mut(layer)?.insert(c, tile.clone());
-        self.recheck.insert(c);
-        self.dirty.insert(c); // content may change under an identical signature
         Some(tile)
+    }
+
+    /// Pixels of a layer tile (`None` if the layer has no tile there).
+    pub fn read_layer_tile(&self, layer: LayerId, c: TileCoord) -> Option<Vec<f16>> {
+        let t = self.doc.find(layer)?.tiles()?.get(&c)?.clone();
+        Some(self.read_layer_tiles(&[t]).remove(0))
     }
 
     fn in_document(&self, c: TileCoord) -> bool {
@@ -1183,7 +1228,7 @@ impl Engine {
     /// Reads mip 0 of layer tiles (blocking).
     pub fn read_layer_tiles(&self, tiles: &[Tile]) -> Vec<Vec<f16>> {
         let slots: Vec<SlotId> = tiles.iter().map(Tile::slot).collect();
-        read_slots(&self.device, &self.queue, &self.layer_pool, &slots)
+        read_slots(&self.device, &self.queue, &self.layer_pool, &slots, 0)
     }
 
     /// Coordinates that currently have composited content.
@@ -1195,11 +1240,17 @@ impl Engine {
 
     /// Reads the flattened image of the given tiles (call [`Engine::flush`] first).
     pub fn read_composite(&self, coords: &[TileCoord]) -> Vec<Vec<f16>> {
-        let n = (TILE_SIZE * TILE_SIZE * 4) as usize;
+        self.read_composite_mip(coords, 0)
+    }
+
+    /// Like [`Engine::read_composite`] at a mip level: tiles are `TILE_SIZE >> mip` px wide.
+    pub fn read_composite_mip(&self, coords: &[TileCoord], mip: u32) -> Vec<Vec<f16>> {
+        let mip = mip.min(TILE_MIP_LEVELS - 1);
+        let n = ((TILE_SIZE >> mip).pow(2) * 4) as usize;
         let slots: Vec<Option<SlotId>> =
             coords.iter().map(|c| self.comp.get(c).and_then(|e| e.tile.as_ref()).map(Tile::slot)).collect();
         let present: Vec<SlotId> = slots.iter().flatten().copied().collect();
-        let mut data = read_slots(&self.device, &self.queue, &self.comp_pool, &present).into_iter();
+        let mut data = read_slots(&self.device, &self.queue, &self.comp_pool, &present, mip).into_iter();
         slots.iter().map(|s| if s.is_some() { data.next().unwrap() } else { vec![f16::ZERO; n] }).collect()
     }
 
@@ -1226,9 +1277,13 @@ fn layer_views(pool: &Pool) -> Vec<&wgpu::TextureView> {
     (0..MAX_LAYER_CHUNKS as usize).map(|i| &chunks.get(i).unwrap_or(&chunks[0]).view).collect()
 }
 
-/// Copies mip 0 of the given slots to the CPU (batched, blocking).
-fn read_slots(device: &wgpu::Device, queue: &wgpu::Queue, pool: &Pool, slots: &[SlotId]) -> Vec<Vec<f16>> {
-    let tile_bytes = (TILE_SIZE * TILE_SIZE * BYTES_PER_PIXEL) as u64;
+/// Copies one mip level of the given slots to the CPU (batched, blocking).
+fn read_slots(device: &wgpu::Device, queue: &wgpu::Queue, pool: &Pool, slots: &[SlotId], mip: u32) -> Vec<Vec<f16>> {
+    let size = TILE_SIZE >> mip;
+    let row = size * BYTES_PER_PIXEL;
+    // Buffer rows must be 256-byte aligned; small mips are padded and unpadded on read.
+    let padded_row = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let tile_bytes = (padded_row * size) as u64;
     let mut out = Vec::with_capacity(slots.len());
     for batch in slots.chunks(256) {
         let buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1240,24 +1295,28 @@ fn read_slots(device: &wgpu::Device, queue: &wgpu::Queue, pool: &Pool, slots: &[
         let mut enc = device.create_command_encoder(&Default::default());
         for (i, s) in batch.iter().enumerate() {
             enc.copy_texture_to_buffer(
-                texel_copy(&pool.chunk(*s).texture, 0, s.layer as u32),
+                texel_copy(&pool.chunk(*s).texture, mip, s.layer as u32),
                 wgpu::TexelCopyBufferInfo {
                     buffer: &buf,
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: i as u64 * tile_bytes,
-                        bytes_per_row: Some(TILE_SIZE * BYTES_PER_PIXEL),
-                        rows_per_image: Some(TILE_SIZE),
+                        bytes_per_row: Some(padded_row),
+                        rows_per_image: Some(size),
                     },
                 },
-                wgpu::Extent3d { width: TILE_SIZE, height: TILE_SIZE, depth_or_array_layers: 1 },
+                wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
             );
         }
         queue.submit([enc.finish()]);
         buf.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
         device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
         let data = buf.slice(..).get_mapped_range().expect("mapped range");
-        for chunk in data.chunks_exact(tile_bytes as usize) {
-            out.push(bytemuck::cast_slice::<u8, f16>(chunk).to_vec());
+        for tile in data.chunks_exact(tile_bytes as usize) {
+            let mut px = Vec::with_capacity((size * size * 4) as usize);
+            for r in tile.chunks_exact(padded_row as usize) {
+                px.extend_from_slice(bytemuck::cast_slice::<u8, f16>(&r[..row as usize]));
+            }
+            out.push(px);
         }
     }
     out

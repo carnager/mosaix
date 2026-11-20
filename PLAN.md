@@ -15,7 +15,8 @@ Zielhardware für Entwicklung: AMD RX 6700 XT (Navi 22, 12 GB VRAM, RADV/Vulkan)
 3. **Alles ist nicht-destruktiv, wo es geht.** Filter und Korrekturen sind Ebenen/Knoten mit Live-Parametern, keine modalen Dialoge mit „OK“-Knopf.
 4. **Alles ist ein Kommando.** Jede Aktion ist ein serialisierbares Command → Undo, Makros, Scripting, Headless-Batch und Command-Palette fallen „gratis“ ab.
 5. **Linux-only ist ein Feature.** Wir nutzen Wayland-Protokolle direkt (Tablet, Color-Management/HDR, Fractional Scaling, Presentation-Time) statt auf den kleinsten gemeinsamen Nenner zu zielen.
-6. **Messen statt glauben.** Performance-Budgets (Abschnitt 7) sind Teil der CI, Profiling (Tracy) ist ab Tag 1 eingebaut.
+6. **Agenten sind Nutzer erster Klasse.** Jede Funktion ist auch als Befehl (MCP-Tool / JSON) erreichbar; Agenten können das Ergebnis *sehen* (gerenderte Vorschau), und sie arbeiten auf Wunsch live im selben Dokument wie der Mensch – mit gemeinsamem Undo.
+7. **Messen statt glauben.** Performance-Budgets (Abschnitt 7) sind Teil der CI, Profiling (Tracy) ist ab Tag 1 eingebaut.
 
 ---
 
@@ -295,6 +296,18 @@ Umgesetzt (Bedienung noch per Tastatur, Ebenenliste im Terminal – das UI kommt
 | PNG → .imagine → PNG | bitgenau identisch |
 
 **Bekannte Grenzen:** kein UI (Phase 3), kein Datei-Dialog (Speichern neben die Quelldatei); Speichern läuft noch im UI-Thread (erstes Speichern 100 MP ≈ 0,5 s Pause, danach inkrementell); Pinsel-Kanten werden linear geblendet; Pass-Through-Gruppen fehlen; Kacheln liegen komplett im VRAM (Auslagerung = Residency-Manager, später); Fenster-Benchmark braucht ein sichtbares Fenster (niri drosselt verdeckte Fenster) – dafür gibt es `--bench-offscreen`.
+
+## Agenten-Schnittstelle (seit 20.11.2026)
+
+Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md).
+
+- Gemeinsame Befehlsschicht (22 Befehle: Dokument, Ebenen, Malen, Füllen, Bild platzieren, Farbe abfragen, Vorschau, Verlauf, Speichern/Export) mit strikter Parameterprüfung
+- **MCP-Server** über stdio (`imagine mcp`), Vorschau als Bild-Content
+- **Live-Modus** `--attach`: Unix-Socket pro Fenster, Agent und Mensch teilen Dokument und Undo-Verlauf
+- **JSON-Lines-Skripte** (`imagine run`) für Shell-Agenten und Batch
+- Getestet: Protokoll-Handshake, Tool↔Befehl-Konsistenz, kompletter Agenten-Ablauf gegen die echte GPU-Engine, Live-Steuerung eines Fensters, Aufräumen verwaister Sockets
+
+**Regel für alle folgenden Phasen:** Jedes neue Werkzeug bekommt sofort seinen Befehl und sein MCP-Tool. Die Tastaturkürzel der App laufen mittelfristig ebenfalls über die Befehlsschicht, dann gibt es Makros und Aufzeichnung gratis.
 
 ## Nächster konkreter Schritt
 

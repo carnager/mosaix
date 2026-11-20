@@ -33,20 +33,29 @@ pub enum Pixels<'a> {
 /// premultiplied linear f16. Pixels outside the image are transparent.
 /// Returns `None` if the tile is fully transparent (it can stay unallocated).
 pub fn extract_tile(src: &Pixels, width: u32, height: u32, tx: u32, ty: u32) -> Option<Vec<f16>> {
-    let ts = TILE_SIZE as usize;
-    let mut out = vec![f16::ZERO; ts * ts * 4];
-    let x0 = (tx * TILE_SIZE) as usize;
-    let y0 = (ty * TILE_SIZE) as usize;
-    let w = (width as usize).saturating_sub(x0).min(ts);
-    let h = (height as usize).saturating_sub(y0).min(ts);
+    extract_region(src, width, height, (tx * TILE_SIZE) as i64, (ty * TILE_SIZE) as i64)
+}
+
+/// Like [`extract_tile`] for a tile whose top-left corner lies at image
+/// coordinates `(x0, y0)` (may be negative or unaligned – used for placing
+/// images at arbitrary positions).
+pub fn extract_region(src: &Pixels, width: u32, height: u32, x0: i64, y0: i64) -> Option<Vec<f16>> {
+    let ts = TILE_SIZE as i64;
+    let mut out = vec![f16::ZERO; (ts * ts * 4) as usize];
     let lut = srgb8_lut();
     let mut any = false;
-
-    for row in 0..h {
-        let src_off = ((y0 + row) * width as usize + x0) * 4;
-        let dst = &mut out[row * ts * 4..][..w * 4];
-        for (i, px) in dst.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let s = src_off + i * 4;
+    let (w, h) = (width as i64, height as i64);
+    let (col0, col1) = ((-x0).clamp(0, ts), (w - x0).clamp(0, ts));
+    if col0 >= col1 {
+        return None;
+    }
+    for row in 0..ts {
+        let y = y0 + row;
+        if y < 0 || y >= h {
+            continue;
+        }
+        for col in col0..col1 {
+            let s = ((y * w + x0 + col) * 4) as usize;
             let (r, g, b, a) = match src {
                 Pixels::Srgb8(p) => (
                     lut[p[s] as usize],
@@ -63,10 +72,11 @@ pub fn extract_tile(src: &Pixels, width: u32, height: u32, tx: u32, ty: u32) -> 
                 Pixels::Linear32(p) => (p[s], p[s + 1], p[s + 2], p[s + 3].clamp(0.0, 1.0)),
             };
             any |= a > 0.0;
-            px[0] = f16::from_f32(r * a);
-            px[1] = f16::from_f32(g * a);
-            px[2] = f16::from_f32(b * a);
-            px[3] = f16::from_f32(a);
+            let d = ((row * ts + col) * 4) as usize;
+            out[d] = f16::from_f32(r * a);
+            out[d + 1] = f16::from_f32(g * a);
+            out[d + 2] = f16::from_f32(b * a);
+            out[d + 3] = f16::from_f32(a);
         }
     }
     any.then_some(out)
@@ -96,6 +106,19 @@ mod tests {
         // Outside the image: transparent.
         assert_eq!(t[8].to_f32(), 0.0);
         assert_eq!(t[TILE_SIZE as usize * 4 + 3].to_f32(), 0.0);
+    }
+
+    #[test]
+    fn region_with_negative_offset() {
+        // 2×1 opaque white image placed so its first pixel lands at tile pixel (3, 5).
+        let img = [255u8; 8];
+        let t = extract_region(&Pixels::Srgb8(&img), 2, 1, -3, -5).unwrap();
+        let at = |x: usize, y: usize| t[(y * TILE_SIZE as usize + x) * 4 + 3].to_f32();
+        assert_eq!(at(3, 5), 1.0);
+        assert_eq!(at(4, 5), 1.0);
+        assert_eq!(at(5, 5), 0.0);
+        assert_eq!(at(3, 4), 0.0);
+        assert!(extract_region(&Pixels::Srgb8(&img), 2, 1, 10, 0).is_none());
     }
 
     #[test]

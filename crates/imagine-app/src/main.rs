@@ -1,5 +1,6 @@
 //! imagine – GPU-first image editor for Linux/Wayland.
 
+mod agent;
 mod app;
 mod loader;
 mod session;
@@ -8,7 +9,7 @@ mod tablet;
 use std::path::PathBuf;
 
 use anyhow::{Context, bail};
-use loader::{LoaderMsg, Source};
+use loader::Source;
 
 const HELP: &str = "\
 imagine – GPU-Bildeditor (Phase 1: Engine)
@@ -21,6 +22,12 @@ Aufruf:
   imagine ... --bench-offscreen derselbe Benchmark ohne Fenster, misst echte GPU-Zeit pro Frame
   imagine DATEI --save A.imagine --export B.png
                                 ohne Fenster konvertieren (beides optional kombinierbar)
+
+Für Agenten (siehe docs/agenten.md):
+  imagine mcp [DATEI]           MCP-Server über stdio mit eigener Engine
+  imagine mcp --attach          MCP-Server, der das laufende Fenster live steuert
+  imagine run SKRIPT.jsonl      JSON-Befehle zeilenweise ausführen (`-` = stdin)
+  imagine run --attach SKRIPT   … im laufenden Fenster
 
 Ansicht:
   Schwenken       Leertaste + Ziehen, mittlere Maustaste, Stifttaste 1
@@ -60,6 +67,12 @@ fn parse_size(s: &str) -> anyhow::Result<(u32, u32)> {
 
 fn main() -> anyhow::Result<()> {
     init_tracing();
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    match argv.first().map(String::as_str) {
+        Some("mcp") => return agent_cmd(true, &argv[1..]),
+        Some("run") => return agent_cmd(false, &argv[1..]),
+        _ => {}
+    }
 
     let mut source = Source::Blank(4000, 3000);
     let mut bench = false;
@@ -95,33 +108,48 @@ fn main() -> anyhow::Result<()> {
     app::run(source, bench)
 }
 
+/// `imagine mcp …` / `imagine run …`
+fn agent_cmd(mcp: bool, args: &[String]) -> anyhow::Result<()> {
+    let mut attach = false;
+    let mut socket: Option<PathBuf> = None;
+    let mut positional = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--attach" => attach = true,
+            "--socket" => {
+                attach = true;
+                socket = Some(it.next().context("--socket braucht einen Pfad")?.into());
+            }
+            "-h" | "--help" => {
+                print!("{HELP}");
+                return Ok(());
+            }
+            s if s.starts_with("--") => bail!("unbekannte Option {s}"),
+            p => positional.push(PathBuf::from(p)),
+        }
+    }
+    let mut backend: Box<dyn agent::Backend> = if attach {
+        Box::new(agent::ipc::Client::connect(socket.as_deref())?)
+    } else {
+        let open = if mcp { positional.first().map(PathBuf::as_path) } else { None };
+        Box::new(agent::Local::new(open)?)
+    };
+    if mcp {
+        agent::mcp::serve(backend.as_mut())
+    } else {
+        let script = positional.last().context("imagine run braucht ein Skript (oder - für stdin)")?;
+        if !agent::run_script(backend.as_mut(), script)? {
+            std::process::exit(1);
+        }
+        Ok(())
+    }
+}
+
 /// Loads, optionally saves and exports, without opening a window.
 fn headless(source: Source, save: Option<PathBuf>, export: Option<PathBuf>, bench: bool) -> anyhow::Result<()> {
     let gpu = pollster::block_on(imagine_gpu::GpuContext::new(imagine_gpu::GpuContext::create_instance(), None))?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    loader::spawn(source, tx);
-    let mut session = None;
-    for msg in rx {
-        match msg {
-            LoaderMsg::Structure { doc, name, source, native_len, .. } => {
-                let engine = imagine_gpu::Engine::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8UnormSrgb, &doc);
-                session = Some(session::Session::new(engine, name, source, native_len));
-            }
-            LoaderMsg::Tiles { layer, tiles } => {
-                let s = session.as_mut().context("Kacheln vor Dokumentstruktur")?;
-                let failed = s.add_tiles(layer, &tiles);
-                if failed > 0 {
-                    bail!("{failed} Kacheln passen nicht in den GPU-Speicher");
-                }
-            }
-            LoaderMsg::Done { total_ms, .. } => {
-                tracing::info!("geladen in {total_ms:.0} ms");
-                break;
-            }
-            LoaderMsg::Error(e) => bail!("Laden fehlgeschlagen: {e}"),
-        }
-    }
-    let mut s = session.context("kein Dokument geladen")?;
+    let mut s = session::load(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb, source)?;
     if let Some(p) = save {
         let r = s.save(Some(&p))?;
         tracing::info!("gespeichert: {} ({} Kacheln, {:.1} MB, {:.0} ms)", r.path.display(), r.tiles_written, r.bytes as f64 / 1e6, r.ms);
@@ -205,7 +233,9 @@ fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt, prelude::*};
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,wgpu_core=warn,wgpu_hal=warn,naga=warn"));
-    let registry = tracing_subscriber::registry().with(fmt::layer().with_filter(filter));
+    // Logs go to stderr: stdout belongs to MCP / script results.
+    let registry =
+        tracing_subscriber::registry().with(fmt::layer().with_writer(std::io::stderr).with_filter(filter));
     #[cfg(feature = "profile")]
     let registry = registry.with(tracing_tracy::TracyLayer::default());
     registry.init();

@@ -19,7 +19,7 @@ use smithay_client_toolkit::{
     dispatch2::Dispatch2,
     output::{OutputHandler, OutputState},
     reexports::{
-        calloop::{EventLoop, channel},
+        calloop::{EventLoop, Interest, Mode, PostAction, channel, generic::Generic},
         calloop_wayland_source::WaylandSource,
     },
     registry::{ProvidesRegistryState, RegistryState},
@@ -52,6 +52,7 @@ use wayland_protocols::wp::{
     viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
 };
 
+use crate::agent::{command, ipc};
 use crate::loader::{self, LoaderMsg, Source, TileData};
 use crate::session::Session;
 use crate::tablet::{self, TabletFrame};
@@ -147,6 +148,9 @@ pub struct App {
     brush: BrushSettings,
     palette_idx: usize,
     tablet_contact: bool,
+
+    // Agents
+    socket: Option<ipc::SocketGuard>,
 
     // Stats
     bench: Option<Bench>,
@@ -278,11 +282,36 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         brush: BrushSettings::default(),
         palette_idx: 0,
         tablet_contact: false,
+        socket: None,
         bench: None,
         bench_on_load: bench,
         title_at: Instant::now(),
         frame_cpu_ms: 0.0,
     };
+    match ipc::bind() {
+        Ok((listener, guard)) => {
+            tracing::info!("Agenten-Socket: {} (imagine mcp --attach)", guard.path().display());
+            app.socket = Some(guard);
+            let handle = event_loop.handle();
+            event_loop
+                .handle()
+                .insert_source(Generic::new(listener, Interest::READ, Mode::Level), move |_, listener, _app: &mut App| {
+                    while let Ok((stream, _)) = listener.accept() {
+                        if stream.set_nonblocking(true).is_err() {
+                            continue;
+                        }
+                        let mut buf = Vec::new();
+                        let _ = handle.insert_source(
+                            Generic::new(stream, Interest::READ, Mode::Level),
+                            move |_, stream, app: &mut App| Ok(app.agent_io(stream, &mut buf)),
+                        );
+                    }
+                    Ok(PostAction::Continue)
+                })
+                .map_err(|e| anyhow::anyhow!("agent socket: {e}"))?;
+        }
+        Err(e) => tracing::warn!("Agenten-Socket nicht verfügbar: {e:#}"),
+    }
     let seats: Vec<_> = app.seat_state.seats().collect();
     for seat in seats {
         app.bind_tablet_seat(&seat);
@@ -686,6 +715,74 @@ impl App {
             l.blend = l.blend.cycle(step);
             true
         });
+    }
+
+    // ---- agents -----------------------------------------------------------
+
+    /// Reads from an agent connection and answers every complete line.
+    fn agent_io(&mut self, stream: &std::os::unix::net::UnixStream, buf: &mut Vec<u8>) -> PostAction {
+        use std::io::{Read, Write};
+        let mut chunk = [0u8; 64 << 10];
+        loop {
+            match (&*stream).read(&mut chunk) {
+                Ok(0) => return PostAction::Remove,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(_) => return PostAction::Remove,
+            }
+        }
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = buf.drain(..=pos).collect();
+            let reply = self.agent_line(&line);
+            // Large replies (previews) are written blocking.
+            let _ = stream.set_nonblocking(false);
+            let ok = (&*stream).write_all(reply.as_bytes()).is_ok();
+            let _ = stream.set_nonblocking(true);
+            if !ok {
+                return PostAction::Remove;
+            }
+        }
+        PostAction::Continue
+    }
+
+    fn agent_line(&mut self, line: &[u8]) -> String {
+        let req: serde_json::Value = match serde_json::from_slice(line) {
+            Ok(v) => v,
+            Err(e) => return ipc::response(serde_json::Value::Null, Err(anyhow::anyhow!("invalid JSON: {e}"))),
+        };
+        let id = req.get("id").cloned().unwrap_or(serde_json::Value::Null);
+        let mut cmd_json = req;
+        if let Some(o) = cmd_json.as_object_mut() {
+            o.remove("id");
+        }
+        let cmd = match command::Command::parse(cmd_json) {
+            Ok(c) => c,
+            Err(e) => return ipc::response(id, Err(e)),
+        };
+        if self.stroke.is_some() && cmd.mutates() {
+            return ipc::response(id, Err(anyhow::anyhow!("the user is painting right now – retry in a moment")));
+        }
+        let (name, mutates) = (cmd.name(), cmd.mutates());
+        tracing::info!("Agent: {name}");
+        let mut ctx = command::Ctx { gpu: &self.gpu, format: self.surface_config.format, session: &mut self.session };
+        let result = command::execute(&mut ctx, cmd);
+        if let Ok(out) = &result {
+            if out.replaced_document {
+                self.pending_uploads.clear();
+                self.loading = false;
+                self.view_fitted = false;
+                self.fit_if_needed();
+                self.modified = false;
+            } else if mutates {
+                self.modified = true;
+            }
+            if mutates {
+                self.print_layers();
+            }
+        }
+        self.needs_redraw = true;
+        self.update_title();
+        ipc::response(id, result)
     }
 
     // ---- rendering --------------------------------------------------------

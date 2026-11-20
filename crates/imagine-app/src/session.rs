@@ -12,7 +12,7 @@ use imagine_io::native::{Writer, compress_tile, live_bytes};
 use imagine_io::{BlobRef, export};
 use rayon::prelude::*;
 
-use crate::loader::TileData;
+use crate::loader::{self, LoaderMsg, Source, TileData};
 
 const READBACK_BATCH: usize = 256;
 
@@ -34,6 +34,33 @@ pub struct Session {
     file_len: Option<u64>,
     /// Tile content (by serial) already stored in that file.
     saved: HashMap<u64, BlobRef>,
+}
+
+/// Loads a document synchronously (headless use and agent commands).
+pub fn load(gpu: &imagine_gpu::GpuContext, format: wgpu::TextureFormat, source: Source) -> anyhow::Result<Session> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    loader::spawn(source, tx);
+    let mut session: Option<Session> = None;
+    for msg in rx {
+        match msg {
+            LoaderMsg::Structure { doc, name, source, native_len, .. } => {
+                let engine = Engine::new(&gpu.device, &gpu.queue, format, &doc);
+                session = Some(Session::new(engine, name, source, native_len));
+            }
+            LoaderMsg::Tiles { layer, tiles } => {
+                let s = session.as_mut().context("Kacheln vor Dokumentstruktur")?;
+                let failed = s.add_tiles(layer, &tiles);
+                if failed > 0 {
+                    bail!("{failed} Kacheln passen nicht in den GPU-Speicher");
+                }
+            }
+            LoaderMsg::Done { .. } => break,
+            LoaderMsg::Error(e) => bail!("Laden fehlgeschlagen: {e}"),
+        }
+    }
+    let mut s = session.context("kein Dokument geladen")?;
+    s.engine.clear_history();
+    Ok(s)
 }
 
 impl Session {

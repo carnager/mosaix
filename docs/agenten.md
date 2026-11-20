@@ -1,0 +1,79 @@
+# imagine für Agenten
+
+imagine lässt sich von KI-Agenten genauso bedienen wie von Menschen. Alle Zugänge teilen dieselbe Befehlsschicht (`crates/imagine-app/src/agent/command.rs`). Jede Änderung ist **ein Undo-Schritt**, egal ob sie vom Agenten oder von dir kommt.
+
+| Zugang | Wofür | Aufruf |
+|---|---|---|
+| **MCP-Server, eigene Engine** | Agent arbeitet allein, ohne Fenster | `imagine mcp [DATEI]` |
+| **MCP-Server, live** | Agent steuert dein offenes Fenster, du siehst zu und kannst eingreifen | `imagine mcp --attach` |
+| **JSON-Lines-Skript** | Agenten mit Shell-Zugriff, Batch, Tests | `imagine run SKRIPT.jsonl` / `… --attach -` |
+
+## Einrichten (Claude Code)
+
+```sh
+# live: der Agent arbeitet in deinem laufenden imagine-Fenster
+claude mcp add imagine -- /pfad/zu/imagine mcp --attach
+
+# oder headless mit eigener Engine
+claude mcp add imagine-headless -- /pfad/zu/imagine mcp
+```
+
+Alternativ als `.mcp.json` im Projekt:
+
+```json
+{ "mcpServers": { "imagine": { "command": "/pfad/zu/imagine", "args": ["mcp", "--attach"] } } }
+```
+
+Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur für deinen Benutzer zugänglich). `--attach` verbindet sich mit dem zuletzt gestarteten Fenster; `--socket PFAD` oder `IMAGINE_SOCKET` wählen ein bestimmtes.
+
+## Konventionen
+
+- Koordinaten in **Dokumentpixeln**, Ursprung oben links
+- Farben in **sRGB**: `"#rrggbb"`, `"#rrggbbaa"` oder `[r, g, b(, a)]` mit 0–255
+- `layer` ist optional und meint sonst die aktive Ebene. Ebenen-IDs bleiben stabil, auch über Speichern und Laden hinweg.
+- Fehler kommen als lesbare Meldung zurück (MCP: `isError`, Skript: `"ok": false`). Tippfehler in Parametern werden abgelehnt, nicht ignoriert.
+- Malst du gerade selbst, lehnt imagine verändernde Agentenbefehle kurz ab („the user is painting right now“).
+
+## Werkzeuge
+
+| Werkzeug | Zweck |
+|---|---|
+| `document_new`, `document_open`, `document_info` | Dokument anlegen/öffnen; Struktur, Ebenenbaum, Verlauf abfragen |
+| `layer_add`, `layer_duplicate`, `layer_delete`, `layer_select`, `layer_move`, `layer_group`, `layer_ungroup` | Ebenenverwaltung |
+| `layer_set` | Name, Deckkraft, Füllmethode (`multiply`, `screen`, `overlay`, … 19 Stück), Sichtbarkeit |
+| `set_blend_space` | `srgb` (Photoshop-artig) oder `linear` |
+| `paint_stroke` | Pinselstrich entlang einer Punktliste, optional mit Druck pro Punkt; Größe, Härte, Deckkraft, Fluss, Radierer |
+| `fill_rect`, `clear_rect` | Rechteck füllen bzw. transparent machen |
+| `place_image` | Bilddatei als neue Ebene an Position (x, y) |
+| `sample_color` | Farbe des Gesamtbilds an einem Punkt |
+| `render_preview` | **Das Ergebnis ansehen:** Gesamtbild oder Ausschnitt als PNG, optional zusätzlich als Datei (`output`) |
+| `undo`, `redo` | Verlauf |
+| `save`, `export` | `.imagine` (mit Ebenen, inkrementell) bzw. PNG/JPEG/WebP/TIFF |
+
+Die vollständigen JSON-Schemata liefert der Server per `tools/list`.
+
+## Beispiel: Skript
+
+```jsonl
+# Kommentare mit # oder //
+{"cmd": "document_new", "width": 800, "height": 500}
+{"cmd": "fill_rect", "x": 0, "y": 0, "width": 800, "height": 500, "color": "#1e2a44"}
+{"cmd": "layer_add", "name": "Sonne"}
+{"cmd": "paint_stroke", "points": [[600, 120]], "size": 140, "hardness": 0.4, "color": "#ffcc33"}
+{"cmd": "layer_set", "blend": "screen", "opacity": 0.8}
+{"cmd": "render_preview", "max_size": 512, "output": "vorschau.png"}
+{"cmd": "save", "path": "nacht.imagine"}
+```
+
+```sh
+imagine run nacht.jsonl            # eigene Engine
+imagine run --attach nacht.jsonl   # im offenen Fenster
+```
+
+Jede Zeile erzeugt eine JSON-Ergebniszeile auf stdout. Beim ersten Fehler bricht das Skript mit Exit-Code 1 ab. Logs gehen nach stderr.
+
+## Grenzen (Stand Phase 1)
+
+- Es gibt noch keine Auswahlen, Masken, Filter oder Transformationen; diese Werkzeuge kommen mit Phase 2 und 4 dazu.
+- `render_preview` zeigt das Bild, nicht die Fensteransicht (kein Zoom, keine Drehung).
+- `document_open`/`document_new` ersetzen im Live-Modus das offene Dokument ohne Rückfrage. Ungespeicherte Änderungen gehen dabei verloren.
