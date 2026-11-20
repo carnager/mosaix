@@ -12,6 +12,7 @@ use imagine_core::{LayerId, MaskRef, TILE_SIZE, TileCoord};
 
 use super::util::color_attachment;
 use super::{Engine, NONE, SCRATCH_LAYERS, StrokeTarget, mask_slot};
+use super::filter::FilterJob;
 use super::magic::SimilarJob;
 use super::transform::WarpJob;
 use crate::pool::{Tile, texel_copy};
@@ -21,6 +22,7 @@ enum Kernel {
     Apply,
     Warp,
     Similar,
+    Filter,
 }
 
 #[repr(C)]
@@ -107,6 +109,23 @@ impl Engine {
         self.run_tiles(StrokeTarget::Mask, Kernel::Similar, bytemuck::cast_slice(jobs), size_of::<SimilarJob>())
     }
 
+    pub(super) fn run_filter(&mut self, jobs: &[FilterJob]) -> Option<Vec<Tile>> {
+        self.run_tiles(StrokeTarget::Pixels, Kernel::Filter, bytemuck::cast_slice(jobs), size_of::<FilterJob>())
+    }
+
+    /// Job mixing `src_slot` over the layer's tile at `c` through the selection.
+    pub(super) fn replace_job(&self, layer: LayerId, c: TileCoord, src_slot: u32) -> ApplyJob {
+        let mut j = self.with_old(self.job(c), layer, StrokeTarget::Pixels, c);
+        j.src_kind = KIND_STROKE;
+        j.src_slots[0] = src_slot;
+        j.mode = MODE_REPLACE;
+        j
+    }
+
+    pub(super) fn run_mix(&mut self, jobs: &[ApplyJob]) -> Option<Vec<Tile>> {
+        self.run_apply(StrokeTarget::Pixels, jobs)
+    }
+
     fn run_tiles(&mut self, target: StrokeTarget, kernel: Kernel, jobs: &[u8], stride: usize) -> Option<Vec<Tile>> {
         let count = jobs.len() / stride;
         let mut out = Vec::with_capacity(count);
@@ -134,7 +153,7 @@ impl Engine {
                         wgpu::BindGroupEntry { binding: 1, resource: self.params.binding() },
                     ],
                 }),
-                Kernel::Warp => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                Kernel::Warp | Kernel::Filter => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("warp"),
                     layout: &self.warp_bgl,
                     entries: &[
@@ -158,6 +177,7 @@ impl Engine {
                 (Kernel::Warp, StrokeTarget::Pixels) => &self.warp_rgba_pipeline,
                 (Kernel::Warp, StrokeTarget::Mask) => &self.warp_mask_pipeline,
                 (Kernel::Similar, _) => &self.similar_pipeline,
+                (Kernel::Filter, _) => &self.filter_pipeline,
             };
             let (views, scratch) = match target {
                 StrokeTarget::Pixels => (&self.scratch_rgba_views, &self.scratch_rgba),

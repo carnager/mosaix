@@ -2107,6 +2107,12 @@ impl App {
                         }
                     }
                 }
+                Action::ApplyFilter(f) => {
+                    let t0 = Instant::now();
+                    let label = f.name();
+                    self.engine_op(|e| e.apply_filter(&f, label));
+                    tracing::info!("{label}: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+                }
                 Action::OpenFile(p) => self.guard_unsaved(Pending::Open(p)),
                 Action::NewDocument { w, h, white } => self.guard_unsaved(Pending::New { w, h, white }),
                 Action::SaveAs(p) => self.save_to(Some(p)),
@@ -2223,7 +2229,11 @@ impl App {
                 tracing::warn!("{} Kacheln passten nicht in den GPU-Speicher", self.upload_failures);
                 self.upload_failures = 0;
             }
-            if let Err(e) = s.engine.set_transform_preview(preview.map(|f| (f, Interp::Bicubic))) {
+            let result = match &self.ui_state.filter_preview {
+                Some(f) => s.engine.set_filter_preview(Some(f)),
+                None => s.engine.set_transform_preview(preview.map(|f| (f, Interp::Bicubic))),
+            };
+            if let Err(e) = result {
                 tracing::warn!("Vorschau: {e}");
             }
             s.engine.render(&target, &self.view, &overlay);

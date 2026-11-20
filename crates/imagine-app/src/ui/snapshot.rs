@@ -109,6 +109,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         }
         Ok("new") => state.new_doc = Some(Default::default()),
         Ok("confirm") => state.confirm = Some("Beim Beenden gehen sie verloren.".into()),
+        Ok("filter") => state.open_filter(imagine_core::Filter::GaussianBlur { radius: 25.0 }),
         _ => {}
     }
     let mut model = model;
@@ -151,6 +152,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     let mut ui_ms = Vec::new();
     for _ in 0..30 {
         std::thread::sleep(std::time::Duration::from_millis(15));
+        let _ = s.engine.set_filter_preview(state.filter_preview.as_ref());
         s.engine.render(&target, &view, &Overlay { checker_px: 8.0, ..Default::default() });
         let t0 = std::time::Instant::now();
         gui.run((w, h), ppp, |ctx| {

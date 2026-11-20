@@ -672,3 +672,76 @@ fn adjustment_layers_match_cpu_reference() {
         e.undo();
     }
 }
+
+#[test]
+fn filters_blur_sharpen_noise_and_preview() {
+    use imagine_core::Filter;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1024, 512));
+    // White right half (x ≥ 512) on transparent.
+    e.select_shape(&Shape::Rect { x: 512.0, y: 0.0, w: 512.0, h: 512.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0; 4], 1.0, "Weiß").unwrap();
+    e.deselect("x").unwrap();
+    // Gaussian step response: 0.5 at the edge, ≈ 0.16 one sigma outside.
+    for sigma in [4.0f32, 40.0] {
+        e.apply_filter(&Filter::GaussianBlur { radius: sigma }, "Weichzeichnen").unwrap();
+        // Φ(z) via the Abramowitz–Stegun erf approximation.
+        let phi = |z: f32| {
+            let x = z.abs() / std::f32::consts::SQRT_2;
+            let t = 1.0 / (1.0 + 0.3275911 * x);
+            let y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * (-x * x).exp();
+            0.5 * (1.0 + y.copysign(z))
+        };
+        // Pixel x covers [x, x+1); the edge is at 512.
+        let expect = |x: i64| phi(((x as f32 + 0.5) - 512.0) / sigma);
+        for x in [511, 512, 511 - sigma as i64, 512 + sigma as i64] {
+            let got = alpha_at(&mut e, x, 256);
+            assert!((got - expect(x)).abs() < 0.03, "sigma {sigma} x {x}: {got} vs {}", expect(x));
+        }
+        assert!(alpha_at(&mut e, 512 - 4 * sigma as i64, 256) < 0.01);
+        e.undo();
+    }
+    // Unsharp mask overshoots next to the edge (inside brighter … capped by alpha).
+    e.edit("grau", |_| false);
+    let grey = imagine_core::color::srgb_to_linear(0.5);
+    e.fill(StrokeTarget::Pixels, [grey, grey, grey, 1.0], 1.0, "Grau").unwrap();
+    e.select_shape(&Shape::Rect { x: 512.0, y: 0.0, w: 512.0, h: 512.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.8, 0.8, 0.8, 1.0], 1.0, "Hell").unwrap();
+    e.deselect("x").unwrap();
+    e.apply_filter(&Filter::UnsharpMask { amount: 150.0, radius: 3.0, threshold: 0.0 }, "Scharf").unwrap();
+    e.flush();
+    let inside = composite_px(&e, TileCoord::new(2, 0), 2, 100)[0];
+    let outside = composite_px(&e, TileCoord::new(1, 0), 253, 100)[0];
+    assert!(inside > 0.85 && outside < grey - 0.05, "{inside} {outside}");
+    e.undo();
+    // Noise changes pixels but keeps the mean.
+    e.apply_filter(&Filter::AddNoise { amount: 20.0, monochrome: true, gaussian: false, seed: 1 }, "Rauschen").unwrap();
+    e.flush();
+    let tile = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+    let vals: Vec<f32> = (0..256).map(|x| px(&tile, x, 7)[0]).collect();
+    let mean = vals.iter().sum::<f32>() / vals.len() as f32;
+    assert!(vals.iter().any(|v| (v - grey).abs() > 0.02));
+    assert!((mean - grey).abs() < 0.04, "mean {mean}");
+    e.undo();
+    // Preview leaves the history alone.
+    let before = e.history_len();
+    let mut view = View { viewport: DVec2::new(1024.0, 512.0), ..Default::default() };
+    view.fit(1024, 512);
+    let tex = g.device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: 1024, height: 512, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FMT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    e.render(&tex.create_view(&Default::default()), &view, &Overlay::default());
+    e.set_filter_preview(Some(&Filter::GaussianBlur { radius: 20.0 })).unwrap();
+    e.flush();
+    let blurred = composite_px(&e, TileCoord::new(1, 0), 255, 100)[0];
+    assert!(blurred > grey + 0.05, "preview visible: {blurred}");
+    assert_eq!(e.history_len(), before);
+    e.set_filter_preview(None).unwrap();
+}

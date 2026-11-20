@@ -128,6 +128,7 @@ pub enum Action {
     NewDocument { w: u32, h: u32, white: bool },
     Unsaved(super::files::Answer),
     AddAdjustment(imagine_core::Adjustment),
+    ApplyFilter(imagine_core::Filter),
     SetAdjustment { adj: imagine_core::Adjustment, done: bool },
 }
 
@@ -149,6 +150,10 @@ pub struct State {
     /// Unsaved-changes question: what happens if the user discards.
     pub confirm: Option<String>,
     adj_editor: super::adjust_ui::EditorState,
+    /// Open filter dialog: the filter and whether to preview it.
+    filter: Option<(imagine_core::Filter, bool)>,
+    /// What the canvas should preview right now (set by the dialog).
+    pub filter_preview: Option<imagine_core::Filter>,
 }
 
 enum Dialog {
@@ -159,9 +164,18 @@ enum Dialog {
 const ACCENT: Color32 = Color32::from_rgb(90, 150, 255);
 
 impl State {
+    pub fn open_filter(&mut self, f: imagine_core::Filter) {
+        self.filter = Some((f, true));
+    }
+
     /// A palette, dialog or question is open: keys go to the interface.
     pub fn captures_keyboard(&self) -> bool {
-        self.palette.is_some() || self.confirm.is_some() || self.file.is_some() || self.new_doc.is_some() || self.dialog.is_some()
+        self.palette.is_some()
+            || self.confirm.is_some()
+            || self.file.is_some()
+            || self.new_doc.is_some()
+            || self.dialog.is_some()
+            || self.filter.is_some()
     }
 }
 
@@ -194,6 +208,7 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
     {
         st.new_doc = None;
     }
+    filter_dialog(ctx, st, &mut out);
     if let Some((query, sel)) = &mut st.palette {
         let mut close = false;
         command_palette(ctx, query, sel, &mut out, &mut close);
@@ -254,6 +269,17 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                             if ui.button(name).on_hover_text(p.display().to_string()).clicked() {
                                 out.push(Action::OpenFile(p.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+                if menu == "Bild" {
+                    ui.separator();
+                    ui.menu_button("Filter", |ui| {
+                        for f in imagine_core::Filter::defaults() {
+                            if ui.button(format!("{} …", f.name())).clicked() {
+                                st.filter = Some((f, true));
                                 ui.close();
                             }
                         }
@@ -937,4 +963,63 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
             })
         })
         .collect()
+}
+
+fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
+    use imagine_core::Filter;
+    let Some((f, preview)) = &mut st.filter else {
+        st.filter_preview = None;
+        return;
+    };
+    let mut open = true;
+    let mut apply = false;
+    let mut cancel = false;
+    egui::Window::new(f.name())
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .default_pos(ctx.content_rect().center() - Vec2::new(160.0, 120.0))
+        .show(ctx, |ui| {
+            let s = |ui: &mut egui::Ui, label: &str, v: &mut f32, r: std::ops::RangeInclusive<f32>, log: bool, suffix: &str| {
+                ui.horizontal(|ui| {
+                    ui.add_sized([90.0, 18.0], egui::Label::new(label));
+                    ui.add(egui::Slider::new(v, r).logarithmic(log).suffix(suffix).max_decimals(1));
+                });
+            };
+            match f {
+                Filter::GaussianBlur { radius } => s(ui, "Radius", radius, 0.1..=1000.0, true, " px"),
+                Filter::UnsharpMask { amount, radius, threshold } => {
+                    s(ui, "Stärke", amount, 1.0..=500.0, false, " %");
+                    s(ui, "Radius", radius, 0.1..=250.0, true, " px");
+                    s(ui, "Schwellenwert", threshold, 0.0..=255.0, false, "");
+                }
+                Filter::HighPass { radius } => s(ui, "Radius", radius, 0.1..=1000.0, true, " px"),
+                Filter::AddNoise { amount, monochrome, gaussian, seed } => {
+                    s(ui, "Stärke", amount, 0.0..=100.0, false, " %");
+                    ui.checkbox(monochrome, "Monochrom");
+                    ui.checkbox(gaussian, "Gaußverteilt");
+                    let mut sd = *seed as f32;
+                    s(ui, "Variante", &mut sd, 0.0..=100.0, false, "");
+                    *seed = sd as u32;
+                }
+            }
+            ui.checkbox(preview, "Vorschau");
+            ui.horizontal(|ui| {
+                if ui.button("Anwenden").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    apply = true;
+                }
+                if ui.button("Abbrechen").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+            });
+        });
+    if apply {
+        out.push(Action::ApplyFilter(f.clone()));
+    }
+    if apply || cancel || !open {
+        st.filter = None;
+        st.filter_preview = None;
+    } else {
+        st.filter_preview = preview.then(|| f.clone());
+    }
 }

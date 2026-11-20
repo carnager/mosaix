@@ -22,6 +22,7 @@
 
 mod apply;
 mod display;
+mod filter;
 mod frame;
 mod magic;
 mod readback;
@@ -233,6 +234,7 @@ pub struct Engine {
     warp_mask_pipeline: wgpu::RenderPipeline,
     bounds_pipeline: wgpu::ComputePipeline,
     similar_pipeline: wgpu::RenderPipeline,
+    filter_pipeline: wgpu::RenderPipeline,
     flatten_pipeline: wgpu::ComputePipeline,
     mip_pipeline: wgpu::ComputePipeline,
 }
@@ -319,6 +321,7 @@ impl Engine {
         let warp_shader = shader("warp", include_str!("../shaders/warp.wgsl").into());
         let bounds_shader = shader("bounds", include_str!("../shaders/bounds.wgsl").into());
         let similar_shader = shader("similar", include_str!("../shaders/similar.wgsl").into());
+        let filter_shader = shader("filter", include_str!("../shaders/filter.wgsl").into());
 
         // ---- bind group layouts ---------------------------------------------
         use wgpu::ShaderStages as S;
@@ -532,6 +535,7 @@ impl Engine {
             rp("smudge pickup", &smudge_layout, &smudge_shader, ("vs", "fs_pickup"), &[], TILE_FORMAT, None, TriangleList);
         let smudge_write_pipeline =
             rp("smudge write", &smudge_layout, &smudge_shader, ("vs", "fs_write"), &[], TILE_FORMAT, None, TriangleList);
+        let filter_pipeline = rp("filter", &warp_layout, &filter_shader, ("vs", "fs"), &[], TILE_FORMAT, None, TriangleList);
         let similar_pipeline =
             rp("similar", &similar_layout, &similar_shader, ("vs", "fs"), &[], MASK_FORMAT, None, TriangleList);
         let bounds_pipeline = compute_pipeline(
@@ -719,6 +723,7 @@ impl Engine {
             warp_mask_pipeline,
             bounds_pipeline,
             similar_pipeline,
+            filter_pipeline,
             flatten_pipeline,
             mip_pipeline,
         };

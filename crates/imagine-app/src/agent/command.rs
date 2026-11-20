@@ -160,6 +160,7 @@ pub enum Command {
         use_selection: Option<bool>,
     },
     LayerBounds { layer: Option<LayerId> },
+    FilterApply { layer: Option<LayerId>, filter: imagine_core::Filter },
     AdjustmentAdd { adjustment: imagine_core::Adjustment, name: Option<String> },
     AdjustmentSet { layer: Option<LayerId>, adjustment: imagine_core::Adjustment },
     Crop { x: i64, y: i64, width: u32, height: u32 },
@@ -233,6 +234,7 @@ impl Command {
             Self::SelectColorRange { .. } => "select_color_range",
             Self::LayerBounds { .. } => "layer_bounds",
             Self::AdjustmentAdd { .. } => "adjustment_add",
+            Self::FilterApply { .. } => "filter_apply",
             Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
@@ -773,6 +775,12 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             s.engine.transform_layer(fwd, interp, use_selection, "Transformieren").map_err(engine_err)?;
             let bounds = s.engine.content_bounds(id).map(bounds_json);
             Ok(Output::json(json!({ "ok": true, "active_layer": id, "bounds": bounds })))
+        }
+        Command::FilterApply { layer, filter } => {
+            pixel_layer(s, layer)?;
+            let label = filter.name();
+            s.engine.apply_filter(&filter, label).map_err(engine_err)?;
+            ok(s)
         }
         Command::AdjustmentAdd { adjustment, name } => {
             let label = format!("Einstellungsebene {}", adjustment.name());

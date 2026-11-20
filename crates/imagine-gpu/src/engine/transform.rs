@@ -55,7 +55,7 @@ const CONST_TAG: u32 = 0xff00_0000;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Default)]
-struct GridRef {
+pub(super) struct GridRef {
     base: u32,
     w: u32,
     h: u32,
@@ -89,12 +89,12 @@ const MODE_FLOAT: u32 = 1;
 
 /// Tile → slot lookup tables for the warp kernel, packed into one buffer.
 #[derive(Default)]
-struct Grids {
-    data: Vec<u32>,
+pub(super) struct Grids {
+    pub(super) data: Vec<u32>,
 }
 
 impl Grids {
-    fn add(&mut self, entries: &[(TileCoord, u32)], fallback: f32) -> GridRef {
+    pub(super) fn add(&mut self, entries: &[(TileCoord, u32)], fallback: f32) -> GridRef {
         if entries.is_empty() {
             return GridRef { fallback, ..Default::default() };
         }
@@ -110,7 +110,7 @@ impl Grids {
         GridRef { base, w, h, x0, y0, fallback, ..Default::default() }
     }
 
-    fn layer(&mut self, tiles: &HashMap<TileCoord, Tile>) -> GridRef {
+    pub(super) fn layer(&mut self, tiles: &HashMap<TileCoord, Tile>) -> GridRef {
         let e: Vec<_> = tiles.iter().map(|(c, t)| (*c, t.slot().packed())).collect();
         self.add(&e, 0.0)
     }
@@ -132,7 +132,7 @@ impl Grids {
 
 /// Destination tiles covered by the transformed source tiles (exact
 /// parallelogram/tile overlap test, `margin` = filter support in source px).
-fn footprint(src: impl IntoIterator<Item = TileCoord>, fwd: DAffine2, margin: f64) -> BTreeSet<TileCoord> {
+pub(super) fn footprint(src: impl IntoIterator<Item = TileCoord>, fwd: DAffine2, margin: f64) -> BTreeSet<TileCoord> {
     let ts = TILE_SIZE as f64;
     let mut out = BTreeSet::new();
     let ax = fwd.matrix2.x_axis;
@@ -192,9 +192,15 @@ pub fn is_integer_translation(fwd: DAffine2) -> bool {
     fwd.matrix2 == glam::DMat2::IDENTITY && fwd.translation.round() == fwd.translation
 }
 
+/// What a live preview shows.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum PreviewKind {
+    Transform(DAffine2, Interp),
+    Filter(imagine_core::Filter),
+}
+
 pub(super) struct Preview {
-    pub fwd: DAffine2,
-    pub interp: Interp,
+    pub kind: PreviewKind,
     /// Area (document px) the preview was computed for.
     pub rect: (DVec2, DVec2),
     pub doc: Document<Tile>,
@@ -466,10 +472,11 @@ impl Engine {
             }
             Some((fwd, interp)) => {
                 let interp = if is_integer_translation(fwd) { Interp::Nearest } else { interp };
-                if self.preview.as_ref().is_some_and(|p| p.fwd == fwd && p.interp == interp) {
+                let kind = PreviewKind::Transform(fwd, interp);
+                if self.preview.as_ref().is_some_and(|p| p.kind == kind) {
                     return Ok(());
                 }
-                self.compute_preview(fwd, interp)
+                self.compute_preview(kind)
             }
         }
     }
@@ -478,13 +485,16 @@ impl Engine {
         self.preview.is_some()
     }
 
-    fn compute_preview(&mut self, fwd: DAffine2, interp: Interp) -> Result<(), &'static str> {
+    pub(super) fn compute_preview(&mut self, kind: PreviewKind) -> Result<(), &'static str> {
         let (min, max) = self.visible;
         let pad = (max - min) * 0.25;
         let rect = (min - pad, max + pad);
         self.preview = None;
-        let (_, doc) = self.transformed_doc(fwd, interp, true, Some(rect))?;
-        self.preview = Some(Preview { fwd, interp, rect, doc });
+        let doc = match &kind {
+            PreviewKind::Transform(fwd, interp) => self.transformed_doc(*fwd, *interp, true, Some(rect))?.1,
+            PreviewKind::Filter(f) => self.filtered_doc(f, Some(rect))?,
+        };
+        self.preview = Some(Preview { kind, rect, doc });
         self.recheck_all = true;
         Ok(())
     }
@@ -497,11 +507,53 @@ impl Engine {
         if min.x >= a.x && min.y >= a.y && max.x <= b.x && max.y <= b.y {
             return;
         }
-        let (fwd, interp) = (p.fwd, p.interp);
-        if let Err(e) = self.compute_preview(fwd, interp) {
+        let kind = p.kind.clone();
+        if let Err(e) = self.compute_preview(kind) {
             tracing::warn!("Vorschau: {e}");
             self.preview = None;
         }
+    }
+
+    /// Resamples a set of tiles by `fwd` into the destination tiles `dest`
+    /// (no selection, no mask).
+    pub(super) fn warp_map(
+        &mut self,
+        src: &HashMap<TileCoord, Tile>,
+        fwd: DAffine2,
+        interp: Interp,
+        samples: u32,
+        dest: &[TileCoord],
+    ) -> Option<HashMap<TileCoord, Tile>> {
+        let mut grids = Grids::default();
+        let g = grids.layer(src);
+        let inv = fwd.inverse();
+        let lin = inv.matrix2;
+        let jobs: Vec<WarpJob> = dest
+            .iter()
+            .map(|c| {
+                let (x, y) = c.origin();
+                let s0 = inv.transform_point2(DVec2::new(x as f64, y as f64));
+                let si = s0.floor();
+                WarpJob {
+                    s0_int: [si.x as i32, si.y as i32],
+                    s0_frac: [(s0.x - si.x) as f32, (s0.y - si.y) as f32],
+                    lin: [lin.x_axis.x as f32, lin.x_axis.y as f32, lin.y_axis.x as f32, lin.y_axis.y as f32],
+                    src: g,
+                    src_sel: GridRef::default(),
+                    old_slot: NONE,
+                    old_const: 0.0,
+                    dsel_slot: NONE,
+                    dsel_const: 0.0,
+                    mode: MODE_REPLACE,
+                    interp: interp as u32,
+                    samples,
+                    _pad: 0,
+                }
+            })
+            .collect();
+        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+        let tiles = self.run_warp(StrokeTarget::Pixels, &jobs)?;
+        Some(dest.iter().copied().zip(tiles).collect())
     }
 
     /// Renders a layer scaled by `scale` into tile (0, 0) of a new layer-pool
