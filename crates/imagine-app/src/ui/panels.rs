@@ -92,6 +92,7 @@ pub struct Model {
     pub has_selection: bool,
     pub status: String,
     pub busy: bool,
+    pub recent: Vec<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +118,11 @@ pub enum Action {
     CancelBox,
     CanvasSize { w: u32, h: u32, anchor: (f64, f64) },
     ImageSize { w: u32, h: u32 },
+    OpenFile(std::path::PathBuf),
+    SaveAs(std::path::PathBuf),
+    ExportAs(std::path::PathBuf),
+    NewDocument { w: u32, h: u32, white: bool },
+    Unsaved(super::files::Answer),
 }
 
 /// UI state that lives across frames.
@@ -132,6 +138,10 @@ pub struct State {
     /// Picker state: HSV and the linear colour it produced.
     hsv: Option<([f32; 3], [f32; 3])>,
     hex: Option<String>,
+    pub file: Option<super::files::FileDialog>,
+    pub new_doc: Option<super::files::NewDialog>,
+    /// Unsaved-changes question: what happens if the user discards.
+    pub confirm: Option<String>,
 }
 
 enum Dialog {
@@ -140,6 +150,13 @@ enum Dialog {
 }
 
 const ACCENT: Color32 = Color32::from_rgb(90, 150, 255);
+
+impl State {
+    /// A palette, dialog or question is open: keys go to the interface.
+    pub fn captures_keyboard(&self) -> bool {
+        self.palette.is_some() || self.confirm.is_some() || self.file.is_some() || self.new_doc.is_some() || self.dialog.is_some()
+    }
+}
 
 pub fn style(ctx: &egui::Context) {
     ctx.set_visuals(egui::Visuals::dark());
@@ -154,6 +171,22 @@ pub fn style(ctx: &egui::Context) {
 
 pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
     let mut out = Vec::new();
+    if let Some(what) = &st.confirm
+        && let Some(a) = super::files::confirm_unsaved(ctx, &m.name, what)
+    {
+        st.confirm = None;
+        out.push(Action::Unsaved(a));
+    }
+    if let Some(d) = &mut st.file
+        && !d.show(ctx, &m.recent, &mut out)
+    {
+        st.file = None;
+    }
+    if let Some(d) = &mut st.new_doc
+        && !d.show(ctx, &mut out)
+    {
+        st.new_doc = None;
+    }
     if let Some((query, sel)) = &mut st.palette {
         let mut close = false;
         command_palette(ctx, query, sel, &mut out, &mut close);
@@ -206,6 +239,18 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                         out.push(Action::Command(*c));
                         ui.close();
                     }
+                }
+                if menu == "Datei" && !m.recent.is_empty() {
+                    ui.separator();
+                    ui.menu_button("Zuletzt geöffnet", |ui| {
+                        for p in &m.recent {
+                            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                            if ui.button(name).on_hover_text(p.display().to_string()).clicked() {
+                                out.push(Action::OpenFile(p.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
                 }
                 if menu == "Bild" {
                     ui.separator();

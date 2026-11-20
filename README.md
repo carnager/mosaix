@@ -30,7 +30,7 @@ Details: [docs/agenten.md](docs/agenten.md)
 
 ## Bedienung
 
-Die Oberfläche hat eine Menüleiste, links die Werkzeugleiste und rechts Panels für Farbe, Werkzeug-Einstellungen, Ebenen (Drag & Drop, Doppelklick zum Umbenennen, Klick auf das Masken-Symbol zum Bemalen) und Verlauf (Klick springt zurück). Unten ist eine Statusleiste mit Meldungen, ein Klick darauf öffnet alle Meldungen. Strg+`K` oder Strg+Umschalt+`P` öffnet die Befehlspalette, `Tab` blendet die Oberfläche aus. Alle drei Minuten wird bei ungespeicherten Änderungen eine Wiederherstellungskopie nach `~/.local/state/imagine/autosave/` gesichert. Deine Datei bleibt dabei unberührt.
+Die Oberfläche hat eine Menüleiste, links die Werkzeugleiste und rechts Panels für Farbe, Werkzeug-Einstellungen, Ebenen (Drag & Drop, Doppelklick zum Umbenennen, Klick auf das Masken-Symbol zum Bemalen) und Verlauf (Klick springt zurück). Unten ist eine Statusleiste mit Meldungen, ein Klick darauf öffnet alle Meldungen. Strg+`K` oder Strg+Umschalt+`P` öffnet die Befehlspalette, `Tab` blendet die Oberfläche aus. Strg+`N` neues Bild, Strg+`O` öffnen (mit „Zuletzt geöffnet“), Strg+Umschalt+`S` speichern unter. Alt+Rechtsziehen ändert Pinselgröße (waagrecht) und Härte (senkrecht). Pinsel, Farbe, Werkzeug und zuletzt geöffnete Dateien merkt sich imagine in `~/.config/imagine/settings.json`. Alle drei Minuten wird bei ungespeicherten Änderungen eine Wiederherstellungskopie nach `~/.local/state/imagine/autosave/` gesichert. Deine Datei bleibt dabei unberührt.
 
 Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) im Terminal, die aktive Ebene im Fenstertitel.
 

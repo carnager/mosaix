@@ -94,11 +94,21 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         has_selection: doc.selection.is_some(),
         status: "0.14 ms".into(),
         busy: false,
+        recent: Vec::new(),
     };
     tracing::info!("UI-Schnappschuss {w}×{h}");
     let palette = std::env::var("IMAGINE_SNAPSHOT_PALETTE").ok();
     if let Some(q) = &palette {
         state.palette = Some((q.clone(), 0));
+    }
+    match std::env::var("IMAGINE_SNAPSHOT_DIALOG").as_deref() {
+        Ok("open") => {
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+            state.file = Some(super::files::FileDialog::new(super::files::FileMode::Open, home.join("Pictures"), String::new()));
+        }
+        Ok("new") => state.new_doc = Some(Default::default()),
+        Ok("confirm") => state.confirm = Some("Beim Beenden gehen sie verloren.".into()),
+        _ => {}
     }
     let mut model = model;
     if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TOOL") {

@@ -376,17 +376,17 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 - **Kosten:** etwa 0,4 ms pro UI-Durchlauf inkl. GPU. Ohne Eingabe und ohne Modelländerung wird das letzte UI-Bild wiederverwendet, beim Malen läuft also kein UI-Durchlauf pro Frame.
 - **Prüfung ohne Fenster:** `imagine --ui-snapshot OUT.png [DATEI]` rendert Leinwand und Oberfläche offscreen (Layout-Kontrolle per Bild).
 
-**Noch offen in Phase 3:**
-- Ebenen-Vorschaubilder
-- frei belegbare Tastenkürzel
-- HUDs (Pinselgröße per Alt+Rechtsziehen)
-- Docking und abtrennbare Panels
-- Einstellungen speichern (Werkzeug, Farben, Panelbreite)
-- Datei öffnen/neu per Dialog (bisher nur über die Kommandozeile)
+- **Nachgereicht:**
+  - Dateidialoge (Öffnen mit „Zuletzt geöffnet“, Speichern unter, Exportieren unter) und Neu-Dialog (Vorgaben, weiß/transparent), Dokumente zur Laufzeit wechseln.
+  - Rückfrage bei ungespeicherten Änderungen (Speichern / Verwerfen / Abbrechen), auch beim Beenden. Speichern ohne eigene Datei fragt nach dem Ort.
+  - Einstellungen in `~/.config/imagine/settings.json` (Pinsel, Farbe, Werkzeug, Zauberstab, Wischfinger, zuletzt geöffnet, letzter Ordner).
+  - Pinsel-HUD per Alt+Rechtsziehen.
+
+**Noch offen in Phase 3:** Ebenen-Vorschaubilder, frei belegbare Tastenkürzel, Docking/abtrennbare Panels, Panelbreite merken.
 
 ## Nächster konkreter Schritt
 
-Rückmeldung zur Oberfläche einarbeiten, dann der Rest von Phase 3: Ebenen-Vorschaubilder, Öffnen/Neu-Dialoge (xdg-desktop-portal), Einstellungen speichern, Pinselgröße-HUD.
+Ebenen-Vorschaubilder, danach Phase 4 (nicht-destruktiv: Korrektur- und Filterebenen, Farbmanagement).
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

@@ -21,7 +21,11 @@ const fn c(menu: &'static str, label: &'static str, key: K, ctrl: bool, shift: b
 pub const MENUS: [&str; 7] = ["Datei", "Bearbeiten", "Bild", "Ebene", "Auswahl", "Werkzeug", "Ansicht"];
 
 pub const COMMANDS: &[Cmd] = &[
+    c("Datei", "Neu …", K::n, true, false, false),
+    c("Datei", "Öffnen …", K::o, true, false, false),
     c("Datei", "Speichern", K::s, true, false, false),
+    c("Datei", "Speichern unter …", K::S, true, true, false),
+    c("Datei", "Exportieren unter …", K::E, true, true, true),
     c("Datei", "Als PNG exportieren", K::E, true, true, false),
     c("Datei", "Beenden", K::q, true, false, false),
     c("Bearbeiten", "Rückgängig", K::z, true, false, false),

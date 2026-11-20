@@ -56,6 +56,7 @@ use wayland_protocols::wp::{
 
 use crate::agent::{command, ipc};
 use crate::boxedit::{self, BoxEdit};
+use crate::settings::{self, Settings};
 use crate::ui::{self, panels::{Action, ToolId}};
 use crate::loader::{self, LoaderMsg, Source, TileData};
 use crate::session::{ExportJob, SaveDone, SaveJob, Session};
@@ -63,6 +64,7 @@ use crate::tablet::{self, TabletFrame};
 
 const BTN_LEFT: u32 = 0x110;
 const BTN_MIDDLE: u32 = 0x112;
+const BTN_RIGHT: u32 = 0x111;
 /// evdev codes of the digit row: KEY_1 = 2 … KEY_9 = 10, KEY_0 = 11.
 const KEY_1: u32 = 2;
 const KEY_0: u32 = 11;
@@ -93,6 +95,8 @@ enum Drag {
     Move { start: DVec2, end: DVec2 },
     /// Dragging a free-transform or crop handle.
     Box,
+    /// Alt + right drag: brush size (horizontal) and hardness (vertical), shown at `origin`.
+    BrushHud { origin: DVec2, start: DVec2, size: f32, hardness: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -136,6 +140,15 @@ enum BgDone {
     Selection { label: &'static str, base: usize, mask: anyhow::Result<CpuMask>, started: Instant },
     Exported { path: std::path::PathBuf, result: anyhow::Result<f64> },
     Autosaved { path: std::path::PathBuf, result: anyhow::Result<()> },
+}
+
+/// An action that replaces or closes the document, held back while the
+/// user decides about unsaved changes.
+#[derive(Debug, Clone)]
+enum Pending {
+    Quit,
+    Open(std::path::PathBuf),
+    New { w: u32, h: u32, white: bool },
 }
 
 /// Recovery copies: `~/.local/state/imagine/autosave/` (or `$XDG_STATE_HOME`).
@@ -259,6 +272,13 @@ pub struct App {
 
     // Interface
     gui: ui::Gui,
+    loader_tx: channel::Sender<LoaderMsg>,
+    settings: Settings,
+    /// Waiting for the unsaved-changes answer (or for the save it triggered).
+    pending: Option<Pending>,
+    after_save: Option<Pending>,
+    fill_white_on_load: bool,
+    ever_loaded: bool,
     ui_state: ui::panels::State,
     /// Canvas area not covered by panels (physical px).
     canvas_rect: (DVec2, DVec2),
@@ -360,6 +380,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
             }
         })
         .map_err(|e| anyhow::anyhow!("loader channel: {e}"))?;
+    let loader_tx = tx.clone();
     loader::spawn(source, tx);
     let (save_tx, save_rx) = channel::channel::<anyhow::Result<SaveDone>>();
     event_loop
@@ -444,6 +465,12 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         edit_count: 0,
         save_mark: 0,
         gui,
+        loader_tx,
+        settings: Settings::load_from(&settings::config_path()),
+        pending: None,
+        after_save: None,
+        fill_white_on_load: false,
+        ever_loaded: false,
         ui_state: ui::panels::State::default(),
         canvas_rect: (DVec2::ZERO, DVec2::ZERO),
         ui_pointer: false,
@@ -486,6 +513,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         app.bind_tablet_seat(&seat);
     }
 
+    app.apply_settings();
     report_orphaned_autosaves();
     while !app.exit {
         // Wake up periodically while a save is in flight or ants are marching.
@@ -518,6 +546,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     }
     // A deliberate quit: the recovery copy is no longer needed.
     app.drop_autosave();
+    app.store_settings();
     Ok(())
 }
 
@@ -602,7 +631,13 @@ impl App {
                         engine.max_layer_tiles()
                     );
                 }
+                if let Some(p) = &source {
+                    self.settings.add_recent(p);
+                    self.store_settings();
+                }
                 self.session = Some(Session::new(engine, name, source, native_len));
+                self.ever_loaded = true;
+                self.view_fitted = false;
                 self.fit_if_needed();
                 self.print_layers();
                 self.needs_redraw = true;
@@ -622,12 +657,19 @@ impl App {
             LoaderMsg::Done { decode_ms, total_ms } => {
                 tracing::info!("Laden fertig: Dekodieren {decode_ms:.0} ms, gesamt {total_ms:.0} ms");
                 self.loading = false;
+                if std::mem::take(&mut self.fill_white_on_load)
+                    && let Some(s) = &mut self.session
+                {
+                    let _ = s.engine.fill(StrokeTarget::Pixels, [1.0; 4], 1.0, "Weiß");
+                    s.engine.clear_history();
+                }
                 self.needs_redraw = true;
             }
             LoaderMsg::Error(e) => {
                 tracing::error!("Laden fehlgeschlagen: {e}");
                 self.loading = false;
-                if self.session.is_none() {
+                self.fill_white_on_load = false;
+                if !self.ever_loaded {
                     self.exit = true;
                 }
             }
@@ -843,6 +885,14 @@ impl App {
             Drag::Marquee { end, .. } | Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
             }
+            Drag::BrushHud { start, size, hardness, .. } => {
+                let d = pos - *start;
+                // 1 screen px ≈ 1 px of diameter at the current zoom; up = harder.
+                self.brush.size = (*size + (d.x / self.view.zoom) as f32 * 2.0).clamp(1.0, 5000.0);
+                if self.brush.tip == 0 {
+                    self.brush.hardness = (*hardness - d.y as f32 * 0.004).clamp(0.0, 1.0);
+                }
+            }
             Drag::Box => {
                 let doc = self.view.screen_to_doc(pos);
                 let m = self.box_mods();
@@ -1021,22 +1071,150 @@ impl App {
             self.update_title();
             return;
         }
-        if !self.modified || self.quit_armed.is_some_and(|t| t.elapsed() < QUIT_CONFIRM) {
-            self.exit = true;
+        self.guard_unsaved(Pending::Quit);
+    }
+
+    /// Runs `action` now, or first asks what to do with unsaved changes.
+    fn guard_unsaved(&mut self, action: Pending) {
+        if !self.modified {
+            return self.run_pending(action);
+        }
+        let what = match action {
+            Pending::Quit => "Beim Beenden gehen sie verloren.",
+            Pending::Open(_) | Pending::New { .. } => "Das neue Bild ersetzt es.",
+        };
+        self.ui_state.confirm = Some(what.into());
+        self.ui_state.hidden = false;
+        self.pending = Some(action);
+        self.needs_redraw = true;
+    }
+
+    fn run_pending(&mut self, action: Pending) {
+        match action {
+            Pending::Quit => self.exit = true,
+            Pending::Open(p) => self.open_source(Source::File(p), false),
+            Pending::New { w, h, white } => self.open_source(Source::Blank(w, h), white),
+        }
+    }
+
+    fn answer_unsaved(&mut self, a: ui::files::Answer) {
+        let Some(action) = self.pending.take() else { return };
+        match a {
+            ui::files::Answer::Discard => self.run_pending(action),
+            ui::files::Answer::Save => {
+                self.after_save = Some(action);
+                self.save();
+            }
+            ui::files::Answer::Cancel => {}
+        }
+    }
+
+    /// Replaces the document (the old one stays until the new structure arrives).
+    fn open_source(&mut self, source: Source, white: bool) {
+        if self.loading {
+            tracing::warn!("Es wird noch geladen.");
             return;
         }
-        tracing::warn!("Ungespeicherte Änderungen! Strg+S speichert, nochmal Strg+Q (innerhalb 3 s) verwirft sie.");
-        self.quit_armed = Some(Instant::now());
-        self.update_title();
+        if self.saving || self.save_job.is_some() {
+            tracing::warn!("Speichern läuft noch – bitte einen Moment warten.");
+            return;
+        }
+        self.drop_autosave();
+        self.pending_uploads.clear();
+        self.loading = true;
+        self.modified = false;
+        self.boxed = None;
+        self.mask_edit = false;
+        self.drag = Drag::None;
+        self.stroke = None;
+        self.fill_white_on_load = white;
+        self.edit_count = 0;
+        self.save_mark = 0;
+        self.autosave_mark = 0;
+        loader::spawn(source, self.loader_tx.clone());
+    }
+
+    fn file_dialog(&mut self, mode: ui::files::FileMode) {
+        let s = self.session.as_ref();
+        let dir = match mode {
+            ui::files::FileMode::Open => self.settings.last_dir.clone(),
+            _ => s.and_then(|s| s.default_save_path().parent().map(|p| p.to_path_buf())).filter(|p| !p.as_os_str().is_empty()),
+        }
+        .or_else(|| self.settings.last_dir.clone())
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let name = match mode {
+            ui::files::FileMode::Open => None,
+            ui::files::FileMode::SaveAs => s.map(|s| s.default_save_path()),
+            ui::files::FileMode::ExportAs => s.map(|s| s.default_export_path()),
+        }
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+        self.ui_state.file = Some(ui::files::FileDialog::new(mode, dir, name));
+        self.ui_state.hidden = false;
+    }
+
+    fn apply_settings(&mut self) {
+        let st = self.settings.clone();
+        st.brush.apply(&mut self.brush);
+        self.wand_tolerance = st.wand_tolerance.clamp(0.0, 255.0);
+        self.wand_contiguous = st.wand_contiguous;
+        self.smudge_strength = st.smudge_strength.clamp(0.0, 1.0);
+        self.tool = match st.tool.as_str() {
+            "eraser" => Tool::Eraser,
+            "smudge" => Tool::Smudge,
+            "marquee" => Tool::Marquee { ellipse: false },
+            "ellipse" => Tool::Marquee { ellipse: true },
+            "lasso" => Tool::Lasso,
+            "wand" => Tool::Wand,
+            "gradient" => Tool::Gradient { radial: false },
+            "radial" => Tool::Gradient { radial: true },
+            "move" => Tool::Move,
+            _ => Tool::Brush,
+        };
+    }
+
+    fn store_settings(&mut self) {
+        let mut b = self.brush;
+        b.eraser = false;
+        self.settings.brush = (&b).into();
+        self.settings.wand_tolerance = self.wand_tolerance;
+        self.settings.wand_contiguous = self.wand_contiguous;
+        self.settings.smudge_strength = self.smudge_strength;
+        self.settings.tool = match self.tool {
+            Tool::Brush => "brush",
+            Tool::Eraser => "eraser",
+            Tool::Smudge => "smudge",
+            Tool::Marquee { ellipse: false } => "marquee",
+            Tool::Marquee { ellipse: true } => "ellipse",
+            Tool::Lasso => "lasso",
+            Tool::Wand => "wand",
+            Tool::Gradient { radial: false } => "gradient",
+            Tool::Gradient { radial: true } => "radial",
+            Tool::Move => "move",
+            Tool::Crop => "brush",
+        }
+        .into();
+        if let Err(e) = self.settings.save_to(&settings::config_path()) {
+            tracing::warn!("Einstellungen nicht gespeichert: {e:#}");
+        }
     }
 
     fn save(&mut self) {
+        // Never saved as .imagine yet: ask where.
+        if self.session.as_ref().is_some_and(|s| !s.has_save_path()) {
+            self.file_dialog(ui::files::FileMode::SaveAs);
+            return;
+        }
+        self.save_to(None);
+    }
+
+    fn save_to(&mut self, path: Option<std::path::PathBuf>) {
         if self.save_job.is_some() || self.saving {
             tracing::warn!("Speichern läuft noch.");
             return;
         }
         let Some(s) = &mut self.session else { return };
-        match s.start_save(None) {
+        match s.start_save(path.as_deref()) {
             Ok(job) => {
                 self.save_job = Some(job);
                 self.save_mark = self.edit_count;
@@ -1073,6 +1251,7 @@ impl App {
                     self.modified = false;
                     self.drop_autosave();
                 }
+                self.settings.add_recent(&r.path);
                 tracing::info!(
                     "Gespeichert: {} ({} Kacheln geschrieben, {}, {:.1} MB, {:.0} ms im Hintergrund)",
                     r.path.display(),
@@ -1082,9 +1261,29 @@ impl App {
                     r.ms
                 );
             }
-            Err(e) => tracing::error!("Speichern fehlgeschlagen: {e:#}"),
+            Err(e) => {
+                tracing::error!("Speichern fehlgeschlagen: {e:#}");
+                self.after_save = None;
+            }
         }
         self.update_title();
+        // Continue what the unsaved-changes question was about.
+        if !self.modified
+            && let Some(a) = self.after_save.take()
+        {
+            self.run_pending(a);
+        }
+    }
+
+    fn export_to(&mut self, path: std::path::PathBuf) {
+        let Some(s) = &mut self.session else { return };
+        if self.export_job.is_some() {
+            tracing::warn!("Export läuft noch.");
+            return;
+        }
+        tracing::info!("Exportiere {} im Hintergrund …", path.display());
+        self.export_job = Some(s.start_export(&path));
+        self.bg_running += 1;
     }
 
     fn export(&mut self) {
@@ -1239,7 +1438,7 @@ impl App {
         let sym = ev.keysym;
         tracing::debug!(?sym, raw = ev.raw_code, pressed, "Taste");
         // Text fields and the command palette take the keyboard.
-        if self.ui_state.palette.is_some() || self.gui.wants_keyboard() {
+        if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() {
             if let Some(k) = ui::egui_key(sym) {
                 self.gui.key(k, pressed);
             }
@@ -1313,8 +1512,15 @@ impl App {
             Keysym::z | Keysym::Z if ctrl && shift => self.redo(),
             Keysym::z if ctrl => self.undo(),
             Keysym::y if ctrl => self.redo(),
+            Keysym::s | Keysym::S if ctrl && shift => self.file_dialog(ui::files::FileMode::SaveAs),
             Keysym::s | Keysym::S if ctrl => self.save(),
+            Keysym::e | Keysym::E if ctrl && shift && alt => self.file_dialog(ui::files::FileMode::ExportAs),
             Keysym::e | Keysym::E if ctrl && shift => self.export(),
+            Keysym::o if ctrl => self.file_dialog(ui::files::FileMode::Open),
+            Keysym::n if ctrl && !shift => {
+                self.ui_state.new_doc = Some(Default::default());
+                self.ui_state.hidden = false;
+            }
             Keysym::n | Keysym::N if ctrl && shift => self.edit("Neue Ebene", |d| {
                 d.add_pixel_layer();
                 true
@@ -1766,6 +1972,7 @@ impl App {
             has_selection: doc.selection.is_some(),
             status: self.ui_status.clone(),
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
+            recent: self.settings.recent.clone(),
         })
     }
 
@@ -1872,6 +2079,11 @@ impl App {
                     self.engine_op(|e| e.crop(x, y, w, h, "Arbeitsfläche"));
                     self.view_fitted = false;
                 }
+                Action::OpenFile(p) => self.guard_unsaved(Pending::Open(p)),
+                Action::NewDocument { w, h, white } => self.guard_unsaved(Pending::New { w, h, white }),
+                Action::SaveAs(p) => self.save_to(Some(p)),
+                Action::ExportAs(p) => self.export_to(p),
+                Action::Unsaved(a) => self.answer_unsaved(a),
                 Action::ImageSize { w, h } => {
                     self.engine_op(|e| e.resize_image(w, h, Interp::Bicubic, "Bildgröße"));
                     self.view_fitted = false;
@@ -1935,8 +2147,12 @@ impl App {
             && !matches!(self.drag, Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. })
             && !self.space
             && self.bench.is_none();
+        let ring_at = match self.drag {
+            Drag::BrushHud { origin, .. } => Some(origin),
+            _ => self.cursor.filter(|_| show_ring),
+        };
         let overlay = Overlay {
-            cursor: self.cursor.filter(|_| show_ring).map(|p| (p, self.brush.size * 0.5 * self.view.zoom as f32)),
+            cursor: ring_at.map(|p| (p, self.brush.size * 0.5 * self.view.zoom as f32)),
             checker_px: (8.0 * self.scale) as f32,
             lines: self.overlay_lines(),
             show_selection: self.bench.is_none(),
@@ -2266,7 +2482,7 @@ impl KeyboardHandler for App {
     }
 
     fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
-        if self.ui_state.palette.is_some() || self.gui.wants_keyboard() {
+        if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() {
             self.key(&ev, true);
         }
     }
@@ -2307,6 +2523,11 @@ impl PointerHandler for App {
             let canvas_busy = !matches!(self.drag, Drag::None);
             let over_ui = self.over_ui(pos);
             match &ev.kind {
+                PointerEventKind::Press { button, .. } | PointerEventKind::Release { button, .. }
+                    if !matches!(*button, BTN_LEFT | BTN_MIDDLE) && (over_ui || self.ui_pointer) =>
+                {
+                    continue; // other buttons do nothing on the interface
+                }
                 PointerEventKind::Press { button, .. } if !self.tablet_contact && (over_ui || self.ui_pointer) && !canvas_busy => {
                     self.ui_pointer = true;
                     self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, true);
@@ -2333,10 +2554,10 @@ impl PointerHandler for App {
                     continue;
                 }
                 // Canvas clicks also reach egui (closes open menus and popups).
-                PointerEventKind::Press { button, .. } if !self.tablet_contact => {
+                PointerEventKind::Press { button, .. } if !self.tablet_contact && matches!(*button, BTN_LEFT | BTN_MIDDLE) => {
                     self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, true);
                 }
-                PointerEventKind::Release { button, .. } if !self.tablet_contact => {
+                PointerEventKind::Release { button, .. } if !self.tablet_contact && matches!(*button, BTN_LEFT | BTN_MIDDLE) => {
                     self.gui.pointer_button(pos, scale, *button == BTN_MIDDLE, false);
                 }
                 _ => {}
@@ -2363,12 +2584,20 @@ impl PointerHandler for App {
                     }
                 }
                 PointerEventKind::Press { button, .. } if !self.tablet_contact => match *button {
+                    BTN_RIGHT if self.mods.alt && self.tool.paints() => {
+                        self.drag = Drag::BrushHud {
+                            origin: pos,
+                            start: pos,
+                            size: self.brush.size,
+                            hardness: self.brush.hardness,
+                        };
+                    }
                     BTN_LEFT => self.press(pos, 1.0, Button::Primary, false),
                     BTN_MIDDLE => self.press(pos, 1.0, Button::Middle, false),
                     _ => {}
                 },
                 PointerEventKind::Release { button, .. } if !self.tablet_contact => {
-                    if matches!(*button, BTN_LEFT | BTN_MIDDLE) {
+                    if matches!(*button, BTN_LEFT | BTN_MIDDLE | BTN_RIGHT) {
                         self.release(pos, 1.0);
                     }
                 }

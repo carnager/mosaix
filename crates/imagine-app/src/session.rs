@@ -165,6 +165,11 @@ impl Session {
         Ok(())
     }
 
+    /// Whether the document has its own `.imagine` file yet.
+    pub fn has_save_path(&self) -> bool {
+        self.save_path.is_some()
+    }
+
     pub fn default_save_path(&self) -> PathBuf {
         if let Some(p) = &self.save_path {
             return p.clone();

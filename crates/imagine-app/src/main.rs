@@ -6,6 +6,7 @@ mod boxedit;
 mod ui;
 mod loader;
 mod session;
+mod settings;
 mod tablet;
 
 use std::path::PathBuf;
