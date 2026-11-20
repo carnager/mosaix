@@ -173,6 +173,7 @@ pub enum Command {
     Histogram { below: Option<LayerId>, bins: Option<u32> },
     FilterApply { layer: Option<LayerId>, filter: imagine_core::Filter, #[serde(default)] smart: bool },
     Liquify { layer: Option<LayerId>, strokes: Vec<LiquifyStroke> },
+    ContentAwareFill { layer: Option<LayerId>, #[serde(default)] all_layers: bool },
     SmartFilterSet {
         layer: Option<LayerId>,
         index: Option<usize>,
@@ -260,6 +261,7 @@ impl Command {
             Self::FilterApply { .. } => "filter_apply",
             Self::SmartFilterSet { .. } => "smart_filter_set",
             Self::Liquify { .. } => "liquify",
+            Self::ContentAwareFill { .. } => "content_aware_fill",
             Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
@@ -824,6 +826,13 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 s.engine.apply_filter(&filter, label).map_err(engine_err)?;
             }
             ok(s)
+        }
+        Command::ContentAwareFill { layer, all_layers } => {
+            pixel_layer(s, layer)?;
+            let ms = s.engine.content_aware_fill(all_layers, "Inhaltsbasiert füllen").map_err(engine_err)?;
+            let mut v = ok(s)?;
+            v.result["ms"] = json!(ms.round());
+            Ok(v)
         }
         Command::Liquify { layer, strokes } => {
             pixel_layer(s, layer)?;

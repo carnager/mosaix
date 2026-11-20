@@ -21,6 +21,7 @@
 //! `readback` (GPU → CPU).
 
 mod apply;
+mod cafill;
 mod display;
 mod filter;
 mod frame;
@@ -48,6 +49,7 @@ use imagine_core::{Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TI
 
 pub use apply::GradientKind;
 pub use magic::SampleFrom;
+pub use cafill::{FillJob, FillResult};
 pub use histogram::Histogram;
 pub use liquify::LiquifyTool;
 pub use readback::{PoolKind, Readback};

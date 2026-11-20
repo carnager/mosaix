@@ -148,6 +148,7 @@ enum BgDone {
     Selection { label: &'static str, base: usize, mask: anyhow::Result<CpuMask>, started: Instant },
     Exported { path: std::path::PathBuf, result: anyhow::Result<f64> },
     Autosaved { path: std::path::PathBuf, result: anyhow::Result<()> },
+    Filled { result: Result<imagine_gpu::FillResult, &'static str>, started: Instant },
 }
 
 /// An action that replaces or closes the document, held back while the
@@ -1557,6 +1558,16 @@ impl App {
                 Ok(ms) => tracing::info!("Exportiert: {} ({ms:.0} ms)", path.display()),
                 Err(e) => tracing::error!("Export fehlgeschlagen: {e:#}"),
             },
+            BgDone::Filled { result, started } => match result {
+                Ok(r) => {
+                    let ms = r.ms;
+                    if self.engine().is_some_and(|e| e.apply_fill(r, "Inhaltsbasiert füllen")) {
+                        self.touch();
+                        tracing::info!("Inhaltsbasiert gefüllt: {:.0} ms (Rechnung {ms:.0} ms)", started.elapsed().as_secs_f64() * 1e3);
+                    }
+                }
+                Err(e) => tracing::warn!("Inhaltsbasiert füllen: {e}"),
+            },
             BgDone::Selection { label, base, mask, started } => {
                 let Some(e) = self.engine() else { return };
                 if e.selection_id() != base {
@@ -1574,6 +1585,19 @@ impl App {
         }
         self.update_title();
         self.needs_redraw = true;
+    }
+
+    /// Content-aware fill of the selection: area read here, computed on a worker.
+    fn content_fill(&mut self, all_layers: bool) {
+        let Some(e) = self.engine() else { return };
+        let started = Instant::now();
+        match e.fill_job(all_layers) {
+            Ok(job) => {
+                tracing::info!("Inhaltsbasiert füllen{} …", if all_layers { " (alle Ebenen)" } else { "" });
+                self.spawn_bg("content fill", move || BgDone::Filled { result: job.run(), started });
+            }
+            Err(err) => tracing::warn!("Inhaltsbasiert füllen: {err}"),
+        }
     }
 
     /// Magic wand: similarity map on the GPU here, flood fill and combining on a worker.
@@ -1724,6 +1748,8 @@ impl App {
             Keysym::j if ctrl => self.edit("Ebene duplizieren", |d| d.duplicate_active().is_some()),
             Keysym::g | Keysym::G if ctrl && shift => self.edit("Gruppierung aufheben", |d| d.ungroup_active()),
             Keysym::g if ctrl => self.edit("Gruppieren", |d| d.group_active().is_some()),
+            // Shift+Rücktaste: content-aware fill (Strg: learn from all layers).
+            Keysym::BackSpace if shift && !alt => self.content_fill(ctrl),
             // Photoshop: Entf and Rücktaste both clear the selection.
             Keysym::Delete | Keysym::BackSpace
                 if !alt && self.session.as_ref().is_some_and(|s| s.engine.has_selection()) =>

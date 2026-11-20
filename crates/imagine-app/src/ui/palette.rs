@@ -32,6 +32,8 @@ pub const COMMANDS: &[Cmd] = &[
     c("Bearbeiten", "Wiederholen", K::Z, true, true, false),
     c("Bearbeiten", "Frei transformieren", K::t, true, false, false),
     c("Bearbeiten", "Fläche füllen", K::BackSpace, false, false, true),
+    c("Bearbeiten", "Inhaltsbasiert füllen", K::BackSpace, false, true, false),
+    c("Bearbeiten", "Inhaltsbasiert füllen (alle Ebenen)", K::BackSpace, true, true, false),
     c("Bearbeiten", "Auswahl löschen (Pixel)", K::Delete, false, false, false),
     c("Bild", "Zuschneiden", K::c, false, false, false),
     c("Bild", "Verflüssigen …", K::X, true, true, false),

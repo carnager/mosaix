@@ -17,7 +17,7 @@ impl Engine {
     /// Reads a rectangle (document px) of the active layer or the composite
     /// as straight f32 RGBA (premultiplied, as stored), plus the full tiles it
     /// came from (layer source only).
-    fn read_region(&mut self, layer: Option<LayerId>, x0: i64, y0: i64, w: usize, h: usize) -> (Vec<Px>, HashMap<TileCoord, Vec<f16>>) {
+    pub(super) fn read_region(&mut self, layer: Option<LayerId>, x0: i64, y0: i64, w: usize, h: usize) -> (Vec<Px>, HashMap<TileCoord, Vec<f16>>) {
         let ts = TILE_SIZE as i64;
         let coords: Vec<TileCoord> = (y0.div_euclid(ts)..=(y0 + h as i64 - 1).div_euclid(ts))
             .flat_map(|ty| (x0.div_euclid(ts)..=(x0 + w as i64 - 1).div_euclid(ts)).map(move |tx| TileCoord::new(tx as i32, ty as i32)))

@@ -1085,3 +1085,57 @@ fn spot_healing_finds_a_matching_source() {
     }
     assert!(worst < 0.03, "max deviation {worst}");
 }
+
+#[test]
+fn content_aware_fill_continues_texture() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    let lin = imagine_core::color::srgb_to_linear;
+    // Diagonal-free vertical stripes, 8 px wide, in two colours.
+    let colour = |x: usize| if (x / 8).is_multiple_of(2) { [lin(0.8), lin(0.3), lin(0.2)] } else { [lin(0.2), lin(0.3), lin(0.8)] };
+    let layer = e.doc().active;
+    let ts = TILE_SIZE as usize;
+    let tiles: Vec<(TileCoord, Option<Vec<f16>>)> = (0..2)
+        .flat_map(|ty| (0..2).map(move |tx| (tx, ty)))
+        .map(|(tx, ty)| {
+            let mut px = vec![f16::ONE; ts * ts * 4];
+            for y in 0..ts {
+                for x in 0..ts {
+                    let c = colour(tx * ts + x);
+                    for k in 0..3 {
+                        px[(y * ts + x) * 4 + k] = f16::from_f32(c[k]);
+                    }
+                }
+            }
+            (TileCoord::new(tx as i32, ty), Some(px))
+        })
+        .collect();
+    assert!(e.replace_tiles(layer, tiles, "Muster"));
+    // Something to remove: a white blob, selected a bit larger.
+    e.select_shape(&Shape::Ellipse { cx: 250.0, cy: 260.0, rx: 30.0, ry: 30.0 }, CombineOp::Replace, "A").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 1.0, 1.0, 1.0], 1.0, "Objekt").unwrap();
+    e.select_shape(&Shape::Ellipse { cx: 250.0, cy: 260.0, rx: 36.0, ry: 36.0 }, CombineOp::Replace, "A").unwrap();
+    let before = e.history_len().0;
+    let ms = e.content_aware_fill(false, "Inhaltsbasiert füllen").unwrap();
+    assert_eq!(e.history_len().0, before + 1);
+    e.deselect("x").unwrap();
+    e.flush();
+    let at = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), x % 256, y % 256);
+    let (mut err, mut n) = (0.0, 0);
+    for y in (232..290).step_by(3) {
+        for x in 222..278 {
+            if ((x as f32 - 250.0).hypot(y as f32 - 260.0)) < 30.0 {
+                let p = at(&e, x, y);
+                let c = colour(x);
+                err += (0..3).map(|k| (p[k] - c[k]).abs()).sum::<f32>() / 3.0;
+                n += 1;
+            }
+        }
+    }
+    let mean = err / n as f32;
+    assert!(mean < 0.08, "mean deviation from the stripes {mean} ({ms:.0} ms)");
+    // The white blob is gone completely.
+    assert!(at(&e, 250, 260)[1] < 0.5);
+    // Without a selection it explains what to do.
+    assert!(e.content_aware_fill(false, "x").is_err());
+}

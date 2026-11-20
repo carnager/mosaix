@@ -231,6 +231,11 @@ pub fn tools() -> Vec<Value> {
              With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
              listed under smart_filters in document_info and editable with smart_filter_set.",
             json!({ "layer": layer_param(), "filter": { "type": "object" }, "smart": { "type": "boolean" } }), &["filter"], false),
+        tool("content_aware_fill",
+            "Fill the selection on a pixel layer with texture from around it so the hole continues the surroundings \
+             (remove objects, extend backgrounds). Select a bit more than the object. all_layers: learn from the \
+             flattened image (fill on an empty layer). One undo step.",
+            json!({ "layer": layer_param(), "all_layers": { "type": "boolean" } }), &[], false),
         tool("liquify",
             "Liquify a pixel layer (one undo step). Each stroke: tool push (moves pixels along the path of `points`), \
              reconstruct, twirl_cw, twirl_ccw, pucker (shrink towards the point), bloat (grow); radius px; strength 0…1; \
@@ -433,7 +438,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
         for t in tools() {
