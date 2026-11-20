@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use half::f16;
 use imagine_core::color::{linear_to_srgb, srgb_to_linear};
-use imagine_core::fill::content_aware_fill;
+use imagine_core::fill::{LevelSolver, content_aware_fill_with};
 use imagine_core::{LayerId, MaskTile, TILE_SIZE, TileCoord};
 
 use super::{Engine, StrokeTarget};
@@ -33,6 +33,8 @@ pub struct FillJob {
     mask: Vec<f32>,
     tiles: HashMap<TileCoord, Vec<f16>>,
     seed: u64,
+    /// Large levels run on the GPU (None: CPU only).
+    gpu: Option<super::cafill_gpu::FillGpu>,
 }
 
 /// The computed fill, ready for [`Engine::apply_fill`].
@@ -121,7 +123,8 @@ impl Engine {
         }
         let base = self.doc.find(layer).and_then(|l| l.tiles()).map_or(0, |t| Arc::as_ptr(t) as usize);
         let seed = (x0 as u64) << 32 ^ y0 as u64 ^ (w as u64) << 16;
-        Ok(FillJob { layer, base, x0, y0, w, h, dest, source, mask, tiles, seed })
+        let gpu = self.fill_gpu.get_or_insert_with(|| super::cafill_gpu::FillGpu::new(&self.device, &self.queue)).clone();
+        Ok(FillJob { layer, base, x0, y0, w, h, dest, source, mask, tiles, seed, gpu: Some(gpu) })
     }
 
     /// Writes a computed fill (one undo step). False if the layer changed meanwhile.
@@ -146,14 +149,21 @@ impl Engine {
 }
 
 impl FillJob {
-    /// The fill itself (CPU, any thread).
+    /// Computes on the CPU only (comparison, tests).
+    pub fn cpu_only(mut self) -> Self {
+        self.gpu = None;
+        self
+    }
+
+    /// The fill itself (CPU plus GPU for large levels; any thread).
     pub fn run(self) -> Result<FillResult, &'static str> {
         let t0 = std::time::Instant::now();
-        let FillJob { layer, base, x0, y0, w, h, dest, source, mask, mut tiles, seed } = self;
+        let FillJob { layer, base, x0, y0, w, h, dest, source, mask, mut tiles, seed, mut gpu } = self;
         let hole: Vec<bool> = mask.iter().map(|&m| m > 0.0).collect();
         let allowed = vec![true; w * h];
         let mut img: Vec<Px> = source.iter().map(|&p| encode(p)).collect();
-        if !content_aware_fill(w, h, &mut img, &hole, &allowed, seed) {
+        let solver = gpu.as_mut().map(|g| g as &mut dyn LevelSolver);
+        if !content_aware_fill_with(w, h, &mut img, &hole, &allowed, seed, solver) {
             return Err("um die Auswahl ist zu wenig Bild, aus dem gefüllt werden kann");
         }
         let ts = TILE_SIZE as i64;

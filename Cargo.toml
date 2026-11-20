@@ -39,6 +39,13 @@ egui-wgpu = { version = "0.37", default-features = false }
 [profile.dev.package."*"]
 opt-level = 3
 
+# Pixel loops (fill, heal) are unusably slow unoptimised, also in tests.
+[profile.dev.package.imagine-core]
+opt-level = 2
+
+[profile.dev.package.imagine-gpu]
+opt-level = 2
+
 [profile.release]
 debug = "line-tables-only"
 lto = "thin"

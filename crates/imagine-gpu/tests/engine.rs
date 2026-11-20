@@ -1139,3 +1139,85 @@ fn content_aware_fill_continues_texture() {
     // Without a selection it explains what to do.
     assert!(e.content_aware_fill(false, "x").is_err());
 }
+
+/// A layer of vertical stripes (8 px, two colours) over the whole document.
+fn stripes_doc(e: &mut Engine, size: usize) -> impl Fn(usize) -> [f32; 3] + use<> {
+    let lin = imagine_core::color::srgb_to_linear;
+    let colour = move |x: usize| if (x / 8).is_multiple_of(2) { [lin(0.8), lin(0.3), lin(0.2)] } else { [lin(0.2), lin(0.3), lin(0.8)] };
+    let layer = e.doc().active;
+    let ts = TILE_SIZE as usize;
+    let n = size.div_ceil(ts);
+    let tiles: Vec<(TileCoord, Option<Vec<f16>>)> = (0..n)
+        .flat_map(|ty| (0..n).map(move |tx| (tx, ty)))
+        .map(|(tx, ty)| {
+            let mut px = vec![f16::ONE; ts * ts * 4];
+            for y in 0..ts {
+                for x in 0..ts {
+                    let c = colour(tx * ts + x);
+                    for k in 0..3 {
+                        px[(y * ts + x) * 4 + k] = f16::from_f32(c[k]);
+                    }
+                }
+            }
+            (TileCoord::new(tx as i32, ty as i32), Some(px))
+        })
+        .collect();
+    assert!(e.replace_tiles(layer, tiles, "Muster"));
+    colour
+}
+
+#[test]
+fn content_aware_fill_gpu_levels() {
+    let Some(g) = gpu() else { return };
+    let mut means = Vec::new();
+    // The CPU comparison is slow unoptimised; IMAGINE_FILL_COMPARE=1 runs it.
+    let compare = std::env::var_os("IMAGINE_FILL_COMPARE").is_some();
+    for cpu in [false, true].into_iter().take(if compare { 2 } else { 1 }) {
+        let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1024, 1024));
+        let colour = stripes_doc(&mut e, 1024);
+        e.select_shape(&Shape::Ellipse { cx: 512.0, cy: 512.0, rx: 130.0, ry: 130.0 }, CombineOp::Replace, "A").unwrap();
+        e.fill(StrokeTarget::Pixels, [1.0, 1.0, 1.0, 1.0], 1.0, "Objekt").unwrap();
+        let job = e.fill_job(false).unwrap();
+        let job = if cpu { job.cpu_only() } else { job };
+        let r = job.run().unwrap();
+        assert!(e.apply_fill(r, "Inhaltsbasiert füllen"));
+        e.deselect("x").unwrap();
+        e.flush();
+        let at = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), x % 256, y % 256);
+        let (mut err, mut n) = (0.0, 0);
+        for y in (400..624).step_by(7) {
+            for x in 400..624 {
+                if ((x as f32 - 512.0).hypot(y as f32 - 512.0)) < 125.0 {
+                    let p = at(&e, x, y);
+                    let c = colour(x);
+                    err += (0..3).map(|k| (p[k] - c[k]).abs()).sum::<f32>() / 3.0;
+                    n += 1;
+                }
+            }
+        }
+        means.push(err / n as f32);
+    }
+    // Perfect 8 px stripes vanish on the coarse levels, so the phase is not
+    // always found; the CPU reaches ≈ 0.124 here. The GPU must be comparable.
+    let cpu = means.get(1).copied().unwrap_or(0.124);
+    eprintln!("mean deviation GPU {} CPU {cpu}", means[0]);
+    assert!(means[0] < cpu * 1.2 + 0.01, "GPU {} vs CPU {cpu}", means[0]);
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn content_aware_fill_speed() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(2048, 2048));
+    let _ = stripes_doc(&mut e, 2048);
+    for r in [150.0, 560.0] {
+        e.select_shape(&Shape::Ellipse { cx: 1024.0, cy: 1024.0, rx: r, ry: r }, CombineOp::Replace, "A").unwrap();
+        let mp = std::f64::consts::PI * r * r / 1e6;
+        let t = std::time::Instant::now();
+        let job = e.fill_job(false).unwrap();
+        let read = t.elapsed();
+        let gpu_ms = job.run().unwrap().ms;
+        let cpu_ms = e.fill_job(false).unwrap().cpu_only().run().unwrap().ms;
+        eprintln!("hole {mp:.2} MP: read {read:?}, GPU {gpu_ms:.0} ms, CPU {cpu_ms:.0} ms");
+    }
+}

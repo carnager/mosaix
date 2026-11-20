@@ -421,12 +421,13 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 - **Reparaturpinsel** (`J`): malt wie der Stempel; beim Loslassen wird der Bereich (Vereinigung der Pinseltupfer) per Poisson-Angleich in die Umgebung eingepasst – Struktur von der Quelle, Farbe/Helligkeit vom Rand. Löser auf der CPU: kaskadisches Multigrid mit rot-schwarzem SOR, parallel über Zeilen (4 MP Bereich: 97 ms, 0,25 MP: 10 ms). Agent: `paint_stroke` mit `heal: true`.
 - **Bereichsreparatur** (`J`, nochmal `J` wechselt zum Reparaturpinsel): über den Fleck malen, beim Loslassen sucht die Engine selbst eine Quelle – 64 Kandidaten-Versätze (16 Richtungen × 4 Abstände) werden über die Gradienten im Ring um die Stelle verglichen – und heilt von dort. Agent: `paint_stroke` mit `spot_heal: true`.
 - **Inhaltsbasiert füllen** (Umschalt+Rücktaste; Strg+Umschalt+Rücktaste lernt aus allen Ebenen): füllt die Auswahl mit Struktur aus der Umgebung (Wexler/PatchMatch, mehrstufig). Gröbste Stufe: „Zwiebelschalen“-Füllen von außen nach innen; pro Stufe PatchMatch (Weitergabe + Zufallssuche, parallel) und gewichtete Abstimmung (Ähnlichkeit × Randnähe 1,3^−d); im ersten Durchgang jeder Stufe vergleichen Randausschnitte nur bekannte Pixel. Rechnet im Hintergrund, Ergebnis als ein Undo-Schritt (verworfen, falls die Ebene inzwischen geändert wurde). Agent: `content_aware_fill`.
-  - Zeiten (CPU): 0,07-MP-Loch 0,2 s, 1-MP-Loch 2,8 s – über dem Budget (< 1 s); die GPU-Variante steht noch aus.
+  - Große Stufen (ab 4000 Zielpixeln) laufen auf der GPU (Compute-Shader `cafill.wgsl`: Bewerten, PatchMatch mit Sprungweiten 8/4/2/1 und lokaler Zufallssuche, Histogramm für σ², Gewichte, Abstimmung als Gather), die kleinen und der Zwiebelschalen-Start auf der CPU. Alles auf dem Worker-Thread.
+  - Zeiten: 0,07-MP-Loch 0,1 s (CPU 0,25 s), 1-MP-Loch 0,77 s inkl. Lesen (CPU 3,6 s) – im Budget (< 1 s).
   - Schwäche: streng periodische Muster (Ziegel) in Bildecken können versetzt weiterlaufen; frei im Bild und bei Fotostrukturen gut.
 - Pinsel-Glättung wechselt jetzt mit Umschalt+S (vorher S), Pinsel-Dynamik mit Umschalt+J (vorher J).
 
 
-Phase 5 Rest: inhaltsbasiertes Füllen auf die GPU (Budget 1 MP < 1 s) und mit progressiver Vorschau; danach Phase 6 laut Roadmap.
+Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fertig. Weiter mit Phase 6 laut Roadmap.
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

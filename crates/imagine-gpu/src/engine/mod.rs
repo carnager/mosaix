@@ -22,6 +22,7 @@
 
 mod apply;
 mod cafill;
+mod cafill_gpu;
 mod display;
 mod filter;
 mod frame;
@@ -207,6 +208,8 @@ pub struct Engine {
     /// The composited document when smart filters substitute layer pixels.
     render: Option<Document<Tile>>,
     liquify: Option<liquify::Liquify>,
+    /// Content-aware fill solver (created on first use).
+    fill_gpu: Option<cafill_gpu::FillGpu>,
     liquify_bgl: wgpu::BindGroupLayout,
     liquify_pipeline: wgpu::RenderPipeline,
     pending_dabs: Vec<Dab>,
@@ -714,6 +717,7 @@ impl Engine {
             smart: HashMap::new(),
             render: None,
             liquify: None,
+            fill_gpu: None,
             liquify_bgl,
             liquify_pipeline,
             pending_dabs: Vec::new(),
