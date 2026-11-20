@@ -7,7 +7,7 @@ Aktueller Stand: **Phase 2a – Auswahl & Masken** (dazu Ebenen, Undo, Füllmeth
 ## Bauen & Starten
 
 ```sh
-cargo run --release -- bild.jpg              # Bild öffnen (PNG, JPEG, WebP, TIFF, EXR, .imagine)
+cargo run --release -- bild.jpg              # Bild öffnen (PSD/PSB mit Ebenen, PNG, JPEG, WebP, TIFF, EXR, .imagine)
 cargo run --release -- --new 30000x30000     # leeres Dokument
 cargo run --release -- --demo 10000x10000    # 100-MP-Testbild
 cargo run --release -- in.jpg --save out.imagine --export out.png   # ohne Fenster konvertieren

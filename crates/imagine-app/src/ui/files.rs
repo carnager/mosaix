@@ -29,7 +29,7 @@ impl FileMode {
     fn extensions(self) -> &'static [&'static str] {
         match self {
             FileMode::Open => &[
-                "imagine", "png", "jpg", "jpeg", "webp", "tif", "tiff", "exr",
+                "imagine", "psd", "psb", "png", "jpg", "jpeg", "webp", "tif", "tiff", "exr",
             ],
             FileMode::SaveAs => &["imagine"],
             FileMode::ExportAs => &["png", "jpg", "jpeg", "webp", "tif", "tiff"],

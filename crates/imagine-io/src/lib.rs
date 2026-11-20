@@ -2,5 +2,6 @@
 
 pub mod export;
 pub mod native;
+pub mod psd;
 
 pub use native::BlobRef;

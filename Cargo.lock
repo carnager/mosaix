@@ -1177,6 +1177,7 @@ dependencies = [
  "half",
  "image",
  "imagine-core",
+ "miniz_oxide 0.8.9",
  "moxcms",
  "rayon",
  "serde",

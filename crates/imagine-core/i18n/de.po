@@ -74,6 +74,9 @@ msgstr "Rauschen hinzufügen"
 msgid "Adjustment"
 msgstr "Einstellung"
 
+msgid "adjustment layer"
+msgstr "Einstellungsebene"
+
 msgid "Adjustment Layer {name}"
 msgstr "Einstellungsebene {name}"
 
@@ -335,6 +338,9 @@ msgstr "Schließen"
 msgid "Close all"
 msgstr "Alle schließen"
 
+msgid "CMYK converted to RGB without a color profile (colors are approximate)"
+msgstr "CMYK ohne Farbprofil nach RGB umgerechnet (Farben sind ungefähr)"
+
 msgid "Color"
 msgstr "Farbe"
 
@@ -475,6 +481,15 @@ msgstr "Ausgeschnitten: {w}×{h} px"
 
 msgid "Cyans"
 msgstr "Cyantöne"
+
+msgid "damaged layer record"
+msgstr "beschädigter Ebeneneintrag"
+
+msgid "damaged RLE data"
+msgstr "beschädigte RLE-Daten"
+
+msgid "damaged ZIP data"
+msgstr "beschädigte ZIP-Daten"
 
 msgid "Darken"
 msgstr "Abdunkeln"
@@ -692,6 +707,9 @@ msgstr "Fläche füllen"
 msgid "Fill Color"
 msgstr "Fläche"
 
+msgid "fill layer"
+msgstr "Füllebene"
+
 msgid "first select the area to fill"
 msgstr "erst den Bereich auswählen, der gefüllt werden soll"
 
@@ -869,8 +887,8 @@ msgstr "bild.jpg"
 msgid "imagine run needs a script (or - for stdin)"
 msgstr "imagine run braucht ein Skript (oder - für stdin)"
 
-msgid "imagine – GPU image editor (Phase 2: selections, masks, transform)\n\nUsage:\n  imagine [FILE]                open an image (PNG, JPEG, WebP, TIFF, EXR, .imagine)\n  imagine --new WxH             empty document, e.g. --new 30000x30000\n  imagine --demo WxH            procedural test image, e.g. --demo 10000x10000\n  imagine ... --bench           run a pan/zoom/rotate benchmark after loading, then quit\n  imagine ... --bench-offscreen the same benchmark without a window, measures real GPU time per frame\n  imagine FILE --save A.imagine --export B.png\n                                convert without a window (both optional, can be combined)\n\nFor agents (see docs/agenten.md):\n  imagine mcp [FILE]            MCP server over stdio with its own engine\n  imagine mcp --attach          MCP server that controls the running window live\n  imagine run SCRIPT.jsonl      run JSON commands line by line (`-` = stdin)\n  imagine run --attach SCRIPT   … in the running window\n\nView:\n  Pan             Space + drag, middle mouse button, pen button 1\n  Zoom            mouse wheel (towards the cursor), Ctrl + Space + drag\n  Rotate          hold R + drag, Shift + mouse wheel, pen button 2; Shift+R resets\n  Fit/100 %       Ctrl+0 / Ctrl+1\n\nTools:\n  B Brush (Shift+B: tip round/chalk/bristle/spray/rough/charcoal; Shift+J: dynamics)   U Smudge\n  P Pen   I Eyedropper   S Clone Stamp (Alt+click: source)   J Spot Healing (again: Healing Brush, Alt+click: source)\n  E Eraser   M Rectangular Marquee (again: ellipse)   L Lasso\n  G Gradient (again: radial)   V Move (arrow keys: 1 px, with Shift 10 px)\n  W Magic Wand (click; Shift/Alt combine; [ / ] tolerance; W again: contiguous ↔ anywhere)\n  C Crop (drag a frame, beyond the edge = enlarge the canvas; Enter / Esc)\n  With a selection, V and Ctrl+T move/transform only the selected pixels.\n\nFree Transform (Ctrl+T):\n  corners scale (proportional, Shift = free), edges stretch, Alt = around the center,\n  drag outside = rotate (Shift = 15° steps), inside = move.\n  Enter applies, Esc or Ctrl+Z cancels. Content outside the image is kept.\n\nPainting:\n  Paint           left mouse button / pen (pressure = size & flow), eraser end of the pen\n  Size            [ / ], Ctrl + mouse wheel\n  Opacity         digits 1…9, 0 (10 … 100 %; with Smudge: strength)\n  Hardness/Smoothing  H / Shift+S   Color  Shift+P (palette), X swap, D black/white, I / Alt+click eyedropper\n  Fill            Alt+Backspace (selection or whole layer)\n\nSelection (while dragging: Shift = add, Alt = subtract, both = intersect):\n  All / none      Ctrl+A / Ctrl+D        Inverse    Ctrl+Shift+I\n  Feather         Shift+F6 (10 px)       Delete     Del or Backspace (pixels in the selection)\n  Quick Mask view  Q (red = not selected)\n\nLayer masks:\n  New mask        Ctrl+Shift+M (from the selection, otherwise reveal all)\n  Paint mask      \\ (toggle pixels ↔ mask; white reveals, black hides)\n  On/Off          Ctrl+Alt+M             Apply      Ctrl+Alt+Shift+M\n\nLayers (Photoshop shortcuts):\n  New layer       Ctrl+Shift+N         Duplicate     Ctrl+J      Delete  Del (without selection)\n  Select          Alt+[ / Alt+]        Move          Ctrl+[ / Ctrl+]\n  Group           Ctrl+G               Ungroup       Ctrl+Shift+G\n  Opacity         Shift + digit        Blend mode    Shift + Plus/Minus\n  On/Off          Ctrl+,               Blend space   F7 (sRGB ↔ linear)\n\nFile & History:\n  Undo            Ctrl+Z               Redo          Ctrl+Shift+Z / Ctrl+Y\n  Save            Ctrl+S (.imagine, incremental, in the background)\n  Export          Ctrl+Shift+E (PNG next to the file)\n  Other           Ctrl+Shift+P command palette, F12 benchmark, F1 help, Ctrl+Q quit\n"
-msgstr "imagine – GPU-Bildeditor (Phase 2: Auswahl, Masken, Transformieren)\n\nAufruf:\n  imagine [DATEI]               Bild öffnen (PNG, JPEG, WebP, TIFF, EXR, .imagine)\n  imagine --new BxH             leeres Dokument, z. B. --new 30000x30000\n  imagine --demo BxH            prozedurales Testbild, z. B. --demo 10000x10000\n  imagine ... --bench           nach dem Laden Pan/Zoom/Rotate-Benchmark fahren und beenden\n  imagine ... --bench-offscreen derselbe Benchmark ohne Fenster, misst echte GPU-Zeit pro Frame\n  imagine DATEI --save A.imagine --export B.png\n                                ohne Fenster konvertieren (beides optional kombinierbar)\n\nFür Agenten (siehe docs/agenten.md):\n  imagine mcp [DATEI]           MCP-Server über stdio mit eigener Engine\n  imagine mcp --attach          MCP-Server, der das laufende Fenster live steuert\n  imagine run SKRIPT.jsonl      JSON-Befehle zeilenweise ausführen (`-` = stdin)\n  imagine run --attach SKRIPT   … im laufenden Fenster\n\nAnsicht:\n  Schwenken       Leertaste + Ziehen, mittlere Maustaste, Stifttaste 1\n  Zoomen          Mausrad (zum Cursor), Strg + Leertaste + Ziehen\n  Drehen          R halten + Ziehen, Umschalt + Mausrad, Stifttaste 2; Umschalt+R zurücksetzen\n  Einpassen/100 % Strg+0 / Strg+1\n\nWerkzeuge:\n  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   U Wischfinger\n  P Zeichenstift   I Pipette   S Kopierstempel (Alt+Klick: Quelle)   J Bereichsreparatur (nochmal: Reparaturpinsel, Alt+Klick: Quelle)\n  E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso\n  G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)\n  W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)\n  C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)\n  Mit Auswahl verschieben/transformieren V und Strg+T nur die ausgewählten Pixel.\n\nFrei transformieren (Strg+T):\n  Ecken skalieren (proportional, Umschalt = frei), Kanten strecken, Alt = um die Mitte,\n  außerhalb ziehen = drehen (Umschalt = 15°-Schritte), innen = verschieben.\n  Enter übernimmt, Esc oder Strg+Z bricht ab. Inhalt außerhalb des Bildes bleibt erhalten.\n\nMalen:\n  Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts\n  Größe           [ / ], Strg + Mausrad\n  Deckkraft       Ziffern 1…9, 0 (10 … 100 %; beim Wischfinger: Stärke)\n  Härte/Glättung  H / Umschalt+S   Farbe  Umschalt+P (Palette), X tauschen, D Schwarz/Weiß, I / Alt+Klick Pipette\n  Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)\n\nAuswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):\n  Alles / nichts  Strg+A / Strg+D        Umkehren   Strg+Umschalt+I\n  Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf oder Rücktaste (Pixel in der Auswahl)\n  Maskierungsmodus-Ansicht  Q (rot = nicht ausgewählt)\n\nEbenenmasken:\n  Neue Maske      Strg+Umschalt+M (aus der Auswahl, sonst alles sichtbar)\n  Maske bemalen   \\ (umschalten Pixel ↔ Maske; Weiß zeigt, Schwarz verbirgt)\n  Ein/Aus         Strg+Alt+M             Anwenden   Strg+Alt+Umschalt+M\n\nEbenen (Photoshop-Tastenkürzel):\n  Neue Ebene      Strg+Umschalt+N      Duplizieren   Strg+J      Löschen  Entf (ohne Auswahl)\n  Auswählen       Alt+[ / Alt+]        Verschieben   Strg+[ / Strg+]\n  Gruppieren      Strg+G               Aufheben      Strg+Umschalt+G\n  Deckkraft       Umschalt + Ziffer    Füllmethode   Umschalt + Plus/Minus\n  Ein/Aus         Strg+,               Blend-Raum    F7 (sRGB ↔ linear)\n\nDatei & Verlauf:\n  Rückgängig      Strg+Z               Wiederholen   Strg+Umschalt+Z / Strg+Y\n  Speichern       Strg+S (.imagine, inkrementell, im Hintergrund)\n  Exportieren     Strg+Umschalt+E (PNG neben der Datei)\n  Sonstiges       Strg+Umschalt+P Befehlspalette, F12 Benchmark, F1 Hilfe, Strg+Q beenden\n"
+msgid "imagine – GPU image editor (Phase 2: selections, masks, transform)\n\nUsage:\n  imagine [FILE]                open an image (PSD/PSB, PNG, JPEG, WebP, TIFF, EXR, .imagine)\n  imagine --new WxH             empty document, e.g. --new 30000x30000\n  imagine --demo WxH            procedural test image, e.g. --demo 10000x10000\n  imagine ... --bench           run a pan/zoom/rotate benchmark after loading, then quit\n  imagine ... --bench-offscreen the same benchmark without a window, measures real GPU time per frame\n  imagine FILE --save A.imagine --export B.png\n                                convert without a window (both optional, can be combined)\n\nFor agents (see docs/agenten.md):\n  imagine mcp [FILE]            MCP server over stdio with its own engine\n  imagine mcp --attach          MCP server that controls the running window live\n  imagine run SCRIPT.jsonl      run JSON commands line by line (`-` = stdin)\n  imagine run --attach SCRIPT   … in the running window\n\nView:\n  Pan             Space + drag, middle mouse button, pen button 1\n  Zoom            mouse wheel (towards the cursor), Ctrl + Space + drag\n  Rotate          hold R + drag, Shift + mouse wheel, pen button 2; Shift+R resets\n  Fit/100 %       Ctrl+0 / Ctrl+1\n\nTools:\n  B Brush (Shift+B: tip round/chalk/bristle/spray/rough/charcoal; Shift+J: dynamics)   U Smudge\n  P Pen   I Eyedropper   S Clone Stamp (Alt+click: source)   J Spot Healing (again: Healing Brush, Alt+click: source)\n  E Eraser   M Rectangular Marquee (again: ellipse)   L Lasso\n  G Gradient (again: radial)   V Move (arrow keys: 1 px, with Shift 10 px)\n  W Magic Wand (click; Shift/Alt combine; [ / ] tolerance; W again: contiguous ↔ anywhere)\n  C Crop (drag a frame, beyond the edge = enlarge the canvas; Enter / Esc)\n  With a selection, V and Ctrl+T move/transform only the selected pixels.\n\nFree Transform (Ctrl+T):\n  corners scale (proportional, Shift = free), edges stretch, Alt = around the center,\n  drag outside = rotate (Shift = 15° steps), inside = move.\n  Enter applies, Esc or Ctrl+Z cancels. Content outside the image is kept.\n\nPainting:\n  Paint           left mouse button / pen (pressure = size & flow), eraser end of the pen\n  Size            [ / ], Ctrl + mouse wheel\n  Opacity         digits 1…9, 0 (10 … 100 %; with Smudge: strength)\n  Hardness/Smoothing  H / Shift+S   Color  Shift+P (palette), X swap, D black/white, I / Alt+click eyedropper\n  Fill            Alt+Backspace (selection or whole layer)\n\nSelection (while dragging: Shift = add, Alt = subtract, both = intersect):\n  All / none      Ctrl+A / Ctrl+D        Inverse    Ctrl+Shift+I\n  Feather         Shift+F6 (10 px)       Delete     Del or Backspace (pixels in the selection)\n  Quick Mask view  Q (red = not selected)\n\nLayer masks:\n  New mask        Ctrl+Shift+M (from the selection, otherwise reveal all)\n  Paint mask      \\ (toggle pixels ↔ mask; white reveals, black hides)\n  On/Off          Ctrl+Alt+M             Apply      Ctrl+Alt+Shift+M\n\nLayers (Photoshop shortcuts):\n  New layer       Ctrl+Shift+N         Duplicate     Ctrl+J      Delete  Del (without selection)\n  Select          Alt+[ / Alt+]        Move          Ctrl+[ / Ctrl+]\n  Group           Ctrl+G               Ungroup       Ctrl+Shift+G\n  Opacity         Shift + digit        Blend mode    Shift + Plus/Minus\n  On/Off          Ctrl+,               Blend space   F7 (sRGB ↔ linear)\n\nFile & History:\n  Undo            Ctrl+Z               Redo          Ctrl+Shift+Z / Ctrl+Y\n  Save            Ctrl+S (.imagine, incremental, in the background)\n  Export          Ctrl+Shift+E (PNG next to the file)\n  Other           Ctrl+Shift+P command palette, F12 benchmark, F1 help, Ctrl+Q quit\n"
+msgstr "imagine – GPU-Bildeditor (Phase 2: Auswahl, Masken, Transformieren)\n\nAufruf:\n  imagine [DATEI]               Bild öffnen (PSD/PSB, PNG, JPEG, WebP, TIFF, EXR, .imagine)\n  imagine --new BxH             leeres Dokument, z. B. --new 30000x30000\n  imagine --demo BxH            prozedurales Testbild, z. B. --demo 10000x10000\n  imagine ... --bench           nach dem Laden Pan/Zoom/Rotate-Benchmark fahren und beenden\n  imagine ... --bench-offscreen derselbe Benchmark ohne Fenster, misst echte GPU-Zeit pro Frame\n  imagine DATEI --save A.imagine --export B.png\n                                ohne Fenster konvertieren (beides optional kombinierbar)\n\nFür Agenten (siehe docs/agenten.md):\n  imagine mcp [DATEI]           MCP-Server über stdio mit eigener Engine\n  imagine mcp --attach          MCP-Server, der das laufende Fenster live steuert\n  imagine run SKRIPT.jsonl      JSON-Befehle zeilenweise ausführen (`-` = stdin)\n  imagine run --attach SKRIPT   … im laufenden Fenster\n\nAnsicht:\n  Schwenken       Leertaste + Ziehen, mittlere Maustaste, Stifttaste 1\n  Zoomen          Mausrad (zum Cursor), Strg + Leertaste + Ziehen\n  Drehen          R halten + Ziehen, Umschalt + Mausrad, Stifttaste 2; Umschalt+R zurücksetzen\n  Einpassen/100 % Strg+0 / Strg+1\n\nWerkzeuge:\n  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   U Wischfinger\n  P Zeichenstift   I Pipette   S Kopierstempel (Alt+Klick: Quelle)   J Bereichsreparatur (nochmal: Reparaturpinsel, Alt+Klick: Quelle)\n  E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso\n  G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)\n  W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)\n  C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)\n  Mit Auswahl verschieben/transformieren V und Strg+T nur die ausgewählten Pixel.\n\nFrei transformieren (Strg+T):\n  Ecken skalieren (proportional, Umschalt = frei), Kanten strecken, Alt = um die Mitte,\n  außerhalb ziehen = drehen (Umschalt = 15°-Schritte), innen = verschieben.\n  Enter übernimmt, Esc oder Strg+Z bricht ab. Inhalt außerhalb des Bildes bleibt erhalten.\n\nMalen:\n  Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts\n  Größe           [ / ], Strg + Mausrad\n  Deckkraft       Ziffern 1…9, 0 (10 … 100 %; beim Wischfinger: Stärke)\n  Härte/Glättung  H / Umschalt+S   Farbe  Umschalt+P (Palette), X tauschen, D Schwarz/Weiß, I / Alt+Klick Pipette\n  Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)\n\nAuswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):\n  Alles / nichts  Strg+A / Strg+D        Umkehren   Strg+Umschalt+I\n  Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf oder Rücktaste (Pixel in der Auswahl)\n  Maskierungsmodus-Ansicht  Q (rot = nicht ausgewählt)\n\nEbenenmasken:\n  Neue Maske      Strg+Umschalt+M (aus der Auswahl, sonst alles sichtbar)\n  Maske bemalen   \\ (umschalten Pixel ↔ Maske; Weiß zeigt, Schwarz verbirgt)\n  Ein/Aus         Strg+Alt+M             Anwenden   Strg+Alt+Umschalt+M\n\nEbenen (Photoshop-Tastenkürzel):\n  Neue Ebene      Strg+Umschalt+N      Duplizieren   Strg+J      Löschen  Entf (ohne Auswahl)\n  Auswählen       Alt+[ / Alt+]        Verschieben   Strg+[ / Strg+]\n  Gruppieren      Strg+G               Aufheben      Strg+Umschalt+G\n  Deckkraft       Umschalt + Ziffer    Füllmethode   Umschalt + Plus/Minus\n  Ein/Aus         Strg+,               Blend-Raum    F7 (sRGB ↔ linear)\n\nDatei & Verlauf:\n  Rückgängig      Strg+Z               Wiederholen   Strg+Umschalt+Z / Strg+Y\n  Speichern       Strg+S (.imagine, inkrementell, im Hintergrund)\n  Exportieren     Strg+Umschalt+E (PNG neben der Datei)\n  Sonstiges       Strg+Umschalt+P Befehlspalette, F12 Benchmark, F1 Hilfe, Strg+Q beenden\n"
 
 msgid "in {input}  out {output}"
 msgstr "ein {input}  aus {output}"
@@ -1132,6 +1150,9 @@ msgstr "keine Wayland-Verbindung (WAYLAND_DISPLAY?)"
 
 msgid "Non-destructive: stays on the layer, can be changed or switched off at any time (affects the whole layer)"
 msgstr "Nicht-destruktiv: bleibt an der Ebene, jederzeit änderbar oder abschaltbar (wirkt auf die ganze Ebene)"
+
+msgid "not a Photoshop file"
+msgstr "keine Photoshop-Datei"
 
 msgid "not a text or shape layer"
 msgstr "keine Text- oder Formebene"
@@ -1559,6 +1580,9 @@ msgstr "Smart-Filter"
 msgid "Smart filters for layer {id}: {ms} ms"
 msgstr "Smart-Filter für Ebene {id}: {ms} ms"
 
+msgid "smart object"
+msgstr "Smartobjekt"
+
 msgid "Smoothing"
 msgstr "Glättung"
 
@@ -1670,6 +1694,9 @@ msgstr "Ziel: {target}"
 msgid "Text"
 msgstr "Text"
 
+msgid "text"
+msgstr "Text"
+
 msgid "text and shape layers have no pixels – rasterize first (Layer › Rasterize)"
 msgstr "Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Rastern)"
 
@@ -1684,6 +1711,12 @@ msgstr "Die Leinwand kann nicht geschlossen werden"
 
 msgid "The clipboard is empty"
 msgstr "Die Zwischenablage ist leer"
+
+msgid "the file contains no image data"
+msgstr "die Datei enthält keine Bilddaten"
+
+msgid "the file is truncated"
+msgstr "die Datei ist abgeschnitten"
 
 msgid "the layer already has a mask"
 msgstr "die Ebene hat bereits eine Maske"
@@ -1823,17 +1856,29 @@ msgstr "Rückgängig: {label}"
 msgid "Ungroup Layers"
 msgstr "Gruppierung aufheben"
 
+msgid "unknown compression {x}"
+msgstr "unbekannte Kompression {x}"
+
 msgid "unknown format “{ext}”"
 msgstr "unbekanntes Format „{ext}“"
 
 msgid "unknown option {option}"
 msgstr "unbekannte Option {option}"
 
+msgid "unknown PSD version {v}"
+msgstr "unbekannte PSD-Version {v}"
+
 msgid "Unsaved Changes"
 msgstr "Ungespeicherte Änderungen"
 
 msgid "Unsharp Mask"
 msgstr "Unscharf maskieren"
+
+msgid "unsupported bit depth {d}"
+msgstr "Farbtiefe {d} wird nicht unterstützt"
+
+msgid "unsupported PSD color mode {m} (only RGB, grayscale and CMYK)"
+msgstr "PSD-Farbmodus {m} wird nicht unterstützt (nur RGB, Graustufen und CMYK)"
 
 msgid "Untitled"
 msgstr "Unbenannt"
@@ -1913,14 +1958,23 @@ msgstr "{name} (Smart-Filter)"
 msgid "{name} copy"
 msgstr "{name} Kopie"
 
+msgid "{n} clipping masks are not supported yet: those layers are shown unclipped"
+msgstr "{n} Schnittmasken werden noch nicht unterstützt: diese Ebenen erscheinen ungeschnitten"
+
 msgid "{n} font families in {ms} ms"
 msgstr "{n} Schriftfamilien in {ms} ms"
+
+msgid "{n} layers use a blend mode imagine does not have yet (shown as Normal)"
+msgstr "{n} Ebenen nutzen eine Füllmethode, die imagine noch nicht hat (als Normal gezeigt)"
 
 msgid "{n} tiles did not fit into GPU memory"
 msgstr "{n} Kacheln passten nicht in den GPU-Speicher"
 
 msgid "{n} tiles do not fit into GPU memory"
 msgstr "{n} Kacheln passen nicht in den GPU-Speicher"
+
+msgid "{n} × {what}: only the pixels were taken over"
+msgstr "{n} × {what}: nur die Pixel wurden übernommen"
 
 msgid "{pct} % of the current size"
 msgstr "{pct} % der jetzigen Größe"

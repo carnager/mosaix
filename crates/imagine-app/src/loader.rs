@@ -217,6 +217,15 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                 total_ms: ms(t0),
             })?;
         }
+        Source::File(path) if imagine_io::psd::is_psd(&path) => {
+            let psd = imagine_io::psd::open(&path)?;
+            let decode_ms = ms(t0);
+            load_psd(psd, file_name(&path), path, tx)?;
+            send(LoaderMsg::Done {
+                decode_ms,
+                total_ms: ms(t0),
+            })?;
+        }
         Source::File(path) => {
             let name = file_name(&path);
             let (w, h) = image::image_dimensions(&path)?;
@@ -284,6 +293,194 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                 total_ms: ms(t0),
             })?;
         }
+    }
+    Ok(())
+}
+
+/// Sends a parsed Photoshop file: structure, then each layer's tiles and masks.
+fn load_psd(
+    psd: imagine_io::psd::Psd,
+    name: String,
+    path: PathBuf,
+    tx: &impl Sink,
+) -> anyhow::Result<()> {
+    use imagine_core::doc::{Content, Layer};
+    use imagine_io::psd::{Node, Raster, Rect};
+    let send = |m| {
+        if tx.send(m) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(tr("UI closed")))
+        }
+    };
+    for w in &psd.warnings {
+        tracing::warn!("{}: {w}", name);
+    }
+    let (w, h) = (psd.width, psd.height);
+    let mut doc = Document::<()>::empty(w, h);
+    let mut rasters: Vec<(LayerId, Rect, Raster)> = Vec::new();
+    let mut masks: Vec<(LayerId, imagine_io::psd::LayerMask)> = Vec::new();
+    fn info_to_layer(l: &mut Layer<()>, i: &imagine_io::psd::Info) {
+        l.opacity = i.opacity;
+        l.blend = i.blend;
+        l.visible = i.visible;
+    }
+    fn build(
+        nodes: Vec<Node>,
+        doc: &mut Document<()>,
+        rasters: &mut Vec<(LayerId, Rect, Raster)>,
+        masks: &mut Vec<(LayerId, imagine_io::psd::LayerMask)>,
+    ) -> Vec<Layer<()>> {
+        nodes
+            .into_iter()
+            .map(|n| {
+                let id = doc.alloc_id();
+                match n {
+                    Node::Layer { info, rect, pixels } => {
+                        let mut l = Layer::pixels(id, &info.name);
+                        info_to_layer(&mut l, &info);
+                        if let Some(px) = pixels {
+                            rasters.push((id, rect, px));
+                        }
+                        if let Some(m) = info.mask {
+                            l.mask_enabled = m.enabled;
+                            masks.push((id, m));
+                        }
+                        l
+                    }
+                    Node::Group { info, children, .. } => {
+                        let mut l = Layer::pixels(id, &info.name);
+                        info_to_layer(&mut l, &info);
+                        l.content = Content::Group(build(children, doc, rasters, masks));
+                        if let Some(m) = info.mask {
+                            l.mask_enabled = m.enabled;
+                            masks.push((id, m));
+                        }
+                        l
+                    }
+                }
+            })
+            .collect()
+    }
+    let nodes = if psd.layers.is_empty() {
+        // Only a flattened image.
+        let merged = psd
+            .merged
+            .ok_or_else(|| anyhow::anyhow!(tr("the file contains no image data")))?;
+        vec![Node::Layer {
+            info: imagine_io::psd::Info {
+                name: tr("Background").into(),
+                opacity: 1.0,
+                blend: imagine_core::BlendMode::Normal,
+                blend_key: *b"norm",
+                visible: true,
+                clipped: false,
+                mask: None,
+                special: None,
+            },
+            rect: Rect { x: 0, y: 0, w, h },
+            pixels: Some(merged),
+        }]
+    } else {
+        psd.layers
+    };
+    doc.layers = build(nodes, &mut doc, &mut rasters, &mut masks);
+    // The top-most layer becomes active.
+    if let Some(top) = doc.display_order().last() {
+        doc.active = *top;
+    }
+    let ts = TILE_SIZE as i64;
+    let tiles_of = |r: &Rect| {
+        let (x0, y0) = (r.x.max(0), r.y.max(0));
+        let (x1, y1) = (
+            (r.x + r.w as i64).min(w as i64),
+            (r.y + r.h as i64).min(h as i64),
+        );
+        if x1 <= x0 || y1 <= y0 {
+            return Vec::new();
+        }
+        (y0 / ts..=(y1 - 1) / ts)
+            .flat_map(|ty| (x0 / ts..=(x1 - 1) / ts).map(move |tx| (tx, ty)))
+            .collect::<Vec<_>>()
+    };
+    let expected = rasters
+        .iter()
+        .map(|(_, r, _)| tiles_of(r).len() as u64)
+        .sum();
+    send(LoaderMsg::Structure {
+        doc,
+        name,
+        source: Some(path),
+        native_len: None,
+        expected_tiles: expected,
+    })?;
+    // Colour profile (8/16 bit only; 32-bit PSDs are linear).
+    let convert = psd.icc.as_deref().and_then(color_transform);
+    if let Some((n, _)) = &convert {
+        tracing::info!(
+            "{}",
+            tr!(
+                "Converting color profile “{name}” to sRGB (linear, extended range)",
+                name = n
+            )
+        );
+    }
+    for (id, r, raster) in rasters {
+        let widened;
+        let px = match (&raster, &convert) {
+            (Raster::U8(v), Some((_, c))) => {
+                widened = v.iter().map(|&b| b as u16 * 257).collect::<Vec<u16>>();
+                Pixels::Converted16 {
+                    data: &widened,
+                    convert: &**c,
+                }
+            }
+            (Raster::U16(v), Some((_, c))) => Pixels::Converted16 {
+                data: v,
+                convert: &**c,
+            },
+            (Raster::U8(v), None) => Pixels::Srgb8(v),
+            (Raster::U16(v), None) => Pixels::Srgb16(v),
+            (Raster::F32(v), _) => Pixels::Linear32(v),
+        };
+        for chunk in tiles_of(&r).chunks(CHUNK) {
+            let tiles: Vec<TileData> = chunk
+                .par_iter()
+                .filter_map(|&(tx, ty)| {
+                    imagine_core::color::extract_region(&px, r.w, r.h, tx * ts - r.x, ty * ts - r.y)
+                        .map(|t| (TileCoord::new(tx as i32, ty as i32), t, None))
+                })
+                .collect();
+            if !tiles.is_empty() {
+                send(LoaderMsg::Tiles { layer: id, tiles })?;
+            }
+        }
+    }
+    for (id, m) in masks {
+        let mut tiles = HashMap::new();
+        for (tx, ty) in tiles_of(&m.rect) {
+            let mut t = vec![m.default; (ts * ts) as usize];
+            for row in 0..ts {
+                let y = ty * ts + row - m.rect.y;
+                if y < 0 || y >= m.rect.h as i64 {
+                    continue;
+                }
+                for col in 0..ts {
+                    let x = tx * ts + col - m.rect.x;
+                    if x >= 0 && x < m.rect.w as i64 {
+                        t[(row * ts + col) as usize] = m.data[(y * m.rect.w as i64 + x) as usize];
+                    }
+                }
+            }
+            tiles.insert(TileCoord::new(tx as i32, ty as i32), MaskData::Pixels(t));
+        }
+        send(LoaderMsg::Mask(MaskLoad {
+            layer: Some(id),
+            default: m.default,
+            enabled: m.enabled,
+            tiles,
+            blobs: HashMap::new(),
+        }))?;
     }
     Ok(())
 }

@@ -384,7 +384,7 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 
 - **Ebenen-Vorschaubilder:** GPU-verkleinert (Warp-Kernel, bis 8×8 Supersampling) in ein 64²-Textur-Array, nur bei geänderten Kacheln neu, höchstens 4 pro Frame und nie während eines Strichs.
 
-**Noch offen in Phase 3:** frei belegbare Tastenkürzel, Docking/abtrennbare Panels, Panelbreite merken, Vorschaubilder für Gruppen und Masken.
+**Noch offen in Phase 3:** frei belegbare Tastenkürzel, Vorschaubilder für Gruppen und Masken. (Docking/abtrennbare Panels: erledigt 2026-11-20 mit egui_dock, Layout wird gespeichert.)
 
 ## Stand Phase 4 (20.11.2026) – Nicht-destruktiv, Filter, Farbe (erster Teil)
 
@@ -452,6 +452,12 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 - **Zeichenstift** (`P`): Bézier-Pfade zeichnen (Ecke/Kurve, Schließen am Startpunkt → gefüllte Form, offen → Linie) und Punkte/Griffe bearbeiten (Alt: Ecke↔Kurve, Griffe einzeln), auch auf transformierten Pfaden. Neue Geometrie `Bezier` mit Knoten; Overlay über der Leinwand. Palettenfarbe wechselt jetzt mit Umschalt+P.
 
 **Noch offen in Phase 6:** Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
+
+### Phase 7 – Interop (begonnen 2026-11-20)
+
+- **PSD/PSB-Import** (eigener Leser, `imagine-io/psd.rs`): Ebenen mit Namen (Unicode), Deckkraft (inkl. Flächendeckkraft), Füllmethoden, Sichtbarkeit, Gruppen (Abschnittstrenner), Ebenenmasken; 8/16/32 Bit; RGB, Graustufen, CMYK (naiv); roh/RLE/ZIP/ZIP mit Vorhersage; eingebettetes ICC-Profil; zusammengefügtes Bild als Rückfall. Ebenen werden kachelweise parallel gestreamt (619-MB-PSD mit 4 Ebenen: 1,4 s bis zum Export). Hinweise für Schnittmasken, Text-/Smart-/Einstellungs-/Füllebenen (nur Pixel) und fremde Füllmethoden. Getestet mit Dateien aus GIMP 3 und ImageMagick.
+
+**Noch offen in Phase 7:** PSD-Export, Schnittmasken, JPEG XL/AVIF, ABR-Pinsel.
 
 ## Nächster konkreter Schritt
 

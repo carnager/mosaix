@@ -119,7 +119,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "document_open",
-            "Open an image (png, jpg, webp, tiff, exr) or .imagine file (replaces the open document).",
+            "Open an image (psd/psb with layers, png, jpg, webp, tiff, exr) or .imagine file (replaces the open document).",
             json!({ "path": { "type": "string" } }),
             &["path"],
             false,
