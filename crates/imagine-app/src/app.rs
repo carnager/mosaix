@@ -826,6 +826,7 @@ impl App {
 
     fn key(&mut self, ev: &KeyEvent, pressed: bool) {
         let sym = ev.keysym;
+        tracing::debug!(?sym, raw = ev.raw_code, pressed, "Taste");
         match sym {
             Keysym::space => self.space = pressed,
             Keysym::r => self.r_key = pressed,
@@ -871,8 +872,20 @@ impl App {
             Keysym::j if ctrl => self.edit("Ebene duplizieren", |d| d.duplicate_active().is_some()),
             Keysym::g | Keysym::G if ctrl && shift => self.edit("Gruppierung aufheben", |d| d.ungroup_active()),
             Keysym::g if ctrl => self.edit("Gruppieren", |d| d.group_active().is_some()),
-            Keysym::Delete if self.session.as_ref().is_some_and(|s| s.engine.has_selection()) => {
-                self.engine_op(|e| e.clear_selected("Löschen").map(|_| ()))
+            // Photoshop: Entf and Rücktaste both clear the selection.
+            Keysym::Delete | Keysym::BackSpace
+                if !alt && self.session.as_ref().is_some_and(|s| s.engine.has_selection()) =>
+            {
+                self.engine_op(|e| {
+                    let n = e.clear_selected("Löschen")?;
+                    let name = e.doc().active_layer().map(|l| l.name.clone()).unwrap_or_default();
+                    if n == 0 {
+                        tracing::warn!("Nichts gelöscht: die Auswahl enthält auf Ebene „{name}“ keine Pixel. Andere Ebene aktiv?");
+                    } else {
+                        tracing::info!("Auswahl auf Ebene „{name}“ gelöscht ({n} Kacheln)");
+                    }
+                    Ok(())
+                })
             }
             Keysym::Delete => self.edit("Ebene löschen", |d| d.remove_active()),
             Keysym::BackSpace if alt => {

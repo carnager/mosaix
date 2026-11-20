@@ -38,7 +38,7 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 | Malen | linke Maustaste / Stift; Radierer-Ende des Stifts; `[` `]` Größe, Ziffern Deckkraft, `H` Härte, `S` Glättung, `C` Farbe, `X` Schwarz↔Weiß |
 | Ansicht | Leertaste+Ziehen schwenken, Mausrad zoomen, `R`+Ziehen drehen, Strg+`0` einpassen, Strg+`1` 100 %, `Q` Maskierungsmodus-Ansicht |
 | Auswahl | Aufziehen mit Umschalt/Alt/beidem = hinzufügen/abziehen/Schnittmenge; Strg+`A` / Strg+`D` / Strg+Umschalt+`I`; Umschalt+`F6` weiche Kante |
-| Füllen & Löschen | Alt+Rücktaste füllt Auswahl (bzw. Ebene), `Entf` löscht ausgewählte Pixel |
+| Füllen & Löschen | Alt+Rücktaste füllt Auswahl (bzw. Ebene), `Entf` oder Rücktaste löscht ausgewählte Pixel |
 | Ebenen | Strg+Umschalt+`N` neu, Strg+`J` duplizieren, `Entf` (ohne Auswahl) löschen, Alt+`[` `]` auswählen, Strg+`[` `]` verschieben |
 | Ebenen-Eigenschaften | Umschalt+Ziffer Deckkraft, Umschalt+`+`/`-` Füllmethode, Strg+`,` ein/aus, Strg+`G` gruppieren, Strg+Umschalt+`G` aufheben, `F7` Blend-Raum |
 | Ebenenmasken | Strg+Umschalt+`M` neu (aus Auswahl), `\` Maske bemalen ↔ Pixel, Strg+Alt+`M` ein/aus, Strg+Alt+Umschalt+`M` anwenden |

@@ -48,7 +48,7 @@ Malen:
 
 Auswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):
   Alles / nichts  Strg+A / Strg+D        Umkehren   Strg+Umschalt+I
-  Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf (Pixel in der Auswahl)
+  Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf oder Rücktaste (Pixel in der Auswahl)
   Maskierungsmodus-Ansicht  Q (rot = nicht ausgewählt)
 
 Ebenenmasken:
