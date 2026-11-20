@@ -59,18 +59,34 @@ impl Engine {
     }
 
     #[allow(clippy::type_complexity)]
-    fn compute_style(&mut self, src: &TileSet, effects: &[Effect]) -> Option<(Vec<(BlendMode, Arc<TileSet>)>, Arc<TileSet>)> {
+    fn compute_style(&mut self, src: &Arc<TileSet>, effects: &[Effect]) -> Option<(Vec<(BlendMode, Arc<TileSet>)>, Arc<TileSet>)> {
         if src.is_empty() {
             return None;
         }
         let ts = TILE_SIZE as i64;
-        let pad = (reach(effects).ceil() as i64).max(1);
+        let pad = (reach(effects).ceil() as i64).max(1) + 1;
+        // The source pixels: from the CPU copy of a vector layer, else read from the GPU.
+        let coords: Vec<TileCoord> = src.keys().copied().collect();
+        let data: Vec<Vec<f16>> = match self.vector_cpu.get(&(Arc::as_ptr(src) as usize)) {
+            Some(cpu) => coords.iter().map(|c| cpu[c].clone()).collect(),
+            None => {
+                let handles: Vec<Tile> = coords.iter().map(|c| src[c].clone()).collect();
+                self.read_layer_tiles(&handles)
+            }
+        };
+        // Work only on the area with pixels (plus the effects' reach), not the whole tiles.
         let (mut x0, mut y0, mut x1, mut y1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
-        for c in src.keys() {
-            x0 = x0.min(c.x as i64 * ts);
-            y0 = y0.min(c.y as i64 * ts);
-            x1 = x1.max((c.x as i64 + 1) * ts);
-            y1 = y1.max((c.y as i64 + 1) * ts);
+        for (c, px) in coords.iter().zip(&data) {
+            let (ox, oy) = (c.x as i64 * ts, c.y as i64 * ts);
+            for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
+                if p[3].to_f32() > 0.0 {
+                    let (x, y) = (ox + i as i64 % ts, oy + i as i64 / ts);
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+                }
+            }
+        }
+        if x0 >= x1 {
+            return None;
         }
         let (x0, y0, x1, y1) = (x0 - pad, y0 - pad, x1 + pad, y1 + pad);
         let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
@@ -78,18 +94,22 @@ impl Engine {
             tracing::warn!("Ebenenstil übersprungen: Ebene zu groß ({} MP)", w * h / 1_000_000);
             return None;
         }
-        // Read the source pixels into the region.
-        let coords: Vec<TileCoord> = src.keys().copied().collect();
-        let handles: Vec<Tile> = coords.iter().map(|c| src[c].clone()).collect();
-        let data = self.read_layer_tiles(&handles);
         let mut region = Region::new(w, h);
         for (c, px) in coords.iter().zip(&data) {
             let (ox, oy) = (c.x as i64 * ts - x0, c.y as i64 * ts - y0);
             for ly in 0..ts {
-                let row = ((oy + ly) as usize) * w;
+                let y = oy + ly;
+                if y < 0 || y >= h as i64 {
+                    continue;
+                }
+                let row = y as usize * w;
                 for lx in 0..ts {
+                    let x = ox + lx;
+                    if x < 0 || x >= w as i64 {
+                        continue;
+                    }
                     let s = ((ly * ts + lx) * 4) as usize;
-                    region.px[row + (ox + lx) as usize] = [px[s].to_f32(), px[s + 1].to_f32(), px[s + 2].to_f32(), px[s + 3].to_f32()];
+                    region.px[row + x as usize] = [px[s].to_f32(), px[s + 1].to_f32(), px[s + 2].to_f32(), px[s + 3].to_f32()];
                 }
             }
         }

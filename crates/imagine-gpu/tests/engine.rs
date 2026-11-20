@@ -1366,3 +1366,40 @@ fn vector_preview_does_not_touch_the_document() {
     e.flush();
     assert_eq!(composite_px(&e, TileCoord::new(0, 0), 50, 50), red);
 }
+
+#[test]
+#[ignore = "benchmark"]
+fn text_resize_speed() {
+    use imagine_core::VectorLayer;
+    use imagine_core::style::{Effect, EffectKind, StrokePosition};
+    use imagine_core::vector::{TextSpec, VectorKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(4000, 3000));
+    e.fill(StrokeTarget::Pixels, [0.5, 0.5, 0.5, 1.0], 1.0, "F").unwrap();
+    let v = VectorLayer::text(TextSpec::new("Ich bin eine Textebene", 200.0, 800.0, 150.0, [1.0, 1.0, 0.0, 1.0]));
+    let id = e.add_vector(v.clone(), "T").unwrap();
+    e.flush();
+    for styled in [false, true] {
+        if styled {
+            e.edit("fx", |d| {
+                d.find_mut(id).unwrap().effects = vec![Effect { enabled: true, kind: EffectKind::Stroke { size: 6.0, position: StrokePosition::Outside, color: [1.0; 3], opacity: 1.0 } }];
+                true
+            });
+            e.flush();
+        }
+        let t = std::time::Instant::now();
+        for i in 0..10 {
+            let mut w = v.clone();
+            if let VectorKind::Text(s) = &mut w.kind {
+                s.size = 150.0 + i as f32 * 3.0;
+            }
+            e.set_vector(id, w, "Größe", Some("size")).unwrap();
+            let t1 = std::time::Instant::now();
+            e.flush();
+            if i == 0 {
+                eprintln!("  first flush {:?}", t1.elapsed());
+            }
+        }
+        eprintln!("styled {styled}: {:?} per change", t.elapsed() / 10);
+    }
+}

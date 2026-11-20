@@ -24,9 +24,10 @@ pub struct FontWindow {
     kind: Option<FontKind>,
     favourites_only: bool,
     all_scripts: bool,
-    /// The layer as it was when the window opened (Escape restores it).
-    original: Option<VectorLayer>,
-    /// What the canvas should show while browsing (read by the app).
+    /// The family being tried out (shown live on the canvas).
+    trying: Option<String>,
+    /// What the canvas should show while browsing (read by the app); always
+    /// built from the current layer, so other edits stay visible.
     pub preview: Option<VectorLayer>,
     /// Rendered previews: (family, text) → texture.
     previews: HashMap<(String, String), Option<egui::TextureHandle>>,
@@ -48,7 +49,7 @@ impl FontWindow {
         self.open = true;
         self.query = query.into();
         self.focus_query = true;
-        self.original = Some(layer.clone());
+        self.trying = None;
         self.preview = None;
         if let VectorKind::Text(t) = &layer.kind {
             self.sel = fonts.iter().find(|g| g.faces.iter().any(|f| f.family == t.font)).map(|g| g.name.clone());
@@ -59,7 +60,7 @@ impl FontWindow {
     fn close(&mut self) {
         self.open = false;
         self.preview = None;
-        self.original = None;
+        self.trying = None;
     }
 }
 
@@ -117,7 +118,7 @@ pub fn show(ctx: &egui::Context, w: &mut FontWindow, layer: &VectorLayer, fonts:
         w.close();
         return ev;
     };
-    let base = w.original.clone().unwrap_or_else(|| layer.clone());
+    let base = layer.clone();
     let sample = preview_text(spec);
     let mut open = true;
     let mut apply = false;
@@ -178,7 +179,7 @@ pub fn show(ctx: &egui::Context, w: &mut FontWindow, layer: &VectorLayer, fonts:
                 };
                 w.sel = Some(list[i].0.name.clone());
                 w.scroll_to_sel = true;
-                w.preview = Some(with_family(&base, &list[i].0).0);
+                w.trying = w.sel.clone();
             }
             if enter && w.sel.is_some() {
                 apply = true;
@@ -249,7 +250,7 @@ pub fn show(ctx: &egui::Context, w: &mut FontWindow, layer: &VectorLayer, fonts:
                         }
                         if resp.clicked() {
                             w.sel = Some(group.name.clone());
-                            w.preview = Some(with_family(&base, group).0);
+                            w.trying = w.sel.clone();
                         }
                         if resp.double_clicked() {
                             w.sel = Some(group.name.clone());
@@ -277,6 +278,12 @@ pub fn show(ctx: &egui::Context, w: &mut FontWindow, layer: &VectorLayer, fonts:
         });
     if apply || cancel || !open {
         w.close();
+    } else {
+        // The live preview: the current layer with the family being tried.
+        w.preview = w.trying.as_ref().and_then(|n| {
+            let g = fonts.iter().find(|g| &g.name == n).cloned().or_else(|| ["sans-serif", "serif", "monospace"].contains(&n.as_str()).then(|| generic(n)))?;
+            Some(with_family(&base, &g).0)
+        });
     }
     // Keep the cache bounded (previews of an old sample text).
     if w.previews.len() > 600 {

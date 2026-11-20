@@ -209,6 +209,8 @@ pub struct Engine {
     smart: HashMap<LayerId, filter::SmartEntry>,
     /// Rasterised vector layers: description hash and tiles.
     vectors: HashMap<LayerId, (u64, Arc<HashMap<TileCoord, Tile>>)>,
+    /// CPU copies of small rasterised vector layers, keyed by their tile map.
+    vector_cpu: HashMap<usize, Arc<HashMap<TileCoord, Vec<half::f16>>>>,
     /// Layer styles: effect layers and styled pixels per layer.
     styles: HashMap<LayerId, style::StyleEntry>,
     /// The composited document when smart filters substitute layer pixels.
@@ -722,6 +724,7 @@ impl Engine {
             histogram: None,
             smart: HashMap::new(),
             vectors: HashMap::new(),
+            vector_cpu: HashMap::new(),
             styles: HashMap::new(),
             render: None,
             liquify: None,

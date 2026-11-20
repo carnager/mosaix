@@ -2625,6 +2625,16 @@ impl App {
 
     /// Builds the interface for this frame and applies what the user did.
     fn run_ui(&mut self) {
+        // The font window belongs to the active text layer.
+        let text_active = self.session.as_ref().and_then(|s| s.engine.doc().active_layer()).is_some_and(|l| {
+            matches!(l.vector().map(|v| &v.kind), Some(imagine_core::vector::VectorKind::Text(_)))
+        });
+        if !text_active {
+            self.ui_state.vec_editor.fonts.open = false;
+        }
+        if !self.ui_state.vec_editor.fonts.open {
+            self.ui_state.vec_editor.fonts.preview = None;
+        }
         // Editing ends when its layer is no longer the active one.
         if let Some(te) = &self.text_edit
             && self.session.as_ref().is_none_or(|s| s.engine.doc().active != te.layer || s.engine.doc().find(te.layer).is_none())

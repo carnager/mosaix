@@ -461,6 +461,8 @@ impl Engine {
         });
         let before = self.vectors.len();
         self.vectors.retain(|id, _| want.iter().any(|w| w.0 == *id));
+        let live: std::collections::HashSet<usize> = self.vectors.values().map(|(_, t)| Arc::as_ptr(t) as usize).collect();
+        self.vector_cpu.retain(|p, _| live.contains(p));
         let mut changed = self.vectors.len() != before;
         for (id, key, v) in want {
             if self.vectors.get(&id).is_some_and(|(k, _)| *k == key) {
@@ -469,6 +471,8 @@ impl Engine {
             let t0 = std::time::Instant::now();
             let rendered = imagine_vector::render(&v);
             let mut map = TileSet::new();
+            // Small results are kept on the CPU too (layer styles read them without a GPU round trip).
+            let cpu: Option<HashMap<TileCoord, Vec<half::f16>>> = (rendered.len() <= 96).then(|| rendered.iter().cloned().collect());
             for (c, px) in rendered {
                 match self.write_new_tile(&px) {
                     Some(t) => {
@@ -481,7 +485,11 @@ impl Engine {
                 }
             }
             tracing::debug!("Vektorebene {id}: {} Kacheln, {:.1} ms", map.len(), t0.elapsed().as_secs_f64() * 1e3);
-            self.vectors.insert(id, (key, Arc::new(map)));
+            let map = Arc::new(map);
+            if let Some(cpu) = cpu {
+                self.vector_cpu.insert(Arc::as_ptr(&map) as usize, Arc::new(cpu));
+            }
+            self.vectors.insert(id, (key, map));
             changed = true;
         }
         changed

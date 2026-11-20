@@ -339,51 +339,50 @@ fn signed_distance(w: usize, h: usize, alpha: &[f32]) -> Vec<f32> {
             seed[i] = s;
         }
     };
-    // Forward: from left/top neighbours; backward: from right/bottom.
-    for _ in 0..2 {
-        for y in 0..h {
-            for x in 0..w {
-                let i = y * w + x;
-                if x > 0 {
-                    relax(i, i - 1, &mut seed, &mut best);
-                }
-                if y > 0 {
-                    relax(i, i - w, &mut seed, &mut best);
-                    if x > 0 {
-                        relax(i, i - w - 1, &mut seed, &mut best);
-                    }
-                    if x + 1 < w {
-                        relax(i, i - w + 1, &mut seed, &mut best);
-                    }
-                }
-            }
-            for x in (0..w.saturating_sub(1)).rev() {
-                let i = y * w + x;
-                relax(i, i + 1, &mut seed, &mut best);
-            }
-        }
-        for y in (0..h).rev() {
-            for x in (0..w).rev() {
-                let i = y * w + x;
-                if x + 1 < w {
-                    relax(i, i + 1, &mut seed, &mut best);
-                }
-                if y + 1 < h {
-                    relax(i, i + w, &mut seed, &mut best);
-                    if x + 1 < w {
-                        relax(i, i + w + 1, &mut seed, &mut best);
-                    }
-                    if x > 0 {
-                        relax(i, i + w - 1, &mut seed, &mut best);
-                    }
-                }
-            }
-            for x in 1..w {
-                let i = y * w + x;
+    // One forward pass (from left/top neighbours) and one backward pass.
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if x > 0 {
                 relax(i, i - 1, &mut seed, &mut best);
             }
+            if y > 0 {
+                relax(i, i - w, &mut seed, &mut best);
+                if x > 0 {
+                    relax(i, i - w - 1, &mut seed, &mut best);
+                }
+                if x + 1 < w {
+                    relax(i, i - w + 1, &mut seed, &mut best);
+                }
+            }
+        }
+        for x in (0..w.saturating_sub(1)).rev() {
+            let i = y * w + x;
+            relax(i, i + 1, &mut seed, &mut best);
         }
     }
+    for y in (0..h).rev() {
+        for x in (0..w).rev() {
+            let i = y * w + x;
+            if x + 1 < w {
+                relax(i, i + 1, &mut seed, &mut best);
+            }
+            if y + 1 < h {
+                relax(i, i + w, &mut seed, &mut best);
+                if x + 1 < w {
+                    relax(i, i + w + 1, &mut seed, &mut best);
+                }
+                if x > 0 {
+                    relax(i, i + w - 1, &mut seed, &mut best);
+                }
+            }
+        }
+        for x in 1..w {
+            let i = y * w + x;
+            relax(i, i - 1, &mut seed, &mut best);
+        }
+    }
+
     (0..w * h)
         .into_par_iter()
         .map(|i| {
