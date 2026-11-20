@@ -111,6 +111,24 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         _ => {}
     }
     let mut model = model;
+    // Paint something into "Schatten" so its thumbnail differs.
+    if let Some(id) = model.layers.iter().find(|r| r.name == "Schatten").map(|r| r.id) {
+        s.engine.select(|d| d.active = id);
+        let _ = s.engine.select_shape(
+            &imagine_core::mask::Shape::Ellipse { cx: dw as f64 * 0.3, cy: dh as f64 * 0.5, rx: dw as f64 * 0.2, ry: dh as f64 * 0.3 },
+            imagine_core::mask::CombineOp::Replace,
+            "Auswahl",
+        );
+        let _ = s.engine.fill(imagine_gpu::StrokeTarget::Pixels, [0.0, 0.0, 0.0, 0.8], 1.0, "Füllen");
+        let _ = s.engine.deselect("x");
+    }
+    while s.engine.update_thumbnails(8) {}
+    for row in &mut model.layers {
+        if let Some((slot, uv)) = s.engine.thumbnail(row.id) {
+            let view = s.engine.thumbnail_view(slot);
+            row.thumb = Some((gui.register_texture(&gpu.device, &view), uv));
+        }
+    }
     if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TOOL") {
         model.tool = match t.as_str() {
             "wand" => ToolId::Wand,

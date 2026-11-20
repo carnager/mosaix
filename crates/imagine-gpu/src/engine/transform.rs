@@ -504,6 +504,33 @@ impl Engine {
         }
     }
 
+    /// Renders a layer scaled by `scale` into tile (0, 0) of a new layer-pool
+    /// tile (thumbnails). Supersampled, `samples` per axis.
+    pub(super) fn downscaled_tile(&mut self, layer: LayerId, scale: f64, samples: u32) -> Option<Tile> {
+        let tiles: HashMap<TileCoord, Tile> = self.doc.find(layer)?.tiles().map(|t| (**t).clone())?;
+        let mut grids = Grids::default();
+        let src = grids.layer(&tiles);
+        let inv = DAffine2::from_scale(DVec2::splat(1.0 / scale));
+        let lin = inv.matrix2;
+        let job = WarpJob {
+            s0_int: [0, 0],
+            s0_frac: [0.0, 0.0],
+            lin: [lin.x_axis.x as f32, lin.x_axis.y as f32, lin.y_axis.x as f32, lin.y_axis.y as f32],
+            src,
+            src_sel: GridRef::default(),
+            old_slot: NONE,
+            old_const: 0.0,
+            dsel_slot: NONE,
+            dsel_const: 0.0,
+            mode: MODE_REPLACE,
+            interp: Interp::Bilinear as u32,
+            samples,
+            _pad: 0,
+        };
+        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+        self.run_warp(StrokeTarget::Pixels, &[job])?.pop()
+    }
+
     /// Pixel-exact bounds `(x0, y0, x1, y1)` (exclusive end) of a layer's
     /// visible pixels, restricted to the selection if there is one.
     pub fn content_bounds(&mut self, layer: LayerId) -> Option<(i64, i64, i64, i64)> {

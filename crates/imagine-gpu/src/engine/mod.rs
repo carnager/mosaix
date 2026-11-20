@@ -27,6 +27,7 @@ mod magic;
 mod readback;
 mod selection;
 mod smudge;
+mod thumbs;
 mod tips;
 mod transform;
 mod util;
@@ -44,6 +45,7 @@ use imagine_core::{Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TI
 pub use apply::GradientKind;
 pub use magic::SampleFrom;
 pub use readback::{PoolKind, Readback};
+pub use thumbs::THUMB;
 pub use transform::{Interp, is_integer_translation};
 
 use crate::pool::{BYTES_PER_PIXEL, MASK_FORMAT, Pool, PoolConfig, TILE_FORMAT, Tile, texel_copy};
@@ -164,6 +166,7 @@ pub struct Engine {
     stroke: Option<ActiveStroke>,
     preview: Option<transform::Preview>,
     merge_key: Option<String>,
+    thumbs: Option<thumbs::Thumbs>,
     pending_dabs: Vec<Dab>,
     pending_mips: Vec<crate::pool::SlotId>,
     visible: (DVec2, DVec2),
@@ -646,6 +649,7 @@ impl Engine {
             stroke: None,
             preview: None,
             merge_key: None,
+            thumbs: None,
             pending_dabs: Vec::new(),
             pending_mips: Vec::new(),
             visible: (DVec2::ZERO, DVec2::ZERO),

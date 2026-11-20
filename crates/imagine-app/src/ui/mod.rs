@@ -101,6 +101,11 @@ impl Gui {
         self.ctx.egui_wants_keyboard_input()
     }
 
+    /// Makes a wgpu texture (premultiplied linear RGBA) usable in egui.
+    pub fn register_texture(&mut self, device: &wgpu::Device, view: &wgpu::TextureView) -> egui::TextureId {
+        self.renderer.register_native_texture(device, view, wgpu::FilterMode::Linear)
+    }
+
     pub fn has_events(&self) -> bool {
         !self.events.is_empty()
     }

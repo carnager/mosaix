@@ -4,7 +4,7 @@
 //! by `wl_surface.frame` callbacks: input is batched per event-loop dispatch
 //! and at most one frame is rendered per compositor refresh.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
@@ -287,6 +287,8 @@ pub struct App {
     tablet_ui: bool,
     ui_log_gen: usize,
     last_model: Option<ui::panels::Model>,
+    /// egui textures of the thumbnail slots.
+    thumb_ids: HashMap<u32, egui::TextureId>,
     /// Status text, refreshed a few times per second (not every frame).
     ui_status: String,
 
@@ -477,6 +479,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         tablet_ui: false,
         ui_log_gen: 0,
         last_model: None,
+        thumb_ids: HashMap::new(),
         ui_status: String::new(),
         socket: None,
         bench: None,
@@ -2094,7 +2097,25 @@ impl App {
 
     /// Builds the interface for this frame and applies what the user did.
     fn run_ui(&mut self) {
-        let Some(model) = self.ui_model() else { return };
+        // Thumbnails: a few per frame, not while dragging.
+        if matches!(self.drag, Drag::None)
+            && let Some(s) = &mut self.session
+            && s.engine.update_thumbnails(4)
+        {
+            self.needs_redraw = true;
+        }
+        let Some(mut model) = self.ui_model() else { return };
+        if let Some(s) = &mut self.session {
+            for row in &mut model.layers {
+                if let Some((slot, uv)) = s.engine.thumbnail(row.id) {
+                    let id = *self.thumb_ids.entry(slot).or_insert_with(|| {
+                        let view = s.engine.thumbnail_view(slot);
+                        self.gui.register_texture(&self.gpu.device, &view)
+                    });
+                    row.thumb = Some((id, uv));
+                }
+            }
+        }
         let size = (self.surface_config.width, self.surface_config.height);
         let changed = self.last_model.as_ref() != Some(&model) || ui::log::generation() != self.ui_log_gen;
         if !self.gui.needs_pass(size, self.scale, changed) {

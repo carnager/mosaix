@@ -382,11 +382,13 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
   - Einstellungen in `~/.config/imagine/settings.json` (Pinsel, Farbe, Werkzeug, Zauberstab, Wischfinger, zuletzt geöffnet, letzter Ordner).
   - Pinsel-HUD per Alt+Rechtsziehen.
 
-**Noch offen in Phase 3:** Ebenen-Vorschaubilder, frei belegbare Tastenkürzel, Docking/abtrennbare Panels, Panelbreite merken.
+- **Ebenen-Vorschaubilder:** GPU-verkleinert (Warp-Kernel, bis 8×8 Supersampling) in ein 64²-Textur-Array, nur bei geänderten Kacheln neu, höchstens 4 pro Frame und nie während eines Strichs.
+
+**Noch offen in Phase 3:** frei belegbare Tastenkürzel, Docking/abtrennbare Panels, Panelbreite merken, Vorschaubilder für Gruppen und Masken.
 
 ## Nächster konkreter Schritt
 
-Ebenen-Vorschaubilder, danach Phase 4 (nicht-destruktiv: Korrektur- und Filterebenen, Farbmanagement).
+Phase 4: nicht-destruktiv (Korrektur- und Filterebenen, Farbmanagement).
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

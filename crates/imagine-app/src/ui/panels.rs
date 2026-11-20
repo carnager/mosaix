@@ -46,6 +46,8 @@ pub struct LayerRow {
     pub group: bool,
     pub has_mask: bool,
     pub mask_enabled: bool,
+    /// Thumbnail texture and the used part of it (u, v).
+    pub thumb: Option<(egui::TextureId, (f32, f32))>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -612,7 +614,7 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
     });
     ui.add_space(2.0);
 
-    let row_h = 22.0;
+    let row_h = 34.0;
     for row in &m.layers {
         let active = row.id == m.active;
         let (rect, resp) =
@@ -624,7 +626,7 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
             painter.rect_filled(rect, 3.0, Color32::from_white_alpha(10));
         }
         // Eye.
-        let eye = egui::Rect::from_min_size(rect.min + Vec2::new(2.0, 2.0), Vec2::splat(row_h - 4.0));
+        let eye = egui::Rect::from_center_size(egui::pos2(rect.min.x + 12.0, rect.center().y), Vec2::splat(18.0));
         let eye_resp = ui.interact(eye, resp.id.with("eye"), Sense::click());
         icons::paint(
             &painter,
@@ -636,10 +638,30 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
             out.push(Action::ToggleVisible(row.id));
         }
         let mut x = eye.max.x + 6.0 + row.depth as f32 * 14.0;
+        // Thumbnail on a checkerboard.
+        if !row.group {
+            let t = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 3.0), Vec2::splat(row_h - 6.0));
+            let n = 4;
+            let c = t.width() / n as f32;
+            for j in 0..n {
+                for i in 0..n {
+                    let g = if (i + j) % 2 == 0 { 190 } else { 140 };
+                    let r = egui::Rect::from_min_size(t.min + Vec2::new(i as f32 * c, j as f32 * c), Vec2::splat(c));
+                    painter.rect_filled(r, 0.0, Color32::from_gray(g));
+                }
+            }
+            if let Some((tex, (u, v))) = row.thumb {
+                let size = Vec2::new(t.width() * u, t.height() * v);
+                let img = egui::Rect::from_center_size(t.center(), size);
+                painter.image(tex, img, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(u, v)), Color32::WHITE);
+            }
+            painter.rect_stroke(t, 0.0, Stroke::new(1.0, Color32::from_gray(70)), egui::StrokeKind::Outside);
+            x = t.max.x + 8.0;
+        }
         // Mask badge.
         let name_end = rect.max.x - if row.has_mask { 28.0 } else { 4.0 };
         if row.has_mask {
-            let badge = egui::Rect::from_min_size(egui::pos2(rect.max.x - 26.0, rect.min.y + 3.0), Vec2::new(22.0, row_h - 6.0));
+            let badge = egui::Rect::from_center_size(egui::pos2(rect.max.x - 15.0, rect.center().y), Vec2::new(22.0, 16.0));
             let b_resp = ui.interact(badge, resp.id.with("mask"), Sense::click());
             let editing = active && m.mask_edit;
             painter.rect(
@@ -875,6 +897,7 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
                 group: l.is_group(),
                 has_mask: l.mask.is_some(),
                 mask_enabled: l.mask_enabled,
+                thumb: None,
             })
         })
         .collect()
