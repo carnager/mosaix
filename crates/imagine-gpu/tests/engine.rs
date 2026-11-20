@@ -1508,3 +1508,27 @@ fn vector_preview_never_replaces_pixels() {
     e.flush();
     assert_eq!(composite_px(&e, TileCoord::new(0, 0), 100, 100), bg);
 }
+
+#[test]
+fn copy_pixels_layer_selection_and_merged() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 400));
+    // A red square 100..200 on an empty layer.
+    e.select_shape(&Shape::Rect { x: 100.0, y: 100.0, w: 100.0, h: 100.0 }, CombineOp::Replace, "A").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "R").unwrap();
+    e.deselect("x").unwrap();
+    // Without a selection: cropped to the pixels.
+    let c = e.copy_pixels(false).unwrap();
+    assert_eq!((c.x, c.y, c.w, c.h), (100, 100, 100, 100));
+    assert_eq!(c.px[0], [1.0, 0.0, 0.0, 1.0]);
+    // Selection: only its part.
+    e.select_shape(&Shape::Rect { x: 150.0, y: 150.0, w: 200.0, h: 200.0 }, CombineOp::Replace, "A").unwrap();
+    let c = e.copy_pixels(false).unwrap();
+    assert_eq!((c.x, c.y, c.w, c.h), (150, 150, 50, 50));
+    // Merged sees the same.
+    let m = e.copy_pixels(true).unwrap();
+    assert_eq!((m.x, m.y, m.w, m.h), (150, 150, 50, 50));
+    // Nothing there.
+    e.select_shape(&Shape::Rect { x: 400.0, y: 300.0, w: 50.0, h: 50.0 }, CombineOp::Replace, "A").unwrap();
+    assert!(e.copy_pixels(false).is_err());
+}

@@ -34,6 +34,8 @@ pub struct Gui {
     textures: egui::TexturesDelta,
     /// Size and scale the last pass was laid out for.
     last_layout: Option<((u32, u32), u64)>,
+    /// Text a UI field copied (for the system clipboard).
+    pub copied: Option<String>,
 }
 
 fn pos(phys: DVec2, ppp: f64) -> Pos2 {
@@ -56,6 +58,7 @@ impl Gui {
             ppp: 1.0,
             textures: Default::default(),
             last_layout: None,
+            copied: None,
         }
     }
 
@@ -92,6 +95,16 @@ impl Gui {
 
     pub fn key(&mut self, key: egui::Key, pressed: bool) {
         self.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: self.modifiers });
+    }
+
+    /// Copy (or cut) in the focused text field.
+    pub fn copy_event(&mut self, cut: bool) {
+        self.events.push(if cut { egui::Event::Cut } else { egui::Event::Copy });
+    }
+
+    /// Pastes text into the focused text field.
+    pub fn paste(&mut self, text: &str) {
+        self.events.push(egui::Event::Paste(text.to_string()));
     }
 
     pub fn text(&mut self, text: &str) {
@@ -147,6 +160,11 @@ impl Gui {
         self.prims = self.ctx.tessellate(out.shapes, out.pixels_per_point);
         self.ppp = out.pixels_per_point;
         self.textures.append(out.textures_delta);
+        for c in out.platform_output.commands {
+            if let egui::OutputCommand::CopyText(t) = c {
+                self.copied = Some(t);
+            }
+        }
     }
 
     /// Draws the last UI pass on top of `target`.

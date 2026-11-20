@@ -210,6 +210,9 @@ impl App {
                 };
                 self.text_replace(r, "");
             }
+            Keysym::c | Keysym::C if ctrl => self.copy(false, false),
+            Keysym::x | Keysym::X if ctrl => self.copy(true, false),
+            Keysym::v | Keysym::V if ctrl => self.paste(super::clipboard::PasteTarget::Text),
             // Other shortcuts with Ctrl/Alt (undo, save …) work as usual.
             _ if ctrl || self.mods.alt => return false,
             _ => match ev.utf8.as_deref().filter(|s| !s.is_empty() && s.chars().all(|c| !c.is_control() || c == '\t')) {
@@ -218,6 +221,28 @@ impl App {
             },
         }
         true
+    }
+
+    /// The selected text while editing (`None` when not editing).
+    pub(super) fn text_edit_selected(&mut self) -> Option<String> {
+        let (t, _) = self.edit_spec()?;
+        let r = valid(&t, &self.text_edit.as_ref()?.sel).text_range();
+        Some(t.text[r].to_string())
+    }
+
+    pub(super) fn text_edit_delete_selection(&mut self) {
+        if let Some((t, _)) = self.edit_spec() {
+            let r = valid(&t, &self.text_edit.as_ref().unwrap().sel).text_range();
+            self.text_replace(r, "");
+        }
+    }
+
+    /// Inserts text at the caret (replacing the selection).
+    pub(super) fn text_edit_insert(&mut self, s: &str) {
+        if let Some((t, _)) = self.edit_spec() {
+            let r = valid(&t, &self.text_edit.as_ref().unwrap().sel).text_range();
+            self.text_replace(r, s);
+        }
     }
 
     /// Caret, selection and box of the edited text in screen points (for the UI).

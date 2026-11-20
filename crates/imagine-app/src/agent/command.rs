@@ -1345,9 +1345,17 @@ fn place_image(s: &mut Session, path: &std::path::Path, x: i64, y: i64, name: Op
     let mut reader = image::ImageReader::open(path)?.with_guessed_format()?;
     reader.no_limits();
     let img = reader.decode().with_context(|| format!("cannot decode {}", path.display()))?.into_rgba8();
+    let name = name.unwrap_or_else(|| path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    let (id, n) = place_rgba(s, &img, x, y, &name, "Bild platzieren")?;
+    Ok(Output::json(json!({ "layer": id, "width": img.width(), "height": img.height(), "tiles": n })))
+}
+
+/// Puts an sRGB image on a new layer at (x, y) (one undo step). Returns the
+/// layer and the number of tiles.
+pub(crate) fn place_rgba(s: &mut Session, img: &image::RgbaImage, x: i64, y: i64, name: &str, label: &str) -> anyhow::Result<(LayerId, usize)> {
     let (iw, ih) = img.dimensions();
     let (dw, dh) = s.engine.size();
-    let px = Pixels::Srgb8(&img);
+    let px = Pixels::Srgb8(img);
     let coords: Vec<TileCoord> =
         tiles_in_rect((x as f64, y as f64), ((x + iw as i64) as f64, (y + ih as i64) as f64), dw, dh).collect();
     let tiles: Vec<(TileCoord, Option<Vec<f16>>)> = coords
@@ -1358,16 +1366,16 @@ fn place_image(s: &mut Session, path: &std::path::Path, x: i64, y: i64, name: Op
         })
         .collect();
     ensure!(!tiles.is_empty(), "image does not overlap the document");
-    let name = name.unwrap_or_else(|| path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     let mut id = 0;
+    let name = name.to_string();
     s.engine.edit("Neue Ebene", |d| {
         id = d.add_pixel_layer();
         d.find_mut(id).unwrap().name = name;
         true
     });
     let n = tiles.len();
-    ensure!(s.engine.replace_tiles(id, tiles, "Bild platzieren"), "placing failed (GPU memory full?)");
-    Ok(Output::json(json!({ "layer": id, "width": iw, "height": ih, "tiles": n })))
+    ensure!(s.engine.replace_tiles(id, tiles, label), "placing failed (GPU memory full?)");
+    Ok((id, n))
 }
 
 fn to_srgb8(px: [f32; 4]) -> ([u8; 3], f32) {

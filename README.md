@@ -54,6 +54,7 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 | Ebenen-Eigenschaften | Umschalt+Ziffer Deckkraft, Umschalt+`+`/`-` Füllmethode, Strg+`,` ein/aus, Strg+`G` gruppieren, Strg+Umschalt+`G` aufheben, `F7` Blend-Raum |
 | Ebenenmasken | Strg+Umschalt+`M` neu (aus Auswahl), `\` Maske bemalen ↔ Pixel, Strg+Alt+`M` ein/aus, Strg+Alt+Umschalt+`M` anwenden |
 | Verlauf & Datei | Strg+`Z` / Strg+Umschalt+`Z` / Strg+`Y`, Strg+`S` speichern (im Hintergrund), Strg+Umschalt+`E` exportieren (im Hintergrund), Strg+Alt+Umschalt+`E` exportieren unter (Farbraum, 16 Bit, JPEG-Qualität) |
+| Zwischenablage | Strg+`C` kopiert (Text beim Bearbeiten, sonst die Pixel der Ebene in der Auswahl), Strg+Umschalt+`C` aus allen Ebenen, Strg+`X` ausschneiden, Strg+`V` einfügen (Bild → neue Ebene, an der alten Stelle wenn aus imagine; Text → in den bearbeiteten Text bzw. als neue Textebene). Auch in Textfeldern der Oberfläche |
 | Sonstiges | `F12` Benchmark, `F1` Hilfe, Strg+`Q` beenden |
 
 ## Aufbau

@@ -447,7 +447,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Text direkt im Bild bearbeiten:** Cursor, Markieren mit Maus (Klick, Doppel-/Dreifachklick, Ziehen, Umschalt+Klick) und Tastatur (Pfeile, Wortweise mit Strg, Pos1/Ende, Strg+A), Tippen, Rück-/Entf-Taste (mit Strg wortweise), Enter = neue Zeile, Esc/Strg+Enter beendet; leer gelassene Textebenen verschwinden. Arbeitet mit parleys Selection auf demselben Layout wie das Rendern, auch auf gedrehtem Text; Markierung und Cursor zeichnet die Oberfläche über die Leinwand. Eine Sitzung = ein Undo-Schritt.
 
-**Noch offen in Phase 6:** Zwischenablage (Text kopieren/einfügen), Zeichenstift/Pfade bearbeiten, Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
+- **Zwischenablage** (Wayland-Data-Device über SCTK, funktioniert in jedem Compositor): Text beim Bearbeiten und in Textfeldern; Pixel der Ebene bzw. aller Ebenen in der Auswahl als PNG (weiche Kanten → Alpha, auf den Inhalt beschnitten); Einfügen als neue Ebene (aus imagine an der alten Stelle, von außen mittig) oder als Textebene. Lesen und Schreiben auf eigenen Threads. Offener Frei-Transformieren-Rahmen wird beim Ändern anderer Dinge übernommen (wie Photoshop).
+
+**Noch offen in Phase 6:** Zeichenstift/Pfade bearbeiten, Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
 
 ## Nächster konkreter Schritt
 

@@ -4,6 +4,7 @@
 //! by `wl_surface.frame` callbacks: input is batched per event-loop dispatch
 //! and at most one frame is rendered per compositor refresh.
 
+mod clipboard;
 pub(crate) mod textedit;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -160,6 +161,8 @@ enum BgDone {
     Exported { path: std::path::PathBuf, result: anyhow::Result<f64> },
     Autosaved { path: std::path::PathBuf, result: anyhow::Result<()> },
     Filled { result: Result<imagine_gpu::FillResult, &'static str>, started: Instant },
+    /// Clipboard data read from another program: (mime type, bytes).
+    Pasted(Result<(String, Vec<u8>), String>),
 }
 
 /// The rectangle of a shape drag: Shift = square, Alt = from the centre.
@@ -293,6 +296,7 @@ pub struct App {
     fonts: std::sync::Arc<Vec<imagine_vector::FontGroup>>,
     /// Text being edited on the canvas.
     text_edit: Option<textedit::TextEdit>,
+    clipboard: clipboard::Clipboard,
     liq_tool: LiquifyTool,
     /// Liquify brush diameter (document px) and strength 0…1.
     liq_size: f32,
@@ -504,6 +508,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         clone_aligned: true,
         fonts: Default::default(),
         text_edit: None,
+        clipboard: clipboard::Clipboard::new(smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(&globals, &qh).ok()),
         liq_tool: LiquifyTool::Push,
         liq_size: 200.0,
         liq_strength: 0.6,
@@ -1624,6 +1629,7 @@ impl App {
                 Ok(ms) => tracing::info!("Exportiert: {} ({ms:.0} ms)", path.display()),
                 Err(e) => tracing::error!("Export fehlgeschlagen: {e:#}"),
             },
+            BgDone::Pasted(result) => self.on_pasted(result),
             BgDone::Filled { result, started } => match result {
                 Ok(r) => {
                     let ms = r.ms;
@@ -1739,6 +1745,15 @@ impl App {
         tracing::debug!(?sym, raw = ev.raw_code, pressed, "Taste");
         // Text fields and the command palette take the keyboard.
         if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() {
+            // Clipboard in text fields.
+            if pressed && self.mods.ctrl {
+                match sym {
+                    Keysym::c | Keysym::C => self.gui.copy_event(false),
+                    Keysym::x | Keysym::X => self.gui.copy_event(true),
+                    Keysym::v | Keysym::V => self.paste(clipboard::PasteTarget::Ui),
+                    _ => {}
+                }
+            }
             if let Some(k) = ui::egui_key(sym) {
                 self.gui.key(k, pressed);
             }
@@ -1822,6 +1837,10 @@ impl App {
                 }
             }
             Keysym::x | Keysym::X if ctrl && shift => self.begin_liquify_mode(),
+            Keysym::c | Keysym::C if ctrl && shift && !self.liquifying() => self.copy(false, true),
+            Keysym::c if ctrl && !self.liquifying() => self.copy(false, false),
+            Keysym::x if ctrl && !self.liquifying() => self.copy(true, false),
+            Keysym::v if ctrl && !alt && !self.liquifying() => self.paste(clipboard::PasteTarget::Document),
             _ if self.liquifying() && !ctrl => {
                 let tool = match sym {
                     Keysym::w | Keysym::W => Some(LiquifyTool::Push),
@@ -2383,6 +2402,12 @@ impl App {
     fn apply_ui(&mut self, actions: Vec<Action>) {
         for a in actions {
             self.needs_redraw = true;
+            // Like Photoshop: changing anything else confirms an open free transform.
+            if matches!(self.boxed, Some((BoxKind::Transform, _)))
+                && !matches!(a, Action::CommitBox | Action::CancelBox | Action::BoxRotate(_) | Action::BoxAngle(_) | Action::BoxFlip { .. })
+            {
+                self.commit_box();
+            }
             match a {
                 Action::Command(c) => self.run_cmd(c),
                 Action::Tool(t) => {
@@ -2690,6 +2715,9 @@ impl App {
         }
         self.ui_log_gen = ui::log::generation();
         self.last_model = Some(model);
+        if let Some(t) = self.gui.copied.take() {
+            self.ui_copied(t);
+        }
         self.apply_ui(actions);
         self.fit_if_needed();
     }
@@ -3062,6 +3090,11 @@ impl SeatHandler for App {
     fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, cap: Capability) {
         if cap == Capability::Keyboard && self.keyboard.is_none() {
             self.keyboard = self.seat_state.get_keyboard(qh, &seat, None).ok();
+            if self.clipboard.device.is_none()
+                && let Some(m) = &self.clipboard.manager
+            {
+                self.clipboard.device = Some(m.get_data_device(qh, &seat));
+            }
         }
         if cap == Capability::Pointer && self.pointer.is_none() {
             let cursor_surface = self.compositor.create_surface(qh);
@@ -3105,7 +3138,8 @@ impl KeyboardHandler for App {
         self.r_key = false;
     }
 
-    fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
+    fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, serial: u32, ev: KeyEvent) {
+        self.clipboard.serial = serial;
         self.key(&ev, true);
     }
 
