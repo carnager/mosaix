@@ -119,7 +119,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "document_open",
-            "Open an image (psd/psb with layers, png, jpg, webp, tiff, exr) or .imagine file (replaces the open document).",
+            "Open an image (psd/psb with layers, png, jpg, webp, avif, jxl, tiff, exr) or .imagine file (replaces the open document).",
             json!({ "path": { "type": "string" } }),
             &["path"],
             false,
@@ -598,7 +598,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "export",
-            "Export the image; format by extension: png, jpg, webp, tif (flattened) or psd/psb (layers, groups and masks as shown; text, shapes and layer styles rasterised; adjustment layers only in the merged image). Wide-gamut colour spaces embed their ICC profile; 16 bit works for png, tif and psd.",
+            "Export the image; format by extension: png, jpg, webp, avif, jxl, tif (flattened) or psd/psb (layers, groups and masks as shown; text, shapes and layer styles rasterised; adjustment layers only in the merged image). Wide-gamut colour spaces embed their ICC profile; 16 bit works for png, tif, psd and jxl; avif and jxl are sRGB only; quality 100 makes jxl lossless.",
             json!({ "path": { "type": "string" },
                     "color_space": { "type": "string", "enum": ["srgb", "display_p3", "adobe_rgb", "rec2020"], "description": "default srgb" },
                     "bit_depth": { "type": "integer", "enum": [8, 16] },

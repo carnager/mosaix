@@ -130,7 +130,7 @@ impl Default for ExportOptions {
 pub fn supports_16bit(path: &Path) -> bool {
     matches!(
         ext_of(path).as_str(),
-        "png" | "tif" | "tiff" | "psd" | "psb"
+        "png" | "tif" | "tiff" | "psd" | "psb" | "jxl"
     )
 }
 
@@ -150,19 +150,25 @@ pub fn write(
     opts: &ExportOptions,
 ) -> anyhow::Result<()> {
     let ext = ext_of(path);
+    if ext == "jxl" {
+        return write_jxl(path, (width, height), tiles, opts);
+    }
     let format = ImageFormat::from_extension(&ext)
         .with_context(|| imagine_core::tr!("unknown format “{ext}”", ext = ext))?;
     if !matches!(
         format,
-        ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Tiff
+        ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Tiff | ImageFormat::Avif
     ) {
         bail!(
             "{}",
             imagine_core::tr!(
-                "Export to “{ext}” is not supported (png, jpg, webp, tiff)",
+                "Export to “{ext}” is not supported (png, jpg, webp, tiff, avif, jxl)",
                 ext = ext
             )
         );
+    }
+    if format == ImageFormat::Avif && opts.space != ColorSpace::Srgb {
+        bail!("{}", imagine_core::tr("AVIF export is sRGB only for now"));
     }
     let icc = opts.space.icc()?;
     if opts.space == ColorSpace::Srgb && !(opts.sixteen_bit && supports_16bit(path)) {
@@ -364,8 +370,72 @@ fn encode(
             h,
             color,
         ),
+        ImageFormat::Avif => go(
+            image::codecs::avif::AvifEncoder::new_with_speed_quality(file, 6, quality.clamp(1, 100)),
+            None,
+            bytes,
+            w,
+            h,
+            color,
+        ),
         _ => unreachable!(),
     }
+}
+
+/// JPEG XL through libjxl: sRGB, 8 or 16 bit with alpha; quality 100 is
+/// lossless, below that the JPEG-like quality scale.
+fn write_jxl(path: &Path, (width, height): (u32, u32), tiles: &[(TileCoord, Vec<f16>)], opts: &ExportOptions) -> anyhow::Result<()> {
+    use jpegxl_rs::encode::{EncoderFrame, encoder_builder};
+    if opts.space != ColorSpace::Srgb {
+        bail!("{}", imagine_core::tr("JPEG XL export is sRGB only for now"));
+    }
+    let lossless = opts.quality >= 100;
+    let mut enc = encoder_builder().has_alpha(true).lossless(lossless).build().map_err(|e| anyhow!("JPEG XL: {e}"))?;
+    if lossless {
+        enc.uses_original_profile = true;
+    } else {
+        enc.quality = jxl_distance(opts.quality);
+    }
+    let data = if opts.sixteen_bit {
+        let img16 = to_srgb16(width, height, tiles);
+        enc.encode_frame(&EncoderFrame::new(&img16).num_channels(4), width, height)
+    } else {
+        let img = tiles_to_rgba8(width, height, tiles);
+        enc.encode_frame(&EncoderFrame::new(img.as_raw()).num_channels(4), width, height)
+    }
+    .map_err(|e| anyhow!("JPEG XL: {e}"))?;
+    std::fs::write(path, data).with_context(|| imagine_core::tr!("creating {path}", path = path.display()))?;
+    Ok(())
+}
+
+/// libjxl's distance for a JPEG-style quality (1–99), as `cjxl` maps it.
+fn jxl_distance(q: u8) -> f32 {
+    let q = q.clamp(1, 99) as f32;
+    if q >= 30.0 { 0.1 + (100.0 - q) * 0.09 } else { 6.4 + 2.5f32.powf((30.0 - q) / 5.0) / 6.25 }
+}
+
+/// Premultiplied linear tiles → straight sRGB 16-bit RGBA (whole image).
+fn to_srgb16(width: u32, height: u32, tiles: &[(TileCoord, Vec<f16>)]) -> Vec<u16> {
+    let ts = TILE_SIZE as usize;
+    let conv: Vec<(TileCoord, Vec<u16>)> = tiles
+        .par_iter()
+        .map(|(c, px)| {
+            let mut out = vec![0u16; ts * ts * 4];
+            for (o, p) in out.chunks_mut(4).zip(px.chunks(4)) {
+                let a = p[3].to_f32().clamp(0.0, 1.0);
+                if a > 0.0 {
+                    for k in 0..3 {
+                        o[k] = (linear_to_srgb((p[k].to_f32() / a).clamp(0.0, 1.0)) * 65535.0).round() as u16;
+                    }
+                    o[3] = (a * 65535.0).round() as u16;
+                }
+            }
+            (*c, out)
+        })
+        .collect();
+    let mut buf = vec![0u16; width as usize * height as usize * 4];
+    place(&mut buf, (width, height), &conv, |v| v);
+    buf
 }
 
 /// Converts premultiplied linear f16 tiles into an sRGB 8-bit image.
@@ -464,6 +534,32 @@ pub fn save(img: &RgbaImage, path: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_avif_and_jpeg_xl() {
+        let ts = TILE_SIZE as usize;
+        let mut t = vec![f16::ZERO; ts * ts * 4];
+        for p in t.chunks_mut(4) {
+            p.copy_from_slice(&[0.2, 0.4, 0.1, 1.0].map(f16::from_f32));
+        }
+        let tiles = vec![(TileCoord::new(0, 0), t)];
+        let dir = tempfile::tempdir().unwrap();
+        for (name, q, sixteen) in [("a.avif", 80, false), ("a.jxl", 90, false), ("l.jxl", 100, true)] {
+            let p = dir.path().join(name);
+            write(&p, (64, 48), &tiles, &ExportOptions { quality: q, sixteen_bit: sixteen, ..Default::default() }).unwrap();
+            let b = std::fs::read(&p).unwrap();
+            if name.ends_with("avif") {
+                assert_eq!(&b[4..12], b"ftypavif", "AVIF container");
+                let img = image::open(&p).unwrap().into_rgba8();
+                assert_eq!(img.dimensions(), (64, 48));
+            } else {
+                assert!(b.starts_with(&[0xff, 0x0a]) || b.starts_with(b"\0\0\0\x0cJXL "), "JPEG XL signature");
+            }
+        }
+        // Wide gamut is refused (sRGB only for now).
+        let p = dir.path().join("w.jxl");
+        assert!(write(&p, (64, 48), &tiles, &ExportOptions { space: ColorSpace::DisplayP3, ..Default::default() }).is_err());
+    }
 
     #[test]
     fn converts_and_crops() {

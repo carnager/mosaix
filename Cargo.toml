@@ -19,7 +19,7 @@ wayland-protocols = { version = "0.32", features = ["client", "unstable", "stagi
 wayland-backend = { version = "0.3", features = ["client_system"] }
 raw-window-handle = "0.6"
 moxcms = { version = "0.8", features = ["extended_range"] }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "tiff", "exr", "rayon"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "tiff", "exr", "rayon", "avif", "avif-native"] }
 half = { version = "2", features = ["bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 glam = { version = "0.34", features = ["bytemuck"] }

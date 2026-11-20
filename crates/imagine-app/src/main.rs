@@ -19,7 +19,7 @@ const HELP: &str = "\
 imagine – GPU image editor (Phase 2: selections, masks, transform)
 
 Usage:
-  imagine [FILE]                open an image (PSD/PSB, PNG, JPEG, WebP, TIFF, EXR, .imagine)
+  imagine [FILE]                open an image (PSD/PSB, PNG, JPEG, WebP, AVIF, JPEG XL, TIFF, EXR, .imagine)
   imagine --new WxH             empty document, e.g. --new 30000x30000
   imagine --demo WxH            procedural test image, e.g. --demo 10000x10000
   imagine ... --bench           run a pan/zoom/rotate benchmark after loading, then quit

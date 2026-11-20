@@ -474,7 +474,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Farbton/Sättigung mit Farbbereichen** (Rottöne … Magentatöne, wie Photoshop: Trapez-Gewichtung auf dem Farbton, Helligkeit in HSV, Sättigungen über Photoshops gemessene Kombinationstabelle von psd-tools), CPU und GPU identisch; PSD liest und schreibt die Bereiche. Abweichung zu Photoshop jetzt 0,002–0,007 (vorher bis 0,085).
 
-**Noch offen in Phase 7:** editierbarer Text im PSD-Export, JPEG XL/AVIF, ABR-Pinsel.
+- **AVIF und JPEG XL:** Öffnen (AVIF über dav1d, JPEG XL über jxl-oxide, auch HDR/ICC) und Exportieren (AVIF über ravif; JPEG XL über libjxl, 8/16 Bit, Qualität 100 = verlustfrei – geprüft bitgleich mit dem PNG-Export). Export vorerst nur sRGB.
+
+**Noch offen in Phase 7:** editierbarer Text im PSD-Export, ABR-Pinsel, AVIF/JPEG XL in weiten Farbräumen.
 
 ## Nächster konkreter Schritt
 

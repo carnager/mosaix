@@ -39,6 +39,7 @@ egui-wgpu.workspace = true
 moxcms.workspace = true
 tracing-tracy = { workspace = true, optional = true }
 egui_dock = { version = "0.22", features = ["serde"] }
+jxl-oxide = { version = "0.12.6", features = ["image"] }
 
 [dev-dependencies]
 tempfile.workspace = true

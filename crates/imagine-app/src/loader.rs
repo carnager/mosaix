@@ -77,6 +77,14 @@ impl Sink for std::sync::mpsc::Sender<LoaderMsg> {
 
 const CHUNK: usize = 48;
 
+/// Formats the image library does not know itself (JPEG XL).
+pub fn register_decoders() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        jxl_oxide::integration::register_image_decoding_hook();
+    });
+}
+
 pub fn spawn(source: Source, tx: impl Sink) {
     std::thread::Builder::new()
         .name("loader".into())
@@ -85,6 +93,7 @@ pub fn spawn(source: Source, tx: impl Sink) {
 }
 
 pub fn run(source: Source, tx: &impl Sink) {
+    register_decoders();
     if let Err(e) = load(source, tx) {
         tx.send(LoaderMsg::Error(format!("{e:#}")));
     }
