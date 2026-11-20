@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use glam::{DAffine2, DVec2};
 use imagine_core::color::linear_to_srgb;
-use imagine_core::mask::{CombineOp, Shape};
+use imagine_core::mask::{CombineOp, CpuMask, Shape};
 use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View};
 use imagine_gpu::{Engine, GpuContext, GradientKind, Interp, Overlay, SampleFrom, OverlayLine, StrokeParams, StrokeTarget};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
@@ -57,7 +57,7 @@ use wayland_protocols::wp::{
 use crate::agent::{command, ipc};
 use crate::boxedit::{self, BoxEdit};
 use crate::loader::{self, LoaderMsg, Source, TileData};
-use crate::session::{SaveDone, SaveJob, Session};
+use crate::session::{ExportJob, SaveDone, SaveJob, Session};
 use crate::tablet::{self, TabletFrame};
 
 const BTN_LEFT: u32 = 0x110;
@@ -127,6 +127,13 @@ impl Tool {
     fn paints(self) -> bool {
         matches!(self, Tool::Brush | Tool::Eraser | Tool::Smudge)
     }
+}
+
+/// Result of a background job.
+enum BgDone {
+    /// A new selection computed from the one identified by `base`.
+    Selection { label: &'static str, base: usize, mask: anyhow::Result<CpuMask>, started: Instant },
+    Exported { path: std::path::PathBuf, result: anyhow::Result<f64> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -214,6 +221,10 @@ pub struct App {
     save_job: Option<SaveJob>,
     saving: bool,
     save_tx: channel::Sender<anyhow::Result<SaveDone>>,
+    /// CPU-heavy work (feathering, wand fill, export encoding) off the UI thread.
+    bg_tx: channel::Sender<BgDone>,
+    bg_running: usize,
+    export_job: Option<ExportJob>,
     edit_count: u64,
     save_mark: u64,
 
@@ -318,6 +329,16 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         })
         .map_err(|e| anyhow::anyhow!("save channel: {e}"))?;
 
+    let (bg_tx, bg_rx) = channel::channel::<BgDone>();
+    event_loop
+        .handle()
+        .insert_source(bg_rx, |ev, _, app: &mut App| {
+            if let channel::Event::Msg(r) = ev {
+                app.on_background_done(r);
+            }
+        })
+        .map_err(|e| anyhow::anyhow!("background channel: {e}"))?;
+
     let mut app = App {
         surface,
         session: None,
@@ -370,6 +391,9 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         save_job: None,
         saving: false,
         save_tx,
+        bg_tx,
+        bg_running: 0,
+        export_job: None,
         edit_count: 0,
         save_mark: 0,
         socket: None,
@@ -410,7 +434,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     while !app.exit {
         // Wake up periodically while a save is in flight or ants are marching.
         let ants = app.session.as_ref().is_some_and(|s| s.engine.has_selection());
-        let timeout = if app.save_job.is_some() {
+        let timeout = if app.save_job.is_some() || app.export_job.is_some() {
             Some(Duration::from_millis(10))
         } else if ants {
             Some(Duration::from_millis(100))
@@ -419,6 +443,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         };
         event_loop.dispatch(timeout, &mut app)?;
         app.poll_save();
+        app.poll_export();
         if ants {
             app.needs_redraw = true;
         }
@@ -576,13 +601,8 @@ impl App {
             Tool::Crop => Drag::None,
             Tool::Wand => {
                 let (x, y) = (doc.x.floor(), doc.y.floor());
-                let (tol, contiguous) = (self.wand_tolerance, self.wand_contiguous);
                 if x >= 0.0 && y >= 0.0 {
-                    let t0 = Instant::now();
-                    self.engine_op(|e| {
-                        e.magic_wand(x as u32, y as u32, tol, contiguous, true, SampleFrom::Image, op, "Zauberstab")
-                    });
-                    tracing::info!("Zauberstab: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
+                    self.magic_wand(x as u32, y as u32, op);
                 }
                 Drag::None
             }
@@ -902,6 +922,12 @@ impl App {
             tracing::warn!("Speichern läuft noch – bitte einen Moment warten.");
             return;
         }
+        if self.bg_running > 0 && self.quit_armed.is_none_or(|t| t.elapsed() >= QUIT_CONFIRM) {
+            tracing::warn!("Im Hintergrund läuft noch etwas (z. B. ein Export). Nochmal Strg+Q bricht es ab.");
+            self.quit_armed = Some(Instant::now());
+            self.update_title();
+            return;
+        }
         if !self.modified || self.quit_armed.is_some_and(|t| t.elapsed() < QUIT_CONFIRM) {
             self.exit = true;
             return;
@@ -969,11 +995,99 @@ impl App {
 
     fn export(&mut self) {
         let Some(s) = &mut self.session else { return };
-        let path = s.default_export_path();
-        match s.export(&path) {
-            Ok(ms) => tracing::info!("Exportiert: {} ({ms:.0} ms)", path.display()),
-            Err(e) => tracing::error!("Export fehlgeschlagen: {e:#}"),
+        if self.export_job.is_some() {
+            tracing::warn!("Export läuft noch.");
+            return;
         }
+        let path = s.default_export_path();
+        tracing::info!("Exportiere {} im Hintergrund …", path.display());
+        self.export_job = Some(s.start_export(&path));
+        self.bg_running += 1;
+    }
+
+    /// Hands a finished export readback to a worker thread.
+    fn poll_export(&mut self) {
+        if self.export_job.as_ref().is_some_and(|j| j.ready(&self.gpu.device)) {
+            let job = self.export_job.take().unwrap();
+            let path = job.path.clone();
+            let work = job.into_writer();
+            self.bg_running -= 1; // spawn_bg counts it again
+            self.spawn_bg("export", move || BgDone::Exported { path, result: work() });
+        }
+    }
+
+    /// Runs `f` on a worker thread; its result arrives in [`Self::on_background_done`].
+    fn spawn_bg(&mut self, name: &str, f: impl FnOnce() -> BgDone + Send + 'static) {
+        let tx = self.bg_tx.clone();
+        self.bg_running += 1;
+        std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || {
+                let _ = tx.send(f());
+            })
+            .expect("spawn worker thread");
+        self.update_title();
+    }
+
+    /// Computes a new selection from the current one on a worker thread.
+    fn selection_job(
+        &mut self,
+        label: &'static str,
+        f: impl FnOnce(Option<CpuMask>) -> anyhow::Result<CpuMask> + Send + 'static,
+    ) {
+        let Some(e) = self.engine() else { return };
+        let base = e.selection_id();
+        let current = e.selection_cpu();
+        let started = Instant::now();
+        self.spawn_bg("selection", move || BgDone::Selection { label, base, mask: f(current), started });
+    }
+
+    fn on_background_done(&mut self, done: BgDone) {
+        self.bg_running = self.bg_running.saturating_sub(1);
+        match done {
+            BgDone::Exported { path, result } => match result {
+                Ok(ms) => tracing::info!("Exportiert: {} ({ms:.0} ms)", path.display()),
+                Err(e) => tracing::error!("Export fehlgeschlagen: {e:#}"),
+            },
+            BgDone::Selection { label, base, mask, started } => {
+                let Some(e) = self.engine() else { return };
+                if e.selection_id() != base {
+                    tracing::warn!("{label}: verworfen, die Auswahl hat sich inzwischen geändert");
+                } else {
+                    match mask {
+                        Ok(m) => {
+                            self.engine_op(|e| e.set_selection(Some(m), label));
+                            tracing::info!("{label}: {:.0} ms", started.elapsed().as_secs_f64() * 1e3);
+                        }
+                        Err(err) => tracing::warn!("{label}: {err:#}"),
+                    }
+                }
+            }
+        }
+        self.update_title();
+        self.needs_redraw = true;
+    }
+
+    /// Magic wand: similarity map on the GPU here, flood fill and combining on a worker.
+    fn magic_wand(&mut self, x: u32, y: u32, op: CombineOp) {
+        let (tol, contiguous) = (self.wand_tolerance, self.wand_contiguous);
+        let Some(e) = self.engine() else { return };
+        let (w, h) = e.size();
+        let map = e
+            .sample_straight(x, y, SampleFrom::Image)
+            .and_then(|reference| e.similarity_map(reference, tol, (tol * 0.5).max(12.0), SampleFrom::Image));
+        let map = match map {
+            Ok(m) => m,
+            Err(err) => return tracing::warn!("Zauberstab: {err}"),
+        };
+        self.selection_job("Zauberstab", move |old| {
+            let region = if contiguous { imagine_core::mask::flood(&map, x, y, w, h) } else { map };
+            Ok(match old {
+                Some(old) => imagine_core::mask::combine(&old, &region, op),
+                None if op == CombineOp::Subtract => CpuMask::filled(0),
+                None => region,
+            })
+        });
     }
 
     fn key(&mut self, ev: &KeyEvent, pressed: bool) {
@@ -1062,7 +1176,17 @@ impl App {
             Keysym::a if ctrl => self.engine_op(|e| e.select_all("Alles auswählen")),
             Keysym::d if ctrl => self.engine_op(|e| e.deselect("Auswahl aufheben")),
             Keysym::i | Keysym::I if ctrl && shift => self.engine_op(|e| e.invert_selection("Auswahl umkehren")),
-            Keysym::F6 if shift => self.engine_op(|e| e.feather_selection(10.0, "Weiche Auswahlkante (10 px)")),
+            Keysym::F6 if shift => {
+                let Some((w, h)) = self.session.as_ref().map(|s| s.engine.size()) else { return };
+                if self.session.as_ref().is_some_and(|s| !s.engine.has_selection()) {
+                    tracing::warn!("keine Auswahl");
+                } else {
+                    self.selection_job("Weiche Auswahlkante (10 px)", move |sel| {
+                        let sel = sel.context("keine Auswahl")?;
+                        Ok(imagine_core::mask::feather(&sel, 10.0, w, h))
+                    });
+                }
+            }
             Keysym::m | Keysym::M if ctrl && alt && shift => {
                 self.mask_edit = false;
                 self.engine_op(|e| e.apply_layer_mask("Ebenenmaske anwenden"))
@@ -1531,6 +1655,8 @@ impl App {
             " – speichert …"
         } else if self.loading || !self.pending_uploads.is_empty() {
             " – lädt …"
+        } else if self.bg_running > 0 {
+            " – rechnet …"
         } else {
             ""
         };

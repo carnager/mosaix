@@ -51,6 +51,12 @@ impl Engine {
         Some(Mask { tiles: Arc::new(tiles), default: m.default })
     }
 
+    /// Identity of the current selection (changes whenever it is replaced);
+    /// used to discard background results computed from an older one.
+    pub fn selection_id(&self) -> usize {
+        self.doc.selection.as_ref().map_or(0, |s| Arc::as_ptr(&s.tiles) as usize)
+    }
+
     pub fn has_selection(&self) -> bool {
         self.doc.selection.is_some()
     }

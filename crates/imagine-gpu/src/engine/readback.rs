@@ -173,6 +173,13 @@ impl Engine {
         tiles.iter().map(|t| if t.is_some() { to_f16(data.next().unwrap()) } else { vec![f16::ZERO; n] }).collect()
     }
 
+    /// All composited tiles (call [`Engine::flush`] first), for asynchronous export.
+    pub fn composite_tiles(&self) -> Vec<(TileCoord, Tile)> {
+        let mut v: Vec<_> = self.comp.iter().filter_map(|(c, e)| e.tile.clone().map(|t| (*c, t))).collect();
+        v.sort_by_key(|(c, _)| *c);
+        v
+    }
+
     /// Layer ids → their pixel tiles; helper for callers that save documents.
     pub fn layer_tile(&self, layer: LayerId, c: TileCoord) -> Option<Tile> {
         self.doc.find(layer)?.tiles()?.get(&c).cloned()
