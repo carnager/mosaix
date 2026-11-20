@@ -4343,25 +4343,34 @@ impl PointerHandler for App {
                         self.release(pos, 1.0);
                     }
                 }
-                PointerEventKind::Axis { vertical, .. } => {
-                    let steps = if vertical.value120 != 0 {
-                        vertical.value120 as f64 / 120.0
-                    } else if vertical.discrete != 0 {
-                        vertical.discrete as f64
-                    } else {
-                        vertical.absolute / 15.0
+                PointerEventKind::Axis { vertical, horizontal, .. } => {
+                    let step = |a: &smithay_client_toolkit::seat::pointer::AxisScroll| {
+                        if a.value120 != 0 {
+                            a.value120 as f64 / 120.0
+                        } else if a.discrete != 0 {
+                            a.discrete as f64
+                        } else {
+                            a.absolute / 15.0
+                        }
                     };
-                    if steps == 0.0 {
+                    let (steps, hsteps) = (step(vertical), step(horizontal));
+                    if steps == 0.0 && hsteps == 0.0 {
                         continue;
                     }
+                    // Like Photoshop: the wheel scrolls, Alt+wheel zooms.
+                    let line = 60.0 * self.scale;
                     if self.mods.ctrl {
                         self.brush.size =
                             (self.brush.size * 1.1f32.powf(-steps as f32)).clamp(1.0, 5000.0);
-                    } else if self.mods.shift {
+                    } else if self.mods.alt && self.mods.shift {
                         self.view.rotate_at(pos, (steps * 7.5).to_radians());
-                    } else {
+                    } else if self.mods.alt {
                         self.view.zoom_at(pos, 1.2f64.powf(-steps));
                         self.limit_zoom_out(pos);
+                    } else if self.mods.shift {
+                        self.view.pan(DVec2::new(-(steps + hsteps) * line, 0.0));
+                    } else {
+                        self.view.pan(DVec2::new(-hsteps * line, -steps * line));
                     }
                     self.cursor = Some(pos);
                     self.needs_redraw = true;

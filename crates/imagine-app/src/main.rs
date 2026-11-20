@@ -34,9 +34,9 @@ For agents (see docs/agenten.md):
   imagine run --attach SCRIPT   … in the running window
 
 View:
-  Pan             Space + drag, middle mouse button, pen button 1
-  Zoom            mouse wheel (towards the cursor), Ctrl + Space + drag
-  Rotate          hold R + drag, Shift + mouse wheel, pen button 2; Shift+R resets
+  Pan             mouse wheel (Shift: sideways), Space + drag, middle mouse button, pen button 1
+  Zoom            Alt + mouse wheel (towards the cursor), Ctrl + Space + drag
+  Rotate          hold R + drag, Alt + Shift + mouse wheel, pen button 2; Shift+R resets
   Fit/100 %       Ctrl+0 / Ctrl+1
 
 Tools:
