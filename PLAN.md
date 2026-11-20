@@ -426,8 +426,21 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
   - Schwäche: streng periodische Muster (Ziegel) in Bildecken können versetzt weiterlaufen; frei im Bild und bei Fotostrukturen gut.
 - Pinsel-Glättung wechselt jetzt mit Umschalt+S (vorher S), Pinsel-Dynamik mit Umschalt+J (vorher J).
 
+Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fertig.
 
-Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fertig. Weiter mit Phase 6 laut Roadmap.
+## Stand Phase 6 (20.11.2026) – Text & Vektor (erster Teil)
+
+- **Text- und Formebenen** (`Content::Vector`): Die Beschreibung bleibt erhalten (Text mit Schrift, Größe, Schnitt, Farbe, Ausrichtung, Zeilenabstand, Laufweite, optional Absatzbreite; Formen: Rechteck mit Eckenradius, Ellipse, Polygon, SVG-Pfad, mit Fläche und Kontur), plus eine Transformation.
+  - Neues Crate `imagine-vector`: Layout mit parley (Systemschriften über fontique), Rastern mit vello_cpu in parallelen 4×4-Kachel-Blöcken direkt in lineare f16-Kacheln – nur dort, wo Inhalt ist.
+  - Die Engine rastert geänderte Vektorebenen und setzt die Kacheln ins Render-Dokument ein (wie Smart-Filter, die auch auf Textebenen wirken). Strg+T und Verschieben verändern nur die Transformation: Text bleibt scharf. Ebene › Rastern (Strg+Alt+R) macht Pixel daraus; Malen auf einer Textebene wird mit Hinweis abgelehnt. Dateiformat v5.
+- **Werkzeuge:** Text (`T`: Klick legt Text an bzw. wählt vorhandenen zum Bearbeiten), Form (Umschalt+`U`: Rechteck/Ellipse aufziehen, Umschalt quadratisch, Alt von der Mitte; Fläche in Pinselfarbe). Eigenschaften-Panel mit Textfeld, Schriftliste mit Suche, Größe, Fett/Kursiv, Ausrichtung, Farbe, Zeilenabstand, Laufweite, Absatz; bei Formen Ecken, Fläche, Kontur. Tippen und Regler ergeben je einen Undo-Schritt.
+- **Agenten:** `text_add`, `shape_add`, `vector_set` (JSON-Merge in die Beschreibung, auch `transform`), `layer_rasterize`; `document_info` zeigt Vektorebenen mit Beschreibung und Grenzen.
+
+**Noch offen in Phase 6:** Text direkt im Bild bearbeiten (Cursor, Auswahl), Zeichenstift/Pfade bearbeiten, Ebenenstile (Schlagschatten, Kontur, Schein, Farbüberlagerung), Text auf Pfad, OpenType-Features.
+
+## Nächster konkreter Schritt
+
+Phase 6 weiter: Ebenenstile, Zeichenstift, Text direkt im Bild bearbeiten.
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 
