@@ -89,6 +89,8 @@ pub struct Settings {
     pub recent: Vec<PathBuf>,
     pub last_dir: Option<PathBuf>,
     pub export: imagine_io::export::ExportOptions,
+    /// Interface language: "auto" (from LANGUAGE / LC_ALL / LC_MESSAGES / LANG), "en", "de".
+    pub language: String,
     pub favourite_fonts: Vec<String>,
     pub recent_fonts: Vec<String>,
 }
@@ -104,6 +106,7 @@ impl Default for Settings {
             recent: Vec::new(),
             last_dir: None,
             export: Default::default(),
+            language: "auto".into(),
             favourite_fonts: Vec::new(),
             recent_fonts: Vec::new(),
         }
