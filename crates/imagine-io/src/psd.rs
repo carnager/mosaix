@@ -1062,6 +1062,9 @@ pub struct WLayer {
     pub effects: Vec<imagine_core::style::Effect>,
     /// Fill opacity (written as "iOpa").
     pub fill_opacity: f32,
+    /// A shape layer (written as a solid fill with vector mask and stroke;
+    /// the pixels stay as Photoshop's rendering of it).
+    pub shape: Option<crate::psd_shape::PsdShape>,
     pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
     pub mask: Option<WMask>,
 }
@@ -1353,6 +1356,7 @@ fn write_record(
     e: &Encoded,
     divider: Option<u32>,
     light: crate::psd_fx::GlobalLight,
+    size: (u32, u32),
 ) {
     write_rect(o, e.rect);
     o.u16(e.channels.len() as u16);
@@ -1413,6 +1417,24 @@ fn write_record(
             o.b.extend(&data);
             o.close(blk, 2);
         }
+    }
+    if let Some(sh) = &l.shape {
+        let block = |o: &mut Out, key: &[u8; 4], data: &[u8]| {
+            o.b.extend(b"8BIM");
+            o.b.extend(key);
+            let blk = o.open(false);
+            o.b.extend(data);
+            o.close(blk, 4);
+        };
+        let desc = |d: &crate::psd_data::Desc| {
+            let mut v = 16u32.to_be_bytes().to_vec();
+            crate::psd_data::w_desc(&mut v, d);
+            v
+        };
+        let fill = sh.fill.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+        block(o, b"SoCo", &desc(&crate::psd_shape::write_solid(fill)));
+        block(o, b"vsms", &crate::psd_shape::write_vector_mask(&sh.subpaths, size));
+        block(o, b"vstk", &desc(&crate::psd_shape::write_stroke(sh.stroke.as_ref(), sh.fill.is_some())));
     }
     if l.fill_opacity < 1.0 {
         o.b.extend(b"8BIMiOpa");
@@ -1509,6 +1531,7 @@ pub fn write(
         adjustment: None,
         effects: Vec::new(),
         fill_opacity: 1.0,
+        shape: None,
         tiles: Vec::new(),
         mask: None,
     };
@@ -1529,6 +1552,7 @@ pub fn write(
                     adjustment: None,
                     effects: Vec::new(),
                     fill_opacity: 1.0,
+                    shape: None,
                     tiles: Vec::new(),
                     mask: l.mask.clone(),
                 },
@@ -1580,9 +1604,9 @@ pub fn write(
     o.i16(-(recs.len() as i16)); // negative: the merged alpha is transparency
     for (r, e) in recs.iter().zip(&encoded) {
         match r {
-            Rec::Layer(l) => write_record(&mut o, l, e, None, light),
-            Rec::End => write_record(&mut o, &end_marker, e, Some(3), light),
-            Rec::Folder(l) => write_record(&mut o, l, e, Some(1), light),
+            Rec::Layer(l) => write_record(&mut o, l, e, None, light, (width, height)),
+            Rec::End => write_record(&mut o, &end_marker, e, Some(3), light, (width, height)),
+            Rec::Folder(l) => write_record(&mut o, l, e, Some(1), light, (width, height)),
         }
     }
     for e in &encoded {
@@ -1604,6 +1628,7 @@ pub fn write(
         adjustment: None,
         effects: Vec::new(),
         fill_opacity: 1.0,
+        shape: None,
         tiles: composite.to_vec(),
         mask: None,
     };

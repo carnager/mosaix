@@ -683,7 +683,11 @@ fn geometry_path(g: &Geometry) -> Option<BezPath> {
             }
         }
         Geometry::Ellipse { cx, cy, rx, ry } => {
-            Ellipse::new((*cx, *cy), (*rx, *ry), 0.0).to_path(0.1)
+            // kurbo leaves it open (ends on its start): close it, so strokes
+            // can sit inside/outside and exports see a closed path.
+            let mut p = Ellipse::new((*cx, *cy), (*rx, *ry), 0.0).to_path(0.1);
+            p.close_path();
+            p
         }
         Geometry::Polygon { points, closed } => {
             let mut p = BezPath::new();
@@ -788,6 +792,61 @@ fn local_bounds(p: &Prepared) -> Option<Rect> {
             Some(b.inflate(pad, pad))
         }
     }
+}
+
+/// The outline of a shape layer in document px (after its transform) as
+/// Bézier subpaths: nodes and whether the subpath is closed. Quadratic
+/// segments become cubics. `None` for text layers.
+pub fn shape_outline(v: &VectorLayer) -> Option<Vec<(Vec<imagine_core::vector::PathNode>, bool)>> {
+    use imagine_core::vector::PathNode;
+    use vello_cpu::kurbo::{PathEl, Point};
+    let VectorKind::Shape(s) = &v.kind else { return None };
+    let mut path = geometry_path(&s.geometry)?;
+    path.apply_affine(affine(&v.transform));
+    let pt = |p: Point| [p.x, p.y];
+    let mut out: Vec<(Vec<PathNode>, bool)> = Vec::new();
+    let mut cur: Vec<PathNode> = Vec::new();
+    let flush = |cur: &mut Vec<PathNode>, out: &mut Vec<(Vec<PathNode>, bool)>, closed: bool| {
+        let mut nodes = std::mem::take(cur);
+        if closed && nodes.len() > 1 {
+            // A closing segment back onto the start: merge the duplicate node.
+            let (f, l) = (nodes[0], *nodes.last().unwrap());
+            if (f.p[0] - l.p[0]).abs() < 1e-4 && (f.p[1] - l.p[1]).abs() < 1e-4 {
+                nodes[0].h_in = l.h_in;
+                nodes.pop();
+            }
+        }
+        if !nodes.is_empty() {
+            out.push((nodes, closed));
+        }
+    };
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(p) => {
+                flush(&mut cur, &mut out, false);
+                cur.push(PathNode::corner(pt(p)));
+            }
+            PathEl::LineTo(p) => cur.push(PathNode::corner(pt(p))),
+            PathEl::QuadTo(c, p) => {
+                let a = cur.last().map_or(pt(p), |n| n.p);
+                let c1 = [a[0] + 2.0 / 3.0 * (c.x - a[0]), a[1] + 2.0 / 3.0 * (c.y - a[1])];
+                let c2 = [p.x + 2.0 / 3.0 * (c.x - p.x), p.y + 2.0 / 3.0 * (c.y - p.y)];
+                if let Some(n) = cur.last_mut() {
+                    n.h_out = c1;
+                }
+                cur.push(PathNode { p: pt(p), h_in: c2, h_out: pt(p) });
+            }
+            PathEl::CurveTo(c1, c2, p) => {
+                if let Some(n) = cur.last_mut() {
+                    n.h_out = pt(c1);
+                }
+                cur.push(PathNode { p: pt(p), h_in: pt(c2), h_out: pt(p) });
+            }
+            PathEl::ClosePath => flush(&mut cur, &mut out, true),
+        }
+    }
+    flush(&mut cur, &mut out, false);
+    Some(out)
 }
 
 /// Bounding box of the rendered content in document px, after the transform.
@@ -1191,5 +1250,24 @@ mod tests {
         assert!(ink > 2000, "ink pixels {ink}");
         let b = bounds(&v).unwrap();
         assert!(b[2] - b[0] > 300.0, "text width {b:?}");
+    }
+}
+
+#[cfg(test)]
+mod outline_tests {
+    use super::*;
+    use imagine_core::vector::{Geometry, ShapeSpec};
+
+    #[test]
+    fn ellipse_outline_has_four_nodes() {
+        let v = VectorLayer::shape(ShapeSpec {
+            geometry: Geometry::Ellipse { cx: 50.0, cy: 50.0, rx: 40.0, ry: 30.0 },
+            fill: Some([1.0; 4]),
+            stroke: None,
+        });
+        let o = shape_outline(&v).unwrap();
+        assert_eq!(o.len(), 1);
+        assert!(o[0].1, "closed");
+        assert_eq!(o[0].0.len(), 4, "{:?}", o[0].0);
     }
 }

@@ -237,6 +237,118 @@ pub fn shape(
     Some(ShapeSpec { geometry, fill: fill_on.then_some(fill), stroke })
 }
 
+// --- Writing ----------------------------------------------------------------
+
+/// A shape layer as Photoshop stores it: path (document px), fill, stroke.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PsdShape {
+    /// Bézier subpaths and whether each is closed.
+    pub subpaths: Vec<(Vec<PathNode>, bool)>,
+    /// Linear RGB(A); `None`: no fill.
+    pub fill: Option<[f32; 4]>,
+    pub stroke: Option<StrokeStyle>,
+}
+
+/// The vector mask block ("vsms"). The subpaths form one component (holes
+/// by even-odd), as written by Photoshop for custom shapes.
+pub fn write_vector_mask(subpaths: &[(Vec<PathNode>, bool)], (w, h): (u32, u32)) -> Vec<u8> {
+    let mut o = Vec::new();
+    o.extend(3u32.to_be_bytes()); // version
+    o.extend(0u32.to_be_bytes()); // flags
+    let record = |o: &mut Vec<u8>, sel: u16, body: &[u8]| {
+        let start = o.len();
+        o.extend(sel.to_be_bytes());
+        o.extend(body);
+        o.resize(start + 26, 0);
+    };
+    record(&mut o, 6, &[]); // path fill rule record
+    record(&mut o, 8, &[0, 0]); // initial fill: empty
+    let fixed = |v: f64| ((v * (1 << 24) as f64).round() as i32).to_be_bytes();
+    for (i, (nodes, closed)) in subpaths.iter().enumerate() {
+        let mut len = (nodes.len() as u16).to_be_bytes().to_vec();
+        // First: "combine" (starts a component), the others belong to it.
+        len.extend(if i == 0 { 1i16 } else { -1 }.to_be_bytes());
+        len.extend(if i == 0 { 1u16 } else { 0 }.to_be_bytes());
+        record(&mut o, if *closed { 0 } else { 3 }, &len);
+        for n in nodes {
+            let mut b = Vec::with_capacity(24);
+            for p in [n.h_in, n.p, n.h_out] {
+                b.extend(fixed(p[1] / h as f64));
+                b.extend(fixed(p[0] / w as f64));
+            }
+            let smooth = n.is_smooth();
+            let sel = match (*closed, smooth) {
+                (true, true) => 1,
+                (true, false) => 2,
+                (false, true) => 4,
+                (false, false) => 5,
+            };
+            record(&mut o, sel, &b);
+        }
+    }
+    o
+}
+
+fn rgb_desc(c: [f32; 4]) -> Desc {
+    let v = |x: f32| Value::Double((imagine_core::color::linear_to_srgb(x.clamp(0.0, 1.0)) * 255.0) as f64);
+    Desc {
+        class: "RGBC".into(),
+        items: vec![("Rd  ".into(), v(c[0])), ("Grn ".into(), v(c[1])), ("Bl  ".into(), v(c[2]))],
+    }
+}
+
+/// The solid fill descriptor ("SoCo" block).
+pub fn write_solid(c: [f32; 4]) -> Desc {
+    Desc { class: "null".into(), items: vec![("Clr ".into(), Value::Desc(rgb_desc(c)))] }
+}
+
+/// The stroke descriptor ("vstk" block).
+pub fn write_stroke(st: Option<&StrokeStyle>, fill_on: bool) -> Desc {
+    let en = |t: &str, v: &str| Value::Enum(t.into(), v.into());
+    let unit = |u: &str, v: f64| Value::Unit(u.into(), v);
+    let none = StrokeStyle::new([0.0, 0.0, 0.0, 1.0], 1.0);
+    let s = st.unwrap_or(&none);
+    let align = match s.align {
+        StrokeAlign::Inside => "strokeStyleAlignInside",
+        StrokeAlign::Center => "strokeStyleAlignCenter",
+        StrokeAlign::Outside => "strokeStyleAlignOutside",
+    };
+    let join = match s.join {
+        StrokeJoin::Miter => "strokeStyleMiterJoin",
+        StrokeJoin::Round => "strokeStyleRoundJoin",
+        StrokeJoin::Bevel => "strokeStyleBevelJoin",
+    };
+    let cap = match s.cap {
+        StrokeCap::Butt => "strokeStyleButtCap",
+        StrokeCap::Round => "strokeStyleRoundCap",
+        StrokeCap::Square => "strokeStyleSquareCap",
+    };
+    Desc {
+        class: "strokeStyle".into(),
+        items: vec![
+            ("strokeStyleVersion".into(), Value::Long(2)),
+            ("strokeEnabled".into(), Value::Bool(st.is_some())),
+            ("fillEnabled".into(), Value::Bool(fill_on)),
+            ("strokeStyleLineWidth".into(), unit("#Pxl", s.width as f64)),
+            ("strokeStyleLineDashOffset".into(), unit("#Pnt", 0.0)),
+            ("strokeStyleMiterLimit".into(), Value::Double(100.0)),
+            ("strokeStyleLineCapType".into(), en("strokeStyleLineCapType", cap)),
+            ("strokeStyleLineJoinType".into(), en("strokeStyleLineJoinType", join)),
+            ("strokeStyleLineAlignment".into(), en("strokeStyleLineAlignment", align)),
+            ("strokeStyleScaleLock".into(), Value::Bool(false)),
+            ("strokeStyleStrokeAdjust".into(), Value::Bool(false)),
+            ("strokeStyleLineDashSet".into(), Value::List(Vec::new())),
+            ("strokeStyleBlendMode".into(), en("BlnM", "Nrml")),
+            ("strokeStyleOpacity".into(), unit("#Prc", s.color[3].clamp(0.0, 1.0) as f64 * 100.0)),
+            (
+                "strokeStyleContent".into(),
+                Value::Desc(Desc { class: "solidColorLayer".into(), items: vec![("Clr ".into(), Value::Desc(rgb_desc(s.color)))] }),
+            ),
+            ("strokeStyleResolution".into(), Value::Double(72.0)),
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +429,30 @@ mod tests {
         let size = (64.0, 64.0);
         let m = read_vector_mask(&mask(&[(-1, square(1.0, 1.0, 8.0, size))]), (64, 64)).unwrap();
         assert!(matches!(geometry(&m), Some(Geometry::Bezier { closed: true, .. })));
+    }
+
+    #[test]
+    fn written_shape_reads_back() {
+        let size = (200u32, 100u32);
+        let tri = vec![
+            PathNode::corner([10.0, 10.0]),
+            PathNode { p: [90.0, 20.0], h_in: [80.0, 5.0], h_out: [100.0, 35.0] },
+            PathNode::corner([20.0, 80.0]),
+        ];
+        let b = write_vector_mask(&[(tri.clone(), true)], size);
+        let m = read_vector_mask(&b, size).unwrap();
+        let Some(Geometry::Bezier { nodes, closed: true }) = geometry(&m) else { panic!("{m:?}") };
+        for (a, b) in nodes.iter().zip(&tri) {
+            for (p, q) in [(a.p, b.p), (a.h_in, b.h_in), (a.h_out, b.h_out)] {
+                assert!((p[0] - q[0]).abs() < 1e-3 && (p[1] - q[1]).abs() < 1e-3, "{a:?} vs {b:?}");
+            }
+        }
+        let st = StrokeStyle { align: StrokeAlign::Outside, join: StrokeJoin::Bevel, ..StrokeStyle::new([1.0, 0.0, 0.0, 0.5], 3.0) };
+        let (back, fill) = stroke(&write_stroke(Some(&st), false), 72.0);
+        assert!(!fill);
+        let back = back.unwrap();
+        assert_eq!((back.align, back.join, back.cap, back.width), (st.align, st.join, st.cap, st.width));
+        assert!((back.color[3] - 0.5).abs() < 1e-3 && back.color[0] > 0.99);
+        assert_eq!(solid_fill(&write_solid([0.0, 1.0, 0.0, 1.0])).map(|c| c[1] > 0.99), Some(true));
     }
 }

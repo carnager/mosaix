@@ -463,6 +463,8 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Ebenenmaske vor Ebenenstil** (2026-11-20): wie in Photoshop werden die Effekte aus dem maskierten Inhalt berechnet – eine Kontur läuft an der Maskenkante entlang, statt von der Maske abgeschnitten zu werden.
 
+- **Formebenen im PSD-Export** (2026-11-20): Formebenen werden als Photoshop-Formen geschrieben (Volltonfüllung `SoCo`, Vektormaske `vsms`, Kontur `vstk` mit Ausrichtung/Ecken/Enden, Konturbreite mit der Transformation skaliert) – in Photoshop weiter editierbar; Rundreise pixelgleich. Ellipsen-Pfade sind jetzt geschlossen (Kontur innen/außen wirkte bei Ellipsen bisher mittig).
+
 **Noch offen in Phase 6:** Musterüberlagerung (braucht eine Musterbibliothek), Cursor direkt in Text auf Pfad.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)

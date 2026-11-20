@@ -440,6 +440,7 @@ impl Session {
             layer_rb: start(PoolKind::Layer, &layer_tiles),
             mask_rb: start(PoolKind::Mask, &mask_tiles),
             doc: doc.map_tiles(&mut |_| ()),
+            shapes: psd_shapes(self.engine.doc()),
             layer_keys,
             mask_keys,
             layer_data: Vec::new(),
@@ -448,9 +449,31 @@ impl Session {
     }
 }
 
+/// The shape layers of a document as Photoshop shapes (path in document
+/// px, fill, stroke scaled with the layer's transform).
+fn psd_shapes<T: Clone>(doc: &Document<T>) -> HashMap<LayerId, imagine_io::psd_shape::PsdShape> {
+    use imagine_core::vector::VectorKind;
+    let mut out = HashMap::new();
+    doc.for_each(&mut |l, _| {
+        let Some(v) = l.vector() else { return };
+        let VectorKind::Shape(s) = &v.kind else { return };
+        let Some(subpaths) = imagine_vector::shape_outline(v) else { return };
+        let t = v.transform;
+        let scale = (t[0] * t[3] - t[1] * t[2]).abs().sqrt() as f32;
+        let stroke = s.stroke.clone().map(|mut st| {
+            st.width *= scale;
+            st
+        });
+        out.insert(l.id, imagine_io::psd_shape::PsdShape { subpaths, fill: s.fill, stroke });
+    });
+    out
+}
+
 /// Layer and mask pixels of a PSD export (readbacks, then their data).
 struct PsdLayers {
     doc: Document<()>,
+    /// Shape layers' vector data (written as Photoshop shapes).
+    shapes: HashMap<LayerId, imagine_io::psd_shape::PsdShape>,
     layer_keys: Vec<(LayerId, TileCoord)>,
     mask_keys: Vec<(LayerId, TileCoord)>,
     layer_rb: Option<Readback>,
@@ -478,8 +501,10 @@ impl PsdLayers {
             self.mask_keys.into_iter().zip(self.mask_data).collect();
         let ts = imagine_core::TILE_SIZE as usize;
         let mut skipped = 0;
+        let mut shapes = self.shapes;
         fn build(
             ls: &[imagine_core::Layer<()>],
+            shapes: &mut HashMap<LayerId, imagine_io::psd_shape::PsdShape>,
             px: &mut HashMap<(LayerId, TileCoord), Vec<half::f16>>,
             mk: &mut HashMap<(LayerId, TileCoord), Vec<u8>>,
             ts: usize,
@@ -513,6 +538,7 @@ impl PsdLayers {
                     adjustment: None,
                     effects: l.effects.clone(),
                     fill_opacity: l.fill_opacity,
+                    shape: shapes.remove(&l.id),
                     tiles: Vec::new(),
                     mask,
                 };
@@ -525,7 +551,7 @@ impl PsdLayers {
                         out.push(WNode::Layer(w));
                     }
                     Content::Group(children) => {
-                        let children = build(children, px, mk, ts, skipped);
+                        let children = build(children, shapes, px, mk, ts, skipped);
                         out.push(WNode::Group { layer: w, children });
                     }
                     Content::Adjustment(a) => {
@@ -538,7 +564,7 @@ impl PsdLayers {
             }
             out
         }
-        let nodes = build(&self.doc.layers, &mut px, &mut mk, ts, &mut skipped);
+        let nodes = build(&self.doc.layers, &mut shapes, &mut px, &mut mk, ts, &mut skipped);
         if skipped > 0 {
             tracing::warn!(
                 "{}",
