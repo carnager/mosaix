@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, bail, ensure};
-use glam::DVec2;
+use glam::{DAffine2, DVec2};
 use half::f16;
 use image::RgbaImage;
 use imagine_core::color::{Pixels, extract_region, srgb_to_linear, linear_to_srgb};
@@ -18,7 +18,7 @@ use imagine_core::doc::Content;
 use imagine_core::tile::tiles_in_rect;
 use imagine_core::mask::{CombineOp, Shape};
 use imagine_core::{BlendMode, BlendSpace, BrushSettings, Document, InputSample, LayerId, Stroke, TILE_SIZE, TileCoord};
-use imagine_gpu::{GpuContext, GradientKind, StrokeParams, StrokeTarget, Tile};
+use imagine_gpu::{GpuContext, GradientKind, Interp, StrokeParams, StrokeTarget, Tile};
 use imagine_io::export::blit_region;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -118,6 +118,23 @@ pub enum Command {
     LayerMaskSet { layer: Option<LayerId>, enabled: bool },
     LayerMaskApply { layer: Option<LayerId> },
     LayerTranslate { layer: Option<LayerId>, dx: i64, dy: i64 },
+    LayerTransform {
+        layer: Option<LayerId>,
+        scale: Option<f64>,
+        scale_x: Option<f64>,
+        scale_y: Option<f64>,
+        rotate: Option<f64>,
+        dx: Option<f64>,
+        dy: Option<f64>,
+        pivot_x: Option<f64>,
+        pivot_y: Option<f64>,
+        interp: Option<String>,
+        use_selection: Option<bool>,
+    },
+    LayerBounds { layer: Option<LayerId> },
+    Crop { x: i64, y: i64, width: u32, height: u32 },
+    CanvasSize { width: u32, height: u32, anchor: Option<String> },
+    ImageResize { width: Option<u32>, height: Option<u32>, interp: Option<String> },
     FillRect {
         layer: Option<LayerId>,
         x: i64,
@@ -181,6 +198,11 @@ impl Command {
             Self::LayerMaskSet { .. } => "layer_mask_set",
             Self::LayerMaskApply { .. } => "layer_mask_apply",
             Self::LayerTranslate { .. } => "layer_translate",
+            Self::LayerTransform { .. } => "layer_transform",
+            Self::LayerBounds { .. } => "layer_bounds",
+            Self::Crop { .. } => "crop",
+            Self::CanvasSize { .. } => "canvas_size",
+            Self::ImageResize { .. } => "image_resize",
             Self::FillRect { .. } => "fill_rect",
             Self::ClearRect { .. } => "clear_rect",
             Self::PlaceImage { .. } => "place_image",
@@ -285,6 +307,27 @@ fn premul(c: &ColorSpec, target: StrokeTarget) -> anyhow::Result<[f32; 4]> {
             [l * a, l * a, l * a, a]
         }
     })
+}
+
+fn parse_interp(i: &Option<String>) -> anyhow::Result<Interp> {
+    match i.as_deref() {
+        None => Ok(Interp::Bicubic),
+        Some(k) => Interp::from_key(k).with_context(|| format!("interp must be nearest, bilinear or bicubic, got {k:?}")),
+    }
+}
+
+/// Fractions (0 = left/top, 1 = right/bottom) for a canvas anchor.
+fn parse_anchor(a: Option<&str>) -> anyhow::Result<(f64, f64)> {
+    let a = a.unwrap_or("center");
+    let x = if a.contains("left") { 0.0 } else if a.contains("right") { 1.0 } else { 0.5 };
+    let y = if a.starts_with("top") { 0.0 } else if a.starts_with("bottom") { 1.0 } else { 0.5 };
+    let known = ["center", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"];
+    ensure!(known.contains(&a), "anchor must be one of {known:?}");
+    Ok((x, y))
+}
+
+fn bounds_json(b: (i64, i64, i64, i64)) -> Value {
+    json!({ "x": b.0, "y": b.1, "width": b.2 - b.0, "height": b.3 - b.1 })
 }
 
 fn engine_err(e: &str) -> anyhow::Error {
@@ -594,6 +637,56 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             pixel_layer(s, layer)?;
             s.engine.translate_active(dx, dy, "Verschieben").map_err(engine_err)?;
             ok(s)
+        }
+        Command::LayerTransform { layer, scale, scale_x, scale_y, rotate, dx, dy, pivot_x, pivot_y, interp, use_selection } => {
+            let id = pixel_layer(s, layer)?;
+            let interp = parse_interp(&interp)?;
+            let use_selection = use_selection.unwrap_or(true);
+            let k = DVec2::new(scale_x.or(scale).unwrap_or(1.0), scale_y.or(scale).unwrap_or(1.0));
+            ensure!(k.x != 0.0 && k.y != 0.0, "scale must not be 0");
+            let pivot = match (pivot_x, pivot_y) {
+                (Some(x), Some(y)) => DVec2::new(x, y),
+                (None, None) => {
+                    let b = s.engine.content_bounds(id).context("the layer (or selection) is empty")?;
+                    DVec2::new((b.0 + b.2) as f64 * 0.5, (b.1 + b.3) as f64 * 0.5)
+                }
+                _ => bail!("give both pivot_x and pivot_y, or neither"),
+            };
+            let fwd = DAffine2::from_translation(DVec2::new(dx.unwrap_or(0.0), dy.unwrap_or(0.0)) + pivot)
+                * DAffine2::from_angle(rotate.unwrap_or(0.0).to_radians())
+                * DAffine2::from_scale(k)
+                * DAffine2::from_translation(-pivot);
+            s.engine.transform_layer(fwd, interp, use_selection, "Transformieren").map_err(engine_err)?;
+            let bounds = s.engine.content_bounds(id).map(bounds_json);
+            Ok(Output::json(json!({ "ok": true, "active_layer": id, "bounds": bounds })))
+        }
+        Command::LayerBounds { layer } => {
+            let id = target_layer(s, layer)?;
+            let b = s.engine.content_bounds(id).map(bounds_json);
+            Ok(Output::json(json!({ "layer": id, "bounds": b })))
+        }
+        Command::Crop { x, y, width, height } => {
+            s.engine.crop(x, y, width, height, "Zuschneiden").map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "width": width, "height": height })))
+        }
+        Command::CanvasSize { width, height, anchor } => {
+            let (w, h) = s.engine.size();
+            let (ax, ay) = parse_anchor(anchor.as_deref())?;
+            let x = ((w as f64 - width as f64) * ax).round() as i64;
+            let y = ((h as f64 - height as f64) * ay).round() as i64;
+            s.engine.crop(x, y, width, height, "Arbeitsfläche").map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "width": width, "height": height, "offset": [-x, -y] })))
+        }
+        Command::ImageResize { width, height, interp } => {
+            let (w, h) = s.engine.size();
+            let (nw, nh) = match (width, height) {
+                (Some(a), Some(b)) => (a, b),
+                (Some(a), None) => (a, ((h as f64 * a as f64 / w as f64).round() as u32).max(1)),
+                (None, Some(b)) => (((w as f64 * b as f64 / h as f64).round() as u32).max(1), b),
+                (None, None) => bail!("give width and/or height"),
+            };
+            s.engine.resize_image(nw, nh, parse_interp(&interp)?, "Bildgröße").map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "width": nw, "height": nh })))
         }
         Command::ClearRect { layer, x, y, width, height } => {
             let id = pixel_layer(s, layer)?;

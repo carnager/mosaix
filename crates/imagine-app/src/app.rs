@@ -9,11 +9,11 @@ use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use glam::DVec2;
+use glam::{DAffine2, DVec2};
 use imagine_core::color::linear_to_srgb;
 use imagine_core::mask::{CombineOp, Shape};
 use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View};
-use imagine_gpu::{Engine, GpuContext, GradientKind, Overlay, OverlayLine, StrokeParams, StrokeTarget};
+use imagine_gpu::{Engine, GpuContext, GradientKind, Interp, Overlay, OverlayLine, StrokeParams, StrokeTarget};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
@@ -55,6 +55,7 @@ use wayland_protocols::wp::{
 };
 
 use crate::agent::{command, ipc};
+use crate::boxedit::{self, BoxEdit};
 use crate::loader::{self, LoaderMsg, Source, TileData};
 use crate::session::{SaveDone, SaveJob, Session};
 use crate::tablet::{self, TabletFrame};
@@ -88,7 +89,9 @@ enum Drag {
     Marquee { start: DVec2, end: DVec2, op: CombineOp, ellipse: bool },
     Lasso { points: Vec<DVec2>, op: CombineOp },
     Gradient { start: DVec2, end: DVec2 },
-    Move { start: DVec2, end: DVec2, bounds: Option<(DVec2, DVec2)> },
+    Move { start: DVec2, end: DVec2 },
+    /// Dragging a free-transform or crop handle.
+    Box,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,6 +102,7 @@ enum Tool {
     Lasso,
     Gradient { radial: bool },
     Move,
+    Crop,
 }
 
 impl Tool {
@@ -112,12 +116,19 @@ impl Tool {
             Tool::Gradient { radial: false } => "Verlauf linear",
             Tool::Gradient { radial: true } => "Verlauf radial",
             Tool::Move => "Verschieben",
+            Tool::Crop => "Zuschneiden",
         }
     }
 
     fn paints(self) -> bool {
         matches!(self, Tool::Brush | Tool::Eraser)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BoxKind {
+    Transform,
+    Crop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -188,6 +199,8 @@ pub struct App {
     /// Paint into the active layer's mask instead of its pixels.
     mask_edit: bool,
     quick_mask: bool,
+    /// Free transform (Strg+T) or crop box being edited.
+    boxed: Option<(BoxKind, BoxEdit)>,
     started: Instant,
 
     // Saving
@@ -342,6 +355,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         tool: Tool::Brush,
         mask_edit: false,
         quick_mask: false,
+        boxed: None,
         started: Instant::now(),
         save_job: None,
         saving: false,
@@ -522,6 +536,7 @@ impl App {
             Button::Primary if self.space && self.mods.ctrl => Drag::Zoom { last: pos, anchor: pos },
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
+            Button::Primary if self.boxed.is_some() || self.tool == Tool::Crop => self.begin_box(pos),
             Button::Primary => self.begin_tool(pos, pressure, eraser_tool),
         };
         self.needs_redraw = true;
@@ -545,20 +560,108 @@ impl App {
             Tool::Marquee { ellipse } => Drag::Marquee { start: doc, end: doc, op, ellipse },
             Tool::Lasso => Drag::Lasso { points: vec![doc], op },
             Tool::Gradient { .. } => Drag::Gradient { start: doc, end: doc },
-            Tool::Move => Drag::Move { start: doc, end: doc, bounds: self.active_bounds() },
+            Tool::Move => Drag::Move { start: doc, end: doc },
+            Tool::Crop => Drag::None,
         }
     }
 
-    /// Coarse bounds (whole tiles) of the active layer's pixels.
-    fn active_bounds(&self) -> Option<(DVec2, DVec2)> {
-        let l = self.session.as_ref()?.engine.doc().active_layer()?;
-        let t = l.tiles()?;
-        let ts = imagine_core::TILE_SIZE as f64;
-        let x0 = t.keys().map(|c| c.x).min()? as f64 * ts;
-        let y0 = t.keys().map(|c| c.y).min()? as f64 * ts;
-        let x1 = (t.keys().map(|c| c.x).max()? + 1) as f64 * ts;
-        let y1 = (t.keys().map(|c| c.y).max()? + 1) as f64 * ts;
-        Some((DVec2::new(x0, y0), DVec2::new(x1, y1)))
+    fn box_mods(&self) -> boxedit::Modifiers {
+        boxedit::Modifiers { shift: self.mods.shift, alt: self.mods.alt }
+    }
+
+    /// Grabs a handle of the transform / crop box (creating the crop box on first use).
+    fn begin_box(&mut self, pos: DVec2) -> Drag {
+        let doc = self.view.screen_to_doc(pos);
+        if self.boxed.is_none() {
+            let Some(s) = &self.session else { return Drag::None };
+            let (w, h) = s.engine.size();
+            self.boxed = Some((BoxKind::Crop, BoxEdit::new(DVec2::ZERO, DVec2::new(w as f64, h as f64), false)));
+        }
+        let (view, scale) = (self.view, self.scale);
+        let (_, b) = self.boxed.as_mut().unwrap();
+        let handle = b.hit(&view, pos, scale);
+        b.begin(handle, doc);
+        Drag::Box
+    }
+
+    /// Ctrl+T: free transform of the active layer (or the selected pixels).
+    fn begin_transform(&mut self) {
+        if self.boxed.is_some() {
+            return;
+        }
+        let Some(s) = &mut self.session else { return };
+        let e = &mut s.engine;
+        let Some(l) = e.doc().active_layer() else { return };
+        if l.is_group() {
+            tracing::warn!("Gruppen lassen sich noch nicht transformieren.");
+            return;
+        }
+        let id = l.id;
+        match e.content_bounds(id) {
+            Some((x0, y0, x1, y1)) => {
+                let b = BoxEdit::new(DVec2::new(x0 as f64, y0 as f64), DVec2::new(x1 as f64, y1 as f64), true);
+                self.boxed = Some((BoxKind::Transform, b));
+                tracing::info!(
+                    "Frei transformieren: Ecken skalieren (Umschalt = frei), Kanten strecken, außerhalb drehen, Alt = um die Mitte. Enter übernimmt, Esc bricht ab."
+                );
+            }
+            None => tracing::warn!("Nichts zu transformieren: die Ebene (bzw. Auswahl) ist leer."),
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Enter: applies the transform or crop.
+    fn commit_box(&mut self) {
+        let Some((kind, b)) = self.boxed.take() else { return };
+        match kind {
+            BoxKind::Transform => {
+                let fwd = b.fwd;
+                self.engine_op(|e| e.transform_active(fwd, Interp::Bicubic, "Frei transformieren"));
+            }
+            BoxKind::Crop => {
+                let (x, y, w, h) = b.rect();
+                if w < 1 || h < 1 {
+                    tracing::warn!("Zuschneiden: Rahmen ist leer");
+                    return;
+                }
+                self.engine_op(|e| e.crop(x, y, w as u32, h as u32, "Zuschneiden"));
+                self.view_fitted = false;
+                self.fit_if_needed();
+                tracing::info!("Neue Bildgröße: {w}×{h}");
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    fn cancel_box(&mut self) {
+        if self.boxed.take().is_some() {
+            if let Some(e) = self.engine() {
+                let _ = e.set_transform_preview(None);
+            }
+            tracing::info!("Abgebrochen");
+            self.needs_redraw = true;
+        }
+    }
+
+    /// The transform to show live (free transform, or a move in progress).
+    fn preview_transform(&self) -> Option<DAffine2> {
+        match (&self.boxed, &self.drag) {
+            (Some((BoxKind::Transform, b)), _) => Some(b.fwd),
+            (_, Drag::Move { start, end }) => Some(DAffine2::from_translation(self.move_delta(*start, *end))),
+            _ => None,
+        }
+    }
+
+    fn move_delta(&self, start: DVec2, end: DVec2) -> DVec2 {
+        let mut d = (end - start).round();
+        if self.mods.shift {
+            if d.x.abs() > d.y.abs() {
+                d.y = 0.0;
+            } else {
+                d.x = 0.0;
+            }
+        }
+        d
     }
 
     fn stroke_target(&self) -> StrokeTarget {
@@ -621,6 +724,13 @@ impl App {
             Drag::Marquee { end, .. } | Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
             }
+            Drag::Box => {
+                let doc = self.view.screen_to_doc(pos);
+                let m = self.box_mods();
+                if let Some((_, b)) = &mut self.boxed {
+                    b.update(doc, m);
+                }
+            }
             Drag::Lasso { points, .. } => {
                 let doc = self.view.screen_to_doc(pos);
                 if points.last().is_none_or(|p| p.distance(doc) * self.view.zoom >= 2.0) {
@@ -639,6 +749,10 @@ impl App {
         let opacity = self.brush.opacity;
         let zoom = self.view.zoom;
         let doc_pos = self.view.screen_to_doc(pos);
+        let move_delta = match &drag {
+            Drag::Move { start, end } => self.move_delta(*start, *end),
+            _ => DVec2::ZERO,
+        };
         let Some(s) = &mut self.session else { return };
         let e = &mut s.engine;
         let result: Result<bool, &str> = match drag {
@@ -684,9 +798,20 @@ impl App {
                 };
                 e.gradient(target, kind, (start.x, start.y), (end.x, end.y), c0, c1, opacity, "Verlauf").map(|_| true)
             }
-            Drag::Move { start, end, .. } => {
-                let d = (end - start).round();
-                e.translate_active(d.x as i64, d.y as i64, "Verschieben").map(|_| d != DVec2::ZERO)
+            Drag::Move { .. } => {
+                let d = move_delta;
+                if d == DVec2::ZERO {
+                    let _ = e.set_transform_preview(None);
+                    Ok(false)
+                } else {
+                    e.transform_active(DAffine2::from_translation(d), Interp::Nearest, "Verschieben").map(|_| true)
+                }
+            }
+            Drag::Box => {
+                if let Some((_, b)) = &mut self.boxed {
+                    b.end();
+                }
+                Ok(false)
             }
             _ => Ok(false),
         };
@@ -860,6 +985,11 @@ impl App {
 
         match sym {
             Keysym::q | Keysym::Q if ctrl => self.request_quit(),
+            Keysym::Escape => self.cancel_box(),
+            Keysym::Return | Keysym::KP_Enter => self.commit_box(),
+            Keysym::t if ctrl => self.begin_transform(),
+            // While a transform/crop box is open, undo just cancels it.
+            Keysym::z | Keysym::Z if ctrl && self.boxed.is_some() => self.cancel_box(),
             Keysym::z | Keysym::Z if ctrl && shift => self.redo(),
             Keysym::z if ctrl => self.undo(),
             Keysym::y if ctrl => self.redo(),
@@ -931,7 +1061,8 @@ impl App {
                     Keysym::Up => (0, -step),
                     _ => (0, step),
                 };
-                self.engine_op(|e| e.translate_active(dx, dy, "Verschieben"))
+                let fwd = DAffine2::from_translation(DVec2::new(dx as f64, dy as f64));
+                self.engine_op(|e| e.transform_active(fwd, Interp::Nearest, "Verschieben"))
             }
             Keysym::comma if ctrl => self.edit("Sichtbarkeit", |d| {
                 let id = d.active;
@@ -987,7 +1118,8 @@ impl App {
                 self.brush.color = if dark { [1.0; 3] } else { [0.0; 3] };
                 tracing::info!("Farbe: {}", if dark { "Weiß" } else { "Schwarz" });
             }
-            Keysym::c => {
+            Keysym::c => self.set_tool(Tool::Crop),
+            Keysym::p => {
                 self.palette_idx = (self.palette_idx + 1) % PALETTE.len();
                 self.brush.color = PALETTE[self.palette_idx];
             }
@@ -1011,6 +1143,14 @@ impl App {
     }
 
     fn set_tool(&mut self, tool: Tool) {
+        match self.boxed.as_ref().map(|b| b.0) {
+            Some(BoxKind::Transform) => self.commit_box(),
+            Some(BoxKind::Crop) if tool != Tool::Crop => self.boxed = None,
+            _ => {}
+        }
+        if tool == Tool::Crop {
+            tracing::info!("Zuschneiden: Rahmen ziehen oder Anfasser verschieben (über den Rand hinaus vergrößert die Arbeitsfläche), Enter übernimmt, Esc bricht ab.");
+        }
         self.tool = tool;
         self.brush.eraser = tool == Tool::Eraser;
         tracing::info!("Werkzeug: {}", tool.name());
@@ -1223,6 +1363,7 @@ impl App {
             quick_mask: self.quick_mask,
             time: self.started.elapsed().as_secs_f32(),
         };
+        let preview = self.preview_transform();
         if let Some(s) = &mut self.session {
             let mut batch: Vec<(LayerId, TileData)> = Vec::new();
             for _ in 0..UPLOADS_PER_FRAME {
@@ -1238,6 +1379,9 @@ impl App {
             if self.pending_uploads.is_empty() && !self.loading && self.upload_failures > 0 {
                 tracing::warn!("{} Kacheln passten nicht in den GPU-Speicher", self.upload_failures);
                 self.upload_failures = 0;
+            }
+            if let Err(e) = s.engine.set_transform_preview(preview.map(|f| (f, Interp::Bicubic))) {
+                tracing::warn!("Vorschau: {e}");
             }
             s.engine.render(&target, &self.view, &overlay);
         } else {
@@ -1298,11 +1442,10 @@ impl App {
             Drag::Gradient { start, end } => {
                 vec![OverlayLine { points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)], closed: false }]
             }
-            Drag::Move { start, end, bounds: Some((a, b)) } => {
-                let d = (*end - *start).round();
-                vec![OverlayLine { points: rect(*a + d, *b + d), closed: true }]
-            }
-            _ => Vec::new(),
+            _ => match &self.boxed {
+                Some((_, b)) => b.lines(v, self.scale),
+                None => Vec::new(),
+            },
         }
     }
 

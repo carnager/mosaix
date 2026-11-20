@@ -2,6 +2,7 @@
 
 mod agent;
 mod app;
+mod boxedit;
 mod loader;
 mod session;
 mod tablet;
@@ -12,7 +13,7 @@ use anyhow::{Context, bail};
 use loader::Source;
 
 const HELP: &str = "\
-imagine – GPU-Bildeditor (Phase 2: Auswahl & Masken)
+imagine – GPU-Bildeditor (Phase 2: Auswahl, Masken, Transformieren)
 
 Aufruf:
   imagine [DATEI]               Bild öffnen (PNG, JPEG, WebP, TIFF, EXR, .imagine)
@@ -38,12 +39,19 @@ Ansicht:
 Werkzeuge:
   B Pinsel   E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
   G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
+  C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)
+  Mit Auswahl verschieben/transformieren V und Strg+T nur die ausgewählten Pixel.
+
+Frei transformieren (Strg+T):
+  Ecken skalieren (proportional, Umschalt = frei), Kanten strecken, Alt = um die Mitte,
+  außerhalb ziehen = drehen (Umschalt = 15°-Schritte), innen = verschieben.
+  Enter übernimmt, Esc oder Strg+Z bricht ab. Inhalt außerhalb des Bildes bleibt erhalten.
 
 Malen:
   Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts
   Größe           [ / ], Strg + Mausrad
   Deckkraft       Ziffern 1…9, 0 (10 … 100 %)
-  Härte/Glättung  H / S       Farbe  C (Palette), X (Schwarz ↔ Weiß)
+  Härte/Glättung  H / S       Farbe  P (Palette), X (Schwarz ↔ Weiß)
   Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)
 
 Auswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):

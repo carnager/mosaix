@@ -119,6 +119,7 @@ impl Engine {
         self.visible = view.visible_doc_rect();
         let mut enc = self.device.create_command_encoder(&Default::default());
         let mut stats = RenderStats::default();
+        self.refresh_preview();
         self.encode_paint(&mut enc, &mut stats);
         self.update_signatures();
         self.encode_flatten(&mut enc, Some(FLATTEN_BUDGET), &mut stats);
@@ -175,12 +176,12 @@ impl Engine {
         self.instance_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&instances));
 
         // Selection → screen-space mask for the ants pass.
-        let show_sel = self.doc.selection.is_some() && (overlay.show_selection || overlay.quick_mask);
+        let show_sel = self.shown().selection.is_some() && (overlay.show_selection || overlay.quick_mask);
         if show_sel {
             let (vw, vh) = (view.viewport.x.max(1.0) as u32, view.viewport.y.max(1.0) as u32);
             self.ensure_screen_mask(vw, vh);
             self.rebuild_arrays_bg();
-            let sel = self.doc.selection.as_ref().unwrap();
+            let sel = self.shown().selection.as_ref().unwrap();
             let sel_instances: Vec<SelInstance> = visible
                 .iter()
                 .filter_map(|&c| {

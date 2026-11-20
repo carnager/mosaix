@@ -1,7 +1,7 @@
 // "Apply" kernel: produces one new tile per job (rendered into a scratch
 // array and copied into the destination pool afterwards, because the pools
 // are bound for reading here). Covers committing strokes, fills, gradients,
-// clearing, moving layers and baking masks – for pixel tiles (fs_rgba) and
+// clearing and baking masks – for pixel tiles (fs_rgba) and
 // mask tiles (fs_mask).
 
 enable wgpu_binding_array;
@@ -14,12 +14,12 @@ struct Job {
     g0: vec2<f32>,          // gradient start (document px)
     g1: vec2<f32>,          // gradient end
     origin: vec2<f32>,      // document px of the target tile
-    shift: vec2<f32>,       // translate: offset into the 2×2 source block
-    src_slots: vec4<u32>,   // stroke tile / translate sources / mask to bake
+    _shift: vec2<f32>,
+    src_slots: vec4<u32>,   // stroke tile / mask to bake
     src_consts: vec4<f32>,  // values for NONE sources (mask tiles)
     old_slot: u32,          // current target tile, or NONE → old_const
     old_const: f32,
-    src_kind: u32,          // 0 stroke, 1 colour, 2 linear, 3 radial, 4 translate, 5 bake mask
+    src_kind: u32,          // 0 stroke, 1 colour, 2 linear, 3 radial, 5 bake mask
     mode: u32,              // 1 paint (over), 2 erase
     opacity: f32,
     sel_slot: u32,          // selection, or NONE → sel_const
@@ -117,22 +117,10 @@ fn source(job: Job, p: vec2<i32>) -> vec4<f32> {
     }
 }
 
-// Position in the 2×2 block of source tiles for a move.
-fn translate_src(job: Job, p: vec2<i32>) -> vec3<i32> {
-    let s = p + vec2<i32>(job.shift);
-    let q = vec2<i32>(select(0, 1, s.x >= 256), select(0, 1, s.y >= 256));
-    let local = s - q * 256;
-    return vec3<i32>(local, q.x + 2 * q.y);
-}
-
 @fragment
 fn fs_rgba(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let job = jobs[params.index];
     let p = vec2<i32>(frag.xy);
-    if job.src_kind == 4u {
-        let t = translate_src(job, p);
-        return load_layer(job.src_slots[t.z], t.xy);
-    }
     let old = load_layer(job.old_slot, p);
     if job.src_kind == 5u {
         return old * load_mask(job.src_slots.x, job.src_consts.x, p);
@@ -148,10 +136,6 @@ fn fs_rgba(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 fn fs_mask(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let job = jobs[params.index];
     let p = vec2<i32>(frag.xy);
-    if job.src_kind == 4u {
-        let t = translate_src(job, p);
-        return vec4<f32>(load_mask(job.src_slots[t.z], job.src_consts[t.z], t.xy), 0.0, 0.0, 1.0);
-    }
     let old = load_mask(job.old_slot, job.old_const, p);
     let s = source(job, p) * (job.opacity * load_mask(job.sel_slot, job.sel_const, p));
     var v: f32;

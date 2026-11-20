@@ -42,9 +42,6 @@ impl Engine {
         m.compact();
         let mut tiles = HashMap::with_capacity(m.tiles.len());
         for (c, t) in m.tiles {
-            if !self.in_document(c) {
-                continue;
-            }
             let t = match t {
                 MaskData::Solid(v) => MaskTile::Solid(v),
                 MaskData::Pixels(p) => MaskTile::Pixels(self.write_new_mask_tile(&p)?),

@@ -361,12 +361,96 @@ fn translate_moves_pixels_and_mask() {
     assert!(alpha_at(&mut e, 50, 50) < 0.01, "old place empty");
     assert!(alpha_at(&mut e, 350, 300) > 0.99, "moved by (300, 250)");
     assert!(alpha_at(&mut e, 309, 259) < 0.01 && alpha_at(&mut e, 310, 260) > 0.99, "exact edge");
-    // Moving off the canvas cuts off.
+    // Content moved off the canvas is kept and comes back.
     e.translate_active(-2000, 0, "Verschieben").unwrap();
     e.flush();
     assert!(e.composite_coords().is_empty());
+    e.translate_active(2000, 0, "Zurück").unwrap();
+    assert!(alpha_at(&mut e, 350, 300) > 0.99, "nothing was cut off");
+    e.undo();
     e.undo();
     assert!(alpha_at(&mut e, 350, 300) > 0.99);
+}
+
+#[test]
+fn transform_scale_rotate_float_and_bounds() {
+    use glam::DAffine2;
+    use imagine_gpu::Interp;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1200, 1000));
+    e.select_shape(&Shape::Rect { x: 100.0, y: 100.0, w: 200.0, h: 100.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Füllen").unwrap();
+    e.deselect("Auswahl aufheben").unwrap();
+    let id = e.doc().active;
+    assert_eq!(e.content_bounds(id), Some((100, 100, 300, 200)));
+
+    // Scale ×2 around (100, 100): covers 100..500 × 100..300.
+    let fwd = DAffine2::from_translation(DVec2::splat(100.0))
+        * DAffine2::from_scale(DVec2::splat(2.0))
+        * DAffine2::from_translation(DVec2::splat(-100.0));
+    e.transform_active(fwd, Interp::Bicubic, "Skalieren").unwrap();
+    assert!(alpha_at(&mut e, 450, 250) > 0.99);
+    assert!(alpha_at(&mut e, 510, 250) < 0.01);
+    // Interpolation softens the edge by about a pixel (bicubic corners may
+    // leave faint ringing one pixel further out).
+    assert!(alpha_at(&mut e, 98, 150) < 0.01 && (alpha_at(&mut e, 99, 150) - 0.2).abs() < 0.01);
+    let b = e.content_bounds(id).unwrap();
+    assert!((b.0 - 99).abs() <= 1 && (b.1 - 99).abs() <= 1 && (b.2 - 501).abs() <= 1 && (b.3 - 301).abs() <= 1, "{b:?}");
+    e.undo();
+
+    // Rotate 90° around the rectangle centre (200, 150): becomes 150..250 × 50..250.
+    let c = DVec2::new(200.0, 150.0);
+    let fwd = DAffine2::from_translation(c)
+        * DAffine2::from_angle(std::f64::consts::FRAC_PI_2)
+        * DAffine2::from_translation(-c);
+    e.transform_active(fwd, Interp::Bilinear, "Drehen").unwrap();
+    assert!(alpha_at(&mut e, 200, 60) > 0.99);
+    assert!(alpha_at(&mut e, 120, 150) < 0.01);
+    let b = e.content_bounds(id).unwrap();
+    assert!((b.0 - 150).abs() <= 1 && (b.1 - 50).abs() <= 1 && (b.2 - 250).abs() <= 1 && (b.3 - 250).abs() <= 1, "{b:?}");
+    e.undo();
+
+    // Downscale ×0.25 stays smooth (supersampled): a half-covered pixel is ≈ 50 %.
+    let fwd = DAffine2::from_scale(DVec2::splat(0.25));
+    e.transform_active(fwd, Interp::Bicubic, "Verkleinern").unwrap();
+    assert!(alpha_at(&mut e, 40, 40) > 0.99);
+    assert!(alpha_at(&mut e, 80, 60) < 0.01);
+    e.undo();
+
+    // Floating selection: only the selected left half moves 300 px right,
+    // the selection outline moves along.
+    e.select_shape(&Shape::Rect { x: 100.0, y: 100.0, w: 100.0, h: 100.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.transform_active(DAffine2::from_translation(DVec2::new(300.0, 0.0)), Interp::Bicubic, "Verschieben").unwrap();
+    assert!(alpha_at(&mut e, 150, 150) < 0.01, "hole left behind");
+    assert!(alpha_at(&mut e, 250, 150) > 0.99, "unselected half stays");
+    assert!(alpha_at(&mut e, 450, 150) > 0.99, "selected half moved");
+    let sel = e.selection_cpu().unwrap();
+    assert_eq!(sel.value_at(450, 150), 255);
+    assert_eq!(sel.value_at(150, 150), 0);
+
+    // Preview shows the result without touching the document or history.
+    let before = e.history_len();
+    e.deselect("Auswahl aufheben").unwrap();
+    let before_px = alpha_at(&mut e, 700, 150);
+    e.set_transform_preview(Some((DAffine2::from_translation(DVec2::new(300.0, 0.0)), Interp::Bicubic))).unwrap();
+    let mut view = View { viewport: DVec2::new(1200.0, 1000.0), ..Default::default() };
+    view.fit(1200, 1000);
+    let tex = g.device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: 1200, height: 1000, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FMT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    e.render(&tex.create_view(&Default::default()), &view, &Overlay::default());
+    e.set_transform_preview(Some((DAffine2::from_translation(DVec2::new(300.0, 0.0)), Interp::Bicubic))).unwrap();
+    assert!(alpha_at(&mut e, 750, 150) > 0.99, "preview visible");
+    assert_eq!(e.history_len().0, before.0 + 1);
+    e.set_transform_preview(None).unwrap();
+    assert!((alpha_at(&mut e, 700, 150) - before_px).abs() < 1e-3, "preview gone");
 }
 
 #[test]
@@ -396,4 +480,43 @@ fn renders_selection_overlay_and_lines() {
     };
     e.render(&tv, &view, &overlay);
     g.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+#[test]
+fn crop_extend_and_resize_keep_content() {
+    use imagine_gpu::Interp;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1000, 800));
+    e.select_shape(&Shape::Rect { x: 600.0, y: 500.0, w: 100.0, h: 100.0 }, CombineOp::Replace, "Auswahl").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 1.0, "Füllen").unwrap();
+    e.add_layer_mask("Maske").unwrap();
+    e.deselect("Auswahl aufheben").unwrap();
+
+    // Off-grid crop: the square moves to (100, 150).
+    e.crop(500, 350, 300, 300, "Zuschneiden").unwrap();
+    assert_eq!(e.size(), (300, 300));
+    assert!(alpha_at(&mut e, 150, 200) > 0.99);
+    assert!(alpha_at(&mut e, 90, 200) < 0.01);
+    // Extending the canvas back brings the cropped-away area back (nothing deleted).
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 10.0, h: 10.0 }, CombineOp::Replace, "x").unwrap();
+    e.crop(-500, -350, 1000, 800, "Arbeitsfläche").unwrap();
+    assert!(!e.has_selection(), "crop drops the selection");
+    assert!(alpha_at(&mut e, 650, 550) > 0.99);
+    assert!(alpha_at(&mut e, 590, 550) < 0.01);
+
+    // Tile-aligned crop just renumbers tiles.
+    let live = e.layer_tiles_live();
+    e.crop(512, 256, 488, 544, "Zuschneiden").unwrap();
+    assert_eq!(e.layer_tiles_live(), live, "no new tiles");
+    assert!(alpha_at(&mut e, 650 - 512, 550 - 256) > 0.99);
+    e.undo();
+
+    // Image size ×0.5: square at 300..350 × 250..300, mask scaled along.
+    e.resize_image(500, 400, Interp::Bicubic, "Bildgröße").unwrap();
+    assert_eq!(e.size(), (500, 400));
+    assert!(alpha_at(&mut e, 325, 275) > 0.99);
+    assert!(alpha_at(&mut e, 290, 275) < 0.01);
+    e.undo();
+    assert_eq!(e.size(), (1000, 800));
+    assert!(alpha_at(&mut e, 650, 550) > 0.99);
 }

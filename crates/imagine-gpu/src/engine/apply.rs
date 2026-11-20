@@ -3,7 +3,7 @@
 //! Each produces fresh tiles (old ones stay in the undo history) and
 //! records exactly one undo step.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
@@ -12,7 +12,14 @@ use imagine_core::{LayerId, MaskRef, TILE_SIZE, TileCoord};
 
 use super::util::color_attachment;
 use super::{Engine, NONE, SCRATCH_LAYERS, StrokeTarget, mask_slot};
+use super::transform::WarpJob;
 use crate::pool::{Tile, texel_copy};
+
+#[derive(Clone, Copy)]
+enum Kernel {
+    Apply,
+    Warp,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -22,7 +29,7 @@ pub(super) struct ApplyJob {
     g0: [f32; 2],
     g1: [f32; 2],
     origin: [f32; 2],
-    shift: [f32; 2],
+    _shift: [f32; 2],
     src_slots: [u32; 4],
     src_consts: [f32; 4],
     old_slot: u32,
@@ -39,7 +46,6 @@ const KIND_STROKE: u32 = 0;
 const KIND_COLOR: u32 = 1;
 const KIND_LINEAR: u32 = 2;
 const KIND_RADIAL: u32 = 3;
-const KIND_TRANSLATE: u32 = 4;
 const KIND_BAKE_MASK: u32 = 5;
 const MODE_PAINT: u32 = 1;
 const MODE_ERASE: u32 = 2;
@@ -85,30 +91,62 @@ impl Engine {
 
     /// Renders one new tile per job into the target pool. `None` if out of memory.
     fn run_apply(&mut self, target: StrokeTarget, jobs: &[ApplyJob]) -> Option<Vec<Tile>> {
-        let mut out = Vec::with_capacity(jobs.len());
-        for _ in jobs {
+        self.run_tiles(target, Kernel::Apply, bytemuck::cast_slice(jobs), size_of::<ApplyJob>())
+    }
+
+    /// Like [`Self::run_apply`] for the warp kernel (grids must be uploaded).
+    pub(super) fn run_warp(&mut self, target: StrokeTarget, jobs: &[WarpJob]) -> Option<Vec<Tile>> {
+        self.run_tiles(target, Kernel::Warp, bytemuck::cast_slice(jobs), size_of::<WarpJob>())
+    }
+
+    fn run_tiles(&mut self, target: StrokeTarget, kernel: Kernel, jobs: &[u8], stride: usize) -> Option<Vec<Tile>> {
+        let count = jobs.len() / stride;
+        let mut out = Vec::with_capacity(count);
+        for _ in 0..count {
             out.push(match target {
                 StrokeTarget::Pixels => self.layer_pool.alloc()?,
                 StrokeTarget::Mask => self.mask_pool.alloc()?,
             });
         }
+        if count == 0 {
+            return Some(out);
+        }
         self.rebuild_arrays_bg();
-        for (b, batch) in jobs.chunks(SCRATCH_LAYERS as usize).enumerate() {
-            self.apply_buf.write(&self.device, &self.queue, bytemuck::cast_slice(batch));
-            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("apply"),
-                layout: &self.apply_bgl,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: self.apply_buf.buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: self.params.binding() },
-                ],
-            });
-            let (pipeline, views, scratch) = match target {
-                StrokeTarget::Pixels => (&self.apply_rgba_pipeline, &self.scratch_rgba_views, &self.scratch_rgba),
-                StrokeTarget::Mask => (&self.apply_mask_pipeline, &self.scratch_mask_views, &self.scratch_mask),
+        let batch_bytes = SCRATCH_LAYERS as usize * stride;
+        for (b, batch) in jobs.chunks(batch_bytes).enumerate() {
+            let n = batch.len() / stride;
+            self.apply_buf.write(&self.device, &self.queue, batch);
+            let bg = match kernel {
+                Kernel::Apply => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("apply"),
+                    layout: &self.apply_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: self.apply_buf.buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: self.params.binding() },
+                    ],
+                }),
+                Kernel::Warp => self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("warp"),
+                    layout: &self.warp_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: self.apply_buf.buf.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: self.params.binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: self.grid_buf.buf.as_entire_binding() },
+                    ],
+                }),
+            };
+            let pipeline = match (kernel, target) {
+                (Kernel::Apply, StrokeTarget::Pixels) => &self.apply_rgba_pipeline,
+                (Kernel::Apply, StrokeTarget::Mask) => &self.apply_mask_pipeline,
+                (Kernel::Warp, StrokeTarget::Pixels) => &self.warp_rgba_pipeline,
+                (Kernel::Warp, StrokeTarget::Mask) => &self.warp_mask_pipeline,
+            };
+            let (views, scratch) = match target {
+                StrokeTarget::Pixels => (&self.scratch_rgba_views, &self.scratch_rgba),
+                StrokeTarget::Mask => (&self.scratch_mask_views, &self.scratch_mask),
             };
             let mut enc = self.device.create_command_encoder(&Default::default());
-            for (i, view) in views.iter().enumerate().take(batch.len()) {
+            for (i, view) in views.iter().enumerate().take(n) {
                 let off = self.params.push([i as u32, 0, 0, 0]);
                 let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("apply"),
@@ -124,7 +162,7 @@ impl Engine {
                 StrokeTarget::Pixels => &self.layer_pool,
                 StrokeTarget::Mask => &self.mask_pool,
             };
-            for (i, tile) in out[b * SCRATCH_LAYERS as usize..][..batch.len()].iter().enumerate() {
+            for (i, tile) in out[b * SCRATCH_LAYERS as usize..][..n].iter().enumerate() {
                 let s = tile.slot();
                 enc.copy_texture_to_texture(
                     texel_copy(scratch, 0, i as u32),
@@ -240,7 +278,7 @@ impl Engine {
         }
     }
 
-    fn check_target(&self, target: StrokeTarget) -> Result<LayerId, &'static str> {
+    pub(super) fn check_target(&self, target: StrokeTarget) -> Result<LayerId, &'static str> {
         if self.stroke.is_some() {
             return Err("während eines Pinselstrichs nicht möglich");
         }
@@ -345,91 +383,11 @@ impl Engine {
         Ok(n)
     }
 
-    /// Moves the active layer (pixels and mask) by whole pixels. Content moved
-    /// outside the document is cut off.
+    /// Moves the whole active layer (pixels and mask) by whole pixels,
+    /// ignoring the selection. Content outside the canvas is kept.
     pub fn translate_active(&mut self, dx: i64, dy: i64, label: &str) -> Result<(), &'static str> {
-        let layer = self.check_target(StrokeTarget::Pixels)?;
-        if dx == 0 && dy == 0 {
-            return Ok(());
-        }
-        let ts = TILE_SIZE as i64;
-        let l = self.doc.find(layer).unwrap();
-        let src: HashMap<TileCoord, Tile> = l.tiles().map(|t| (**t).clone()).unwrap_or_default();
-        let mask = l.mask.clone();
-
-        // Target tiles = shifted footprint of the source tiles.
-        let (gw, gh) = imagine_core::tile::grid_size(self.doc.width, self.doc.height);
-        let in_doc = |t: TileCoord| t.x >= 0 && t.y >= 0 && (t.x as u32) < gw && (t.y as u32) < gh;
-        let shifted = |keys: Vec<TileCoord>| -> BTreeSet<TileCoord> {
-            let mut out = BTreeSet::new();
-            for c in keys {
-                let (ox, oy) = c.origin();
-                for ty in (oy + dy).div_euclid(ts)..=(oy + dy + ts - 1).div_euclid(ts) {
-                    for tx in (ox + dx).div_euclid(ts)..=(ox + dx + ts - 1).div_euclid(ts) {
-                        let t = TileCoord::new(tx as i32, ty as i32);
-                        if in_doc(t) {
-                            out.insert(t);
-                        }
-                    }
-                }
-            }
-            out
-        };
-        // Source block for a target tile: base tile and offset into the 2×2 block.
-        let block = |t: TileCoord| {
-            let (ox, oy) = t.origin();
-            let (sx, sy) = (ox - dx, oy - dy);
-            let (bx, by) = (sx.div_euclid(ts), sy.div_euclid(ts));
-            let shift = [(sx - bx * ts) as f32, (sy - by * ts) as f32];
-            let srcs = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(i, j)| TileCoord::new((bx + i) as i32, (by + j) as i32));
-            (srcs, shift)
-        };
-
-        let pixel_targets: Vec<TileCoord> = shifted(src.keys().copied().collect()).into_iter().collect();
-        let mut pixel_jobs = Vec::new();
-        for &t in &pixel_targets {
-            let (srcs, shift) = block(t);
-            let mut j = self.job(t);
-            j.src_kind = KIND_TRANSLATE;
-            j.shift = shift;
-            j.src_slots = srcs.map(|s| src.get(&s).map_or(NONE, |t| t.slot().packed()));
-            pixel_jobs.push(j);
-        }
-        let new_pixels = self.run_apply(StrokeTarget::Pixels, &pixel_jobs).ok_or("GPU-Speicher voll")?;
-
-        let mut new_mask = None;
-        if let Some(m) = &mask {
-            let keys: Vec<TileCoord> = m.tiles.keys().copied().collect();
-            let targets: Vec<TileCoord> = shifted(keys).into_iter().collect();
-            let mut jobs = Vec::new();
-            for &t in &targets {
-                let (srcs, shift) = block(t);
-                let mut j = self.job(t);
-                j.src_kind = KIND_TRANSLATE;
-                j.shift = shift;
-                for (k, s) in srcs.iter().enumerate() {
-                    let (slot, val) = mask_slot(Some(m.at(*s)));
-                    j.src_slots[k] = slot;
-                    j.src_consts[k] = val;
-                }
-                jobs.push(j);
-            }
-            let tiles = self.run_apply(StrokeTarget::Mask, &jobs).ok_or("GPU-Speicher voll")?;
-            new_mask = Some((targets, tiles, m.default));
-        }
-
-        self.edit(label, |d| {
-            let l = d.find_mut(layer).unwrap();
-            l.content = Content::Pixels(Arc::new(pixel_targets.into_iter().zip(new_pixels).collect()));
-            if let Some((targets, tiles, default)) = new_mask {
-                l.mask = Some(imagine_core::Mask {
-                    tiles: Arc::new(targets.into_iter().zip(tiles.into_iter().map(MaskTile::Pixels)).collect()),
-                    default,
-                });
-            }
-            true
-        });
-        Ok(())
+        let fwd = glam::DAffine2::from_translation(glam::DVec2::new(dx as f64, dy as f64));
+        self.transform_layer(fwd, super::Interp::Nearest, false, label)
     }
 
     /// Multiplies the active layer's pixels by its mask and removes the mask.

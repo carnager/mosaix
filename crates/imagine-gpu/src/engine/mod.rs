@@ -25,6 +25,7 @@ mod display;
 mod frame;
 mod readback;
 mod selection;
+mod transform;
 mod util;
 
 use std::collections::{HashMap, HashSet};
@@ -39,6 +40,7 @@ use imagine_core::{Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TI
 
 pub use apply::GradientKind;
 pub use readback::{PoolKind, Readback};
+pub use transform::{Interp, is_integer_translation};
 
 use crate::pool::{BYTES_PER_PIXEL, MASK_FORMAT, Pool, PoolConfig, TILE_FORMAT, Tile, texel_copy};
 use util::{DynBuf, Params, PipelineSpec, compute_pipeline, make_origin_buf, render_pipeline};
@@ -154,6 +156,7 @@ pub struct Engine {
     recheck: HashSet<TileCoord>,
     recheck_all: bool,
     stroke: Option<ActiveStroke>,
+    preview: Option<transform::Preview>,
     pending_dabs: Vec<Dab>,
     pending_mips: Vec<crate::pool::SlotId>,
     visible: (DVec2, DVec2),
@@ -162,6 +165,8 @@ pub struct Engine {
     ops_buf: DynBuf,
     jobs_buf: DynBuf,
     apply_buf: DynBuf,
+    grid_buf: DynBuf,
+    bounds_jobs: DynBuf,
     list_buf: DynBuf,
     instance_buf: DynBuf,
     sel_instance_buf: DynBuf,
@@ -189,6 +194,8 @@ pub struct Engine {
     arrays_gen: (u64, u64),
     flatten_bgl: wgpu::BindGroupLayout,
     apply_bgl: wgpu::BindGroupLayout,
+    warp_bgl: wgpu::BindGroupLayout,
+    bounds_bgl: wgpu::BindGroupLayout,
     mip_bgl: wgpu::BindGroupLayout,
     screen_bgl: wgpu::BindGroupLayout,
 
@@ -201,6 +208,9 @@ pub struct Engine {
     line_pipeline: wgpu::RenderPipeline,
     apply_rgba_pipeline: wgpu::RenderPipeline,
     apply_mask_pipeline: wgpu::RenderPipeline,
+    warp_rgba_pipeline: wgpu::RenderPipeline,
+    warp_mask_pipeline: wgpu::RenderPipeline,
+    bounds_pipeline: wgpu::ComputePipeline,
     flatten_pipeline: wgpu::ComputePipeline,
     mip_pipeline: wgpu::ComputePipeline,
 }
@@ -278,6 +288,8 @@ impl Engine {
         );
         let apply_shader = shader("apply", include_str!("../shaders/apply.wgsl").into());
         let mip_shader = shader("mip", include_str!("../shaders/mip.wgsl").into());
+        let warp_shader = shader("warp", include_str!("../shaders/warp.wgsl").into());
+        let bounds_shader = shader("bounds", include_str!("../shaders/bounds.wgsl").into());
 
         // ---- bind group layouts ---------------------------------------------
         use wgpu::ShaderStages as S;
@@ -344,6 +356,23 @@ impl Engine {
             ],
         );
         let apply_bgl = bgl("apply", &[buffer(0, S::FRAGMENT, storage, false), buffer(1, S::FRAGMENT, uniform, true)]);
+        let warp_bgl = bgl(
+            "warp",
+            &[
+                buffer(0, S::FRAGMENT, storage, false),
+                buffer(1, S::FRAGMENT, uniform, true),
+                buffer(2, S::FRAGMENT, storage, false),
+            ],
+        );
+        let storage_rw = wgpu::BufferBindingType::Storage { read_only: false };
+        let bounds_bgl = bgl(
+            "bounds",
+            &[
+                buffer(0, S::COMPUTE, storage, false),
+                buffer(1, S::COMPUTE, storage_rw, false),
+                buffer(2, S::COMPUTE, uniform, true),
+            ],
+        );
         let mip_bgl = bgl(
             "mip",
             &[
@@ -369,6 +398,7 @@ impl Engine {
         let line_layout = layout("lines", &[&globals_bgl]);
         let brush_layout = layout("brush", &[&brush_bgl]);
         let apply_layout = layout("apply", &[&arrays_bgl, &apply_bgl]);
+        let warp_layout = layout("warp", &[&arrays_bgl, &warp_bgl]);
 
         // ---- pipelines ------------------------------------------------------
         let tile_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32];
@@ -435,6 +465,17 @@ impl Engine {
             "main",
         );
         let mip_pipeline = compute_pipeline(device, "mip", &layout("mip", &[&mip_bgl]), &mip_shader, "main");
+        let warp_rgba_pipeline =
+            rp("warp rgba", &warp_layout, &warp_shader, ("vs", "fs_rgba"), &[], TILE_FORMAT, None, TriangleList);
+        let warp_mask_pipeline =
+            rp("warp mask", &warp_layout, &warp_shader, ("vs", "fs_mask"), &[], MASK_FORMAT, None, TriangleList);
+        let bounds_pipeline = compute_pipeline(
+            device,
+            "bounds",
+            &layout("bounds", &[&arrays_bgl, &bounds_bgl]),
+            &bounds_shader,
+            "main",
+        );
 
         // ---- resources ------------------------------------------------------
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -501,6 +542,7 @@ impl Engine {
             recheck: HashSet::new(),
             recheck_all: true,
             stroke: None,
+            preview: None,
             pending_dabs: Vec::new(),
             pending_mips: Vec::new(),
             visible: (DVec2::ZERO, DVec2::ZERO),
@@ -508,6 +550,8 @@ impl Engine {
             ops_buf: DynBuf::new(device, "ops", B::STORAGE, 64 << 10),
             jobs_buf: DynBuf::new(device, "jobs", B::STORAGE, 16 << 10),
             apply_buf: DynBuf::new(device, "apply jobs", B::STORAGE, 16 << 10),
+            grid_buf: DynBuf::new(device, "warp grids", B::STORAGE, 16 << 10),
+            bounds_jobs: DynBuf::new(device, "bounds jobs", B::STORAGE, 16 << 10),
             list_buf: DynBuf::new(device, "mip layers", B::STORAGE, 16 << 10),
             instance_buf: DynBuf::new(device, "tile instances", B::VERTEX, 64 << 10),
             sel_instance_buf: DynBuf::new(device, "selection instances", B::VERTEX, 16 << 10),
@@ -534,6 +578,8 @@ impl Engine {
             arrays_gen: (0, 0),
             flatten_bgl,
             apply_bgl,
+            warp_bgl,
+            bounds_bgl,
             mip_bgl,
             screen_bgl,
             checker_pipeline,
@@ -545,6 +591,9 @@ impl Engine {
             line_pipeline,
             apply_rgba_pipeline,
             apply_mask_pipeline,
+            warp_rgba_pipeline,
+            warp_mask_pipeline,
+            bounds_pipeline,
             flatten_pipeline,
             mip_pipeline,
         };
@@ -566,6 +615,9 @@ impl Engine {
     pub fn edit(&mut self, label: &str, f: impl FnOnce(&mut Document<Tile>) -> bool) -> bool {
         if self.stroke.is_some() {
             return false;
+        }
+        if self.preview.take().is_some() {
+            self.recheck_all = true;
         }
         let before = self.doc.clone();
         if f(&mut self.doc) {
@@ -596,6 +648,9 @@ impl Engine {
         if self.stroke.is_some() {
             return None;
         }
+        if self.preview.take().is_some() {
+            self.recheck_all = true;
+        }
         let cur = std::mem::replace(&mut self.doc, Document::empty(0, 0));
         let r = if back { self.history.undo(cur) } else { self.history.redo(cur) };
         match r {
@@ -620,11 +675,9 @@ impl Engine {
     }
 
     /// Writes premultiplied linear RGBA f16 pixels (TILE_SIZE² × 4) into a
-    /// pixel layer, outside of the undo history (used for loading).
+    /// pixel layer, outside of the undo history (used for loading). Tiles
+    /// outside the canvas are kept but not shown.
     pub fn upload_tile(&mut self, layer: LayerId, c: TileCoord, pixels: &[f16]) -> Option<Tile> {
-        if !self.in_document(c) {
-            return None;
-        }
         let tile = self.write_new_tile(pixels)?;
         self.doc.tiles_mut(layer)?.insert(c, tile.clone());
         self.recheck.insert(c);
@@ -640,9 +693,6 @@ impl Engine {
         }
         let mut new = Vec::with_capacity(tiles.len());
         for (c, px) in tiles {
-            if !self.in_document(c) {
-                continue;
-            }
             match px {
                 Some(px) => match self.write_new_tile(&px) {
                     Some(t) => new.push((c, Some(t))),

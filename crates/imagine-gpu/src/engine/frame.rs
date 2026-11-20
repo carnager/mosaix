@@ -151,13 +151,13 @@ impl Engine {
 
     fn signature(&self, c: TileCoord) -> Option<u64> {
         let stroke = self.stroke_at(c);
-        let ops = self.doc.program(c, stroke.map(|s| s.0));
+        let ops = self.shown().program(c, stroke.map(|s| s.0));
         if ops.is_empty() {
             return None;
         }
         let mut h = DefaultHasher::new();
         hash_program(&ops, |t: &Tile| t.serial(), &mut h);
-        (self.doc.blend_space as u32).hash(&mut h);
+        (self.shown().blend_space as u32).hash(&mut h);
         if let Some((_, t, p)) = stroke {
             (t.serial(), p.opacity.to_bits(), p.erase, p.target).hash(&mut h);
             let (slot, val) = self.sel_slot(c);
@@ -168,7 +168,7 @@ impl Engine {
 
     pub(super) fn update_signatures(&mut self) {
         let coords: Vec<TileCoord> = if self.recheck_all {
-            let mut s = self.doc.all_tile_coords();
+            let mut s = self.shown().all_tile_coords();
             s.extend(self.comp.keys().copied());
             if let Some(st) = &self.stroke {
                 s.extend(st.tiles.keys().copied());
@@ -180,7 +180,9 @@ impl Engine {
         };
         self.recheck_all = false;
         for c in coords {
-            match self.signature(c) {
+            // Layers may hold content outside the canvas; it is not composited.
+            let sig = if self.in_document(c) { self.signature(c) } else { None };
+            match sig {
                 None => {
                     self.comp.remove(&c);
                     self.dirty.remove(&c);
@@ -223,7 +225,11 @@ impl Engine {
             self.dirty.remove(&c);
             let stroke = self.stroke_at(c).map(|(l, t, p)| (l, t.slot(), p));
             let (sel_slot, sel_const) = self.sel_slot(c);
-            let program = self.doc.program(c, stroke.map(|s| s.0));
+            let shown = match &self.preview {
+                Some(p) => &p.doc,
+                None => &self.doc,
+            };
+            let program = shown.program(c, stroke.map(|s| s.0));
             if program.is_empty() {
                 continue;
             }

@@ -166,8 +166,34 @@ pub fn tools() -> Vec<Value> {
         tool("layer_mask_set", "Enable or disable a layer's mask.",
             json!({ "layer": layer_param(), "enabled": { "type": "boolean" } }), &["enabled"], false),
         tool("layer_mask_apply", "Bake a layer's mask into its pixels and remove the mask.", json!({ "layer": layer_param() }), &[], false),
-        tool("layer_translate", "Move a layer's pixels and mask by whole pixels (content leaving the canvas is cut off).",
+        tool("layer_translate", "Move a whole layer (pixels and mask) by whole pixels, ignoring the selection. Content outside the canvas is kept.",
             json!({ "layer": layer_param(), "dx": { "type": "integer" }, "dy": { "type": "integer" } }), &["dx", "dy"], false),
+        tool("layer_transform",
+            "Scale, rotate and/or move a layer (with its mask) around a pivot (default: centre of its content). With a selection, \
+             only the selected pixels move and the selection follows (like Photoshop's free transform); set use_selection=false \
+             to transform the whole layer anyway. Order: scale, rotate, then move by dx/dy. Returns the new content bounds.",
+            json!({
+                "layer": layer_param(),
+                "scale": { "type": "number", "description": "uniform factor, e.g. 0.5" },
+                "scale_x": { "type": "number" }, "scale_y": { "type": "number", "description": "negative values mirror" },
+                "rotate": { "type": "number", "description": "degrees, clockwise" },
+                "dx": { "type": "number" }, "dy": { "type": "number" },
+                "pivot_x": { "type": "number" }, "pivot_y": { "type": "number" },
+                "interp": { "type": "string", "enum": ["bicubic", "bilinear", "nearest"], "description": "default bicubic; nearest for pixel art" },
+                "use_selection": { "type": "boolean" }
+            }), &[], false),
+        tool("layer_bounds", "Pixel-exact bounding box of a layer's visible content (within the selection, if any); null if empty.",
+            json!({ "layer": layer_param() }), &[], true),
+        tool("crop", "Crop the canvas to a rectangle (may extend beyond the canvas to enlarge it). Pixels outside are kept, not deleted. Drops the selection.",
+            json!({ "x": { "type": "integer" }, "y": { "type": "integer" }, "width": { "type": "integer" }, "height": { "type": "integer" } }),
+            &["x", "y", "width", "height"], false),
+        tool("canvas_size", "Change the canvas size without scaling; anchor decides where the existing image stays (default center).",
+            json!({ "width": { "type": "integer" }, "height": { "type": "integer" },
+                    "anchor": { "type": "string", "enum": ["center", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"] } }),
+            &["width", "height"], false),
+        tool("image_resize", "Scale the whole image (all layers and masks). Give width and/or height; a missing one keeps the aspect ratio.",
+            json!({ "width": { "type": "integer" }, "height": { "type": "integer" },
+                    "interp": { "type": "string", "enum": ["bicubic", "bilinear", "nearest"] } }), &[], false),
         tool("fill_rect", "Fill a rectangle on a pixel layer with a colour (normal blending onto existing pixels).",
             Value::Object(fill), &["x", "y", "width", "height", "color"], false),
         tool("clear_rect", "Make a rectangle on a pixel layer fully transparent.",
@@ -332,6 +358,12 @@ mod tests {
             "select_feather": {"radius": 2}, "layer_mask_add": {}, "layer_mask_delete": {}, "layer_mask_set": {"enabled": true},
             "layer_mask_apply": {}, "layer_translate": {"dx": 1, "dy": 0}
         });
+        let mut samples = samples;
+        let more = json!({
+            "layer_transform": {"scale": 2}, "layer_bounds": {}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
+            "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1}
+        });
+        samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
         for t in tools() {
             let name = t["name"].as_str().unwrap();
             let mut args = samples[name].as_object().unwrap_or_else(|| panic!("no sample for {name}")).clone();
@@ -352,6 +384,8 @@ mod tests {
                         ("blend", _) => json!("screen"),
                         ("space", _) => json!("linear"),
                         ("points", _) => json!([[0, 0], [1, 1], [2, 0]]),
+                        ("interp", _) => json!("nearest"),
+                        ("anchor", _) => json!("top-left"),
                         (_, Some("boolean")) => json!(true),
                         (_, Some("string")) => json!("x"),
                         _ => json!(1),
