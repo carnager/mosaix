@@ -252,6 +252,7 @@ fn edt_1d(f: &[f32], d: &mut [f32], v: &mut [usize], z: &mut [f32]) {
 }
 
 /// Euclidean distance from every pixel to the nearest `seed` pixel.
+#[cfg_attr(not(test), allow(dead_code))]
 fn distance(w: usize, h: usize, seed: &[bool]) -> Vec<f32> {
     const INF: f32 = 1e20;
     let mut g: Vec<f32> = seed.iter().map(|&s| if s { 0.0 } else { INF }).collect();
@@ -284,16 +285,111 @@ fn distance(w: usize, h: usize, seed: &[bool]) -> Vec<f32> {
 /// Signed distance to the shape edge: negative inside, positive outside
 /// (half-pixel accurate at antialiased edges).
 fn signed_distance(w: usize, h: usize, alpha: &[f32]) -> Vec<f32> {
-    let inside: Vec<bool> = alpha.iter().map(|&a| a >= 0.5).collect();
-    let outside: Vec<bool> = inside.iter().map(|&b| !b).collect();
-    let d_out = distance(w, h, &inside);
-    let d_in = distance(w, h, &outside);
+    // Edge points with sub-pixel position: in every pixel on the boundary
+    // the 0.5-contour of the alpha lies (a − 0.5) from the centre, against
+    // the alpha gradient. Every pixel then takes the distance to the nearest
+    // edge point (two-pass propagation of the point, Danielsson-style), so
+    // antialiased edges stay smooth instead of following pixel steps.
+    let at = |x: isize, y: isize| -> f32 {
+        if x < 0 || y < 0 || x >= w as isize || y >= h as isize { 0.0 } else { alpha[y as usize * w + x as usize].clamp(0.0, 1.0) }
+    };
+    const NONE: (f32, f32) = (f32::NAN, f32::NAN);
+    let mut seed: Vec<(f32, f32)> = (0..w * h)
+        .into_par_iter()
+        .map(|i| {
+            let (x, y) = ((i % w) as isize, (i / w) as isize);
+            let a = at(x, y);
+            let inside = a >= 0.5;
+            let partial = a > 0.02 && a < 0.98;
+            // Hard edge (no antialiasing): full pixel next to an empty one.
+            let hard = !partial
+                && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| {
+                    let b = at(x + dx, y + dy);
+                    if inside { b <= 0.02 } else { b >= 0.98 }
+                });
+            let boundary = partial || hard;
+            if !boundary {
+                return NONE;
+            }
+            // Gradient (Sobel) points into the shape.
+            let gx = (at(x + 1, y - 1) + 2.0 * at(x + 1, y) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0 * at(x - 1, y) + at(x - 1, y + 1));
+            let gy = (at(x - 1, y + 1) + 2.0 * at(x, y + 1) + at(x + 1, y + 1)) - (at(x - 1, y - 1) + 2.0 * at(x, y - 1) + at(x + 1, y - 1));
+            let len = (gx * gx + gy * gy).sqrt();
+            let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
+            if len < 1e-6 {
+                return (cx, cy);
+            }
+            let off = (a - 0.5).clamp(-0.5, 0.5);
+            (cx - gx / len * off, cy - gy / len * off)
+        })
+        .collect();
+    let d2 = |i: usize, s: (f32, f32)| {
+        let (px, py) = ((i % w) as f32 + 0.5, (i / w) as f32 + 0.5);
+        (px - s.0).powi(2) + (py - s.1).powi(2)
+    };
+    let mut best: Vec<f32> = seed.iter().enumerate().map(|(i, s)| if s.0.is_nan() { f32::INFINITY } else { d2(i, *s) }).collect();
+    let mut relax = |i: usize, j: usize, seed: &mut Vec<(f32, f32)>, best: &mut Vec<f32>| {
+        let s = seed[j];
+        if s.0.is_nan() {
+            return;
+        }
+        let d = d2(i, s);
+        if d < best[i] {
+            best[i] = d;
+            seed[i] = s;
+        }
+    };
+    // Forward: from left/top neighbours; backward: from right/bottom.
+    for _ in 0..2 {
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                if x > 0 {
+                    relax(i, i - 1, &mut seed, &mut best);
+                }
+                if y > 0 {
+                    relax(i, i - w, &mut seed, &mut best);
+                    if x > 0 {
+                        relax(i, i - w - 1, &mut seed, &mut best);
+                    }
+                    if x + 1 < w {
+                        relax(i, i - w + 1, &mut seed, &mut best);
+                    }
+                }
+            }
+            for x in (0..w.saturating_sub(1)).rev() {
+                let i = y * w + x;
+                relax(i, i + 1, &mut seed, &mut best);
+            }
+        }
+        for y in (0..h).rev() {
+            for x in (0..w).rev() {
+                let i = y * w + x;
+                if x + 1 < w {
+                    relax(i, i + 1, &mut seed, &mut best);
+                }
+                if y + 1 < h {
+                    relax(i, i + w, &mut seed, &mut best);
+                    if x + 1 < w {
+                        relax(i, i + w + 1, &mut seed, &mut best);
+                    }
+                    if x > 0 {
+                        relax(i, i + w - 1, &mut seed, &mut best);
+                    }
+                }
+            }
+            for x in 1..w {
+                let i = y * w + x;
+                relax(i, i - 1, &mut seed, &mut best);
+            }
+        }
+    }
     (0..w * h)
         .into_par_iter()
         .map(|i| {
-            // Use the coverage to place the edge within the boundary pixel.
-            let a = alpha[i].clamp(0.0, 1.0);
-            if inside[i] { -(d_in[i] - 1.0) - (a - 0.5) } else { d_out[i] - 1.0 + (0.5 - a) }
+            let d = best[i].sqrt();
+            let d = if d.is_finite() { d } else { 1e6 };
+            if alpha[i] >= 0.5 { -d } else { d }
         })
         .collect()
 }
@@ -636,5 +732,25 @@ mod tests {
         assert!(reach(&all) > 15.0);
         let json = serde_json::to_string(&all).unwrap();
         assert_eq!(serde_json::from_str::<Vec<Effect>>(&json).unwrap(), all);
+    }
+
+    #[test]
+    fn stroke_edge_is_smooth_not_stepped() {
+        // Outer edge of a 6 px stroke around a disc of radius 30.3 must follow
+        // the circle 36.3 to within a fraction of a pixel everywhere.
+        let n = 120;
+        let r = 30.3;
+        let s = apply(&fx(EffectKind::Stroke { size: 6.0, position: StrokePosition::Outside, color: [1.0; 3], opacity: 1.0 }), &disc(n, r));
+        let ring = &s.below[0].1;
+        let c = n as f32 / 2.0;
+        let mut worst = 0.0f32;
+        for (i, p) in ring.px.iter().enumerate() {
+            let d = ((i % n) as f32 + 0.5 - c).hypot((i / n) as f32 + 0.5 - c);
+            if d > r + 3.0 {
+                let want = (r + 6.0 - d + 0.5).clamp(0.0, 1.0);
+                worst = worst.max((p[3] - want).abs());
+            }
+        }
+        assert!(worst < 0.1, "largest coverage error at the outer edge {worst}");
     }
 }
