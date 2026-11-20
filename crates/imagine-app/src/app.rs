@@ -432,6 +432,8 @@ pub struct App {
     last_model: Option<ui::panels::Model>,
     /// egui textures of the thumbnail slots.
     thumb_ids: HashMap<u32, egui::TextureId>,
+    /// Mask thumbnails as UI textures: content key and texture.
+    mask_thumbs: HashMap<LayerId, (usize, egui::TextureHandle)>,
     /// Status text, refreshed a few times per second (not every frame).
     ui_status: String,
 
@@ -653,6 +655,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         ui_log_gen: 0,
         last_model: None,
         thumb_ids: HashMap::new(),
+        mask_thumbs: HashMap::new(),
         ui_status: String::new(),
         socket: None,
         bench: None,
@@ -3565,7 +3568,7 @@ impl App {
         // Thumbnails: a few per frame, not while dragging.
         if matches!(self.drag, Drag::None)
             && let Some(s) = &mut self.session
-            && s.engine.update_thumbnails(4)
+            && (s.engine.update_thumbnails(4) | s.engine.update_mask_thumbnails(2))
         {
             self.needs_redraw = true;
         }
@@ -3594,7 +3597,31 @@ impl App {
                     });
                     row.thumb = Some((id, uv));
                 }
+                if row.has_mask
+                    && let Some((key, px)) = s.engine.mask_thumbnail(row.id)
+                {
+                    let uv = s.engine.thumbnail_uv();
+                    let entry = self.mask_thumbs.entry(row.id);
+                    let tex = match entry {
+                        std::collections::hash_map::Entry::Occupied(mut o) => {
+                            if o.get().0 != key {
+                                let n = ui::panels::THUMB_PX;
+                                o.get_mut().1.set(egui::ColorImage::from_gray([n, n], &px), egui::TextureOptions::LINEAR);
+                                o.get_mut().0 = key;
+                            }
+                            o.get().1.id()
+                        }
+                        std::collections::hash_map::Entry::Vacant(v) => {
+                            let n = ui::panels::THUMB_PX;
+                            let h = self.gui.ctx.load_texture(format!("mask {}", row.id), egui::ColorImage::from_gray([n, n], &px), egui::TextureOptions::LINEAR);
+                            v.insert((key, h)).1.id()
+                        }
+                    };
+                    row.mask_thumb = Some((tex, uv));
+                }
             }
+            let rows: std::collections::HashSet<LayerId> = model.layers.iter().map(|r| r.id).collect();
+            self.mask_thumbs.retain(|id, _| rows.contains(id));
         }
         let size = (self.surface_config.width, self.surface_config.height);
         let changed =

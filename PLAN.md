@@ -384,7 +384,7 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 
 - **Ebenen-Vorschaubilder:** GPU-verkleinert (Warp-Kernel, bis 8×8 Supersampling) in ein 64²-Textur-Array, nur bei geänderten Kacheln neu, höchstens 4 pro Frame und nie während eines Strichs.
 
-**Noch offen in Phase 3:** Vorschaubilder für Gruppen und Masken. (Frei belegbare Tastenkürzel: erledigt 2026-11-20 – Bearbeiten › Tastaturbefehle, Strg+Alt+Umschalt+K; gespeichert in den Einstellungen; Konflikte wie Photoshop.) (Docking/abtrennbare Panels: erledigt 2026-11-20 mit egui_dock, Layout wird gespeichert.)
+**Phase 3 abgeschlossen** (2026-11-20): zuletzt Vorschaubilder für Gruppen (gestapelte Ebenen-Vorschauen) und Masken (auf der GPU verkleinert, grau, rotes Kreuz wenn aus). (Frei belegbare Tastenkürzel: erledigt 2026-11-20 – Bearbeiten › Tastaturbefehle, Strg+Alt+Umschalt+K; gespeichert in den Einstellungen; Konflikte wie Photoshop.) (Docking/abtrennbare Panels: erledigt 2026-11-20 mit egui_dock, Layout wird gespeichert.)
 
 ## Stand Phase 4 (20.11.2026) – Nicht-destruktiv, Filter, Farbe (erster Teil)
 

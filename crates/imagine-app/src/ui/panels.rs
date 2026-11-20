@@ -71,7 +71,12 @@ pub struct LayerRow {
     pub fx: bool,
     /// Clipped to the layer below (clipping mask).
     pub clip: bool,
+    /// Mask thumbnail (grey) and the used part of it.
+    pub mask_thumb: Option<(egui::TextureId, (f32, f32))>,
 }
+
+/// Side of a thumbnail in pixels (matches the engine's THUMB).
+pub const THUMB_PX: usize = 64;
 
 /// Caret, selection and frame of the text edited on the canvas, as quads
 /// in screen points.
@@ -1703,11 +1708,25 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                 Color32::from_gray(220),
                             );
                             x = t.max.x + 8.0;
-                        } else if !row.group {
+                        } else {
                             let t = egui::Rect::from_min_size(
                                 egui::pos2(x, rect.min.y + 3.0),
                                 Vec2::splat(row_h - 6.0),
                             );
+                            // A group shows its layers' thumbnails stacked (bottom first).
+                            let stack: Vec<(egui::TextureId, (f32, f32))> = if row.group {
+                                let i = m.layers.iter().position(|r| r.id == row.id).unwrap_or(0);
+                                let mut v: Vec<_> = m.layers[i + 1..]
+                                    .iter()
+                                    .take_while(|r| r.depth > row.depth)
+                                    .filter(|r| r.visible)
+                                    .filter_map(|r| r.thumb)
+                                    .collect();
+                                v.reverse();
+                                v
+                            } else {
+                                row.thumb.into_iter().collect()
+                            };
                             let n = 4;
                             let c = t.width() / n as f32;
                             for j in 0..n {
@@ -1720,7 +1739,7 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                     painter.rect_filled(r, 0.0, Color32::from_gray(g));
                                 }
                             }
-                            if let Some((tex, (u, v))) = row.thumb {
+                            for (tex, (u, v)) in stack {
                                 let size = Vec2::new(t.width() * u, t.height() * v);
                                 let img = egui::Rect::from_center_size(t.center(), size);
                                 painter.image(
@@ -1742,11 +1761,12 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                             x = t.max.x + 8.0;
                         }
                         // Mask badge.
+                        let mask_w = row_h - 6.0;
                         let name_end = rect.max.x
-                            - if row.has_mask { 28.0 } else { 4.0 }
+                            - if row.has_mask { mask_w + 10.0 } else { 4.0 }
                             - if row.fx { 20.0 } else { 0.0 };
                         if row.fx {
-                            let x = rect.max.x - if row.has_mask { 30.0 } else { 6.0 } - 8.0;
+                            let x = rect.max.x - if row.has_mask { mask_w + 12.0 } else { 6.0 } - 8.0;
                             painter.text(
                                 egui::pos2(x, rect.center().y),
                                 egui::Align2::CENTER_CENTER,
@@ -1757,23 +1777,34 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                         }
                         if row.has_mask {
                             let badge = egui::Rect::from_center_size(
-                                egui::pos2(rect.max.x - 15.0, rect.center().y),
-                                Vec2::new(22.0, 16.0),
+                                egui::pos2(rect.max.x - 6.0 - mask_w * 0.5, rect.center().y),
+                                Vec2::splat(mask_w),
                             );
                             let b_resp = ui.interact(badge, resp.id.with("mask"), Sense::click());
                             let editing = active && m.mask_edit;
-                            painter.rect(
+                            match row.mask_thumb {
+                                Some((tex, (u, v))) => {
+                                    painter.rect_filled(badge, 0.0, Color32::from_gray(60));
+                                    let img = egui::Rect::from_center_size(badge.center(), Vec2::new(badge.width() * u, badge.height() * v));
+                                    painter.image(tex, img, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(u, v)), Color32::WHITE);
+                                }
+                                None => {
+                                    painter.rect_filled(badge, 0.0, Color32::from_gray(200));
+                                    painter.circle_filled(badge.center(), 5.0, Color32::from_gray(30));
+                                }
+                            }
+                            painter.rect_stroke(
                                 badge,
-                                3.0,
-                                if row.mask_enabled {
-                                    Color32::from_gray(200)
-                                } else {
-                                    Color32::from_gray(80)
-                                },
-                                Stroke::new(if editing { 2.0 } else { 0.0 }, ACCENT),
+                                0.0,
+                                Stroke::new(if editing { 2.0 } else { 1.0 }, if editing { ACCENT } else { Color32::from_gray(70) }),
                                 egui::StrokeKind::Outside,
                             );
-                            painter.circle_filled(badge.center(), 4.0, Color32::from_gray(30));
+                            if !row.mask_enabled {
+                                // Like Photoshop: a red cross over a disabled mask.
+                                let s = Stroke::new(2.0, Color32::from_rgb(220, 40, 40));
+                                painter.line_segment([badge.left_top(), badge.right_bottom()], s);
+                                painter.line_segment([badge.right_top(), badge.left_bottom()], s);
+                            }
                             if b_resp
                 .on_hover_text(tr(
                     "Mask: click to switch between painting the mask and the pixels",
@@ -2131,6 +2162,7 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
                     .map(|v| matches!(v.kind, imagine_core::vector::VectorKind::Text(_))),
                 fx: l.effects.iter().any(|e| e.enabled),
                 clip: l.clip,
+                mask_thumb: None,
             })
         })
         .collect()

@@ -126,7 +126,7 @@ impl Grids {
         self.add(&e, 0.0)
     }
 
-    fn mask(&mut self, m: &Mask<Tile>) -> GridRef {
+    pub(super) fn mask(&mut self, m: &Mask<Tile>) -> GridRef {
         let e: Vec<_> = m
             .tiles
             .iter()
@@ -894,6 +894,31 @@ impl Engine {
         self.grid_buf
             .write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
         self.run_warp(StrokeTarget::Pixels, &[job])?.pop()
+    }
+
+    /// A layer's mask scaled into one mask tile (thumbnail).
+    pub(super) fn downscaled_mask(&mut self, layer: LayerId, scale: f64, samples: u32) -> Option<Tile> {
+        let m = self.doc.find(layer)?.mask.clone()?;
+        let mut grids = Grids::default();
+        let src = grids.mask(&m);
+        let lin = DAffine2::from_scale(DVec2::splat(1.0 / scale)).matrix2;
+        let job = WarpJob {
+            s0_int: [0, 0],
+            s0_frac: [0.0, 0.0],
+            lin: [lin.x_axis.x as f32, lin.x_axis.y as f32, lin.y_axis.x as f32, lin.y_axis.y as f32],
+            src,
+            src_sel: GridRef::default(),
+            old_slot: NONE,
+            old_const: 0.0,
+            dsel_slot: NONE,
+            dsel_const: 0.0,
+            mode: MODE_REPLACE,
+            interp: Interp::Bilinear as u32,
+            samples,
+            _pad: 0,
+        };
+        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+        self.run_warp(StrokeTarget::Mask, &[job])?.pop()
     }
 
     /// Pixel-exact bounds `(x0, y0, x1, y1)` (exclusive end) of a layer's

@@ -18,6 +18,8 @@ pub(super) struct Thumbs {
     /// Layer → (slot, content key it was rendered from).
     entries: HashMap<LayerId, (u32, usize)>,
     free: Vec<u32>,
+    /// Layer masks: content key and THUMB × THUMB grey values.
+    masks: HashMap<LayerId, (usize, Arc<Vec<u8>>)>,
 }
 
 impl Thumbs {
@@ -40,6 +42,7 @@ impl Thumbs {
             texture,
             entries: HashMap::new(),
             free: (0..SLOTS).rev().collect(),
+            masks: HashMap::new(),
         }
     }
 }
@@ -111,6 +114,56 @@ impl Engine {
             self.queue.submit([enc.finish()]);
         }
         true
+    }
+
+    /// Brings up to `max` stale mask thumbnails up to date (GPU downscale,
+    /// small readback). Returns true if any changed.
+    pub fn update_mask_thumbnails(&mut self, max: usize) -> bool {
+        if self.stroke.is_some() {
+            return false;
+        }
+        let (w, h) = (self.doc.width.max(1), self.doc.height.max(1));
+        let mut want: Vec<(LayerId, usize)> = Vec::new();
+        self.doc.for_each(&mut |l, _| {
+            if let Some(m) = &l.mask {
+                want.push((l.id, Arc::as_ptr(&m.tiles) as usize ^ ((m.default as usize) << 8) ^ ((w as usize) << 20) ^ h as usize));
+            }
+        });
+        let thumbs = self.thumbs.get_or_insert_with(|| Thumbs::new(&self.device));
+        thumbs.masks.retain(|id, _| want.iter().any(|(w, _)| w == id));
+        let stale: Vec<(LayerId, usize)> = want.into_iter().filter(|(id, k)| thumbs.masks.get(id).is_none_or(|e| e.0 != *k)).take(max).collect();
+        if stale.is_empty() {
+            return false;
+        }
+        let scale = THUMB as f64 / w.max(h) as f64;
+        let samples = ((1.0 / scale).ceil() as u32).clamp(1, 8);
+        for (id, key) in stale {
+            let Some(tile) = self.downscaled_mask(id, scale, samples) else { continue };
+            let raw = self.read_mask_tiles(&[tile]).pop().unwrap_or_default();
+            let n = THUMB.min(TILE_SIZE) as usize;
+            let ts = TILE_SIZE as usize;
+            let mut px = vec![0u8; n * n];
+            for y in 0..n {
+                if raw.len() >= (y + 1) * ts {
+                    px[y * n..(y + 1) * n].copy_from_slice(&raw[y * ts..y * ts + n]);
+                }
+            }
+            self.thumbs.as_mut().unwrap().masks.insert(id, (key, Arc::new(px)));
+        }
+        true
+    }
+
+    /// The used part of a thumbnail (the document's aspect ratio in THUMB × THUMB).
+    pub fn thumbnail_uv(&self) -> (f32, f32) {
+        let (w, h) = (self.doc.width.max(1) as f32, self.doc.height.max(1) as f32);
+        let k = THUMB as f32 / w.max(h);
+        (w * k / THUMB as f32, h * k / THUMB as f32)
+    }
+
+    /// A layer's mask thumbnail: content key and THUMB × THUMB grey values
+    /// (the used part has the size `thumbnail` reports).
+    pub fn mask_thumbnail(&self, layer: LayerId) -> Option<(usize, Arc<Vec<u8>>)> {
+        self.thumbs.as_ref()?.masks.get(&layer).cloned()
     }
 
     /// Thumbnail slot of a layer (if rendered) and the size of the image in

@@ -269,11 +269,17 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             model.layers[n - 2].clip = true;
         }
     }
-    while s.engine.update_thumbnails(8) {}
+    while s.engine.update_thumbnails(8) | s.engine.update_mask_thumbnails(8) {}
     for row in &mut model.layers {
         if let Some((slot, uv)) = s.engine.thumbnail(row.id) {
             let view = s.engine.thumbnail_view(slot);
             row.thumb = Some((gui.register_texture(&gpu.device, &view), uv));
+        }
+        if let Some((_, px)) = s.engine.mask_thumbnail(row.id) {
+            let n = panels::THUMB_PX;
+            let tex = gui.ctx.load_texture(format!("mask {}", row.id), egui::ColorImage::from_gray([n, n], &px), egui::TextureOptions::LINEAR);
+            row.mask_thumb = Some((tex.id(), s.engine.thumbnail_uv()));
+            std::mem::forget(tex); // keep the texture alive for the snapshot
         }
     }
     if let Ok(q) = std::env::var("IMAGINE_SNAPSHOT_SHORTCUTS") {
