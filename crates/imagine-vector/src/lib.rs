@@ -58,6 +58,9 @@ pub struct FontFace {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FontGroup {
     pub name: String,
+    pub kind: FontKind,
+    /// Has Latin letters (other scripts are hidden by default).
+    pub latin: bool,
     /// Sorted by weight, upright before italic.
     pub faces: Vec<FontFace>,
 }
@@ -78,6 +81,76 @@ impl FontGroup {
             k(a).cmp(&k(b))
         })
     }
+}
+
+/// Rough classification for filtering the font list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FontKind {
+    Sans,
+    Serif,
+    Mono,
+    Script,
+    Display,
+    Symbol,
+}
+
+impl FontKind {
+    pub const ALL: [Self; 6] = [Self::Sans, Self::Serif, Self::Mono, Self::Script, Self::Display, Self::Symbol];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sans => "Sans",
+            Self::Serif => "Serif",
+            Self::Mono => "Mono",
+            Self::Script => "Schreibschrift",
+            Self::Display => "Display",
+            Self::Symbol => "Symbole",
+        }
+    }
+}
+
+/// Classifies a font from its OS/2 family class, PANOSE and fixed pitch,
+/// with the name as a fallback.
+fn classify(name: &str, data: &[u8], index: u32) -> FontKind {
+    use read_fonts::{FontRef, TableProvider};
+    let n = name.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    if has(&["emoji", "symbol", "icon", "dingbat", "awesome", "material", "wingding", "webding"]) {
+        return FontKind::Symbol;
+    }
+    let font = FontRef::from_index(data, index).ok();
+    let mono = font.as_ref().and_then(|f| f.post().ok()).is_some_and(|p| p.is_fixed_pitch() != 0);
+    if mono || has(&["mono", "code", "courier", "console", "terminal"]) {
+        return FontKind::Mono;
+    }
+    let os2 = font.as_ref().and_then(|f| f.os2().ok());
+    let class = os2.as_ref().map_or(0, |o| (o.s_family_class() >> 8) as u8);
+    let panose: Vec<u8> = os2.as_ref().map(|o| o.panose_10().to_vec()).unwrap_or_default();
+    let p0 = panose.first().copied().unwrap_or(0);
+    let p1 = panose.get(1).copied().unwrap_or(0);
+    if class == 12 || p0 == 5 {
+        return FontKind::Symbol;
+    }
+    if class == 10 || p0 == 3 || has(&["script", "hand", "brush", "callig", "signature"]) {
+        return FontKind::Script;
+    }
+    if class == 9 || p0 == 4 || has(&["display", "decor", "poster", "stencil"]) {
+        return FontKind::Display;
+    }
+    if has(&["sans"]) || class == 8 || (p0 == 2 && (11..=15).contains(&p1)) {
+        return FontKind::Sans;
+    }
+    if has(&["serif"]) || (1..=7).contains(&class) || (p0 == 2 && (2..=10).contains(&p1)) {
+        return FontKind::Serif;
+    }
+    FontKind::Sans
+}
+
+/// Whether the font maps the basic Latin letters.
+fn has_latin(data: &[u8], index: u32) -> bool {
+    use read_fonts::{FontRef, TableProvider};
+    let Some(cmap) = FontRef::from_index(data, index).ok().and_then(|f| f.cmap().ok()) else { return true };
+    "AaZz".chars().all(|c| cmap.map_codepoint(c).is_some_and(|g| g.to_u32() != 0))
 }
 
 /// Style words that some fonts put into the family name.
@@ -113,12 +186,20 @@ fn weight_label(w: f32) -> &'static str {
 pub fn font_groups() -> Vec<FontGroup> {
     let mut f = fonts().lock().unwrap();
     let ids: Vec<_> = f.font.collection.family_ids().collect();
-    let mut groups: std::collections::BTreeMap<String, (String, Vec<FontFace>)> = Default::default();
+    // Lower-case base name → (display name, faces, (kind, has Latin)).
+    type Entry = (String, Vec<FontFace>, Option<(FontKind, bool)>);
+    let mut groups: std::collections::BTreeMap<String, Entry> = Default::default();
     for id in ids {
         let Some(fam) = f.font.collection.family(id) else { continue };
         let name = fam.name().to_string();
         let base = base_name(&name);
-        let entry = groups.entry(base.to_lowercase()).or_insert_with(|| (base.clone(), Vec::new()));
+        let entry = groups.entry(base.to_lowercase()).or_insert_with(|| (base.clone(), Vec::new(), None));
+        if entry.2.is_none()
+            && let Some(info) = fam.fonts().first()
+            && let Some(blob) = info.load(None)
+        {
+            entry.2 = Some((classify(&base, blob.data(), info.index()), has_latin(blob.data(), info.index())));
+        }
         for info in fam.fonts() {
             let weight = info.weight().value();
             let italic = !matches!(info.style(), parley::FontStyle::Normal);
@@ -132,10 +213,11 @@ pub fn font_groups() -> Vec<FontGroup> {
     }
     let mut out: Vec<FontGroup> = groups
         .into_values()
-        .filter(|(_, faces)| !faces.is_empty())
-        .map(|(name, mut faces)| {
+        .filter(|(_, faces, _)| !faces.is_empty())
+        .map(|(name, mut faces, kind)| {
             faces.sort_by(|a, b| a.weight.total_cmp(&b.weight).then(a.italic.cmp(&b.italic)));
-            FontGroup { name, faces }
+            let (kind, latin) = kind.unwrap_or((FontKind::Sans, true));
+            FontGroup { name, kind, latin, faces }
         })
         .collect();
     out.sort_by_key(|g| g.name.to_lowercase());

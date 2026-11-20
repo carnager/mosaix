@@ -442,6 +442,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
   - Berechnung auf der CPU aus dem Alpha der Ebene (nach Smart-Filtern bzw. Rastern): exakte euklidische Distanzfelder (Felzenszwalb–Huttenlocher), dreifacher Box-Blur ≈ Gauß, beleuchtetes Höhenfeld. Zwischengespeichert, bis sich Pixel oder Stil ändern; über 24 MP wird übersprungen.
   - Effekte außerhalb der Form (Schatten: Multiplizieren, Schein: Negativ multiplizieren, äußere Kontur) werden im Render-Dokument als eigene Ebenen direkt unter die Ebene gesetzt – mit deren Deckkraft, Maske und Sichtbarkeit – und wirken so wirklich auf das Darunterliegende; Effekte innen werden in die Ebene eingerechnet. Dateiformat v6. Agent: `layer_effects_set`.
 
+- **Schriftwahl:** Fenster mit Suche, Filter nach Art (Sans, Serif, Mono, Schreibschrift, Display, Symbole – aus OS/2-Familienklasse, PANOSE und Festbreite, Name als Rückfall), Favoriten (Stern) und zuletzt verwendet (beide in den Einstellungen gespeichert); Schriften ohne lateinische Buchstaben ausgeblendet (zuschaltbar). Jede Familie mit dem eigenen Text als Vorschau; Pfeiltasten/Klick zeigen die Schrift live im Bild (Engine-Vorschau, Dokument unverändert), Enter übernimmt, Esc stellt zurück. Familien mit Schnitten als einzelne Systemfamilien (Plex: „… Medm“, „… SmBld“) werden zu einer Familie mit Schnitt-Auswahl zusammengefasst (937 → 294).
+- Konturkanten der Ebenenstile subpixelgenau (Abstand zu Kantenpunkten aus Deckung und Gradient), keine Pixeltreppen mehr.
+
 **Noch offen in Phase 6:** Text direkt im Bild bearbeiten (Cursor, Auswahl), Zeichenstift/Pfade bearbeiten, Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
 
 ## Nächster konkreter Schritt

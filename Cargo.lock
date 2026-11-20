@@ -1143,6 +1143,7 @@ dependencies = [
  "imagine-core",
  "parley",
  "rayon",
+ "read-fonts 0.46.0",
  "vello_cpu 0.4.0",
 ]
 

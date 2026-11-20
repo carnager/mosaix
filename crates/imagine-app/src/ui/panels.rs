@@ -143,6 +143,8 @@ pub struct Model {
     pub active_effects: Option<Vec<imagine_core::style::Effect>>,
     /// Installed font families (loaded when first needed).
     pub fonts: std::sync::Arc<Vec<imagine_vector::FontGroup>>,
+    pub favourite_fonts: Vec<String>,
+    pub recent_fonts: Vec<String>,
     /// Shape tool: ellipse instead of rectangle.
     pub shape_ellipse: bool,
     /// Histogram of what is below the active adjustment (levels and curves).
@@ -158,6 +160,8 @@ pub enum Action {
     SmudgeStrength(f32),
     CloneOptions { all: bool, aligned: bool },
     SetVector { v: imagine_core::VectorLayer, done: bool },
+    FontUsed(String),
+    ToggleFavouriteFont(String),
     SetEffects { effects: Vec<imagine_core::style::Effect>, done: bool },
     ShapeEllipse(bool),
     WandTolerance(f32),
@@ -547,8 +551,15 @@ fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action
     egui::CollapsingHeader::new("Werkzeug").default_open(true).show(ui, |ui| tool_section(ui, m, out));
     if let Some(v) = &m.active_vector {
         egui::CollapsingHeader::new("Eigenschaften").id_salt("vector props").default_open(true).show(ui, |ui| {
-            if let Some((v, done)) = super::vector_ui::editor(ui, v, &m.fonts, m.color, &mut st.vec_editor) {
+            let e = super::vector_ui::editor(ui, v, &m.fonts, &m.favourite_fonts, &m.recent_fonts, m.color, &mut st.vec_editor);
+            if let Some((v, done)) = e.change {
                 out.push(Action::SetVector { v, done });
+            }
+            if let Some(f) = e.font_used {
+                out.push(Action::FontUsed(f));
+            }
+            if let Some(f) = e.toggle_favourite {
+                out.push(Action::ToggleFavouriteFont(f));
             }
         });
     }

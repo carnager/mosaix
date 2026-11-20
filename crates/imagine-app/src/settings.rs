@@ -89,6 +89,8 @@ pub struct Settings {
     pub recent: Vec<PathBuf>,
     pub last_dir: Option<PathBuf>,
     pub export: imagine_io::export::ExportOptions,
+    pub favourite_fonts: Vec<String>,
+    pub recent_fonts: Vec<String>,
 }
 
 impl Default for Settings {
@@ -102,6 +104,8 @@ impl Default for Settings {
             recent: Vec::new(),
             last_dir: None,
             export: Default::default(),
+            favourite_fonts: Vec::new(),
+            recent_fonts: Vec::new(),
         }
     }
 }

@@ -104,6 +104,8 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         active_vector: None,
         active_effects: Some(Vec::new()),
         fonts: Default::default(),
+        favourite_fonts: vec!["IBM Plex Sans".into()],
+        recent_fonts: vec!["IBM Plex Mono".into()],
         shape_ellipse: false,
         histogram: None,
     };
@@ -157,9 +159,10 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_VECTOR") {
         let v: imagine_core::VectorLayer = serde_json::from_str(&j)?;
         s.engine.add_vector(v.clone(), "Vektor");
-        model.active_vector = Some(v);
+        model.active_vector = Some(v.clone());
         if let Ok(q) = std::env::var("IMAGINE_SNAPSHOT_FONTS") {
-            state.vec_editor.open_font_list(&q);
+            let fonts = model.fonts.clone();
+            state.vec_editor.fonts.open_for(&v, &fonts, &q);
         }
         model.fonts = std::sync::Arc::new(imagine_vector::font_groups());
         model.layers = panels::layer_rows(s.engine.doc());

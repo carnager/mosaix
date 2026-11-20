@@ -1342,3 +1342,27 @@ fn layer_styles_stroke_and_shadow() {
     assert_eq!(at(&mut e, 96, 200), [1.0, 1.0, 1.0, 1.0]);
     assert_eq!(at(&mut e, 200, 318), [1.0, 1.0, 1.0, 1.0]);
 }
+
+#[test]
+fn vector_preview_does_not_touch_the_document() {
+    use imagine_core::VectorLayer;
+    use imagine_core::vector::{Geometry, ShapeSpec, VectorKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let v = VectorLayer::shape(ShapeSpec { geometry: Geometry::Rect { x: 10.0, y: 10.0, w: 100.0, h: 100.0, radius: 0.0 }, fill: Some(red), stroke: None });
+    let id = e.add_vector(v.clone(), "R").unwrap();
+    let mut blue = v.clone();
+    if let VectorKind::Shape(s) = &mut blue.kind {
+        s.fill = Some([0.0, 0.0, 1.0, 1.0]);
+    }
+    let steps = e.history_len().0;
+    e.set_vector_preview(Some((id, &blue))).unwrap();
+    e.flush();
+    assert_eq!(composite_px(&e, TileCoord::new(0, 0), 50, 50), [0.0, 0.0, 1.0, 1.0]);
+    assert_eq!(e.history_len().0, steps);
+    assert_eq!(e.doc().find(id).unwrap().vector(), Some(&v));
+    e.set_vector_preview(None).unwrap();
+    e.flush();
+    assert_eq!(composite_px(&e, TileCoord::new(0, 0), 50, 50), red);
+}

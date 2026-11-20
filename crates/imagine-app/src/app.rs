@@ -2344,6 +2344,8 @@ impl App {
             active_vector: active.and_then(|l| l.vector().cloned()),
             active_effects: active.filter(|l| l.is_pixels() || l.vector().is_some()).map(|l| l.effects.clone()),
             fonts: self.fonts.clone(),
+            favourite_fonts: self.settings.favourite_fonts.clone(),
+            recent_fonts: self.settings.recent_fonts.clone(),
             shape_ellipse: matches!(self.tool, Tool::Shape { ellipse: true }),
             histogram: None,
         })
@@ -2386,6 +2388,23 @@ impl App {
                 }
                 Action::SmudgeStrength(v) => self.smudge_strength = v,
                 Action::ShapeEllipse(ellipse) => self.tool = Tool::Shape { ellipse },
+                Action::FontUsed(name) => {
+                    let r = &mut self.settings.recent_fonts;
+                    r.retain(|f| f != &name);
+                    r.insert(0, name);
+                    r.truncate(8);
+                    self.store_settings();
+                }
+                Action::ToggleFavouriteFont(name) => {
+                    let f = &mut self.settings.favourite_fonts;
+                    if let Some(i) = f.iter().position(|x| x == &name) {
+                        f.remove(i);
+                    } else {
+                        f.push(name);
+                        f.sort_by_key(|n| n.to_lowercase());
+                    }
+                    self.store_settings();
+                }
                 Action::SetEffects { effects, done } => {
                     if let Some(e) = self.engine() {
                         let id = e.doc().active;
@@ -2700,6 +2719,10 @@ impl App {
             }
             let result = match &self.ui_state.filter_preview {
                 _ if s.engine.liquify_active() => s.engine.liquify_tick(),
+                None if self.ui_state.vec_editor.fonts.preview.is_some() => {
+                    let id = s.engine.doc().active;
+                    s.engine.set_vector_preview(self.ui_state.vec_editor.fonts.preview.as_ref().map(|v| (id, v)))
+                }
                 Some(ui::panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
                 Some(ui::panels::FilterPreview::Smart(i, f)) => s.engine.set_smart_filter_preview(Some((*i, f))),
                 None => s.engine.set_transform_preview(preview.map(|f| (f, Interp::Bicubic))),

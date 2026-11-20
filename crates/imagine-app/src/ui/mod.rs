@@ -7,6 +7,7 @@
 
 pub mod adjust_ui;
 pub mod vector_ui;
+pub mod font_ui;
 pub mod style_ui;
 pub mod files;
 pub mod icons;

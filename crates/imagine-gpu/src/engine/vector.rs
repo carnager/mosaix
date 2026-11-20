@@ -49,4 +49,19 @@ impl Engine {
         });
         Ok(())
     }
+
+    /// Shows a text or shape layer with another description without changing
+    /// the document (e.g. while browsing fonts). `None` ends it.
+    pub fn set_vector_preview(&mut self, p: Option<(LayerId, &VectorLayer)>) -> Result<(), &'static str> {
+        match p {
+            None => self.set_filter_preview(None),
+            Some((id, v)) => {
+                let kind = super::transform::PreviewKind::Vector(id, Box::new(v.clone()));
+                if self.preview.as_ref().is_some_and(|p| p.kind == kind) {
+                    return Ok(());
+                }
+                self.compute_preview(kind)
+            }
+        }
+    }
 }

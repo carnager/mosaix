@@ -201,6 +201,8 @@ pub(super) enum PreviewKind {
     SmartFilter(Option<usize>, imagine_core::Filter),
     /// Maintained by the liquify session itself.
     Liquify,
+    /// A vector layer shown with a different description (font picker).
+    Vector(imagine_core::LayerId, Box<imagine_core::VectorLayer>),
 }
 
 pub(super) struct Preview {
@@ -563,6 +565,12 @@ impl Engine {
             PreviewKind::Transform(fwd, interp) => self.transformed_doc(*fwd, *interp, true, Some(rect))?.1,
             PreviewKind::Filter(f) => self.filtered_doc(f, Some(rect))?,
             PreviewKind::Liquify => return Err("Verflüssigen-Vorschau wird nicht hier berechnet"),
+            PreviewKind::Vector(id, v) => {
+                let mut d = self.doc.clone();
+                let l = d.find_mut(*id).ok_or("Ebene existiert nicht")?;
+                l.content = imagine_core::doc::Content::Vector((**v).clone());
+                d
+            }
             PreviewKind::SmartFilter(index, f) => {
                 let layer = self.check_target(StrokeTarget::Pixels)?;
                 let mut d = self.doc.clone();
