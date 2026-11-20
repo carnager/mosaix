@@ -74,6 +74,7 @@ Layers (Photoshop shortcuts):
   New layer       Ctrl+Shift+N         Duplicate     Ctrl+J      Delete  Del (without selection)
   Select          Alt+[ / Alt+]        Move          Ctrl+[ / Ctrl+]
   Group           Ctrl+G               Ungroup       Ctrl+Shift+G
+  Clipping mask   Ctrl+Alt+G (clip to the layer below)
   Opacity         Shift + digit        Blend mode    Shift + Plus/Minus
   On/Off          Ctrl+,               Blend space   F7 (sRGB ↔ linear)
 

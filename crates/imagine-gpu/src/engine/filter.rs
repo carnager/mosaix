@@ -556,6 +556,7 @@ impl Engine {
                                 fx.visible = l.visible;
                                 fx.mask = l.mask.clone();
                                 fx.mask_enabled = l.mask_enabled;
+                                fx.clip = l.clip;
                                 ls.push(fx);
                             }
                         }

@@ -97,6 +97,8 @@ pub enum Command {
         opacity: Option<f32>,
         blend: Option<String>,
         visible: Option<bool>,
+        /// Clipping mask: show only where the layers below have pixels.
+        clip: Option<bool>,
     },
     LayerSelect {
         layer: LayerId,
@@ -714,6 +716,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             opacity,
             blend,
             visible,
+            clip,
         } => {
             let id = target_layer(s, layer)?;
             let blend = blend
@@ -737,6 +740,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 }
                 if let Some(b) = blend {
                     l.blend = b;
+                }
+                if let Some(c) = clip {
+                    l.clip = c;
                 }
                 if let Some(v) = visible {
                     l.visible = v;

@@ -324,6 +324,7 @@ fn load_psd(
         l.opacity = i.opacity;
         l.blend = i.blend;
         l.visible = i.visible;
+        l.clip = i.clipped;
     }
     fn build(
         nodes: Vec<Node>,

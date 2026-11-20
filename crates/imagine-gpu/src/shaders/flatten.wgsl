@@ -6,7 +6,7 @@ const NONE: u32 = 0xffffffffu;
 const MAX_DEPTH: u32 = 7u;
 
 struct Op {
-    kind: u32,           // 0 layer, 1 push group, 2 pop group, 3 adjustment (slot = params, blend = kind)
+    kind: u32,           // 0 layer, 1 push group, 2 pop group, 3 adjustment (slot = params, blend = kind), 4/5 clipped layer/pop
     slot: u32,           // packed chunk<<16 | layer, or NONE
     blend: u32,
     opacity: f32,
@@ -57,6 +57,14 @@ fn load_mask(slot: u32, c: f32, p: vec2<i32>) -> f32 {
     return textureLoad(mask_tiles[slot >> 16u], p, slot & 0xffffu, 0).r;
 }
 
+/// Clipping: the result keeps the coverage of what was below (source-atop).
+fn atop(below: vec4<f32>, c: vec4<f32>) -> vec4<f32> {
+    if c.a <= 0.0 {
+        return below;
+    }
+    return c * (below.a / c.a);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let job = jobs[params.base + gid.z];
@@ -66,7 +74,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     stack[0] = vec4<f32>(0.0);
     for (var i = 0u; i < job.op_count; i++) {
         let op = ops[job.op_start + i];
-        if op.kind == 0u {
+        if op.kind == 0u || op.kind == 4u {
             var src = load_slot(op.slot, p);
             var m = load_mask(op.mask_slot, op.mask_const, p);
             if op.stroke_mode != 0u {
@@ -81,7 +89,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     default: { m = m * (1.0 - s.a); }
                 }
             }
-            stack[sp] = composite(stack[sp], src * (m * op.opacity), op.blend, params.blend_space);
+            let c = composite(stack[sp], src * (m * op.opacity), op.blend, params.blend_space);
+            stack[sp] = select(c, atop(stack[sp], c), op.kind == 4u);
         } else if op.kind == 3u {
             var m = load_mask(op.mask_slot, op.mask_const, p);
             if op.stroke_mode >= 3u {
@@ -113,7 +122,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         } else {
             let child = stack[sp] * (load_mask(op.mask_slot, op.mask_const, p) * op.opacity);
             sp = select(sp - 1u, 0u, sp == 0u);
-            stack[sp] = composite(stack[sp], child, op.blend, params.blend_space);
+            let c = composite(stack[sp], child, op.blend, params.blend_space);
+            stack[sp] = select(c, atop(stack[sp], c), op.kind == 5u);
         }
     }
     textureStore(dst, p, job.dst_layer, stack[0]);

@@ -2488,6 +2488,8 @@ impl App {
             }),
             Keysym::j if ctrl => self.edit(tr("Duplicate Layer"), |d| d.duplicate_active().is_some()),
             Keysym::g | Keysym::G if ctrl && shift => self.edit(tr("Ungroup Layers"), |d| d.ungroup_active()),
+            // Ctrl+Alt+G: clipping mask on/off (clips to the layer below).
+            Keysym::g if ctrl && alt => self.edit(tr("Clipping Mask"), |d| d.toggle_clip_active()),
             Keysym::g if ctrl => self.edit(tr("Group Layers"), |d| d.group_active().is_some()),
             // Shift+Rücktaste: content-aware fill (Strg: learn from all layers).
             Keysym::BackSpace if shift && !alt => self.content_fill(ctrl),

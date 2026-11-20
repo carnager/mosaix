@@ -94,6 +94,8 @@ struct LayerEntry {
     filters: Vec<imagine_core::SmartFilter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     effects: Vec<imagine_core::style::Effect>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    clip: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -213,6 +215,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                 mask: l.mask.as_ref().map(|m| mask_to_entry(m, l.mask_enabled)),
                 filters: l.filters.clone(),
                 effects: l.effects.clone(),
+                clip: l.clip,
             })
             .collect()
     }
@@ -280,6 +283,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     mask_enabled,
                     filters: e.filters,
                     effects: e.effects,
+                    clip: e.clip,
                 })
             })
             .collect()

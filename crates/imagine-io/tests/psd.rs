@@ -102,6 +102,7 @@ mod roundtrip {
             opacity: 1.0,
             blend: BlendMode::Normal,
             visible: true,
+            clip: false,
             tiles,
             mask: None,
         }
@@ -121,6 +122,7 @@ mod roundtrip {
         );
         red.blend = BlendMode::Multiply;
         red.opacity = 0.5;
+        red.clip = true;
         let mut green = layer(
             "Green",
             vec![(
@@ -172,6 +174,7 @@ mod roundtrip {
             panic!()
         };
         assert_eq!(info.name, "Rot Ä");
+        assert!(info.clipped, "clipping mask survives");
         assert_eq!(info.blend, BlendMode::Multiply);
         assert!((info.opacity - 0.5).abs() < 0.01);
         assert_eq!((rect.x, rect.y, rect.w, rect.h), (10, 20, 50, 30));

@@ -7,7 +7,7 @@
 //! as a fallback for files without layers.
 //!
 //! Not (yet) carried over: layer styles, adjustment and fill layers,
-//! clipping masks, smart objects and editable text (their pixels are kept).
+//! smart objects and editable text (their pixels are kept).
 
 use anyhow::{Context, Result, bail, ensure};
 use imagine_core::{BlendMode, tr};
@@ -736,7 +736,6 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     }
     // Records (bottom → top) → tree.
     let mut stack: Vec<Vec<Node>> = vec![Vec::new()];
-    let mut clipped = 0;
     let mut specials = std::collections::BTreeMap::<&str, usize>::new();
     let mut unknown_blend = 0;
     let mut passthrough = 0;
@@ -769,9 +768,6 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             mask,
             special: r.special,
         };
-        if info.clipped && r.divider.is_none() {
-            clipped += 1;
-        }
         if let Some(s) = r.special {
             *specials.entry(s).or_default() += 1;
         }
@@ -821,12 +817,6 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         stack.last_mut().unwrap().extend(inner);
     }
     let layers = stack.pop().unwrap();
-    if clipped > 0 {
-        warnings.push(imagine_core::tr!(
-            "{n} clipping masks are not supported yet: those layers are shown unclipped",
-            n = clipped
-        ));
-    }
     for (what, n) in specials {
         warnings.push(imagine_core::tr!(
             "{n} × {what}: only the pixels were taken over",
@@ -877,6 +867,7 @@ pub struct WLayer {
     pub opacity: f32,
     pub blend: BlendMode,
     pub visible: bool,
+    pub clip: bool,
     pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
     pub mask: Option<WMask>,
 }
@@ -1173,7 +1164,7 @@ fn write_record(o: &mut Out, l: &WLayer, e: &Encoded, divider: Option<u32>) {
     // imagine groups are isolated, i.e. Photoshop's "Normal" group mode.
     o.b.extend(blend_key(l.blend));
     o.u8((l.opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
-    o.u8(0); // clipping
+    o.u8(l.clip as u8); // clipping: 0 = base, 1 = clipped
     o.u8(if l.visible { 0 } else { 2 } | 8); // bit 3: bit 4 is meaningful
     o.u8(0);
     let extra = o.open(false);
@@ -1266,6 +1257,7 @@ pub fn write(
         opacity: 1.0,
         blend: BlendMode::Normal,
         visible: true,
+        clip: false,
         tiles: Vec::new(),
         mask: None,
     };
@@ -1281,6 +1273,7 @@ pub fn write(
                     opacity: l.opacity,
                     blend: l.blend,
                     visible: l.visible,
+                    clip: false,
                     tiles: Vec::new(),
                     mask: l.mask.clone(),
                 },
@@ -1343,6 +1336,7 @@ pub fn write(
         opacity: 1.0,
         blend: BlendMode::Normal,
         visible: true,
+        clip: false,
         tiles: composite.to_vec(),
         mask: None,
     };

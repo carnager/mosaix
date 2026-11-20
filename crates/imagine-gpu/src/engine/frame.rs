@@ -79,6 +79,7 @@ impl FlattenBatch {
                     opacity,
                     blend,
                     mask,
+                    clip,
                 } => {
                     let (mask_slot, mask_const) = mask_slot(mask);
                     let st = stroke.filter(|s| s.0 == id);
@@ -90,7 +91,7 @@ impl FlattenBatch {
                         (StrokeTarget::Mask, true) => 4,
                     });
                     GpuOp {
-                        kind: 0,
+                        kind: if clip { 4 } else { 0 },
                         slot: tile.map_or(NONE, |t| t.slot().packed()),
                         blend: blend as u32,
                         opacity,
@@ -165,11 +166,12 @@ impl FlattenBatch {
                     opacity,
                     blend,
                     mask,
+                    clip,
                 } => {
                     depth = depth.saturating_sub(1);
                     let (mask_slot, mask_const) = mask_slot(mask);
                     GpuOp {
-                        kind: 2,
+                        kind: if clip { 5 } else { 2 },
                         blend: blend as u32,
                         opacity,
                         mask_slot,

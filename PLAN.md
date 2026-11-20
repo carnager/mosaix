@@ -459,7 +459,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **PSD/PSB-Export** (Exportieren unter … `.psd`/`.psb`, auch für Agenten): Ebenen, Gruppen (isoliert = „Normal“), Masken, Deckkraft, Füllmethoden, Sichtbarkeit, Unicode-Namen; Text, Formen, Smartfilter und Ebenenstile werden wie angezeigt gerastert (Effekte als eigene Ebenen „Name – Effekt“); 8/16 Bit, RLE; eingebettetes ICC-Profil des gewählten Farbraums; zusammengefügtes Bild; PSB automatisch über 30 000 px. Einstellungsebenen fehlen noch als Ebene (nur im zusammengefügten Bild). Geprüft: Rundreise pixelgleich, GIMP 3 und ImageMagick lesen die Dateien.
 
-**Noch offen in Phase 7:** Einstellungsebenen und Text als PSD-Ebenen, Schnittmasken, „Hindurchwirken“-Gruppen, JPEG XL/AVIF, ABR-Pinsel.
+- **Schnittmasken** (Strg+Alt+G, Ebene-Menü, Agenten `layer_set clip`): eine Ebene zeigt sich nur, wo die Basisebene darunter Pixel hat; Basis plus geschnittene Ebenen werden als eigene Gruppe berechnet (geschnittene Ebenen „atop“), Deckkraft und Füllmethode der Basis gelten für die Gruppe, ausgeblendete Basis blendet alle aus. Auch Gruppen, Text, Formen und Einstellungsebenen können Basis oder geschnitten sein; Effektebenen erben das. PSD-Import und -Export übernehmen Schnittmasken, `.imagine` speichert sie.
+
+**Noch offen in Phase 7:** Einstellungsebenen und Text als PSD-Ebenen, „Hindurchwirken“-Gruppen, JPEG XL/AVIF, ABR-Pinsel.
 
 ## Nächster konkreter Schritt
 

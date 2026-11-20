@@ -55,7 +55,7 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 | Zauberstab | Klick wählt ähnliche Farben, Umschalt/Alt kombinieren, `[` `]` Toleranz, `W` nochmal: zusammenhängend ↔ überall |
 | Zuschneiden | `C`, Rahmen ziehen/anpassen, über den Rand hinaus vergrößert die Arbeitsfläche, Enter / Esc. Nichts wird gelöscht |
 | Füllen & Löschen | Alt+Rücktaste füllt Auswahl (bzw. Ebene), `Entf` oder Rücktaste löscht ausgewählte Pixel |
-| Ebenen | Strg+Umschalt+`N` neu, Strg+`J` duplizieren, `Entf` (ohne Auswahl) löschen, Alt+`[` `]` auswählen, Strg+`[` `]` verschieben |
+| Ebenen | Strg+Umschalt+`N` neu, Strg+`J` duplizieren, `Entf` (ohne Auswahl) löschen, Alt+`[` `]` auswählen, Strg+`[` `]` verschieben, Strg+Alt+`G` Schnittmaske (an die Ebene darunter; Pfeil in der Ebenenliste, Deckkraft/Füllmethode der Basisebene gelten für die Gruppe) |
 | Ebenen-Eigenschaften | Umschalt+Ziffer Deckkraft, Umschalt+`+`/`-` Füllmethode, Strg+`,` ein/aus, Strg+`G` gruppieren, Strg+Umschalt+`G` aufheben, `F7` Blend-Raum |
 | Ebenenmasken | Strg+Umschalt+`M` neu (aus Auswahl), `\` Maske bemalen ↔ Pixel, Strg+Alt+`M` ein/aus, Strg+Alt+Umschalt+`M` anwenden |
 | Verlauf & Datei | Strg+`Z` / Strg+Umschalt+`Z` / Strg+`Y`, Strg+`S` speichern (im Hintergrund), Strg+Umschalt+`E` exportieren (im Hintergrund), Strg+Alt+Umschalt+`E` exportieren unter (Farbraum, 16 Bit, JPEG-Qualität) |

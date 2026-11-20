@@ -260,6 +260,13 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             model.histogram = Some(s.engine.histogram(Some(model.active)));
         }
     }
+    if std::env::var_os("IMAGINE_SNAPSHOT_CLIP").is_some() {
+        // Clip the second-lowest layer to the one below (row display only).
+        let n = model.layers.len();
+        if n >= 2 {
+            model.layers[n - 2].clip = true;
+        }
+    }
     while s.engine.update_thumbnails(8) {}
     for row in &mut model.layers {
         if let Some((slot, uv)) = s.engine.thumbnail(row.id) {

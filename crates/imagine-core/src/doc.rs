@@ -110,6 +110,9 @@ pub struct Layer<T> {
     pub filters: Vec<SmartFilter>,
     /// Layer styles (stroke, shadows, glows, bevel …).
     pub effects: Vec<crate::style::Effect>,
+    /// Clipping mask: shown only where the layers below it (down to the
+    /// first unclipped "base" layer) have pixels.
+    pub clip: bool,
 }
 
 impl<T> Layer<T> {
@@ -165,6 +168,8 @@ pub enum Op<'a, T> {
         opacity: f32,
         blend: BlendMode,
         mask: Option<MaskRef<'a, T>>,
+        /// Clipped: covers only where something is already drawn (source-atop).
+        clip: bool,
     },
     /// Start an isolated group.
     Push,
@@ -173,6 +178,7 @@ pub enum Op<'a, T> {
         opacity: f32,
         blend: BlendMode,
         mask: Option<MaskRef<'a, T>>,
+        clip: bool,
     },
     /// Apply an adjustment to what is below (mixed by opacity × mask).
     Adjust {
@@ -487,6 +493,7 @@ impl<T: Clone> Document<T> {
             mask_enabled: true,
             filters: Vec::new(),
             effects: Vec::new(),
+            clip: false,
         };
         list.insert(i, group);
         self.active = gid;
@@ -494,6 +501,32 @@ impl<T: Clone> Document<T> {
     }
 
     /// Dissolves the active group into its parent.
+    /// Clips the active layer to the one below it, or releases it. False if
+    /// it is the lowest layer of its group (nothing to clip to).
+    pub fn toggle_clip_active(&mut self) -> bool {
+        let id = self.active;
+        fn find<T>(ls: &mut [Layer<T>], id: LayerId) -> Option<(&mut [Layer<T>], usize)> {
+            if let Some(i) = ls.iter().position(|l| l.id == id) {
+                return Some((ls, i));
+            }
+            for l in ls.iter_mut() {
+                if let Content::Group(c) = &mut l.content
+                    && let Some(r) = find(c, id)
+                {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        match find(&mut self.layers, id) {
+            Some((ls, i)) if i > 0 || ls[i].clip => {
+                ls[i].clip = !ls[i].clip;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn ungroup_active(&mut self) -> bool {
         let Some((list, i)) = self.locate_mut(self.active) else {
             return false;
@@ -576,63 +609,114 @@ impl<T: Clone> Document<T> {
         fn mask<T>(l: &Layer<T>, c: TileCoord) -> Option<MaskRef<'_, T>> {
             l.mask_at(c).filter(|m| !matches!(m, MaskRef::Solid(255)))
         }
+        /// One layer's ops. `look`: opacity and blend to use (a clipping
+        /// base is drawn plainly, its own values apply to the clipping group).
+        fn emit<'a, T>(
+            l: &'a Layer<T>,
+            c: TileCoord,
+            force: Option<LayerId>,
+            out: &mut Vec<Op<'a, T>>,
+            (opacity, blend): (f32, BlendMode),
+            clip: bool,
+        ) {
+            let m = mask(l, c);
+            // Fully masked out – unless a stroke is being painted into this layer (or its mask).
+            if matches!(m, Some(MaskRef::Solid(0))) && force != Some(l.id) {
+                return;
+            }
+            match &l.content {
+                Content::Pixels(tiles) => {
+                    let tile = tiles.get(&c);
+                    if tile.is_some() || force == Some(l.id) {
+                        out.push(Op::Layer {
+                            id: l.id,
+                            tile,
+                            opacity,
+                            blend,
+                            mask: m,
+                            clip,
+                        });
+                    }
+                }
+                Content::Vector(_) => {}
+                Content::Adjustment(adj) => {
+                    // Nothing below in this group: nothing to adjust.
+                    if !out.is_empty() && !matches!(out.last(), Some(Op::Push)) {
+                        out.push(Op::Adjust {
+                            id: l.id,
+                            adj,
+                            opacity,
+                            blend,
+                            mask: m,
+                        });
+                    }
+                }
+                Content::Group(children) => {
+                    let start = out.len();
+                    out.push(Op::Push);
+                    walk(children, c, force, out);
+                    if out.len() == start + 1 {
+                        out.pop(); // empty group
+                    } else {
+                        out.push(Op::Pop {
+                            opacity,
+                            blend,
+                            mask: m,
+                            clip,
+                        });
+                    }
+                }
+            }
+        }
+        fn shown<T>(l: &Layer<T>) -> bool {
+            l.visible && l.opacity > 0.0
+        }
         fn walk<'a, T>(
             ls: &'a [Layer<T>],
             c: TileCoord,
             force: Option<LayerId>,
             out: &mut Vec<Op<'a, T>>,
         ) {
-            for l in ls {
-                if !l.visible || l.opacity <= 0.0 {
+            let mut i = 0;
+            while i < ls.len() {
+                let base = &ls[i];
+                // The clipped layers resting on this one.
+                let mut j = i + 1;
+                while j < ls.len() && ls[j].clip {
+                    j += 1;
+                }
+                let clipped = &ls[i + 1..j];
+                if !shown(base) {
+                    // A hidden base hides its clipping group too.
+                    i = j;
                     continue;
                 }
-                let m = mask(l, c);
-                // Fully masked out – unless a stroke is being painted into this layer (or its mask).
-                if matches!(m, Some(MaskRef::Solid(0))) && force != Some(l.id) {
+                if clipped.iter().all(|l| !shown(l)) {
+                    emit(base, c, force, out, (base.opacity, base.blend), false);
+                    i = j;
                     continue;
                 }
-                let opacity = l.opacity;
-                match &l.content {
-                    Content::Pixels(tiles) => {
-                        let tile = tiles.get(&c);
-                        if tile.is_some() || force == Some(l.id) {
-                            out.push(Op::Layer {
-                                id: l.id,
-                                tile,
-                                opacity,
-                                blend: l.blend,
-                                mask: m,
-                            });
-                        }
-                    }
-                    Content::Vector(_) => {}
-                    Content::Adjustment(adj) => {
-                        // Nothing below in this group: nothing to adjust.
-                        if !out.is_empty() && !matches!(out.last(), Some(Op::Push)) {
-                            out.push(Op::Adjust {
-                                id: l.id,
-                                adj,
-                                opacity,
-                                blend: l.blend,
-                                mask: m,
-                            });
-                        }
-                    }
-                    Content::Group(children) => {
-                        let start = out.len();
-                        out.push(Op::Push);
-                        walk(children, c, force, out);
-                        if out.len() == start + 1 {
-                            out.pop(); // empty group
-                        } else {
-                            out.push(Op::Pop {
-                                opacity,
-                                blend: l.blend,
-                                mask: m,
-                            });
-                        }
-                    }
+                // Clipping group: base plainly, clipped layers atop, then the
+                // base's opacity and blend mode for the whole group.
+                let start = out.len();
+                out.push(Op::Push);
+                emit(base, c, force, out, (1.0, BlendMode::Normal), false);
+                if out.len() == start + 1 {
+                    // The base has nothing here: neither do the clipped layers.
+                    out.pop();
+                    i = j;
+                    continue;
                 }
+                for l in clipped.iter().filter(|l| shown(l)) {
+                    emit(l, c, force, out, (l.opacity, l.blend), true);
+                }
+                out.push(Op::Pop {
+                    opacity: base.opacity,
+                    blend: base.blend,
+                    mask: None,
+                    clip: false,
+                });
+                i = j;
             }
         }
         let mut out = Vec::new();
@@ -685,6 +769,7 @@ impl<T: Clone> Document<T> {
                     mask_enabled: l.mask_enabled,
                     filters: l.filters.clone(),
                     effects: l.effects.clone(),
+                    clip: l.clip,
                 })
                 .collect()
         }
@@ -718,7 +803,8 @@ impl<T: Clone> Document<T> {
                 (Some(_), false) => format!(" [{}]", crate::tr("Mask off")),
                 (None, _) => String::new(),
             };
-            let name = format!("{}{icon}{}{mask}", "  ".repeat(depth), l.name);
+            let clip = if l.clip { "↳ " } else { "" };
+            let name = format!("{}{clip}{icon}{}{mask}", "  ".repeat(depth), l.name);
             s += &format!(
                 " {marker} {vis} {name:<28} {:<26} {:>3} %\n",
                 l.blend.name(),
@@ -742,6 +828,7 @@ impl<T> Layer<T> {
             mask_enabled: true,
             filters: Vec::new(),
             effects: Vec::new(),
+            clip: false,
         }
     }
 
@@ -766,8 +853,10 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 opacity,
                 blend,
                 mask,
+                clip,
             } => {
                 0u8.hash(h);
+                clip.hash(h);
                 id.hash(h);
                 tile.map(&key).hash(h);
                 opacity.to_bits().hash(h);
@@ -794,8 +883,10 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 opacity,
                 blend,
                 mask,
+                clip,
             } => {
                 2u8.hash(h);
+                clip.hash(h);
                 opacity.to_bits().hash(h);
                 (*blend as u32).hash(h);
                 hash_mask(mask, &key, h);

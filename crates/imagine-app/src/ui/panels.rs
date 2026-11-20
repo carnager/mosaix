@@ -69,6 +69,8 @@ pub struct LayerRow {
     pub vector: Option<bool>,
     /// Has layer styles switched on.
     pub fx: bool,
+    /// Clipped to the layer below (clipping mask).
+    pub clip: bool,
 }
 
 /// Caret, selection and frame of the text edited on the canvas, as quads
@@ -1615,6 +1617,22 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                             out.push(Action::ToggleVisible(row.id));
                         }
                         let mut x = eye.max.x + 6.0 + row.depth as f32 * 14.0;
+                        if row.clip {
+                            // Photoshop's clipping arrow: indented, pointing down to the base.
+                            let ax = x + 6.0;
+                            let (top, mid) = (rect.min.y + 9.0, rect.center().y + 6.0);
+                            let s = Stroke::new(1.4, Color32::from_gray(190));
+                            painter.line_segment([egui::pos2(ax, top), egui::pos2(ax, mid)], s);
+                            painter.line_segment(
+                                [egui::pos2(ax - 3.5, mid - 4.0), egui::pos2(ax, mid)],
+                                s,
+                            );
+                            painter.line_segment(
+                                [egui::pos2(ax + 3.5, mid - 4.0), egui::pos2(ax, mid)],
+                                s,
+                            );
+                            x += 16.0;
+                        }
                         // Adjustment icon, or thumbnail on a checkerboard.
                         if row.adjustment {
                             let t = egui::Rect::from_min_size(
@@ -2072,6 +2090,7 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
                     .vector()
                     .map(|v| matches!(v.kind, imagine_core::vector::VectorKind::Text(_))),
                 fx: l.effects.iter().any(|e| e.enabled),
+                clip: l.clip,
             })
         })
         .collect()

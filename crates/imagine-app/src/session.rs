@@ -507,6 +507,7 @@ impl PsdLayers {
                     opacity: l.opacity,
                     blend: l.blend,
                     visible: l.visible,
+                    clip: l.clip,
                     tiles: Vec::new(),
                     mask,
                 };

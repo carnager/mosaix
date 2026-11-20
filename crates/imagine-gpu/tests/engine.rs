@@ -2602,3 +2602,57 @@ fn sample_average_point_and_area() {
     );
     assert!(e.sample_average(-1, 0, 0, SampleFrom::Layer).is_err());
 }
+
+#[test]
+fn clipping_mask_limits_to_base_and_uses_base_opacity() {
+    let Some(g) = gpu() else { return };
+    let mut doc = Document::<()>::new(512, 256);
+    doc.layers[0].name = "base".into();
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &doc);
+    // Base: red square 50..100.
+    e.select_shape(
+        &Shape::Rect {
+            x: 50.0,
+            y: 50.0,
+            w: 50.0,
+            h: 50.0,
+        },
+        CombineOp::Replace,
+        "A",
+    )
+    .unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "R")
+        .unwrap();
+    e.deselect("x").unwrap();
+    let base = e.doc().active;
+    // Clipped: green everywhere.
+    e.edit("new", |d| {
+        d.add_pixel_layer();
+        true
+    });
+    e.fill(StrokeTarget::Pixels, [0.0, 1.0, 0.0, 1.0], 1.0, "G")
+        .unwrap();
+    let top = e.doc().active;
+    e.edit("clip", |d| {
+        d.find_mut(top).unwrap().clip = true;
+        d.find_mut(base).unwrap().opacity = 0.5;
+        true
+    });
+    e.flush();
+    let t = TileCoord::new(0, 0);
+    let inside = composite_px(&e, t, 70, 70);
+    let outside = composite_px(&e, t, 20, 20);
+    assert!(
+        (inside[1] - 0.5).abs() < 0.02 && inside[0] < 0.02,
+        "green at half opacity: {inside:?}"
+    );
+    assert!((inside[3] - 0.5).abs() < 0.02, "{inside:?}");
+    assert!(outside[3] < 0.01, "nothing outside the base: {outside:?}");
+    // Unclipping shows the green everywhere again.
+    e.edit("unclip", |d| {
+        d.find_mut(top).unwrap().clip = false;
+        true
+    });
+    e.flush();
+    assert!(composite_px(&e, t, 20, 20)[1] > 0.99);
+}
