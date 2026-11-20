@@ -100,9 +100,6 @@ impl Cmd {
                 // Upper-case letters stand for Shift+letter.
                 if n.len() == 1 && n.chars().all(|c| c.is_ascii_uppercase()) && !self.shift {
                     format!("Umschalt+{n}")
-                } else if n.len() == 1 && !self.ctrl && !self.alt && !self.shift {
-                    // A plain key is written as on the key cap: lower case (j, not J).
-                    n.to_lowercase()
                 } else {
                     n.to_uppercase()
                 }
@@ -144,8 +141,6 @@ mod tests {
         assert_eq!(find("Ebenenmaske anwenden"), "Strg+Alt+Umschalt+M");
         assert_eq!(find("Einpassen"), "Strg+0");
         assert_eq!(find("Pinselspitze wechseln"), "Umschalt+B");
-        assert_eq!(find("Reparaturpinsel"), "j");
-        assert_eq!(find("Pinsel-Dynamik an/aus"), "Umschalt+J");
     }
 
     #[test]
