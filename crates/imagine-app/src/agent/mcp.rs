@@ -231,6 +231,31 @@ pub fn tools() -> Vec<Value> {
              With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
              listed under smart_filters in document_info and editable with smart_filter_set.",
             json!({ "layer": layer_param(), "filter": { "type": "object" }, "smart": { "type": "boolean" } }), &["filter"], false),
+        tool("text_add",
+            "Add a text layer (stays editable; system fonts). (x, y) is the top-left of the text box; '\\n' starts a new line; \
+             width wraps lines (paragraph text). Returns the layer id and its bounds.",
+            json!({ "text": { "type": "string" }, "x": { "type": "number" }, "y": { "type": "number" },
+                    "size": { "type": "number", "description": "px" }, "font": { "type": "string", "description": "family, or sans-serif / serif / monospace" },
+                    "color": color_param("Text colour (default black)"), "weight": { "type": "number", "description": "100–900, 700 = bold" },
+                    "italic": { "type": "boolean" }, "align": { "type": "string", "enum": ["left", "center", "right", "justify"] },
+                    "line_height": { "type": "number", "description": "multiple of the size (1.2)" }, "letter_spacing": { "type": "number" },
+                    "width": { "type": "number" }, "name": { "type": "string" } }), &["text", "x", "y", "size"], false),
+        tool("shape_add",
+            "Add a shape layer (stays sharp and editable): rect / ellipse (x, y, width, height; rect radius), polygon (points), \
+             path (SVG path data d). Fill defaults to black; no_fill for outlines; stroke_color / stroke_width for a contour.",
+            json!({ "shape": { "type": "string", "enum": ["rect", "ellipse", "polygon", "path"] },
+                    "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" },
+                    "radius": { "type": "number" }, "points": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
+                    "d": { "type": "string" }, "fill": color_param("Fill colour"), "no_fill": { "type": "boolean" },
+                    "stroke_color": color_param("Contour colour"), "stroke_width": { "type": "number" }, "name": { "type": "string" } }),
+            &["shape"], false),
+        tool("vector_set",
+            "Change a text or shape layer: `changes` is merged into its description as shown by document_info \
+             (e.g. {\"text\": \"New\", \"size\": 64, \"color\": \"#ff0000\"} or {\"fill\": \"#00ff00\", \"radius\": 12}; \
+             \"transform\": [a, b, c, d, e, f] places it).",
+            json!({ "layer": layer_param(), "changes": { "type": "object" } }), &["changes"], false),
+        tool("layer_rasterize", "Turn a text or shape layer into ordinary pixels (needed before painting or pixel filters).",
+            json!({ "layer": layer_param() }), &[], false),
         tool("content_aware_fill",
             "Fill the selection on a pixel layer with texture from around it so the hole continues the surroundings \
              (remove objects, extend backgrounds). Select a bit more than the object. all_layers: learn from the \
@@ -438,7 +463,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
         for t in tools() {
@@ -456,6 +481,8 @@ mod tests {
                     let v = match (prop.as_str(), schema["type"].as_str()) {
                         ("color_space", _) => json!("display_p3"),
                         ("clone_offset", _) => json!([10, -5]),
+                        ("align", _) => json!("center"),
+                        ("fill" | "stroke_color", _) => json!("#123456"),
                         (p, _) if p.starts_with("color") => json!("#123456"),
                         ("target", _) => json!("pixels"),
                         ("mode", _) => json!("add"),

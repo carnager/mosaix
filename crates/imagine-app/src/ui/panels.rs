@@ -8,7 +8,7 @@ use super::icons::{self, Icon};
 use super::palette::{self, Cmd, COMMANDS, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut).
-pub const TOOLS: [(ToolId, &str, &str); 14] = [
+pub const TOOLS: [(ToolId, &str, &str); 16] = [
     (ToolId::Move, "Verschieben", "V"),
     (ToolId::Marquee, "Auswahlrechteck", "M"),
     (ToolId::Ellipse, "Auswahlellipse", "M"),
@@ -21,6 +21,8 @@ pub const TOOLS: [(ToolId, &str, &str); 14] = [
     (ToolId::SpotHeal, "Bereichsreparatur", "J"),
     (ToolId::Heal, "Reparaturpinsel", "J"),
     (ToolId::Eraser, "Radierer", "E"),
+    (ToolId::Text, "Text", "T"),
+    (ToolId::Shape, "Form (Rechteck / Ellipse)", "Umschalt+U"),
     (ToolId::Gradient, "Verlauf linear", "G"),
     (ToolId::Radial, "Verlauf radial", "G"),
 ];
@@ -38,6 +40,8 @@ pub enum ToolId {
     Clone,
     Heal,
     SpotHeal,
+    Text,
+    Shape,
     Eraser,
     Gradient,
     Radial,
@@ -56,6 +60,8 @@ pub struct LayerRow {
     pub thumb: Option<(egui::TextureId, (f32, f32))>,
     pub adjustment: bool,
     pub filters: Vec<imagine_core::SmartFilter>,
+    /// Text (true) or shape (false) layer.
+    pub vector: Option<bool>,
 }
 
 /// The filter dialog: a new filter (destructive or smart) or an existing
@@ -128,6 +134,11 @@ pub struct Model {
     pub busy: bool,
     pub recent: Vec<std::path::PathBuf>,
     pub active_adjustment: Option<imagine_core::Adjustment>,
+    pub active_vector: Option<imagine_core::VectorLayer>,
+    /// Installed font families (loaded when first needed).
+    pub fonts: std::sync::Arc<Vec<String>>,
+    /// Shape tool: ellipse instead of rectangle.
+    pub shape_ellipse: bool,
     /// Histogram of what is below the active adjustment (levels and curves).
     pub histogram: Option<std::sync::Arc<imagine_gpu::Histogram>>,
 }
@@ -140,6 +151,8 @@ pub enum Action {
     Brush(BrushModel),
     SmudgeStrength(f32),
     CloneOptions { all: bool, aligned: bool },
+    SetVector { v: imagine_core::VectorLayer, done: bool },
+    ShapeEllipse(bool),
     WandTolerance(f32),
     WandContiguous(bool),
     SelectLayer(LayerId),
@@ -193,6 +206,7 @@ pub struct State {
     /// Unsaved-changes question: what happens if the user discards.
     pub confirm: Option<String>,
     adj_editor: super::adjust_ui::EditorState,
+    pub vec_editor: super::vector_ui::EditorState,
     filter: Option<FilterDialog>,
     /// New filters are added as smart filters (remembered while running).
     smart_filters: bool,
@@ -488,6 +502,13 @@ fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action
     }
     egui::CollapsingHeader::new("Farbe").default_open(true).show(ui, |ui| color_section(ui, m, st, out));
     egui::CollapsingHeader::new("Werkzeug").default_open(true).show(ui, |ui| tool_section(ui, m, out));
+    if let Some(v) = &m.active_vector {
+        egui::CollapsingHeader::new("Eigenschaften").id_salt("vector props").default_open(true).show(ui, |ui| {
+            if let Some((v, done)) = super::vector_ui::editor(ui, v, &m.fonts, m.color, &mut st.vec_editor) {
+                out.push(Action::SetVector { v, done });
+            }
+        });
+    }
     if let Some(adj) = &m.active_adjustment {
         egui::CollapsingHeader::new("Eigenschaften").default_open(true).show(ui, |ui| {
             if let Some((adj, done)) = super::adjust_ui::editor(ui, adj, &mut st.adj_editor, m.histogram.as_deref()) {
@@ -638,6 +659,21 @@ fn slider(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInc
 
 fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     match m.tool {
+        ToolId::Text => {
+            ui.label("Klick ins Bild: neuer Text. Klick auf einen Text: bearbeiten.");
+            ui.label(RichText::new("Schrift, Größe und Farbe stehen unter Eigenschaften; neue Texte nehmen die Pinselfarbe.").weak().small());
+        }
+        ToolId::Shape => {
+            ui.horizontal(|ui| {
+                if ui.selectable_label(!m.shape_ellipse, "Rechteck").clicked() {
+                    out.push(Action::ShapeEllipse(false));
+                }
+                if ui.selectable_label(m.shape_ellipse, "Ellipse").clicked() {
+                    out.push(Action::ShapeEllipse(true));
+                }
+            });
+            ui.label(RichText::new("Aufziehen (Umschalt: Quadrat/Kreis, Alt: von der Mitte). Fläche in Pinselfarbe; Kontur und Ecken unter Eigenschaften.").weak().small());
+        }
         ToolId::Brush | ToolId::Eraser | ToolId::Smudge | ToolId::Clone | ToolId::Heal | ToolId::SpotHeal => {
             let mut b = m.brush;
             let mut changed = false;
@@ -791,6 +827,11 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
         if row.adjustment {
             let t = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 3.0), Vec2::splat(row_h - 6.0));
             icons::paint(&painter, t.shrink(4.0), Icon::Adjust, Color32::from_gray(210));
+            x = t.max.x + 8.0;
+        } else if let Some(text) = row.vector {
+            let t = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 3.0), Vec2::splat(row_h - 6.0));
+            painter.rect_stroke(t, 2.0, Stroke::new(1.0, Color32::from_gray(90)), egui::StrokeKind::Inside);
+            icons::paint(&painter, t.shrink(5.0), Icon::Tool(if text { ToolId::Text } else { ToolId::Shape }), Color32::from_gray(220));
             x = t.max.x + 8.0;
         } else if !row.group {
             let t = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 3.0), Vec2::splat(row_h - 6.0));
@@ -1064,6 +1105,7 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
                 thumb: None,
                 adjustment: l.adjustment().is_some(),
                 filters: l.filters.clone(),
+                vector: l.vector().map(|v| matches!(v.kind, imagine_core::vector::VectorKind::Text(_))),
             })
         })
         .collect()

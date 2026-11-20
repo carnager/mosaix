@@ -87,6 +87,8 @@ enum Drag {
     Paint,
     /// Liquify brush: last position (document px) and pressure.
     Liquify { last: DVec2, pressure: f32 },
+    /// Shape tool: dragging out a rectangle / ellipse (document px).
+    Shape { start: DVec2, end: DVec2 },
     Pan { last: DVec2 },
     Rotate { last: DVec2 },
     Zoom { last: DVec2, anchor: DVec2 },
@@ -115,6 +117,8 @@ enum Tool {
     Clone,
     Heal,
     SpotHeal,
+    Text,
+    Shape { ellipse: bool },
 }
 
 impl Tool {
@@ -134,6 +138,9 @@ impl Tool {
             Tool::Clone => "Kopierstempel",
             Tool::Heal => "Reparaturpinsel",
             Tool::SpotHeal => "Bereichsreparatur",
+            Tool::Text => "Text",
+            Tool::Shape { ellipse: false } => "Rechteck",
+            Tool::Shape { ellipse: true } => "Ellipse",
         }
     }
 
@@ -149,6 +156,17 @@ enum BgDone {
     Exported { path: std::path::PathBuf, result: anyhow::Result<f64> },
     Autosaved { path: std::path::PathBuf, result: anyhow::Result<()> },
     Filled { result: Result<imagine_gpu::FillResult, &'static str>, started: Instant },
+}
+
+/// The rectangle of a shape drag: Shift = square, Alt = from the centre.
+fn shape_rect(start: DVec2, end: DVec2, square: bool, centre: bool) -> (DVec2, DVec2) {
+    let mut d = end - start;
+    if square {
+        let m = d.x.abs().max(d.y.abs());
+        d = DVec2::new(m.copysign(d.x), m.copysign(d.y));
+    }
+    let (a, b) = if centre { (start - d, start + d) } else { (start, start + d) };
+    (a.min(b), a.max(b))
 }
 
 /// An action that replaces or closes the document, held back while the
@@ -267,6 +285,8 @@ pub struct App {
     clone_offset: Option<[i32; 2]>,
     clone_all: bool,
     clone_aligned: bool,
+    /// Font families for the text properties (loaded on first use).
+    fonts: std::sync::Arc<Vec<String>>,
     liq_tool: LiquifyTool,
     /// Liquify brush diameter (document px) and strength 0…1.
     liq_size: f32,
@@ -476,6 +496,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         clone_offset: None,
         clone_all: false,
         clone_aligned: true,
+        fonts: Default::default(),
         liq_tool: LiquifyTool::Push,
         liq_size: 200.0,
         liq_strength: 0.6,
@@ -754,6 +775,11 @@ impl App {
             Tool::Lasso => Drag::Lasso { points: vec![doc], op },
             Tool::Gradient { .. } => Drag::Gradient { start: doc, end: doc },
             Tool::Move => Drag::Move { start: doc, end: doc },
+            Tool::Shape { .. } => Drag::Shape { start: doc, end: doc },
+            Tool::Text => {
+                self.text_click(doc);
+                Drag::None
+            }
             Tool::Crop => Drag::None,
             Tool::Wand => {
                 let (x, y) = (doc.x.floor(), doc.y.floor());
@@ -1034,7 +1060,7 @@ impl App {
                 let anchor = *anchor;
                 self.view.zoom_at(anchor, f);
             }
-            Drag::Marquee { end, .. } | Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
+            Drag::Marquee { end, .. } | Drag::Gradient { end, .. } | Drag::Move { end, .. } | Drag::Shape { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
             }
             Drag::BrushHud { start, size, hardness, .. } => {
@@ -1085,6 +1111,27 @@ impl App {
                 }
                 None => Ok(false),
             },
+            Drag::Shape { start, end } => {
+                let (start, end) = shape_rect(start, end, self.mods.shift, self.mods.alt);
+                let size = end - start;
+                if size.min_element() * zoom < 3.0 {
+                    Ok(false)
+                } else {
+                    let ellipse = matches!(tool, Tool::Shape { ellipse: true });
+                    let geometry = if ellipse {
+                        let c = (start + end) * 0.5;
+                        imagine_core::vector::Geometry::Ellipse { cx: c.x, cy: c.y, rx: size.x * 0.5, ry: size.y * 0.5 }
+                    } else {
+                        imagine_core::vector::Geometry::Rect { x: start.x, y: start.y, w: size.x, h: size.y, radius: 0.0 }
+                    };
+                    let v = imagine_core::VectorLayer::shape(imagine_core::vector::ShapeSpec {
+                        geometry,
+                        fill: Some([color[0], color[1], color[2], 1.0]),
+                        stroke: None,
+                    });
+                    Ok(e.add_vector(v, if ellipse { "Ellipse" } else { "Rechteck" }).is_some())
+                }
+            }
             Drag::Marquee { start, end, op, ellipse } => {
                 let (min, max) = (start.min(end), start.max(end));
                 let size = max - min;
@@ -1319,6 +1366,8 @@ impl App {
             "clone" => Tool::Clone,
             "heal" => Tool::Heal,
             "spot_heal" => Tool::SpotHeal,
+            "text" => Tool::Text,
+            "shape" => Tool::Shape { ellipse: false },
             "marquee" => Tool::Marquee { ellipse: false },
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
@@ -1344,6 +1393,8 @@ impl App {
             Tool::Clone => "clone",
             Tool::Heal => "heal",
             Tool::SpotHeal => "spot_heal",
+            Tool::Text => "text",
+            Tool::Shape { .. } => "shape",
             Tool::Marquee { ellipse: false } => "marquee",
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
@@ -1585,6 +1636,52 @@ impl App {
         }
         self.update_title();
         self.needs_redraw = true;
+    }
+
+    /// Loads the installed font families once (for the text properties).
+    fn ensure_fonts(&mut self) {
+        if self.fonts.is_empty() {
+            let t0 = Instant::now();
+            self.fonts = std::sync::Arc::new(imagine_vector::font_families());
+            tracing::debug!("{} Schriftfamilien in {:.0} ms", self.fonts.len(), t0.elapsed().as_secs_f64() * 1e3);
+        }
+    }
+
+    /// Text tool: a click on a text layer selects it for editing, anywhere
+    /// else creates a new text there.
+    fn text_click(&mut self, at: DVec2) {
+        self.ensure_fonts();
+        let color = self.brush.color;
+        let size = (24.0 / self.view.zoom as f32).clamp(8.0, 2000.0).round();
+        let Some(e) = self.engine() else { return };
+        let doc = e.doc();
+        let hit = doc.panel_rows().into_iter().map(|(id, _)| id).find(|&id| {
+            doc.find(id).is_some_and(|l| {
+                l.visible
+                    && matches!(l.vector().map(|v| &v.kind), Some(imagine_core::vector::VectorKind::Text(_)))
+                    && imagine_vector::bounds(l.vector().unwrap()).is_some_and(|b| at.x >= b[0] && at.x <= b[2] && at.y >= b[1] && at.y <= b[3])
+            })
+        });
+        match hit {
+            Some(id) => e.select(|d| d.active = id),
+            None => {
+                let spec = imagine_core::vector::TextSpec::new("Text", at.x, at.y - size as f64 * 0.6, size, [color[0], color[1], color[2], 1.0]);
+                if e.add_vector(imagine_core::VectorLayer::text(spec), "Text").is_some() {
+                    self.touch();
+                }
+            }
+        }
+        self.ui_state.vec_editor.focus_text = true;
+        self.ui_state.hidden = false;
+        self.needs_redraw = true;
+    }
+
+    /// Ebene › Rastern: a text or shape layer becomes pixels.
+    fn rasterize_active(&mut self) {
+        self.engine_op(|e| {
+            let id = e.doc().active;
+            e.rasterize(id, "Rastern")
+        });
     }
 
     /// Content-aware fill of the selection: area read here, computed on a worker.
@@ -1866,6 +1963,12 @@ impl App {
                 tracing::info!("Pinselspitze: {}", imagine_core::TIP_NAMES[self.brush.tip as usize]);
             }
             Keysym::u => self.set_tool(Tool::Smudge),
+            Keysym::U if shift => {
+                let ellipse = matches!(self.tool, Tool::Shape { ellipse: false });
+                self.set_tool(Tool::Shape { ellipse });
+            }
+            Keysym::t if !ctrl => self.set_tool(Tool::Text),
+            Keysym::r if ctrl && alt => self.rasterize_active(),
             Keysym::s if !ctrl => self.set_tool(Tool::Clone),
             // j: spot healing, again: healing brush (and back).
             Keysym::j if !ctrl && !shift => self.set_tool(if self.tool == Tool::SpotHeal { Tool::Heal } else { Tool::SpotHeal }),
@@ -2135,6 +2238,8 @@ impl App {
             Tool::Clone => ToolId::Clone,
             Tool::Heal => ToolId::Heal,
             Tool::SpotHeal => ToolId::SpotHeal,
+            Tool::Text => ToolId::Text,
+            Tool::Shape { .. } => ToolId::Shape,
             Tool::Marquee { ellipse: false } => ToolId::Marquee,
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
@@ -2206,6 +2311,9 @@ impl App {
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
             recent: self.settings.recent.clone(),
             active_adjustment: active.and_then(|l| l.adjustment().cloned()),
+            active_vector: active.and_then(|l| l.vector().cloned()),
+            fonts: self.fonts.clone(),
+            shape_ellipse: matches!(self.tool, Tool::Shape { ellipse: true }),
             histogram: None,
         })
     }
@@ -2223,6 +2331,8 @@ impl App {
                         ToolId::Clone => Tool::Clone,
                         ToolId::Heal => Tool::Heal,
                         ToolId::SpotHeal => Tool::SpotHeal,
+                        ToolId::Text => Tool::Text,
+                        ToolId::Shape => Tool::Shape { ellipse: false },
                         ToolId::Marquee => Tool::Marquee { ellipse: false },
                         ToolId::Ellipse => Tool::Marquee { ellipse: true },
                         ToolId::Lasso => Tool::Lasso,
@@ -2244,6 +2354,18 @@ impl App {
                         (m.size_jitter, m.angle_jitter, m.scatter, m.flow_jitter);
                 }
                 Action::SmudgeStrength(v) => self.smudge_strength = v,
+                Action::ShapeEllipse(ellipse) => self.tool = Tool::Shape { ellipse },
+                Action::SetVector { v, done } => {
+                    if let Some(e) = self.engine() {
+                        let id = e.doc().active;
+                        let label = if matches!(v.kind, imagine_core::vector::VectorKind::Text(_)) { "Text ändern" } else { "Form ändern" };
+                        let _ = e.set_vector(id, v, label, Some(&format!("vector-{id}")));
+                        if done {
+                            e.end_merge();
+                        }
+                        self.touch();
+                    }
+                }
                 Action::CloneOptions { all, aligned } => {
                     self.clone_all = all;
                     if aligned != self.clone_aligned {
@@ -2399,6 +2521,11 @@ impl App {
             && s.engine.update_thumbnails(4)
         {
             self.needs_redraw = true;
+        }
+        if self.fonts.is_empty()
+            && self.session.as_ref().is_some_and(|s| s.engine.doc().active_layer().is_some_and(|l| l.vector().is_some()))
+        {
+            self.ensure_fonts();
         }
         let Some(mut model) = self.ui_model() else { return };
         if let Some(s) = &mut self.session {
@@ -2587,6 +2714,21 @@ impl App {
             }
             Drag::Lasso { points, .. } => {
                 vec![OverlayLine { points: points.iter().map(|p| v.doc_to_screen(*p)).collect(), closed: true }]
+            }
+            Drag::Shape { start, end } => {
+                let (a, b) = shape_rect(*start, *end, self.mods.shift, self.mods.alt);
+                if matches!(self.tool, Tool::Shape { ellipse: true }) {
+                    let (c, r) = ((a + b) * 0.5, (b - a) * 0.5);
+                    let points = (0..96)
+                        .map(|i| {
+                            let t = i as f64 / 96.0 * std::f64::consts::TAU;
+                            v.doc_to_screen(c + DVec2::new(r.x * t.cos(), r.y * t.sin()))
+                        })
+                        .collect();
+                    vec![OverlayLine { points, closed: true }]
+                } else {
+                    vec![OverlayLine { points: rect(a, b), closed: true }]
+                }
             }
             Drag::Gradient { start, end } => {
                 vec![OverlayLine { points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)], closed: false }]

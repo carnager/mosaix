@@ -320,7 +320,7 @@ mod tests {
         let t = render(&v);
         assert_eq!(px(&t, 1050, 1000), blue, "ring at radius 50");
         assert_eq!(px(&t, 1000, 1000)[3], 0.0, "hollow");
-        assert_eq!(v.transform != IDENTITY, true);
+        assert_ne!(v.transform, IDENTITY);
     }
 
     #[test]

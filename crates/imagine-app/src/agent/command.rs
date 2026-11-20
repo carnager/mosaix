@@ -174,6 +174,40 @@ pub enum Command {
     FilterApply { layer: Option<LayerId>, filter: imagine_core::Filter, #[serde(default)] smart: bool },
     Liquify { layer: Option<LayerId>, strokes: Vec<LiquifyStroke> },
     ContentAwareFill { layer: Option<LayerId>, #[serde(default)] all_layers: bool },
+    TextAdd {
+        text: String,
+        x: f64,
+        y: f64,
+        size: f32,
+        font: Option<String>,
+        color: Option<ColorSpec>,
+        weight: Option<f32>,
+        #[serde(default)]
+        italic: bool,
+        align: Option<imagine_core::vector::TextAlign>,
+        line_height: Option<f32>,
+        letter_spacing: Option<f32>,
+        width: Option<f32>,
+        name: Option<String>,
+    },
+    ShapeAdd {
+        shape: String,
+        x: Option<f64>,
+        y: Option<f64>,
+        width: Option<f64>,
+        height: Option<f64>,
+        radius: Option<f64>,
+        points: Option<Vec<[f64; 2]>>,
+        d: Option<String>,
+        fill: Option<ColorSpec>,
+        #[serde(default)]
+        no_fill: bool,
+        stroke_color: Option<ColorSpec>,
+        stroke_width: Option<f32>,
+        name: Option<String>,
+    },
+    VectorSet { layer: Option<LayerId>, changes: Value },
+    LayerRasterize { layer: Option<LayerId> },
     SmartFilterSet {
         layer: Option<LayerId>,
         index: Option<usize>,
@@ -262,6 +296,10 @@ impl Command {
             Self::SmartFilterSet { .. } => "smart_filter_set",
             Self::Liquify { .. } => "liquify",
             Self::ContentAwareFill { .. } => "content_aware_fill",
+            Self::TextAdd { .. } => "text_add",
+            Self::ShapeAdd { .. } => "shape_add",
+            Self::VectorSet { .. } => "vector_set",
+            Self::LayerRasterize { .. } => "layer_rasterize",
             Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
@@ -827,6 +865,87 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             ok(s)
         }
+        Command::TextAdd { text, x, y, size, font, color, weight, italic, align, line_height, letter_spacing, width, name } => {
+            ensure!(size > 0.0, "size must be positive");
+            let (rgb, a) = match &color {
+                Some(c) => c.linear()?,
+                None => ([0.0; 3], 1.0),
+            };
+            let mut t = imagine_core::vector::TextSpec::new(&text, x, y, size, [rgb[0], rgb[1], rgb[2], a]);
+            if let Some(f) = font {
+                t.font = f;
+            }
+            t.weight = weight.unwrap_or(t.weight).clamp(100.0, 900.0);
+            t.italic = italic;
+            t.align = align.unwrap_or_default();
+            t.line_height = line_height.unwrap_or(t.line_height);
+            t.letter_spacing = letter_spacing.unwrap_or(0.0);
+            t.width = width;
+            let id = s.engine.add_vector(imagine_core::VectorLayer::text(t), "Text").context("not possible right now (painting?)")?;
+            if let Some(n) = name {
+                s.engine.select(|d| d.find_mut(id).unwrap().name = n);
+            }
+            vector_ok(s, id)
+        }
+        Command::ShapeAdd { shape, x, y, width, height, radius, points, d, fill, no_fill, stroke_color, stroke_width, name } => {
+            use imagine_core::vector::{Geometry, ShapeSpec, StrokeStyle};
+            let need = |v: Option<f64>, n: &str| v.with_context(|| format!("{shape} needs {n}"));
+            let geometry = match shape.as_str() {
+                "rect" => Geometry::Rect {
+                    x: need(x, "x")?,
+                    y: need(y, "y")?,
+                    w: need(width, "width")?,
+                    h: need(height, "height")?,
+                    radius: radius.unwrap_or(0.0),
+                },
+                "ellipse" => {
+                    let (w, h) = (need(width, "width")?, need(height, "height")?);
+                    Geometry::Ellipse { cx: need(x, "x")? + w / 2.0, cy: need(y, "y")? + h / 2.0, rx: w / 2.0, ry: h / 2.0 }
+                }
+                "polygon" => Geometry::Polygon { points: points.context("polygon needs points")?, closed: true },
+                "path" => Geometry::Path { d: d.context("path needs d (SVG path data)")? },
+                o => bail!("shape must be rect, ellipse, polygon or path, got {o:?}"),
+            };
+            let lin = |c: &ColorSpec| -> anyhow::Result<[f32; 4]> {
+                let (rgb, a) = c.linear()?;
+                Ok([rgb[0], rgb[1], rgb[2], a])
+            };
+            let fill = match (&fill, no_fill) {
+                (_, true) => None,
+                (Some(c), false) => Some(lin(c)?),
+                (None, false) => Some([0.0, 0.0, 0.0, 1.0]),
+            };
+            let stroke = match (&stroke_color, stroke_width) {
+                (None, None) => None,
+                (c, w) => Some(StrokeStyle {
+                    color: c.as_ref().map(lin).transpose()?.unwrap_or([0.0, 0.0, 0.0, 1.0]),
+                    width: w.unwrap_or(2.0).max(0.1),
+                }),
+            };
+            ensure!(fill.is_some() || stroke.is_some(), "a shape needs a fill or a stroke");
+            let v = imagine_core::VectorLayer::shape(ShapeSpec { geometry, fill, stroke });
+            ensure!(imagine_vector::bounds(&v).is_some(), "the shape is empty or the path data is invalid");
+            let id = s.engine.add_vector(v, "Form").context("not possible right now (painting?)")?;
+            if let Some(n) = name {
+                s.engine.select(|d| d.find_mut(id).unwrap().name = n);
+            }
+            vector_ok(s, id)
+        }
+        Command::VectorSet { layer, changes } => {
+            let id = target_layer(s, layer)?;
+            let current = s.engine.doc().find(id).and_then(|l| l.vector().cloned()).with_context(|| format!("layer {id} is not a text or shape layer"))?;
+            let mut v = serde_json::to_value(&current)?;
+            merge_json(&mut v, changes)?;
+            let new: imagine_core::VectorLayer = serde_json::from_value(v).context("invalid change")?;
+            ensure!(std::mem::discriminant(&new.kind) == std::mem::discriminant(&current.kind), "cannot turn text into a shape or back");
+            s.engine.set_vector(id, new, "Vektor ändern", None).map_err(engine_err)?;
+            vector_ok(s, id)
+        }
+        Command::LayerRasterize { layer } => {
+            let id = target_layer(s, layer)?;
+            s.engine.rasterize(id, "Rastern").map_err(engine_err)?;
+            ok(s)
+        }
         Command::ContentAwareFill { layer, all_layers } => {
             pixel_layer(s, layer)?;
             let ms = s.engine.content_aware_fill(all_layers, "Inhaltsbasiert füllen").map_err(engine_err)?;
@@ -1053,6 +1172,45 @@ pub struct LiquifyStroke {
     pub strength: Option<f64>,
     /// Continuous tools: dabs per point (default 10; ≈ frames held).
     pub steps: Option<u32>,
+}
+
+/// Result for a vector command: the layer and where its content ended up.
+fn vector_ok(s: &mut Session, id: LayerId) -> anyhow::Result<Output> {
+    let mut v = Output::json(json!({ "ok": true, "active_layer": s.engine.doc().active }));
+    v.result["layer"] = json!(id);
+    if let Some(b) = s.engine.doc().find(id).and_then(|l| l.vector()).and_then(imagine_vector::bounds) {
+        v.result["bounds"] = json!(b.map(|x| x.round()));
+    }
+    Ok(v)
+}
+
+/// Merges `patch` into `target` (objects recursively; "#rrggbb" colours
+/// become linear [r, g, b, a] arrays like the stored format).
+fn merge_json(target: &mut Value, patch: Value) -> anyhow::Result<()> {
+    match patch {
+        Value::Object(p) => {
+            if !target.is_object() {
+                *target = json!({});
+            }
+            let t = target.as_object_mut().unwrap();
+            for (k, mut v) in p {
+                if matches!(k.as_str(), "color" | "fill")
+                    && let Value::String(hex) = &v
+                {
+                    let (rgb, a) = ColorSpec::Hex(hex.clone()).linear()?;
+                    v = json!([rgb[0], rgb[1], rgb[2], a]);
+                }
+                match t.get_mut(&k) {
+                    Some(old) if v.is_object() => merge_json(old, v)?,
+                    _ => {
+                        t.insert(k, v);
+                    }
+                }
+            }
+        }
+        v => *target = v,
+    }
+    Ok(())
 }
 
 /// Document summary for agents.

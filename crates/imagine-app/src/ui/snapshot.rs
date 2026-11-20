@@ -100,6 +100,9 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         busy: false,
         recent: Vec::new(),
         active_adjustment: None,
+        active_vector: None,
+        fonts: Default::default(),
+        shape_ellipse: false,
         histogram: None,
     };
     tracing::info!("UI-Schnappschuss {w}×{h}");
@@ -145,6 +148,14 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             model.active = id;
         }
     }
+    if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_VECTOR") {
+        let v: imagine_core::VectorLayer = serde_json::from_str(&j)?;
+        s.engine.add_vector(v.clone(), "Vektor");
+        model.active_vector = Some(v);
+        model.fonts = std::sync::Arc::new(imagine_vector::font_families());
+        model.layers = panels::layer_rows(s.engine.doc());
+        model.active = s.engine.doc().active;
+    }
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_ADJ") {
         let adj: imagine_core::Adjustment = serde_json::from_str(&j)?;
         s.engine.add_adjustment(adj.clone(), "Einstellung");
@@ -169,6 +180,8 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "clone" => ToolId::Clone,
             "heal" => ToolId::Heal,
             "spot_heal" => ToolId::SpotHeal,
+            "text" => ToolId::Text,
+            "shape" => ToolId::Shape,
             "move" => ToolId::Move,
             _ => ToolId::Brush,
         };

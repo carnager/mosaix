@@ -117,6 +117,15 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.add(Shape::convex_polygon(vec![pts[0], at(6.5, 9.5), at(12.5, 15.5), pts[3]], color, Stroke::NONE));
             p.line_segment([at(9.0, 19.0), at(18.0, 19.0)], thin);
         }
+        Icon::Tool(ToolId::Text) => {
+            p.line_segment([at(4.0, 4.0), at(16.0, 4.0)], Stroke::new(2.4 * u, color));
+            p.line_segment([at(10.0, 4.0), at(10.0, 17.0)], Stroke::new(2.4 * u, color));
+            p.line_segment([at(7.5, 17.0), at(12.5, 17.0)], Stroke::new(1.6 * u, color));
+        }
+        Icon::Tool(ToolId::Shape) => {
+            p.rect_stroke(Rect::from_min_max(at(3.0, 3.0), at(12.0, 12.0)), 1.0, Stroke::new(1.6 * u, color), egui::StrokeKind::Middle);
+            p.circle_filled(at(13.0, 13.0), 4.5 * u, color);
+        }
         Icon::Tool(ToolId::Gradient) => {
             let r = Rect::from_min_max(at(3.0, 4.0), at(17.0, 16.0));
             let mut mesh = egui::Mesh::default();
