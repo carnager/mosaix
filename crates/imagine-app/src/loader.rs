@@ -224,9 +224,12 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Turns a row of encoded RGB triples into linear sRGB in place.
+pub type RowConverter = Box<dyn Fn(&mut [f32]) + Send + Sync>;
+
 /// Converter from an embedded ICC profile to linear sRGB, unless the
 /// profile already is sRGB (or cannot be used, then the image is taken as sRGB).
-pub fn color_transform(icc: &[u8]) -> Option<(String, Box<dyn Fn(&mut [f32]) + Send + Sync>)> {
+pub fn color_transform(icc: &[u8]) -> Option<(String, RowConverter)> {
     use moxcms::{ColorProfile, Layout, ToneReprCurve, TransformOptions};
     let src = match ColorProfile::new_from_slice(icc) {
         Ok(p) => p,
