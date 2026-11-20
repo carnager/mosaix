@@ -6,6 +6,53 @@ use imagine_core::TIP_NAMES;
 
 pub const TIP_SIZE: u32 = 256;
 pub const TIP_MIPS: u32 = 9;
+/// Layers of the tip texture: the built-in tips, then room for custom ones.
+pub const TIP_LAYERS: u32 = 64;
+/// Tip index of the first custom tip (`tip` 1…5 are built in, 0 is round).
+pub const FIRST_CUSTOM_TIP: u32 = 6;
+/// How many custom tips fit.
+pub const MAX_CUSTOM_TIPS: usize = (TIP_LAYERS - FIRST_CUSTOM_TIP + 1) as usize;
+
+/// The mip chain of one TIP_SIZE² tip (2×2 averaging).
+pub fn mips(base: &[u8]) -> Vec<Vec<u8>> {
+    let mut levels = vec![base.to_vec()];
+    for mip in 1..TIP_MIPS {
+        let size = (TIP_SIZE >> mip) as usize;
+        let ps = size * 2;
+        let p = &levels[mip as usize - 1];
+        let next = (0..size * size)
+            .map(|k| {
+                let (x, y) = (k % size * 2, k / size * 2);
+                let sum = p[y * ps + x] as u32 + p[y * ps + x + 1] as u32 + p[(y + 1) * ps + x] as u32 + p[(y + 1) * ps + x + 1] as u32;
+                ((sum + 2) / 4) as u8
+            })
+            .collect();
+        levels.push(next);
+    }
+    levels
+}
+
+impl super::Engine {
+    /// Loads custom tips (TIP_SIZE² coverage each) as tips FIRST_CUSTOM_TIP…;
+    /// extra ones beyond MAX_CUSTOM_TIPS are ignored.
+    pub fn set_custom_tips(&mut self, tips: &[Vec<u8>]) {
+        for (i, base) in tips.iter().take(MAX_CUSTOM_TIPS).enumerate() {
+            if base.len() != (TIP_SIZE * TIP_SIZE) as usize {
+                continue;
+            }
+            let layer = FIRST_CUSTOM_TIP - 1 + i as u32;
+            for (mip, data) in mips(base).iter().enumerate() {
+                let size = TIP_SIZE >> mip;
+                self.queue.write_texture(
+                    crate::pool::texel_copy(&self.tips_tex, mip as u32, layer),
+                    data,
+                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size), rows_per_image: Some(size) },
+                    wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+                );
+            }
+        }
+    }
+}
 
 /// Smooth value noise in [0, 1] with integer lattice spacing `cell`.
 fn value_noise(x: f32, y: f32, cell: f32, seed: u32) -> f32 {

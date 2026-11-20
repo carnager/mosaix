@@ -15,6 +15,8 @@ pub enum FileMode {
     Open,
     SaveAs,
     ExportAs,
+    /// Brush tips: .abr or an image.
+    ImportBrushes,
 }
 
 impl FileMode {
@@ -23,6 +25,7 @@ impl FileMode {
             FileMode::Open => tr("Open"),
             FileMode::SaveAs => tr("Save As"),
             FileMode::ExportAs => tr("Export As"),
+            FileMode::ImportBrushes => tr("Import Brushes"),
         }
     }
 
@@ -32,6 +35,7 @@ impl FileMode {
                 "imagine", "psd", "psb", "png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "exr",
             ],
             FileMode::SaveAs => &["imagine"],
+            FileMode::ImportBrushes => &["abr", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
             FileMode::ExportAs => &["png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "psd", "psb"],
         }
     }
@@ -138,6 +142,7 @@ impl FileDialog {
         };
         match self.mode {
             FileMode::Open => out.push(Action::OpenFile(path)),
+            FileMode::ImportBrushes => out.push(Action::ImportBrushes(path)),
             FileMode::SaveAs => {
                 if path
                     .extension()

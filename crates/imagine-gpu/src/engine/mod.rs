@@ -61,6 +61,7 @@ pub use liquify::LiquifyTool;
 pub use magic::SampleFrom;
 pub use readback::{PoolKind, Readback};
 pub use thumbs::THUMB;
+pub use tips::{FIRST_CUSTOM_TIP, MAX_CUSTOM_TIPS, TIP_SIZE};
 pub use transform::{Interp, is_integer_translation};
 
 use crate::pool::{BYTES_PER_PIXEL, MASK_FORMAT, Pool, PoolConfig, TILE_FORMAT, Tile, texel_copy};
@@ -265,6 +266,8 @@ pub struct Engine {
     brush_bgl: wgpu::BindGroupLayout,
     tips_bg: wgpu::BindGroup,
     tips_view: wgpu::TextureView,
+    /// The tip texture array: built-in tips first, then custom ones.
+    tips_tex: wgpu::Texture,
     smudge_tex_bgl: wgpu::BindGroupLayout,
     smudge_buffers: Option<smudge::SmudgeBuffers>,
     smudge_jobs: DynBuf,
@@ -892,7 +895,7 @@ impl Engine {
             size: wgpu::Extent3d {
                 width: tips::TIP_SIZE,
                 height: tips::TIP_SIZE,
-                depth_or_array_layers: tip_levels[0].len() as u32,
+                depth_or_array_layers: tips::TIP_LAYERS,
             },
             mip_level_count: tips::TIP_MIPS,
             sample_count: 1,
@@ -1008,6 +1011,7 @@ impl Engine {
             brush_bgl,
             tips_bg,
             tips_view,
+            tips_tex,
             smudge_tex_bgl,
             smudge_buffers: None,
             smudge_jobs: DynBuf::new(device, "smudge jobs", B::STORAGE, 16 << 10),

@@ -143,6 +143,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("Edit", "Undo", K::z, true, false, false),
     c("Edit", "Redo", K::Z, true, true, false),
     c("Edit", "Keyboard Shortcuts …", K::k, true, true, true),
+    c("Edit", "Import Brushes …", K::b, true, true, true),
     c("Edit", "Copy", K::c, true, false, false),
     c("Edit", "Copy Merged", K::C, true, true, false),
     c("Edit", "Cut", K::x, true, false, false),

@@ -2769,3 +2769,26 @@ fn transform_moves_a_whole_group() {
     let v = e.doc().find(t).unwrap().vector().unwrap().transform;
     assert_eq!((v[4], v[5]), (100.0, 20.0), "text stays editable, transform composed");
 }
+
+#[test]
+fn custom_tip_paints_its_shape() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(300, 300));
+    // A tip covering only its left half.
+    let n = imagine_gpu::TIP_SIZE as usize;
+    let tip: Vec<u8> = (0..n * n).map(|i| if i % n < n / 2 { 255 } else { 0 }).collect();
+    e.set_custom_tips(&[tip]);
+    e.begin_stroke(StrokeParams::default()).unwrap();
+    let mut s = Stroke::new(BrushSettings {
+        size: 120.0,
+        tip: imagine_gpu::FIRST_CUSTOM_TIP,
+        spacing: 5.0,
+        ..red_brush()
+    });
+    e.stroke_dabs(&s.add(InputSample { pos: DVec2::new(150.0, 150.0), pressure: 1.0 }));
+    e.end_stroke("Custom tip");
+    e.flush();
+    let tile = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+    assert!(px(&tile, 120, 150)[3] > 0.9, "left half painted: {:?}", px(&tile, 120, 150));
+    assert!(px(&tile, 180, 150)[3] < 0.05, "right half empty: {:?}", px(&tile, 180, 150));
+}

@@ -5,6 +5,7 @@
 //! and at most one frame is rendered per compositor refresh.
 
 mod clipboard;
+mod brushes;
 pub(crate) mod pen;
 pub(crate) mod textedit;
 
@@ -434,6 +435,8 @@ pub struct App {
     thumb_ids: HashMap<u32, egui::TextureId>,
     /// Mask thumbnails as UI textures: content key and texture.
     mask_thumbs: HashMap<LayerId, (usize, egui::TextureHandle)>,
+    /// Names of the custom brush tips (tips FIRST_CUSTOM_TIP, …).
+    custom_tips: Vec<String>,
     /// Status text, refreshed a few times per second (not every frame).
     ui_status: String,
 
@@ -656,6 +659,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         last_model: None,
         thumb_ids: HashMap::new(),
         mask_thumbs: HashMap::new(),
+        custom_tips: Vec::new(),
         ui_status: String::new(),
         socket: None,
         bench: None,
@@ -890,6 +894,7 @@ impl App {
                     self.store_settings();
                 }
                 self.session = Some(Session::new(engine, name, source, native_len));
+                self.load_custom_tips();
                 self.ever_loaded = true;
                 self.view_fitted = false;
                 self.fit_if_needed();
@@ -1807,7 +1812,7 @@ impl App {
         .or_else(|| self.settings.last_dir.clone())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         let name = match mode {
-            ui::files::FileMode::Open => None,
+            ui::files::FileMode::Open | ui::files::FileMode::ImportBrushes => None,
             ui::files::FileMode::SaveAs => s.map(|s| s.default_save_path()),
             ui::files::FileMode::ExportAs => s.map(|s| s.default_export_path()),
         }
@@ -2534,6 +2539,7 @@ impl App {
             Keysym::j if ctrl => self.edit(tr("Duplicate Layer"), |d| d.duplicate_active().is_some()),
             Keysym::g | Keysym::G if ctrl && shift => self.edit(tr("Ungroup Layers"), |d| d.ungroup_active()),
             // Ctrl+Alt+G: clipping mask on/off (clips to the layer below).
+            Keysym::b | Keysym::B if ctrl && alt && shift => self.file_dialog(ui::files::FileMode::ImportBrushes),
             Keysym::k | Keysym::K if ctrl && alt && shift => {
                 self.ui_state.shortcuts = Some(Default::default());
             }
@@ -2685,7 +2691,15 @@ impl App {
             Keysym::e => self.set_tool(Tool::Eraser),
             Keysym::b => self.set_tool(Tool::Brush),
             Keysym::B => {
-                self.brush.tip = (self.brush.tip + 1) % imagine_core::TIP_NAMES.len() as u32;
+                // Built-in tips, then the custom ones.
+                let builtin = imagine_core::TIP_NAMES.len() as u32;
+                let custom = self.custom_tips.len() as u32;
+                self.brush.tip = match self.brush.tip + 1 {
+                    t if t == builtin && custom > 0 => imagine_gpu::FIRST_CUSTOM_TIP,
+                    t if t < builtin => t,
+                    t if t >= imagine_gpu::FIRST_CUSTOM_TIP && t < imagine_gpu::FIRST_CUSTOM_TIP + custom => t,
+                    _ => 0,
+                };
                 tracing::info!("{}", tr!("Brush tip: {tip}", tip = tr(imagine_core::TIP_NAMES[self.brush.tip as usize])));
             }
             Keysym::u => self.set_tool(Tool::Smudge),
@@ -2943,6 +2957,7 @@ impl App {
         let result = command::execute(&mut ctx, cmd);
         if let Ok(out) = &result {
             if out.replaced_document {
+                self.load_custom_tips();
                 self.pending_uploads.clear();
                 self.loading = false;
                 self.view_fitted = false;
@@ -3122,6 +3137,7 @@ impl App {
             wand_tolerance: self.wand_tolerance,
             wand_contiguous: self.wand_contiguous,
             bg_color: self.bg_color,
+            custom_tips: self.custom_tips.clone(),
             eyedrop_radius: self.eyedrop_radius,
             eyedrop_all: self.eyedrop_all,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
@@ -3234,6 +3250,7 @@ impl App {
                 }
                 Action::Color(c) => self.brush.color = c,
                 Action::BgColor(c) => self.bg_color = c,
+                Action::ImportBrushes(p) => self.import_brushes(&p),
                 Action::Shortcut { id, combo, reset } => {
                     ui::palette::rebind(&mut self.settings.keymap, &id, combo, reset);
                     self.store_settings();

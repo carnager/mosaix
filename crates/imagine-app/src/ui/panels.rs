@@ -162,6 +162,8 @@ pub struct Model {
     pub wand_tolerance: f32,
     pub wand_contiguous: bool,
     pub bg_color: [f32; 3],
+    /// Names of the custom brush tips (tip numbers FIRST_CUSTOM_TIP, …).
+    pub custom_tips: Vec<String>,
     pub eyedrop_radius: i64,
     pub eyedrop_all: bool,
     pub boxed: Option<&'static str>,
@@ -210,6 +212,8 @@ pub enum Action {
     Tool(ToolId),
     Color([f32; 3]),
     BgColor([f32; 3]),
+    /// Add the tips of an .abr file or an image to the brush library.
+    ImportBrushes(std::path::PathBuf),
     /// Keyboard shortcut of a command: `None` removes it, `reset` restores the default.
     Shortcut { id: String, combo: Option<palette::Combo>, reset: bool },
     ResetShortcuts,
@@ -1367,12 +1371,31 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                         .max_decimals(0),
                 )
                 .changed();
+            let first = imagine_gpu::FIRST_CUSTOM_TIP;
+            let tip_name = |t: u32| -> String {
+                if t >= first {
+                    m.custom_tips.get((t - first) as usize).cloned().unwrap_or_else(|| "?".into())
+                } else {
+                    tr(TIP_NAMES.get(t as usize).copied().unwrap_or("round")).to_string()
+                }
+            };
             egui::ComboBox::from_id_salt("tip")
-                .selected_text(tr(TIP_NAMES[b.tip as usize]))
-                .width(80.0)
+                .selected_text(tip_name(b.tip))
+                .width(110.0)
+                .height(400.0)
                 .show_ui(ui, |ui| {
                     for (i, n) in TIP_NAMES.iter().enumerate() {
                         changed |= ui.selectable_value(&mut b.tip, i as u32, tr(n)).changed();
+                    }
+                    if !m.custom_tips.is_empty() {
+                        ui.separator();
+                        for (i, n) in m.custom_tips.iter().enumerate() {
+                            changed |= ui.selectable_value(&mut b.tip, first + i as u32, n).changed();
+                        }
+                    }
+                    ui.separator();
+                    if ui.button(tr("Import Brushes …")).on_hover_text(tr("Photoshop brushes (.abr) or an image (dark or opaque = paint)")).clicked() {
+                        out.push(Action::Command(palette::find("Import Brushes …")));
                     }
                 })
                 .response

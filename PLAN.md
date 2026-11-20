@@ -476,7 +476,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **AVIF und JPEG XL:** Öffnen (AVIF über dav1d, JPEG XL über jxl-oxide, auch HDR/ICC) und Exportieren (AVIF über ravif; JPEG XL über libjxl, 8/16 Bit, Qualität 100 = verlustfrei – geprüft bitgleich mit dem PNG-Export). Export vorerst nur sRGB.
 
-**Noch offen in Phase 7:** editierbarer Text im PSD-Export, ABR-Pinsel, AVIF/JPEG XL in weiten Farbräumen.
+- **Eigene Pinselspitzen und ABR-Import:** Bearbeiten › Pinsel importieren … (Strg+Alt+Umschalt+B, auch im Spitzen-Menü): Photoshop-ABR (v1/v2 und v6–10, Namen aus dem `desc`-Abschnitt; geprüft mit einer echten 6.2-Datei aus Kritas Testdaten) oder ein beliebiges Bild (Transparenz bzw. dunkel = Farbe). Spitzen liegen als graue PNGs in `~/.local/share/imagine/brushes`, bis zu 59 im Pinsel; Umschalt+B schaltet durch alle.
+
+**Noch offen in Phase 7:** editierbarer Text im PSD-Export, AVIF/JPEG XL in weiten Farbräumen, Pinsel-Dynamik aus ABR.
 
 ## Nächster konkreter Schritt
 
