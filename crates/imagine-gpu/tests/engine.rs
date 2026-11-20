@@ -746,3 +746,45 @@ fn filters_blur_sharpen_noise_and_preview() {
     assert_eq!(e.history_len(), before);
     e.set_filter_preview(None).unwrap();
 }
+
+#[test]
+fn histogram_of_what_is_below() {
+    use imagine_core::Adjustment;
+    use imagine_core::color::linear_to_srgb;
+    let Some(g) = gpu() else { return };
+    // Not a multiple of the tile size: pixels past the edge must not count.
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 300));
+    let base = [0.6f32, 0.25, 0.05];
+    e.fill(StrokeTarget::Pixels, [base[0], base[1], base[2], 1.0], 1.0, "Füllen").unwrap();
+    let bin = |v: f32| (linear_to_srgb(v) * 255.0).round() as usize;
+    let h = e.histogram(None);
+    let total = 600.0 * 300.0;
+    for c in 0..3 {
+        assert!((h.bins[c + 1][bin(base[c])] - total).abs() < 1.0, "channel {c}: {:?}", h.bins[c + 1].iter().sum::<f32>());
+    }
+    assert!((h.bins[0].iter().sum::<f32>() - 3.0 * total).abs() < 3.0);
+    e.edit("Umkehren", |d| {
+        d.add_adjustment(Adjustment::Invert);
+        true
+    });
+    let adj = e.doc().active;
+    let below = e.histogram(Some(adj));
+    assert_eq!(*below, *h, "the adjustment itself is not part of its input");
+    let all = e.histogram(None);
+    assert!((all.bins[1][255 - bin(base[0])] - total).abs() < 1.0, "inverted red");
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn histogram_speed_100mp() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(10_000, 10_000));
+    e.fill(StrokeTarget::Pixels, [0.3, 0.5, 0.1, 1.0], 1.0, "Füllen").unwrap();
+    e.flush();
+    let t = std::time::Instant::now();
+    let h = e.histogram(None);
+    eprintln!("histogram 100 MP: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    let _ = e.histogram(None);
+    eprintln!("cached: {:?} ({} px)", t.elapsed(), h.bins[1].iter().sum::<f32>());
+}

@@ -24,6 +24,7 @@ mod apply;
 mod display;
 mod filter;
 mod frame;
+mod histogram;
 mod magic;
 mod readback;
 mod selection;
@@ -45,6 +46,7 @@ use imagine_core::{Dab, Document, History, LayerId, MaskRef, TILE_MIP_LEVELS, TI
 
 pub use apply::GradientKind;
 pub use magic::SampleFrom;
+pub use histogram::Histogram;
 pub use readback::{PoolKind, Readback};
 pub use thumbs::THUMB;
 pub use transform::{Interp, is_integer_translation};
@@ -168,6 +170,8 @@ pub struct Engine {
     preview: Option<transform::Preview>,
     merge_key: Option<String>,
     thumbs: Option<thumbs::Thumbs>,
+    /// Last histogram and the key of what it was computed from.
+    histogram: Option<(u64, std::sync::Arc<Histogram>)>,
     pending_dabs: Vec<Dab>,
     pending_mips: Vec<crate::pool::SlotId>,
     visible: (DVec2, DVec2),
@@ -660,6 +664,7 @@ impl Engine {
             preview: None,
             merge_key: None,
             thumbs: None,
+            histogram: None,
             pending_dabs: Vec::new(),
             pending_mips: Vec::new(),
             visible: (DVec2::ZERO, DVec2::ZERO),

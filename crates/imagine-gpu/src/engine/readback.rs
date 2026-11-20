@@ -33,7 +33,7 @@ pub struct Readback {
 }
 
 impl Readback {
-    fn start(device: &wgpu::Device, queue: &wgpu::Queue, pool: &Pool, slots: &[SlotId], mip: u32, keep: Vec<Tile>) -> Self {
+    pub(super) fn start(device: &wgpu::Device, queue: &wgpu::Queue, pool: &Pool, slots: &[SlotId], mip: u32, keep: Vec<Tile>) -> Self {
         let size = TILE_SIZE >> mip;
         let row = (size * pool.bytes_per_pixel()) as usize;
         let padded_row = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize);

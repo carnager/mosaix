@@ -228,6 +228,8 @@ pub fn tools() -> Vec<Value> {
             json!({ "layer": layer_param(), "adjustment": { "type": "object" } }), &["adjustment"], false),
         tool("layer_bounds", "Pixel-exact bounding box of a layer's visible content (within the selection, if any); null if empty.",
             json!({ "layer": layer_param() }), &[], true),
+        tool("histogram", "Tonal histogram per channel (rgb, red, green, blue) with mean, median, 1st/99th percentile and clipping. With `below`, of the image underneath that layer (the input of an adjustment layer); otherwise of the whole image.",
+            json!({ "below": layer_param(), "bins": { "type": "integer", "description": "number of bins, a divisor of 256 (default 32)" } }), &[], true),
         tool("crop", "Crop the canvas to a rectangle (may extend beyond the canvas to enlarge it). Pixels outside are kept, not deleted. Drops the selection.",
             json!({ "x": { "type": "integer" }, "y": { "type": "integer" }, "width": { "type": "integer" }, "height": { "type": "integer" } }),
             &["x", "y", "width", "height"], false),
@@ -404,7 +406,7 @@ mod tests {
         });
         let mut samples = samples;
         let more = json!({
-            "layer_transform": {"scale": 2}, "layer_bounds": {}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
+            "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
             "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "adjustment_set": {"adjustment": {"kind": "invert"}}

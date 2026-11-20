@@ -17,7 +17,7 @@ use super::{
     CompositeEntry, Engine, MAX_GROUP_DEPTH, MAX_LAYER_CHUNKS, MAX_MASK_CHUNKS, NONE, RenderStats,
     StrokeParams, StrokeTarget, UNIFORM_STRIDE, make_origin_buf, mask_slot,
 };
-use crate::pool::{Pool, Tile};
+use crate::pool::{Pool, SlotId, Tile};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -43,6 +43,117 @@ struct GpuJob {
     op_start: u32,
     op_count: u32,
     _pad: u32,
+}
+
+/// Flatten jobs collected for one dispatch.
+#[derive(Default)]
+pub(super) struct FlattenBatch {
+    ops: Vec<GpuOp>,
+    jobs: BTreeMap<u16, Vec<GpuJob>>,
+    /// Adjustment parameters, once per adjustment layer: id → (offset, kind).
+    adjust: Vec<[f32; 4]>,
+    adjust_at: HashMap<LayerId, (u32, u32)>,
+    deep_warned: bool,
+}
+
+impl FlattenBatch {
+    /// Adds the program of one tile, rendered into the composite slot `dst`.
+    pub(super) fn push(
+        &mut self,
+        program: &[Op<'_, Tile>],
+        stroke: Option<(LayerId, SlotId, StrokeParams)>,
+        (sel_slot, sel_const): (u32, f32),
+        dst: SlotId,
+    ) {
+        if self.adjust.is_empty() {
+            self.adjust.push([0.0; 4]);
+        }
+        let start = self.ops.len() as u32;
+        let mut depth = 0usize;
+        for op in program {
+            let gpu = match *op {
+                Op::Layer { id, tile, opacity, blend, mask } => {
+                    let (mask_slot, mask_const) = mask_slot(mask);
+                    let st = stroke.filter(|s| s.0 == id);
+                    let stroke_mode = st.map_or(0, |s| match (s.2.target, s.2.erase) {
+                        _ if s.2.smudge => 5,
+                        (StrokeTarget::Pixels, false) => 1,
+                        (StrokeTarget::Pixels, true) => 2,
+                        (StrokeTarget::Mask, false) => 3,
+                        (StrokeTarget::Mask, true) => 4,
+                    });
+                    GpuOp {
+                        kind: 0,
+                        slot: tile.map_or(NONE, |t| t.slot().packed()),
+                        blend: blend as u32,
+                        opacity,
+                        stroke_slot: st.map_or(NONE, |s| s.1.packed()),
+                        stroke_opacity: st.map_or(0.0, |s| s.2.opacity),
+                        stroke_mode,
+                        mask_slot,
+                        mask_const,
+                        sel_slot,
+                        sel_const,
+                        _pad: 0,
+                    }
+                }
+                Op::Adjust { id, adj, opacity, mask } => {
+                    let adjust = &mut self.adjust;
+                    let (off, kind) = *self.adjust_at.entry(id).or_insert_with(|| {
+                        let off = adjust.len() as u32;
+                        match adj.gpu() {
+                            GpuAdjust::Lut(lut) => {
+                                adjust.extend(lut.iter().map(|c| [c[0], c[1], c[2], 0.0]));
+                                (off, KIND_LUT)
+                            }
+                            GpuAdjust::Shader(kind, p) => {
+                                adjust.push([p[0], p[1], p[2], p[3]]);
+                                adjust.push([p[4], p[5], p[6], p[7]]);
+                                (off, kind)
+                            }
+                        }
+                    });
+                    let (mask_slot, mask_const) = mask_slot(mask);
+                    // A stroke into this adjustment's mask (preview).
+                    let st = stroke.filter(|s| s.0 == id && s.2.target == StrokeTarget::Mask);
+                    GpuOp {
+                        kind: 3,
+                        slot: off,
+                        blend: kind,
+                        opacity,
+                        mask_slot,
+                        mask_const,
+                        stroke_slot: st.map_or(NONE, |s| s.1.packed()),
+                        stroke_opacity: st.map_or(0.0, |s| s.2.opacity),
+                        stroke_mode: st.map_or(0, |s| if s.2.erase { 4 } else { 3 }),
+                        sel_slot,
+                        sel_const,
+                        ..Zeroable::zeroed()
+                    }
+                }
+                Op::Push => {
+                    depth += 1;
+                    if depth > MAX_GROUP_DEPTH && !self.deep_warned {
+                        tracing::warn!("Gruppen tiefer als {MAX_GROUP_DEPTH} Ebenen werden falsch dargestellt");
+                        self.deep_warned = true;
+                    }
+                    GpuOp { kind: 1, ..Zeroable::zeroed() }
+                }
+                Op::Pop { opacity, blend, mask } => {
+                    depth = depth.saturating_sub(1);
+                    let (mask_slot, mask_const) = mask_slot(mask);
+                    GpuOp { kind: 2, blend: blend as u32, opacity, mask_slot, mask_const, ..Zeroable::zeroed() }
+                }
+            };
+            self.ops.push(gpu);
+        }
+        self.jobs.entry(dst.chunk).or_default().push(GpuJob {
+            dst_layer: dst.layer as u32,
+            op_start: start,
+            op_count: self.ops.len() as u32 - start,
+            _pad: 0,
+        });
+    }
 }
 
 /// Binding-array views of all chunks of a pool, padded to `n` entries.
@@ -232,16 +343,11 @@ impl Engine {
             list.truncate(budget);
         }
 
-        let mut ops: Vec<GpuOp> = Vec::new();
-        let mut jobs: BTreeMap<u16, Vec<GpuJob>> = BTreeMap::new();
-        // Adjustment parameters, once per adjustment layer: id → (offset, kind).
-        let mut adjust: Vec<[f32; 4]> = vec![[0.0; 4]];
-        let mut adjust_at: HashMap<LayerId, (u32, u32)> = HashMap::new();
-        let mut deep_warned = false;
+        let mut b = FlattenBatch::default();
         for c in list {
             self.dirty.remove(&c);
             let stroke = self.stroke_at(c).map(|(l, t, p)| (l, t.slot(), p));
-            let (sel_slot, sel_const) = self.sel_slot(c);
+            let sel = self.sel_slot(c);
             let shown = match &self.preview {
                 Some(p) => &p.doc,
                 None => &self.doc,
@@ -258,97 +364,20 @@ impl Engine {
                 tracing::warn!("Composite-Speicher voll");
                 continue;
             };
-            let start = ops.len() as u32;
-            let mut depth = 0usize;
-            for op in &program {
-                ops.push(match *op {
-                    Op::Layer { id, tile, opacity, blend, mask } => {
-                        let (mask_slot, mask_const) = mask_slot(mask);
-                        let st = stroke.filter(|s| s.0 == id);
-                        let stroke_mode = st.map_or(0, |s| match (s.2.target, s.2.erase) {
-                            _ if s.2.smudge => 5,
-                            (StrokeTarget::Pixels, false) => 1,
-                            (StrokeTarget::Pixels, true) => 2,
-                            (StrokeTarget::Mask, false) => 3,
-                            (StrokeTarget::Mask, true) => 4,
-                        });
-                        GpuOp {
-                            kind: 0,
-                            slot: tile.map_or(NONE, |t| t.slot().packed()),
-                            blend: blend as u32,
-                            opacity,
-                            stroke_slot: st.map_or(NONE, |s| s.1.packed()),
-                            stroke_opacity: st.map_or(0.0, |s| s.2.opacity),
-                            stroke_mode,
-                            mask_slot,
-                            mask_const,
-                            sel_slot,
-                            sel_const,
-                            _pad: 0,
-                        }
-                    }
-                    Op::Adjust { id, adj, opacity, mask } => {
-                        let (off, kind) = *adjust_at.entry(id).or_insert_with(|| {
-                            let off = adjust.len() as u32;
-                            match adj.gpu() {
-                                GpuAdjust::Lut(lut) => {
-                                    adjust.extend(lut.iter().map(|c| [c[0], c[1], c[2], 0.0]));
-                                    (off, KIND_LUT)
-                                }
-                                GpuAdjust::Shader(kind, p) => {
-                                    adjust.push([p[0], p[1], p[2], p[3]]);
-                                    adjust.push([p[4], p[5], p[6], p[7]]);
-                                    (off, kind)
-                                }
-                            }
-                        });
-                        let (mask_slot, mask_const) = mask_slot(mask);
-                        // A stroke into this adjustment's mask (preview).
-                        let st = stroke.filter(|s| s.0 == id && s.2.target == StrokeTarget::Mask);
-                        GpuOp {
-                            kind: 3,
-                            slot: off,
-                            blend: kind,
-                            opacity,
-                            mask_slot,
-                            mask_const,
-                            stroke_slot: st.map_or(NONE, |s| s.1.packed()),
-                            stroke_opacity: st.map_or(0.0, |s| s.2.opacity),
-                            stroke_mode: st.map_or(0, |s| if s.2.erase { 4 } else { 3 }),
-                            sel_slot,
-                            sel_const,
-                            ..Zeroable::zeroed()
-                        }
-                    }
-                    Op::Push => {
-                        depth += 1;
-                        if depth > MAX_GROUP_DEPTH && !deep_warned {
-                            tracing::warn!("Gruppen tiefer als {MAX_GROUP_DEPTH} Ebenen werden falsch dargestellt");
-                            deep_warned = true;
-                        }
-                        GpuOp { kind: 1, ..Zeroable::zeroed() }
-                    }
-                    Op::Pop { opacity, blend, mask } => {
-                        depth = depth.saturating_sub(1);
-                        let (mask_slot, mask_const) = mask_slot(mask);
-                        GpuOp { kind: 2, blend: blend as u32, opacity, mask_slot, mask_const, ..Zeroable::zeroed() }
-                    }
-                });
-            }
             let slot = tile.slot();
-            jobs.entry(slot.chunk).or_default().push(GpuJob {
-                dst_layer: slot.layer as u32,
-                op_start: start,
-                op_count: ops.len() as u32 - start,
-                _pad: 0,
-            });
+            b.push(&program, stroke, sel, slot);
             self.pending_mips.push(slot);
             stats.flattened += 1;
         }
-        if jobs.is_empty() {
+        self.dispatch_flatten(enc, b);
+    }
+
+    /// Records the flatten dispatches of a batch (buffers are written now).
+    pub(super) fn dispatch_flatten(&mut self, enc: &mut wgpu::CommandEncoder, b: FlattenBatch) {
+        if b.jobs.is_empty() {
             return;
         }
-
+        let FlattenBatch { ops, jobs, adjust, .. } = b;
         let mut all_jobs = Vec::new();
         let mut ranges = Vec::new();
         for (chunk, js) in jobs {

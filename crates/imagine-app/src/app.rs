@@ -1978,6 +1978,7 @@ impl App {
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
             recent: self.settings.recent.clone(),
             active_adjustment: active.and_then(|l| l.adjustment().cloned()),
+            histogram: None,
         })
     }
 
@@ -2137,6 +2138,9 @@ impl App {
         }
         let Some(mut model) = self.ui_model() else { return };
         if let Some(s) = &mut self.session {
+            if ui::adjust_ui::wants_histogram(model.active_adjustment.as_ref()) {
+                model.histogram = Some(s.engine.histogram(Some(model.active)));
+            }
             for row in &mut model.layers {
                 if let Some((slot, uv)) = s.engine.thumbnail(row.id) {
                     let id = *self.thumb_ids.entry(slot).or_insert_with(|| {

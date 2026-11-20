@@ -97,6 +97,8 @@ pub struct Model {
     pub busy: bool,
     pub recent: Vec<std::path::PathBuf>,
     pub active_adjustment: Option<imagine_core::Adjustment>,
+    /// Histogram of what is below the active adjustment (levels and curves).
+    pub histogram: Option<std::sync::Arc<imagine_gpu::Histogram>>,
 }
 
 #[derive(Debug, Clone)]
@@ -408,7 +410,7 @@ fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action
     egui::CollapsingHeader::new("Werkzeug").default_open(true).show(ui, |ui| tool_section(ui, m, out));
     if let Some(adj) = &m.active_adjustment {
         egui::CollapsingHeader::new("Eigenschaften").default_open(true).show(ui, |ui| {
-            if let Some((adj, done)) = super::adjust_ui::editor(ui, adj, &mut st.adj_editor) {
+            if let Some((adj, done)) = super::adjust_ui::editor(ui, adj, &mut st.adj_editor, m.histogram.as_deref()) {
                 out.push(Action::SetAdjustment { adj, done });
             }
         });

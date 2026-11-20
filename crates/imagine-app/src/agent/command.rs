@@ -160,6 +160,7 @@ pub enum Command {
         use_selection: Option<bool>,
     },
     LayerBounds { layer: Option<LayerId> },
+    Histogram { below: Option<LayerId>, bins: Option<u32> },
     FilterApply { layer: Option<LayerId>, filter: imagine_core::Filter },
     AdjustmentAdd { adjustment: imagine_core::Adjustment, name: Option<String> },
     AdjustmentSet { layer: Option<LayerId>, adjustment: imagine_core::Adjustment },
@@ -233,6 +234,7 @@ impl Command {
             Self::SelectMagicWand { .. } => "select_magic_wand",
             Self::SelectColorRange { .. } => "select_color_range",
             Self::LayerBounds { .. } => "layer_bounds",
+            Self::Histogram { .. } => "histogram",
             Self::AdjustmentAdd { .. } => "adjustment_add",
             Self::FilterApply { .. } => "filter_apply",
             Self::AdjustmentSet { .. } => "adjustment_set",
@@ -809,6 +811,46 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let id = target_layer(s, layer)?;
             let b = s.engine.content_bounds(id).map(bounds_json);
             Ok(Output::json(json!({ "layer": id, "bounds": b })))
+        }
+        Command::Histogram { below, bins } => {
+            let n = bins.unwrap_or(32);
+            if n == 0 || n > 256 || 256 % n != 0 {
+                anyhow::bail!("bins: 1, 2, 4 … 256");
+            }
+            if let Some(id) = below
+                && s.engine.doc().find(id).is_none()
+            {
+                anyhow::bail!("keine Ebene {id}");
+            }
+            let h = s.engine.histogram(below);
+            let channel = |bins: &[f32; 256]| {
+                let total: f32 = bins.iter().sum::<f32>().max(1e-6);
+                let quantile = |q: f32| {
+                    let mut acc = 0.0;
+                    bins.iter().position(|b| {
+                        acc += b;
+                        acc >= q * total
+                    }).unwrap_or(255)
+                };
+                let mean = bins.iter().enumerate().map(|(i, b)| i as f32 * b).sum::<f32>() / total;
+                let grouped: Vec<f32> = bins
+                    .chunks(256 / n as usize)
+                    .map(|c| (c.iter().sum::<f32>() / total * 1e4).round() / 1e4)
+                    .collect();
+                json!({
+                    "mean": (mean * 10.0).round() / 10.0,
+                    "median": quantile(0.5), "p1": quantile(0.01), "p99": quantile(0.99),
+                    "clipped_black": (bins[0] / total * 1e4).round() / 1e4,
+                    "clipped_white": (bins[255] / total * 1e4).round() / 1e4,
+                    "bins": grouped,
+                })
+            };
+            Ok(Output::json(json!({
+                "below": below,
+                "scale": "sRGB-encoded 0–255, fractions of all (alpha-weighted) pixels",
+                "rgb": channel(&h.bins[0]), "red": channel(&h.bins[1]),
+                "green": channel(&h.bins[2]), "blue": channel(&h.bins[3]),
+            })))
         }
         Command::Crop { x, y, width, height } => {
             s.engine.crop(x, y, width, height, "Zuschneiden").map_err(engine_err)?;

@@ -394,7 +394,8 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
   - Eigenschaften-Panel mit Kurven-Editor, Dateiformat v3.
 - **Filter (GPU):** Gaußscher Weichzeichner (separabel; ab 10 px Radius auf einer verkleinerten Kopie, deckungsgleich mit der analytischen Sprungantwort), Unscharf maskieren, Hochpass, Rauschen. Sie wirken durch die Auswahl, als ein Undo-Schritt, mit Live-Vorschau des sichtbaren Bereichs.
 - **Farbmanagement beim Import:** Eingebettete ICC-Profile (z. B. Display P3, Adobe RGB) werden mit moxcms nach linearem sRGB im erweiterten Bereich umgerechnet. Farben außerhalb von sRGB bleiben in f16 erhalten, statt abgeschnitten zu werden.
-- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`.
+- **Histogramm** in Tonwertkorrektur (mit ziehbaren Reglern für Tiefen, Gamma, Lichter) und Kurven. Es zeigt das Bild unterhalb der Einstellungsebene: Dieser Teil wird stapelweise in temporäre Kacheln geflattet, eine Mip-Stufe gelesen und gezählt; zwischengespeichert, bis sich darunter etwas ändert.
+- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`, `histogram`.
 
 | Messung (100 MP, RX 6700 XT) | Ergebnis |
 |---|---|
@@ -403,18 +404,18 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 | Rauschen | 17 ms |
 | Kurven-Einstellungsebene (kompletter Neuaufbau) | 42 ms |
 | 24-MP-PNG mit Display-P3-Profil laden | 133 ms (ohne Profil 67 ms) |
+| Histogramm unter einer Ebene | 36 ms, danach aus dem Cache 0,08 ms |
 
 **Noch offen in Phase 4:**
 - Smart-Filter (nicht-destruktive Filterebenen)
 - Verflüssigen
-- Histogramm in der Tonwertkorrektur
 - Export mit ICC-Profil / in weitem Farbraum
 - Monitorprofil (Wayland color-management)
 - Füllmethoden für Einstellungsebenen (bisher nur Normal)
 
 ## Nächster konkreter Schritt
 
-Rest von Phase 4: Histogramm, Smart-Filter, Export mit Profil, Verflüssigen. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
+Rest von Phase 4: Smart-Filter, Export mit Profil, Verflüssigen. Danach Phase 5 (Retusche: Stempel, Reparaturpinsel).
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

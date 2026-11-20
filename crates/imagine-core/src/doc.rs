@@ -283,6 +283,26 @@ impl<T: Clone> Document<T> {
         self.insert_above_active(l)
     }
 
+    /// The document as it looks underneath layer `id`: the layer itself and
+    /// everything stacked above it are hidden (the input of an adjustment).
+    pub fn below(&self, id: LayerId) -> Document<T> {
+        fn walk<T>(ls: &mut [Layer<T>], id: LayerId, seen: &mut bool) {
+            for l in ls {
+                if l.id == id {
+                    *seen = true;
+                }
+                if *seen {
+                    l.visible = false;
+                } else if let Content::Group(c) = &mut l.content {
+                    walk(c, id, seen);
+                }
+            }
+        }
+        let mut d = self.clone();
+        walk(&mut d.layers, id, &mut false);
+        d
+    }
+
     pub fn add_pixel_layer(&mut self) -> LayerId {
         let id = self.alloc_id();
         let n = self.count_layers() + 1;
@@ -830,5 +850,28 @@ mod tests {
         let m = d.map_tiles(&mut |v| *v as u64 * 2);
         assert!(matches!(m.selection.as_ref().unwrap().at(TileCoord::new(1, 1)), MaskRef::Tile(&10)));
         assert_eq!(m.find(d.active).unwrap().tiles().unwrap()[&TileCoord::new(0, 0)], 14);
+    }
+}
+
+#[cfg(test)]
+mod below_tests {
+    use super::*;
+
+    #[test]
+    fn below_hides_layer_and_everything_above() {
+        let mut d: Document<u32> = Document::new(10, 10);
+        let bg = d.active;
+        let a = d.add_pixel_layer();
+        let g = d.group_active().unwrap();
+        d.active = a;
+        let adj = d.add_adjustment(Adjustment::Invert);
+        let a2 = d.add_pixel_layer(); // above the adjustment, inside the group
+        d.active = g;
+        let top = d.add_pixel_layer();
+        let b = d.below(adj);
+        let vis = |id| b.find(id).unwrap().visible;
+        assert!(vis(bg) && vis(g) && vis(a));
+        assert!(!vis(adj) && !vis(a2) && !vis(top));
+        assert!(d.find(top).unwrap().visible);
     }
 }

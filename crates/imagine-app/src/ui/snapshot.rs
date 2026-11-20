@@ -96,6 +96,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         busy: false,
         recent: Vec::new(),
         active_adjustment: None,
+        histogram: None,
     };
     tracing::info!("UI-Schnappschuss {w}×{h}");
     let palette = std::env::var("IMAGINE_SNAPSHOT_PALETTE").ok();
@@ -130,6 +131,9 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         model.active_adjustment = Some(adj);
         model.layers = panels::layer_rows(s.engine.doc());
         model.active = s.engine.doc().active;
+        if super::adjust_ui::wants_histogram(model.active_adjustment.as_ref()) {
+            model.histogram = Some(s.engine.histogram(Some(model.active)));
+        }
     }
     while s.engine.update_thumbnails(8) {}
     for row in &mut model.layers {
