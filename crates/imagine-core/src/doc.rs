@@ -117,6 +117,9 @@ pub struct Layer<T> {
     /// below the group (Photoshop's default); otherwise the group is
     /// composited on its own first (isolated, "Normal").
     pub pass_through: bool,
+    /// Photoshop's "Fill": opacity of the layer's own pixels only; layer
+    /// styles keep their strength (1 = fully opaque).
+    pub fill_opacity: f32,
 }
 
 impl<T> Layer<T> {
@@ -497,6 +500,7 @@ impl<T: Clone> Document<T> {
             visible: true,
             content: Content::Group(vec![inner]),
             pass_through: true,
+            fill_opacity: 1.0,
             mask: None,
             mask_enabled: true,
             filters: Vec::new(),
@@ -792,6 +796,7 @@ impl<T: Clone> Document<T> {
                     effects: l.effects.clone(),
                     clip: l.clip,
                     pass_through: l.pass_through,
+                    fill_opacity: l.fill_opacity,
                 })
                 .collect()
         }
@@ -852,6 +857,7 @@ impl<T> Layer<T> {
             effects: Vec::new(),
             clip: false,
             pass_through: false,
+            fill_opacity: 1.0,
         }
     }
 

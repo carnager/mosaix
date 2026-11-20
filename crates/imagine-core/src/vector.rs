@@ -255,6 +255,51 @@ pub struct StrokeStyle {
     /// Linear RGB + alpha.
     pub color: [f32; 4],
     pub width: f32,
+    /// Where the stroke lies relative to the path (closed paths).
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub align: StrokeAlign,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub join: StrokeJoin,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub cap: StrokeCap,
+}
+
+impl StrokeStyle {
+    /// A centred stroke with round joins and caps.
+    pub fn new(color: [f32; 4], width: f32) -> Self {
+        Self { color, width, align: StrokeAlign::default(), join: StrokeJoin::default(), cap: StrokeCap::default() }
+    }
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeAlign {
+    #[default]
+    Center,
+    Inside,
+    Outside,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeJoin {
+    #[default]
+    Round,
+    Miter,
+    Bevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeCap {
+    #[default]
+    Round,
+    Butt,
+    Square,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

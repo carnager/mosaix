@@ -76,6 +76,10 @@ pub struct Info {
     pub text: Option<Text>,
     /// Layer style.
     pub effects: Vec<imagine_core::style::Effect>,
+    /// A shape or solid-colour fill layer imagine can represent.
+    pub shape: Option<imagine_core::vector::ShapeSpec>,
+    /// Fill opacity ("iOpa"): the layer's pixels only, not its style.
+    pub fill_opacity: f32,
 }
 
 /// A Photoshop text layer, as far as imagine can use it.
@@ -319,6 +323,14 @@ struct Record {
     text: Option<Text>,
     /// Layer style ("lfx2" / "lmfx" descriptor).
     fx: Option<crate::psd_data::Desc>,
+    /// The mask channel −2 is a rendering of the vector mask.
+    mask_from_vector: bool,
+    /// Vector mask ("vmsk" / "vsms").
+    vmask: Option<Vec<u8>>,
+    /// Solid fill content ("SoCo" / "vscg" with SoCo).
+    solid: Option<crate::psd_data::Desc>,
+    /// Shape stroke ("vstk").
+    vstroke: Option<crate::psd_data::Desc>,
 }
 
 fn rect(c: &mut Cur) -> Result<Rect> {
@@ -385,12 +397,14 @@ fn record(c: &mut Cur) -> Result<Record> {
     let mlen = e.u32()? as usize;
     let mut mask = None;
     let mut real_mask = None;
+    let mut mask_from_vector = false;
     if mlen > 0 {
         let mut m = e.sub(mlen)?;
         let mr = rect(&mut m)?;
         let default = m.u8()?;
         let mflags = m.u8()?;
         mask = Some((mr, default, mflags & 2 == 0));
+        mask_from_vector = mflags & 8 != 0;
         if mlen >= 36 {
             // Optional mask parameters, then the real (pixel) mask.
             if mflags & 0x10 != 0 {
@@ -425,6 +439,9 @@ fn record(c: &mut Cur) -> Result<Record> {
     let mut text = None;
     let mut cged: Option<crate::psd_data::Desc> = None;
     let mut fx: Option<crate::psd_data::Desc> = None;
+    let mut vmask = None;
+    let mut solid = None;
+    let mut vstroke = None;
     while e.left() >= 12 {
         let sig = e.bytes(4)?;
         if sig != b"8BIM" && sig != b"8B64" {
@@ -460,6 +477,25 @@ fn record(c: &mut Cur) -> Result<Record> {
                         fx = Some(desc);
                     }
                 }
+            }
+            b"vmsk" | b"vsms" => vmask = Some(d.bytes(d.left())?.to_vec()),
+            b"vstk" if d.left() > 4 => {
+                d.skip(4)?;
+                vstroke = crate::psd_data::read_desc(d.bytes(d.left())?).ok();
+            }
+            b"vscg" if d.left() > 8 => {
+                // Content key, then version and descriptor.
+                if d.bytes(4)? == b"SoCo" {
+                    d.skip(4)?;
+                    solid = crate::psd_data::read_desc(d.bytes(d.left())?).ok();
+                } else {
+                    special = special.or(Some("fill layer"));
+                }
+            }
+            b"SoCo" if d.left() > 4 => {
+                special = special.or(Some("fill layer"));
+                d.skip(4)?;
+                solid = solid.or(crate::psd_data::read_desc(d.bytes(d.left())?).ok());
             }
             b"TySh" => {
                 special = special.or(Some("text"));
@@ -502,6 +538,10 @@ fn record(c: &mut Cur) -> Result<Record> {
         },
         text,
         fx,
+        mask_from_vector,
+        vmask,
+        solid,
+        vstroke,
     })
 }
 
@@ -703,6 +743,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     let mut res = c.sub(n)?;
     let mut icc = None;
     let mut light = crate::psd_fx::GlobalLight::default();
+    let mut dpi = 72.0f64;
     while res.left() >= 12 {
         if res.bytes(4)? != b"8BIM" {
             break;
@@ -718,6 +759,10 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         }
         if id == 1039 {
             icc = Some(data.to_vec());
+        }
+        if id == 1005 && data.len() >= 4 {
+            // Resolution: horizontal, 16.16 fixed point.
+            dpi = u32::from_be_bytes(data[..4].try_into()?) as f64 / 65536.0;
         }
         if data.len() >= 4 && (id == 1037 || id == 1049) {
             let v = i32::from_be_bytes(data[..4].try_into()?) as f32;
@@ -857,8 +902,19 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         let get_mask = |id: i16| data.iter().find(|(i, _)| *i == id).map(|(_, v)| v.clone());
         // With a vector mask too, −2 is the rasterised vector mask and −3
         // the user's pixel mask; prefer the pixel mask.
+        // Shape and solid fill layers become imagine shape layers.
+        let shape = r.solid.as_ref().and_then(crate::psd_shape::solid_fill).and_then(|fill| {
+            let vm = match &r.vmask {
+                Some(b) => Some(crate::psd_shape::read_vector_mask(b, (width, height))?),
+                None => None,
+            };
+            let st = r.vstroke.as_ref().map(|d| crate::psd_shape::stroke(d, dpi.max(1.0)));
+            crate::psd_shape::shape(vm.as_ref(), fill, st, (width, height))
+        });
         let (which, m) = match (get_mask(-3).is_some(), r.real_mask) {
             (true, Some(rm)) => (-3, Some(rm)),
+            // A rendering of the vector mask is not needed for a shape.
+            _ if shape.is_some() && (r.mask_from_vector || r.vmask.is_some() && r.real_mask.is_some()) => (-2, None),
             _ => (-2, r.mask),
         };
         let mask = m.and_then(|(mr, default, enabled)| {
@@ -874,10 +930,8 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         if blend.is_none() {
             unknown_blend += 1;
         }
-        let mut opacity = r.opacity as f32 / 255.0;
-        if let Some(f) = r.fill_opacity {
-            opacity *= f as f32 / 255.0;
-        }
+        let opacity = r.opacity as f32 / 255.0;
+        let fill_opacity = r.fill_opacity.map_or(1.0, |f| f as f32 / 255.0);
         let effects = match &r.fx {
             Some(fx) => {
                 let (fx, lost) = crate::psd_fx::read(fx, light);
@@ -889,6 +943,8 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             None => Vec::new(),
         };
         let info = Info {
+            fill_opacity,
+            shape,
             effects,
             name: r.name.clone(),
             opacity,
@@ -905,6 +961,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         let handled = match r.special {
             Some("adjustment layer") => r.adjustment.is_some(),
             Some("text") => r.text.is_some(),
+            Some("fill layer") => info.shape.is_some(),
             _ => false,
         };
         if let Some(s) = r.special.filter(|_| !handled) {
@@ -1003,6 +1060,8 @@ pub struct WLayer {
     pub adjustment: Option<imagine_core::Adjustment>,
     /// Layer style (written as Photoshop's "lfx2").
     pub effects: Vec<imagine_core::style::Effect>,
+    /// Fill opacity (written as "iOpa").
+    pub fill_opacity: f32,
     pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
     pub mask: Option<WMask>,
 }
@@ -1355,6 +1414,12 @@ fn write_record(
             o.close(blk, 2);
         }
     }
+    if l.fill_opacity < 1.0 {
+        o.b.extend(b"8BIMiOpa");
+        let blk = o.open(false);
+        o.u8((l.fill_opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+        o.close(blk, 4);
+    }
     if let Some(fx) = crate::psd_fx::write(&l.effects, light) {
         o.b.extend(b"8BIMlfx2");
         let blk = o.open(false);
@@ -1443,6 +1508,7 @@ pub fn write(
         pass_through: false,
         adjustment: None,
         effects: Vec::new(),
+        fill_opacity: 1.0,
         tiles: Vec::new(),
         mask: None,
     };
@@ -1462,6 +1528,7 @@ pub fn write(
                     pass_through: l.pass_through,
                     adjustment: None,
                     effects: Vec::new(),
+                    fill_opacity: 1.0,
                     tiles: Vec::new(),
                     mask: l.mask.clone(),
                 },
@@ -1536,6 +1603,7 @@ pub fn write(
         pass_through: false,
         adjustment: None,
         effects: Vec::new(),
+        fill_opacity: 1.0,
         tiles: composite.to_vec(),
         mask: None,
     };

@@ -17,6 +17,7 @@ zstd.workspace = true
 moxcms.workspace = true
 miniz_oxide = "0.8"
 jpegxl-rs = "0.16.0"
+i_overlay = "9.2.0"
 
 [dev-dependencies]
 tempfile.workspace = true

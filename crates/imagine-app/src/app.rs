@@ -3161,6 +3161,7 @@ impl App {
             layers: ui::panels::layer_rows(doc),
             active: doc.active,
             active_opacity: active.map_or(1.0, |l| l.opacity),
+            active_fill: active.map_or(1.0, |l| l.fill_opacity),
             active_blend: active.map_or(imagine_core::BlendMode::Normal, |l| l.blend),
             keymap: std::sync::Arc::new(self.settings.keymap.clone()),
             active_pass_through: active.filter(|l| l.is_group()).map(|l| l.pass_through),
@@ -3411,13 +3412,15 @@ impl App {
                     above,
                     into,
                 } => self.edit(tr("Move Layer"), |d| d.move_layer(id, target, above, into)),
-                Action::LayerOpacity { value, done } => {
+                Action::LayerOpacity { value, done, fill } => {
                     if let Some(e) = self.engine() {
-                        let changed = e.edit_merged(tr("Opacity"), "layer-opacity", |d| {
+                        let (name, key) = if fill { (tr("Fill"), "layer-fill") } else { (tr("Opacity"), "layer-opacity") };
+                        let changed = e.edit_merged(name, key, |d| {
                             let id = d.active;
                             let l = d.find_mut(id).unwrap();
-                            let c = l.opacity != value;
-                            l.opacity = value;
+                            let v = if fill { &mut l.fill_opacity } else { &mut l.opacity };
+                            let c = *v != value;
+                            *v = value;
                             c
                         });
                         if done {

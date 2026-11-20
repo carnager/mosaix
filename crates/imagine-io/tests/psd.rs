@@ -106,6 +106,7 @@ mod roundtrip {
             pass_through: false,
             adjustment: None,
             effects: Vec::new(),
+            fill_opacity: 1.0,
             tiles,
             mask: None,
         }
@@ -126,6 +127,7 @@ mod roundtrip {
         red.blend = BlendMode::Multiply;
         red.opacity = 0.5;
         red.clip = true;
+        red.fill_opacity = 0.25;
         red.effects = vec![
             imagine_core::style::Effect::new(imagine_core::style::EffectKind::Stroke {
                 size: 3.0,
@@ -198,6 +200,7 @@ mod roundtrip {
         assert_eq!(info.blend, BlendMode::Multiply);
         assert!((info.opacity - 0.5).abs() < 0.01);
         assert_eq!((rect.x, rect.y, rect.w, rect.h), (10, 20, 50, 30));
+        assert!((info.fill_opacity - 0.25).abs() < 0.01);
         // The layer style survives (Photoshop's stacking order: shadow first).
         assert_eq!(info.effects.len(), 2);
         match &info.effects[0].kind {
@@ -332,6 +335,7 @@ fn adjustment_layers_roundtrip() {
                 pass_through: false,
                 adjustment: Some(a.clone()),
                 effects: Vec::new(),
+                fill_opacity: 1.0,
                 tiles: Vec::new(),
                 mask: None,
             })

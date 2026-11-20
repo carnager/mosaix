@@ -398,10 +398,7 @@ pub fn editor(
                     ui.horizontal(|ui| {
                         let mut on = s.stroke.is_some();
                         if ui.checkbox(&mut on, "").changed() {
-                            s.stroke = on.then_some(StrokeStyle {
-                                color: [brush[0], brush[1], brush[2], 1.0],
-                                width: 4.0,
-                            });
+                            s.stroke = on.then_some(StrokeStyle::new([brush[0], brush[1], brush[2], 1.0], 4.0));
                             t.changed = true;
                             t.done = true;
                         }
@@ -415,6 +412,23 @@ pub fn editor(
                                     .speed(0.2),
                             );
                             t.add(&r);
+                            use imagine_core::vector::StrokeAlign;
+                            let name = |a: StrokeAlign| match a {
+                                StrokeAlign::Center => tr("Center"),
+                                StrokeAlign::Inside => tr("Inside"),
+                                StrokeAlign::Outside => tr("Outside"),
+                            };
+                            egui::ComboBox::from_id_salt("stroke align")
+                                .selected_text(name(st.align))
+                                .show_ui(ui, |ui| {
+                                    for a in [StrokeAlign::Inside, StrokeAlign::Center, StrokeAlign::Outside] {
+                                        if ui.selectable_label(st.align == a, name(a)).clicked() && st.align != a {
+                                            st.align = a;
+                                            t.changed = true;
+                                            t.done = true;
+                                        }
+                                    }
+                                });
                         }
                     });
                     ui.end_row();

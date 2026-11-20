@@ -110,6 +110,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         layers: panels::layer_rows(doc),
         active: active.id,
         active_opacity: active.opacity,
+        active_fill: active.fill_opacity,
         active_blend: active.blend,
         keymap: Default::default(),
         active_pass_through: active.is_group().then_some(active.pass_through),

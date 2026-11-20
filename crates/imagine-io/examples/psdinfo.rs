@@ -27,6 +27,9 @@ fn show(nodes: &[Node], depth: usize) {
                 if let Some(a) = &info.adjustment {
                     println!("{pad}    adjustment: {a:?}");
                 }
+                if let Some(sh) = &info.shape {
+                    println!("{pad}    shape: {sh:?}");
+                }
                 for e in &info.effects {
                     println!("{pad}    fx: {e:?}");
                 }

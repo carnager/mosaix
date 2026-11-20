@@ -2792,3 +2792,50 @@ fn custom_tip_paints_its_shape() {
     assert!(px(&tile, 120, 150)[3] > 0.9, "left half painted: {:?}", px(&tile, 120, 150));
     assert!(px(&tile, 180, 150)[3] < 0.05, "right half empty: {:?}", px(&tile, 180, 150));
 }
+
+#[test]
+fn fill_opacity_fades_the_pixels_but_not_the_style() {
+    use imagine_core::VectorLayer;
+    use imagine_core::style::{Effect, EffectKind, StrokePosition};
+    use imagine_core::vector::{Geometry, ShapeSpec};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    e.fill(StrokeTarget::Pixels, [1.0, 1.0, 1.0, 1.0], 1.0, "White").unwrap();
+    let id = e
+        .add_vector(
+            VectorLayer::shape(ShapeSpec {
+                geometry: Geometry::Rect { x: 50.0, y: 50.0, w: 100.0, h: 100.0, radius: 0.0 },
+                fill: Some([0.0, 0.0, 0.0, 1.0]),
+                stroke: None,
+            }),
+            "R",
+        )
+        .unwrap();
+    let at = |e: &mut Engine, x: usize, y: usize| {
+        e.flush();
+        composite_px(e, TileCoord::new(0, 0), x, y)
+    };
+    // No style: fill acts like opacity.
+    e.edit("Fill", |d| {
+        d.find_mut(id).unwrap().fill_opacity = 0.5;
+        true
+    });
+    let p = at(&mut e, 100, 100);
+    // 50 % black over white, mixed in sRGB: 0.5 encoded = 0.214 linear.
+    assert!((p[0] - 0.214).abs() < 0.02, "half fill {p:?}");
+    // With a stroke and no fill: only the stroke shows, at full strength.
+    e.edit("Style", |d| {
+        let l = d.find_mut(id).unwrap();
+        l.fill_opacity = 0.0;
+        l.effects = vec![Effect::new(EffectKind::Stroke {
+            size: 6.0,
+            position: StrokePosition::Inside,
+            color: [1.0, 0.0, 0.0],
+            opacity: 1.0,
+        })];
+        true
+    });
+    assert_eq!(at(&mut e, 100, 100), [1.0, 1.0, 1.0, 1.0], "inside empty");
+    let edge = at(&mut e, 52, 100);
+    assert!(edge[0] > 0.95 && edge[1] < 0.05, "stroke {edge:?}");
+}

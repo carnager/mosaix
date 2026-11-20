@@ -2203,3 +2203,9 @@ msgstr "Kontur mit Verlauf oder Muster"
 
 msgid "gradient stops"
 msgstr "Verläufe mit mehr als zwei Farben"
+
+msgid "Fill"
+msgstr "Fläche"
+
+msgid "Fill: opacity of the layer's own pixels; its layer style keeps full strength"
+msgstr "Fläche: Deckkraft der Ebenenpixel selbst; der Ebenenstil bleibt voll sichtbar"

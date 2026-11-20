@@ -101,6 +101,8 @@ pub enum Command {
         clip: Option<bool>,
         /// Groups: Pass Through (children blend with what is below).
         pass_through: Option<bool>,
+        /// Fill opacity: the layer's own pixels, not its style.
+        fill_opacity: Option<f32>,
     },
     LayerSelect {
         layer: LayerId,
@@ -296,6 +298,8 @@ pub enum Command {
         no_fill: bool,
         stroke_color: Option<ColorSpec>,
         stroke_width: Option<f32>,
+        /// Closed paths: inside, center (default) or outside.
+        stroke_align: Option<imagine_core::vector::StrokeAlign>,
         name: Option<String>,
     },
     VectorSet {
@@ -720,6 +724,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             visible,
             clip,
             pass_through,
+            fill_opacity,
         } => {
             let id = target_layer(s, layer)?;
             let blend = blend
@@ -730,7 +735,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                     })
                 })
                 .transpose()?;
-            if let Some(o) = opacity {
+            for o in [opacity, fill_opacity].into_iter().flatten() {
                 ensure!((0.0..=1.0).contains(&o), "opacity must be 0.0–1.0");
             }
             edit(s, tr("Layer Properties"), |d| {
@@ -740,6 +745,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 }
                 if let Some(o) = opacity {
                     l.opacity = o;
+                }
+                if let Some(f) = fill_opacity {
+                    l.fill_opacity = f;
                 }
                 if let Some(b) = blend {
                     l.blend = b;
@@ -1323,6 +1331,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             no_fill,
             stroke_color,
             stroke_width,
+            stroke_align,
             name,
         } => {
             use imagine_core::vector::{Geometry, ShapeSpec, StrokeStyle};
@@ -1365,12 +1374,11 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let stroke = match (&stroke_color, stroke_width) {
                 (None, None) => None,
                 (c, w) => Some(StrokeStyle {
-                    color: c
-                        .as_ref()
-                        .map(lin)
-                        .transpose()?
-                        .unwrap_or([0.0, 0.0, 0.0, 1.0]),
-                    width: w.unwrap_or(2.0).max(0.1),
+                    align: stroke_align.unwrap_or_default(),
+                    ..StrokeStyle::new(
+                        c.as_ref().map(lin).transpose()?.unwrap_or([0.0, 0.0, 0.0, 1.0]),
+                        w.unwrap_or(2.0).max(0.1),
+                    )
                 }),
             };
             ensure!(
@@ -1823,6 +1831,9 @@ pub fn info(s: &Session) -> Value {
                     "opacity": l.opacity,
                     "visible": l.visible,
                 });
+                if l.fill_opacity < 1.0 {
+                    v["fill_opacity"] = json!(l.fill_opacity);
+                }
                 if let Some(m) = &l.mask {
                     v["mask"] = json!({ "enabled": l.mask_enabled, "default": m.default, "tiles": m.tiles.len() });
                 }

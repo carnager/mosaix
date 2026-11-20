@@ -179,6 +179,8 @@ pub struct Model {
     pub layers: Vec<LayerRow>,
     pub active: LayerId,
     pub active_opacity: f32,
+    /// Fill opacity of the active layer (its pixels only, not its style).
+    pub active_fill: f32,
     pub active_blend: BlendMode,
     /// The user's keyboard shortcuts.
     pub keymap: std::sync::Arc<palette::Keymap>,
@@ -258,6 +260,8 @@ pub enum Action {
     LayerOpacity {
         value: f32,
         done: bool,
+        /// Fill opacity instead of opacity.
+        fill: bool,
     },
     LayerBlend(BlendMode),
     DeleteLayer,
@@ -1589,33 +1593,33 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                     }
                 }
             });
-        let mut o = m.active_opacity;
-        let r = ui.add(
-            egui::DragValue::new(&mut o)
-                .range(0.0..=1.0)
-                .speed(0.005)
-                .custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
-                .custom_parser(|t| {
-                    t.trim_end_matches('%')
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .map(|v| v / 100.0)
-                }),
-        );
-        if r.changed() {
-            out.push(Action::LayerOpacity {
-                value: o,
-                done: false,
-            });
-        }
-        if r.drag_stopped() || r.lost_focus() {
-            out.push(Action::LayerOpacity {
-                value: o,
-                done: true,
-            });
-        }
-        r.on_hover_text(tr("Opacity (drag or type)"));
+        let mut percent = |ui: &mut egui::Ui, value: f32, fill: bool| {
+            let mut o = value;
+            let r = ui.add(
+                egui::DragValue::new(&mut o)
+                    .range(0.0..=1.0)
+                    .speed(0.005)
+                    .custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
+                    .custom_parser(|t| {
+                        t.trim_end_matches('%')
+                            .trim()
+                            .parse::<f64>()
+                            .ok()
+                            .map(|v| v / 100.0)
+                    }),
+            );
+            if r.changed() {
+                out.push(Action::LayerOpacity { value: o, done: false, fill });
+            }
+            if r.drag_stopped() || r.lost_focus() {
+                out.push(Action::LayerOpacity { value: o, done: true, fill });
+            }
+            r
+        };
+        percent(ui, m.active_opacity, false).on_hover_text(tr("Opacity (drag or type)"));
+        ui.label(tr("Fill"));
+        percent(ui, m.active_fill, true)
+            .on_hover_text(tr("Fill: opacity of the layer's own pixels; its layer style keeps full strength"));
     });
     ui.add_space(2.0);
 

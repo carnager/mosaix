@@ -159,6 +159,7 @@ pub fn tools() -> Vec<Value> {
                 "layer": layer_param(),
                 "name": { "type": "string" },
                 "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+                "fill_opacity": { "type": "number", "minimum": 0, "maximum": 1, "description": "Photoshop's Fill: fades the layer's own pixels but not its layer style (0 = only the effects show)" },
                 "blend": { "type": "string", "enum": blend_keys, "description": "Blend mode (Photoshop semantics)" },
                 "visible": { "type": "boolean" },
                 "clip": { "type": "boolean", "description": "Clipping mask: the layer shows only where the layers below it (down to the first unclipped one) have pixels; that base layer's opacity and blend mode apply to the group" },
@@ -436,7 +437,9 @@ pub fn tools() -> Vec<Value> {
                     "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" },
                     "radius": { "type": "number" }, "points": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
                     "d": { "type": "string" }, "fill": color_param("Fill colour"), "no_fill": { "type": "boolean" },
-                    "stroke_color": color_param("Contour colour"), "stroke_width": { "type": "number" }, "name": { "type": "string" } }),
+                    "stroke_color": color_param("Contour colour"), "stroke_width": { "type": "number" },
+                    "stroke_align": { "type": "string", "enum": ["inside", "center", "outside"], "description": "Where the contour lies on closed shapes (default center)" },
+                    "name": { "type": "string" } }),
             &["shape"],
             false,
         ),
@@ -813,6 +816,8 @@ mod tests {
                 a.insert("cmd".into(), name.into());
                 if !a.contains_key(prop) {
                     let v = match (prop.as_str(), schema["type"].as_str()) {
+                        // Enumerations: their first value.
+                        _ if schema["enum"].is_array() => schema["enum"][0].clone(),
                         ("color_space", _) => json!("display_p3"),
                         ("clone_offset", _) => json!([10, -5]),
                         ("align", _) => json!("center"),

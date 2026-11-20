@@ -397,7 +397,9 @@ impl Engine {
 /// Whether any layer has a style switched on.
 fn base_has_effects(d: &Document<Tile>) -> bool {
     let mut any = false;
-    d.for_each(&mut |l, _| any |= l.effects.iter().any(|e| e.enabled));
+    // Fill opacity below 1 also needs the render document (it is folded into
+    // the opacity there, or applied under the layer style).
+    d.for_each(&mut |l, _| any |= l.effects.iter().any(|e| e.enabled) || l.fill_opacity < 1.0);
     any
 }
 
@@ -491,7 +493,7 @@ impl Engine {
         }
         // Layer styles, computed from what the layer shows (after filters).
         let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
-        let mut style_src: Vec<(LayerId, Arc<TileSet>, Vec<imagine_core::style::Effect>)> =
+        let mut style_src: Vec<(LayerId, Arc<TileSet>, Vec<imagine_core::style::Effect>, f32)> =
             Vec::new();
         base.for_each(&mut |l, _| {
             let fx = l.active_effects();
@@ -505,14 +507,14 @@ impl Engine {
                 _ => None,
             };
             if let Some(t) = src {
-                style_src.push((l.id, t, fx));
+                style_src.push((l.id, t, fx, l.fill_opacity));
             }
         });
         changed |= self.refresh_styles(&style_src);
         if changed || self.render.is_none() || self.recheck_all || !self.recheck.is_empty() {
             let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
             let mut d = base.clone();
-            substitute(&mut d.layers, &self.smart, &self.vectors, &self.styles);
+            substitute(&mut d.layers, &self.smart, &self.vectors, &self.styles, true);
             self.render = Some(d);
             if changed {
                 self.recheck_all = true;
@@ -526,7 +528,7 @@ impl Engine {
     pub fn layers_unstyled(&self) -> imagine_core::Document<Tile> {
         let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
         let mut d = base.clone();
-        substitute(&mut d.layers, &self.smart, &self.vectors, &HashMap::new());
+        substitute(&mut d.layers, &self.smart, &self.vectors, &HashMap::new(), false);
         d
     }
 
@@ -594,11 +596,13 @@ impl Engine {
 
 /// The render document's layers: filters applied, vectors rasterised and
 /// (with `styles`) layer styles baked in, effect layers inserted.
+/// `bake_fill`: fold the fill opacity of unstyled layers into their opacity.
 fn substitute(
     ls: &mut Vec<imagine_core::Layer<Tile>>,
     smart: &HashMap<LayerId, SmartEntry>,
     vectors: &HashMap<LayerId, (u64, Arc<TileSet>)>,
     styles: &HashMap<LayerId, super::style::StyleEntry>,
+    bake_fill: bool,
 ) {
     for l in ls.iter_mut() {
         let filtered = smart.get(&l.id).map(|e| e.tiles.clone());
@@ -614,11 +618,15 @@ fn substitute(
                     .unwrap_or_default();
                 l.content = Content::Pixels(tiles);
             }
-            Content::Group(c) => substitute(c, smart, vectors, styles),
+            Content::Group(c) => substitute(c, smart, vectors, styles, bake_fill),
             Content::Adjustment(_) => {}
         }
         if let Some(st) = styles.get(&l.id) {
             l.content = Content::Pixels(st.content.clone());
+        } else if bake_fill && !l.is_group() {
+            // Without effects, fill opacity is plain opacity.
+            l.opacity *= l.fill_opacity;
+            l.fill_opacity = 1.0;
         }
     }
     // Effect layers go right under their layer (same opacity, mask, visibility).

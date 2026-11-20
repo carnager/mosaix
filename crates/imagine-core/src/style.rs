@@ -694,24 +694,29 @@ fn blend_into(dst: &mut [Px], src_rgb: [f32; 3], src_alpha: &[f32], mode: BlendM
         });
 }
 
-/// Like [`blend_into`] but keeps the content's coverage (an overlay clipped
-/// to the shape); `color(i)` gives the overlay colour per pixel.
-fn blend_atop(dst: &mut [Px], color: &(dyn Fn(usize) -> [f32; 3] + Sync), src_alpha: &[f32], mode: BlendMode) {
-    dst.par_iter_mut().enumerate().zip(src_alpha.par_iter()).for_each(|((i, d), &sa)| {
-        let sa = sa.clamp(0.0, 1.0);
-        if sa <= 0.0 || d[3] <= 0.0 {
+/// An overlay clipped to the shape: inside the shape (coverage `shape`)
+/// the overlay is composited over what is there with `opacity`, the
+/// shape's coverage is kept. With fill opacity below 1 the content inside
+/// is translucent and the overlay still shows at full strength.
+/// `color(i)` gives the overlay colour per pixel.
+fn blend_atop(
+    dst: &mut [Px],
+    color: &(dyn Fn(usize) -> [f32; 3] + Sync),
+    shape: &[f32],
+    opacity: f32,
+    mode: BlendMode,
+) {
+    dst.par_iter_mut().enumerate().zip(shape.par_iter()).for_each(|((i, d), &s)| {
+        let s = s.clamp(0.0, 1.0);
+        if s <= 0.0 || opacity <= 0.0 {
             return;
         }
         let c = color(i);
-        // Blend against the content at full coverage, then mix by `sa`.
-        let da = d[3];
-        let opaque = [d[0] / da, d[1] / da, d[2] / da, 1.0];
-        let b = crate::blend::composite(opaque, [c[0], c[1], c[2], 1.0], mode, crate::blend::BlendSpace::Srgb);
-        let k = sa / da;
-        for ch in 0..3 {
-            let mixed = opaque[ch] + (b[ch] - opaque[ch]) * k;
-            d[ch] = mixed * da;
-        }
+        // Inside the shape at full coverage, then scaled back by it.
+        let inner = [d[0] / s, d[1] / s, d[2] / s, (d[3] / s).min(1.0)];
+        let o = opacity.clamp(0.0, 1.0);
+        let b = crate::blend::composite(inner, [c[0] * o, c[1] * o, c[2] * o, o], mode, crate::blend::BlendSpace::Srgb);
+        *d = b.map(|v| v * s);
     });
 }
 
@@ -757,6 +762,13 @@ fn gradient_positions(w: usize, h: usize, alpha: &[f32], angle: f32, style: Grad
 /// Applies `effects` to `content` (premultiplied linear). The region must
 /// already include `reach(effects)` of transparent margin.
 pub fn apply(effects: &[Effect], content: &Region) -> Styled {
+    apply_with_fill(effects, content, 1.0)
+}
+
+/// [`apply`] with Photoshop's fill opacity: the content's own pixels are
+/// faded by `fill`, the effects are computed from the full shape and keep
+/// their strength.
+pub fn apply_with_fill(effects: &[Effect], content: &Region, fill: f32) -> Styled {
     let (w, h) = (content.w, content.h);
     let alpha = content.alpha();
     let enabled: Vec<&Effect> = effects.iter().filter(|e| e.enabled).collect();
@@ -784,6 +796,12 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
 
     let mut below: Vec<(BlendMode, Region)> = Vec::new();
     let mut out = content.clone();
+    let fill = fill.clamp(0.0, 1.0);
+    if fill < 1.0 {
+        for p in &mut out.px {
+            *p = p.map(|v| v * fill);
+        }
+    }
     // Underneath (in Photoshop's order, bottom first): drop shadow, outer glow, outside stroke.
     for (k, &mode) in active.iter().zip(&modes) {
         match **k {
@@ -817,8 +835,7 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
     for (k, &mode) in active.iter().zip(&modes) {
         match **k {
             EffectKind::ColorOverlay { color, opacity } => {
-                let a: Vec<f32> = alpha.iter().map(|a| a * opacity).collect();
-                blend_atop(&mut out.px, &|_| color, &a, mode);
+                blend_atop(&mut out.px, &|_| color, &alpha, opacity, mode);
             }
             EffectKind::GradientOverlay {
                 start,
@@ -833,11 +850,11 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 // Interpolated like Photoshop: in sRGB-encoded values.
                 let enc = |c: [f32; 3]| c.map(crate::color::linear_to_srgb);
                 let (s, e) = (enc(start), enc(end));
-                let a: Vec<f32> = alpha.iter().map(|a| a * opacity).collect();
                 blend_atop(
                     &mut out.px,
                     &|i| std::array::from_fn(|c| crate::color::srgb_to_linear(s[c] + (e[c] - s[c]) * t[i])),
-                    &a,
+                    &alpha,
+                    opacity,
                     mode,
                 );
             }
@@ -1257,5 +1274,36 @@ mod gradient_angle_tests {
         // 90° runs from the bottom up: top bright, bottom dark.
         assert!(at(300, 2) > 0.55, "top {}", at(300, 2));
         assert!(at(300, 57) < 0.05, "bottom {}", at(300, 57));
+    }
+}
+
+#[cfg(test)]
+mod fill_tests {
+    use super::*;
+
+    #[test]
+    fn zero_fill_hides_the_pixels_but_not_the_effects() {
+        let (w, h) = (40, 40);
+        let mut r = Region::new(w, h);
+        for y in 10..30 {
+            for x in 10..30 {
+                r.px[y * w + x] = [1.0, 1.0, 1.0, 1.0];
+            }
+        }
+        let overlay = Effect::new(EffectKind::ColorOverlay { color: [0.0, 0.0, 1.0], opacity: 0.5 });
+        let stroke = Effect::new(EffectKind::Stroke {
+            size: 2.0,
+            position: StrokePosition::Inside,
+            color: [1.0, 0.0, 0.0],
+            opacity: 1.0,
+        });
+        let s = apply_with_fill(&[overlay.clone(), stroke], &r, 0.0);
+        let mid = s.content.px[20 * w + 20];
+        // Only the half-strength overlay is left inside.
+        assert!((mid[3] - 0.5).abs() < 1e-3 && (mid[2] - 0.5).abs() < 1e-3 && mid[0] < 1e-3, "{mid:?}");
+        let edge = s.content.px[10 * w + 20];
+        assert!(edge[0] > 0.9 && edge[3] > 0.99, "stroke at full strength: {edge:?}");
+        // Fill 1 is the plain apply.
+        assert_eq!(apply_with_fill(std::slice::from_ref(&overlay), &r, 1.0).content.px, apply(&[overlay], &r).content.px);
     }
 }

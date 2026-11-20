@@ -833,9 +833,44 @@ fn draw(ctx: &mut RenderContext, res: &mut Resources, p: &Prepared) {
                 ctx.fill_path(path);
             }
             if let Some(st) = &s.stroke {
+                use imagine_core::vector::{StrokeAlign, StrokeCap, StrokeJoin};
+                use vello_cpu::kurbo::{Cap, Join};
+                use vello_cpu::peniko::{BlendMode, Compose, Mix};
+                let closed = path.elements().iter().any(|e| matches!(e, vello_cpu::kurbo::PathEl::ClosePath));
+                let align = if closed { st.align } else { StrokeAlign::Center };
+                // Inside / outside: a stroke twice as wide, cut to one side of the path.
+                let w = st.width as f64 * if align == StrokeAlign::Center { 1.0 } else { 2.0 };
+                let stroke = Stroke::new(w)
+                    .with_join(match st.join {
+                        StrokeJoin::Round => Join::Round,
+                        StrokeJoin::Miter => Join::Miter,
+                        StrokeJoin::Bevel => Join::Bevel,
+                    })
+                    .with_caps(match st.cap {
+                        StrokeCap::Round => Cap::Round,
+                        StrokeCap::Butt => Cap::Butt,
+                        StrokeCap::Square => Cap::Square,
+                    });
                 ctx.set_paint(color(st.color));
-                ctx.set_stroke(Stroke::new(st.width as f64));
-                ctx.stroke_path(path);
+                ctx.set_stroke(stroke);
+                match align {
+                    StrokeAlign::Center => ctx.stroke_path(path),
+                    StrokeAlign::Inside => {
+                        ctx.push_clip_layer(path);
+                        ctx.stroke_path(path);
+                        ctx.pop_layer();
+                    }
+                    StrokeAlign::Outside => {
+                        ctx.push_layer(None, None, None, None, None);
+                        ctx.stroke_path(path);
+                        // Erase the inside (also hides inner outlines of combined paths).
+                        ctx.push_blend_layer(BlendMode::new(Mix::Normal, Compose::DestOut));
+                        ctx.set_paint(color([0.0, 0.0, 0.0, 1.0]));
+                        ctx.fill_path(path);
+                        ctx.pop_layer();
+                        ctx.pop_layer();
+                    }
+                }
             }
         }
         Prepared::Shape(_, None) => {}
@@ -1086,10 +1121,7 @@ mod tests {
                 ry: 50.0,
             },
             fill: None,
-            stroke: Some(StrokeStyle {
-                color: blue,
-                width: 8.0,
-            }),
+            stroke: Some(StrokeStyle::new(blue, 8.0)),
         });
         v.transform = [1.0, 0.0, 0.0, 1.0, 1000.0, 1000.0];
         let t = render(&v);

@@ -335,6 +335,7 @@ fn load_psd(
         l.visible = i.visible;
         l.clip = i.clipped;
         l.effects = i.effects.clone();
+        l.fill_opacity = i.fill_opacity;
     }
     let mut fonts: Option<Vec<imagine_vector::FontGroup>> = None;
     let mut missing_fonts = std::collections::BTreeSet::new();
@@ -364,6 +365,8 @@ fn load_psd(
                         });
                         if let Some(adj) = info.adjustment.clone() {
                             l.content = Content::Adjustment(adj);
+                        } else if let Some(sh) = info.shape.clone() {
+                            l.content = Content::Vector(imagine_core::VectorLayer::shape(sh));
                         } else if let Some(v) = vector {
                             l.content = Content::Vector(v);
                         } else if let Some(px) = pixels {
@@ -415,6 +418,8 @@ fn load_psd(
                 adjustment: None,
                 text: None,
                 effects: Vec::new(),
+                shape: None,
+                fill_opacity: 1.0,
             },
             rect: Rect { x: 0, y: 0, w, h },
             pixels: Some(merged),

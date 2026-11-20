@@ -31,7 +31,7 @@ pub const MAGIC: &[u8; 8] = b"IMAGINE\x01";
 const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
 /// 1: layers. 2: + layer masks and selection.
-const FORMAT_VERSION: u32 = 6;
+const FORMAT_VERSION: u32 = 7;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
 const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
 
@@ -98,6 +98,16 @@ struct LayerEntry {
     clip: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pass_through: bool,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    fill_opacity: f32,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn is_one(v: &f32) -> bool {
+    *v == 1.0
 }
 
 #[derive(Serialize, Deserialize)]
@@ -219,6 +229,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                 effects: l.effects.clone(),
                 clip: l.clip,
                 pass_through: l.pass_through,
+                fill_opacity: l.fill_opacity,
             })
             .collect()
     }
@@ -288,6 +299,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     effects: e.effects,
                     clip: e.clip,
                     pass_through: e.pass_through,
+                    fill_opacity: e.fill_opacity.clamp(0.0, 1.0),
                 })
             })
             .collect()

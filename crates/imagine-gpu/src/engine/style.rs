@@ -10,7 +10,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use half::f16;
-use imagine_core::style::{Effect, Region, apply, reach};
+use imagine_core::style::{Effect, Region, apply_with_fill, reach};
 use imagine_core::{BlendMode, LayerId, TILE_SIZE, TileCoord};
 
 use super::Engine;
@@ -33,22 +33,23 @@ impl Engine {
     /// the pixels the style is computed from. True if anything changed.
     pub(super) fn refresh_styles(
         &mut self,
-        sources: &[(LayerId, Arc<TileSet>, Vec<Effect>)],
+        sources: &[(LayerId, Arc<TileSet>, Vec<Effect>, f32)],
     ) -> bool {
         let before = self.styles.len();
         self.styles
             .retain(|id, _| sources.iter().any(|s| s.0 == *id));
         let mut changed = self.styles.len() != before;
-        for (id, src, effects) in sources {
+        for (id, src, effects, fill) in sources {
             let mut h = DefaultHasher::new();
             (Arc::as_ptr(src) as usize).hash(&mut h);
             format!("{effects:?}").hash(&mut h);
+            fill.to_bits().hash(&mut h);
             let key = h.finish();
             if self.styles.get(id).is_some_and(|e| e.key == key) {
                 continue;
             }
             let t0 = std::time::Instant::now();
-            match self.compute_style(src, effects) {
+            match self.compute_style(src, effects, *fill) {
                 Some((below, content)) => {
                     self.styles.insert(
                         *id,
@@ -82,6 +83,7 @@ impl Engine {
         &mut self,
         src: &Arc<TileSet>,
         effects: &[Effect],
+        fill: f32,
     ) -> Option<(Vec<(BlendMode, Arc<TileSet>)>, Arc<TileSet>)> {
         if src.is_empty() {
             return None;
@@ -147,7 +149,7 @@ impl Engine {
                 }
             }
         }
-        let styled = apply(effects, &region);
+        let styled = apply_with_fill(effects, &region, fill);
         let mut upload = |r: &Region| -> Option<Arc<TileSet>> {
             let mut map = TileSet::new();
             for ty in y0.div_euclid(ts)..=(y1 - 1).div_euclid(ts) {

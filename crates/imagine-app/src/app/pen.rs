@@ -243,10 +243,7 @@ impl App {
                     closed: false,
                 },
                 fill: None,
-                stroke: Some(StrokeStyle {
-                    color: colour,
-                    width,
-                }),
+                stroke: Some(StrokeStyle::new(colour, width)),
             }
         };
         if let Some(e) = self.engine()

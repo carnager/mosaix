@@ -512,6 +512,7 @@ impl PsdLayers {
                     pass_through: l.pass_through,
                     adjustment: None,
                     effects: l.effects.clone(),
+                    fill_opacity: l.fill_opacity,
                     tiles: Vec::new(),
                     mask,
                 };
