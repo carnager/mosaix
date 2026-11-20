@@ -457,7 +457,9 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **PSD/PSB-Import** (eigener Leser, `imagine-io/psd.rs`): Ebenen mit Namen (Unicode), Deckkraft (inkl. Flächendeckkraft), Füllmethoden, Sichtbarkeit, Gruppen (Abschnittstrenner), Ebenenmasken; 8/16/32 Bit; RGB, Graustufen, CMYK (naiv); roh/RLE/ZIP/ZIP mit Vorhersage; eingebettetes ICC-Profil; zusammengefügtes Bild als Rückfall. Ebenen werden kachelweise parallel gestreamt (619-MB-PSD mit 4 Ebenen: 1,4 s bis zum Export). Hinweise für Schnittmasken, Text-/Smart-/Einstellungs-/Füllebenen (nur Pixel) und fremde Füllmethoden. Getestet mit Dateien aus GIMP 3 und ImageMagick.
 
-**Noch offen in Phase 7:** PSD-Export, Schnittmasken, JPEG XL/AVIF, ABR-Pinsel.
+- **PSD/PSB-Export** (Exportieren unter … `.psd`/`.psb`, auch für Agenten): Ebenen, Gruppen (isoliert = „Normal“), Masken, Deckkraft, Füllmethoden, Sichtbarkeit, Unicode-Namen; Text, Formen, Smartfilter und Ebenenstile werden wie angezeigt gerastert (Effekte als eigene Ebenen „Name – Effekt“); 8/16 Bit, RLE; eingebettetes ICC-Profil des gewählten Farbraums; zusammengefügtes Bild; PSB automatisch über 30 000 px. Einstellungsebenen fehlen noch als Ebene (nur im zusammengefügten Bild). Geprüft: Rundreise pixelgleich, GIMP 3 und ImageMagick lesen die Dateien.
+
+**Noch offen in Phase 7:** Einstellungsebenen und Text als PSD-Ebenen, Schnittmasken, „Hindurchwirken“-Gruppen, JPEG XL/AVIF, ABR-Pinsel.
 
 ## Nächster konkreter Schritt
 

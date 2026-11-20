@@ -548,7 +548,7 @@ impl Engine {
                             for (k, (mode, tiles)) in st.below.iter().enumerate() {
                                 let mut fx = imagine_core::Layer::pixels(
                                     effect_layer_id(l.id, k),
-                                    imagine_core::tr("Effect"),
+                                    &imagine_core::tr!("{layer} – Effect", layer = l.name),
                                 );
                                 fx.content = Content::Pixels(tiles.clone());
                                 fx.blend = *mode;

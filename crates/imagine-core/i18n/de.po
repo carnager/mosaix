@@ -1313,6 +1313,9 @@ msgstr "Vorschau: {err}"
 msgid "Properties"
 msgstr "Eigenschaften"
 
+msgid "PSD: {n} adjustment layers were left out (the merged image includes them)"
+msgstr "PSD: {n} Einstellungsebenen wurden ausgelassen (das zusammengefügte Bild enthält sie)"
+
 msgid "Pucker"
 msgstr "Zusammenziehen"
 
@@ -1946,6 +1949,9 @@ msgstr "{label}: verworfen, die Ebene wurde inzwischen verändert"
 msgid "{label}: discarded, the selection has changed in the meantime"
 msgstr "{label}: verworfen, die Auswahl hat sich inzwischen geändert"
 
+msgid "{layer} – Effect"
+msgstr "{layer} – Effekt"
+
 msgid "{modified}{name} – {w}×{h} – {zoom} % – {angle}° – {layer} – {tool} {size} px {opacity} % – {layer_tiles}+{composite_tiles} tiles ({mb} MB) – {ms} ms{status}"
 msgstr "{modified}{name} – {w}×{h} – {zoom} % – {angle}° – {layer} – {tool} {size} px {opacity} % – {layer_tiles}+{composite_tiles} Kacheln ({mb} MB) – {ms} ms{status}"
 
@@ -1975,6 +1981,9 @@ msgstr "{n} Kacheln passen nicht in den GPU-Speicher"
 
 msgid "{n} × {what}: only the pixels were taken over"
 msgstr "{n} × {what}: nur die Pixel wurden übernommen"
+
+msgid "{n} “Pass Through” groups are composited as isolated groups (their blend modes act inside the group only)"
+msgstr "{n} Gruppen mit „Hindurchwirken“ werden isoliert berechnet (ihre Füllmethoden wirken nur innerhalb der Gruppe)"
 
 msgid "{pct} % of the current size"
 msgstr "{pct} % der jetzigen Größe"

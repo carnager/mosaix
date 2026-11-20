@@ -397,7 +397,9 @@ impl Session {
         let handles: Vec<Tile> = tiles.iter().map(|(_, t)| t.clone()).collect();
         let readback = (!handles.is_empty())
             .then(|| self.engine.begin_readback(PoolKind::Composite, &handles));
+        let psd = imagine_io::psd::is_psd(path).then(|| self.start_psd_layers());
         ExportJob {
+            psd,
             path: path.to_path_buf(),
             opts: *opts,
             t0,
@@ -408,9 +410,143 @@ impl Session {
     }
 }
 
+impl Session {
+    /// Starts reading back every layer and mask as shown (PSD export).
+    fn start_psd_layers(&mut self) -> PsdLayers {
+        let doc = self.engine.layers_as_shown();
+        let (mut layer_keys, mut layer_tiles, mut mask_keys, mut mask_tiles) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        doc.for_each(&mut |l, _| {
+            if let Some(t) = l.tiles() {
+                for (c, tile) in t.iter() {
+                    layer_keys.push((l.id, *c));
+                    layer_tiles.push(tile.clone());
+                }
+            }
+            if let Some(m) = &l.mask {
+                for (c, t) in m.tiles.iter() {
+                    if let MaskTile::Pixels(tile) = t {
+                        mask_keys.push((l.id, *c));
+                        mask_tiles.push(tile.clone());
+                    }
+                }
+            }
+        });
+        let start = |kind, tiles: &[Tile]| {
+            (!tiles.is_empty()).then(|| self.engine.begin_readback(kind, tiles))
+        };
+        PsdLayers {
+            layer_rb: start(PoolKind::Layer, &layer_tiles),
+            mask_rb: start(PoolKind::Mask, &mask_tiles),
+            doc: doc.map_tiles(&mut |_| ()),
+            layer_keys,
+            mask_keys,
+            layer_data: Vec::new(),
+            mask_data: Vec::new(),
+        }
+    }
+}
+
+/// Layer and mask pixels of a PSD export (readbacks, then their data).
+struct PsdLayers {
+    doc: Document<()>,
+    layer_keys: Vec<(LayerId, TileCoord)>,
+    mask_keys: Vec<(LayerId, TileCoord)>,
+    layer_rb: Option<Readback>,
+    mask_rb: Option<Readback>,
+    layer_data: Vec<Vec<u8>>,
+    mask_data: Vec<Vec<u8>>,
+}
+
+impl PsdLayers {
+    fn take(mut self) -> Self {
+        self.layer_data = self.layer_rb.take().map(Readback::take).unwrap_or_default();
+        self.mask_data = self.mask_rb.take().map(Readback::take).unwrap_or_default();
+        self
+    }
+
+    /// The layer tree to write (adjustment layers are left out).
+    fn nodes(self) -> Vec<imagine_io::psd::WNode> {
+        use imagine_core::doc::Content;
+        use imagine_io::psd::{WLayer, WMask, WNode};
+        let mut px: HashMap<(LayerId, TileCoord), Vec<half::f16>> = HashMap::new();
+        for (k, raw) in self.layer_keys.into_iter().zip(self.layer_data) {
+            px.insert(k, bytemuck::pod_collect_to_vec(&raw));
+        }
+        let mut mk: HashMap<(LayerId, TileCoord), Vec<u8>> =
+            self.mask_keys.into_iter().zip(self.mask_data).collect();
+        let ts = imagine_core::TILE_SIZE as usize;
+        let mut skipped = 0;
+        fn build(
+            ls: &[imagine_core::Layer<()>],
+            px: &mut HashMap<(LayerId, TileCoord), Vec<half::f16>>,
+            mk: &mut HashMap<(LayerId, TileCoord), Vec<u8>>,
+            ts: usize,
+            skipped: &mut usize,
+        ) -> Vec<WNode> {
+            let mut out = Vec::new();
+            for l in ls {
+                let mask = l.mask.as_ref().map(|m| WMask {
+                    default: m.default,
+                    enabled: l.mask_enabled,
+                    tiles: m
+                        .tiles
+                        .iter()
+                        .map(|(c, t)| match t {
+                            MaskTile::Solid(v) => (*c, vec![*v; ts * ts]),
+                            MaskTile::Pixels(()) => (
+                                *c,
+                                mk.remove(&(l.id, *c))
+                                    .unwrap_or_else(|| vec![m.default; ts * ts]),
+                            ),
+                        })
+                        .collect(),
+                });
+                let mut w = WLayer {
+                    name: l.name.clone(),
+                    opacity: l.opacity,
+                    blend: l.blend,
+                    visible: l.visible,
+                    tiles: Vec::new(),
+                    mask,
+                };
+                match &l.content {
+                    Content::Pixels(t) => {
+                        w.tiles = t
+                            .keys()
+                            .filter_map(|c| px.remove(&(l.id, *c)).map(|d| (*c, d)))
+                            .collect();
+                        out.push(WNode::Layer(w));
+                    }
+                    Content::Group(children) => {
+                        let children = build(children, px, mk, ts, skipped);
+                        out.push(WNode::Group { layer: w, children });
+                    }
+                    // Not representable yet; the merged image still shows it.
+                    Content::Adjustment(_) | Content::Vector(_) => *skipped += 1,
+                }
+            }
+            out
+        }
+        let nodes = build(&self.doc.layers, &mut px, &mut mk, ts, &mut skipped);
+        if skipped > 0 {
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "PSD: {n} adjustment layers were left out (the merged image includes them)",
+                    n = skipped
+                )
+            );
+        }
+        nodes
+    }
+}
+
 /// An export whose GPU readback is in flight.
 pub struct ExportJob {
     pub path: PathBuf,
+    /// Layered export (PSD): every layer's and mask's tiles in flight too.
+    psd: Option<PsdLayers>,
     opts: ExportOptions,
     t0: Instant,
     size: (u32, u32),
@@ -421,11 +557,16 @@ pub struct ExportJob {
 impl ExportJob {
     pub fn ready(&self, device: &wgpu::Device) -> bool {
         self.readback.as_ref().is_none_or(|r| r.poll(device))
+            && self.psd.as_ref().is_none_or(|p| {
+                p.layer_rb.as_ref().is_none_or(|r| r.poll(device))
+                    && p.mask_rb.as_ref().is_none_or(|r| r.poll(device))
+            })
     }
 
     /// Conversion, encoding and writing (any thread). Returns the total time in ms.
     pub fn into_writer(self) -> impl FnOnce() -> anyhow::Result<f64> + Send + 'static {
         let data = self.readback.map(Readback::take).unwrap_or_default();
+        let psd = self.psd.map(PsdLayers::take);
         let (path, opts, t0, size, coords) =
             (self.path, self.opts, self.t0, self.size, self.coords);
         move || {
@@ -436,6 +577,12 @@ impl ExportJob {
                         .map(|raw| bytemuck::pod_collect_to_vec(&raw)),
                 )
                 .collect();
+            if let Some(p) = psd {
+                let nodes = p.nodes();
+                imagine_io::psd::write(&path, size, &nodes, &tiles, &opts)
+                    .with_context(|| tr!("exporting {path}", path = path.display()))?;
+                return Ok(t0.elapsed().as_secs_f64() * 1e3);
+            }
             export::write(&path, size, &tiles, &opts)
                 .with_context(|| tr!("exporting {path}", path = path.display()))?;
             Ok(t0.elapsed().as_secs_f64() * 1e3)

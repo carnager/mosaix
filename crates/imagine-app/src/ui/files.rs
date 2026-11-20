@@ -32,7 +32,7 @@ impl FileMode {
                 "imagine", "psd", "psb", "png", "jpg", "jpeg", "webp", "tif", "tiff", "exr",
             ],
             FileMode::SaveAs => &["imagine"],
-            FileMode::ExportAs => &["png", "jpg", "jpeg", "webp", "tif", "tiff"],
+            FileMode::ExportAs => &["png", "jpg", "jpeg", "webp", "tif", "tiff", "psd", "psb"],
         }
     }
 }

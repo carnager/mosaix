@@ -739,6 +739,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     let mut clipped = 0;
     let mut specials = std::collections::BTreeMap::<&str, usize>::new();
     let mut unknown_blend = 0;
+    let mut passthrough = 0;
     for (r, data) in records.into_iter().zip(layer_data) {
         let get_mask = |id: i16| data.iter().find(|(i, _)| *i == id).map(|(_, v)| v.clone());
         let mask = r.mask.and_then(|(mr, default, enabled)| {
@@ -782,6 +783,17 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
                 } else {
                     Vec::new()
                 };
+                // Pass-through groups let their children blend with what is
+                // below; imagine groups are isolated. Same result unless a
+                // child uses another blend mode.
+                let blends = |n: &Node| match n {
+                    Node::Layer { info, .. } | Node::Group { info, .. } => {
+                        info.blend != BlendMode::Normal || info.special == Some("adjustment layer")
+                    }
+                };
+                if &r.blend_key == b"pass" && children.iter().any(blends) {
+                    passthrough += 1;
+                }
                 stack.last_mut().unwrap().push(Node::Group {
                     info,
                     children,
@@ -822,6 +834,12 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             what = tr(what)
         ));
     }
+    if passthrough > 0 {
+        warnings.push(imagine_core::tr!(
+            "{n} “Pass Through” groups are composited as isolated groups (their blend modes act inside the group only)",
+            n = passthrough
+        ));
+    }
     if unknown_blend > 0 {
         warnings.push(imagine_core::tr!(
             "{n} layers use a blend mode imagine does not have yet (shown as Normal)",
@@ -848,6 +866,568 @@ pub fn open(path: &std::path::Path) -> Result<Psd> {
 pub fn is_psd(path: &std::path::Path) -> bool {
     path.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("psd") || e.eq_ignore_ascii_case("psb"))
+}
+
+// --- Writing ------------------------------------------------------------
+
+/// A layer to write: premultiplied linear tiles (as the engine stores them)
+/// and an optional mask (default value, enabled, 8-bit tiles).
+pub struct WLayer {
+    pub name: String,
+    pub opacity: f32,
+    pub blend: BlendMode,
+    pub visible: bool,
+    pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
+    pub mask: Option<WMask>,
+}
+
+#[derive(Clone)]
+pub struct WMask {
+    pub default: u8,
+    pub enabled: bool,
+    pub tiles: Vec<(imagine_core::TileCoord, Vec<u8>)>,
+}
+
+pub enum WNode {
+    Layer(WLayer),
+    Group { layer: WLayer, children: Vec<WNode> },
+}
+
+struct Out {
+    b: Vec<u8>,
+    psb: bool,
+}
+
+impl Out {
+    fn u8(&mut self, v: u8) {
+        self.b.push(v);
+    }
+    fn u16(&mut self, v: u16) {
+        self.b.extend(v.to_be_bytes());
+    }
+    fn i16(&mut self, v: i16) {
+        self.b.extend(v.to_be_bytes());
+    }
+    fn u32(&mut self, v: u32) {
+        self.b.extend(v.to_be_bytes());
+    }
+    fn i32(&mut self, v: i32) {
+        self.b.extend(v.to_be_bytes());
+    }
+    fn len(&mut self, v: usize, wide: bool) {
+        if wide && self.psb {
+            self.b.extend((v as u64).to_be_bytes());
+        } else {
+            self.b.extend((v as u32).to_be_bytes());
+        }
+    }
+    /// Reserves a length field; `close` fills it with the bytes written since,
+    /// padded to `align`.
+    fn open(&mut self, wide: bool) -> (usize, bool) {
+        let at = self.b.len();
+        self.len(0, wide);
+        (at, wide && self.psb)
+    }
+    fn close(&mut self, (at, wide): (usize, bool), align: usize) {
+        let start = at + if wide { 8 } else { 4 };
+        while !(self.b.len() - start).is_multiple_of(align) {
+            self.b.push(0);
+        }
+        let n = self.b.len() - start;
+        if wide {
+            self.b[at..at + 8].copy_from_slice(&(n as u64).to_be_bytes());
+        } else {
+            self.b[at..at + 4].copy_from_slice(&(n as u32).to_be_bytes());
+        }
+    }
+}
+
+/// PackBits encoding of one row.
+fn packbits_encode(src: &[u8], out: &mut Vec<u8>) {
+    let mut i = 0;
+    while i < src.len() {
+        // A run of at least 3 equal bytes?
+        let mut run = 1;
+        while i + run < src.len() && run < 128 && src[i + run] == src[i] {
+            run += 1;
+        }
+        if run >= 3 {
+            out.push((1i16 - run as i16) as i8 as u8);
+            out.push(src[i]);
+            i += run;
+            continue;
+        }
+        // Literals until the next run of 3.
+        let start = i;
+        while i < src.len() && i - start < 128 {
+            if i + 2 < src.len() && src[i] == src[i + 1] && src[i] == src[i + 2] {
+                break;
+            }
+            i += 1;
+        }
+        out.push((i - start - 1) as u8);
+        out.extend_from_slice(&src[start..i]);
+    }
+}
+
+/// A channel plane (`w × h` samples, big-endian) → RLE data incl. compression
+/// field and row counts.
+fn rle_channel(plane: &[u8], row_bytes: usize, h: usize, psb: bool) -> Vec<u8> {
+    let mut rows = Vec::with_capacity(h);
+    for r in 0..h {
+        let mut v = Vec::new();
+        packbits_encode(&plane[r * row_bytes..(r + 1) * row_bytes], &mut v);
+        rows.push(v);
+    }
+    let mut out = Vec::new();
+    out.extend(1u16.to_be_bytes());
+    for r in &rows {
+        if psb {
+            out.extend((r.len() as u32).to_be_bytes());
+        } else {
+            out.extend((r.len() as u16).to_be_bytes());
+        }
+    }
+    for r in rows {
+        out.extend(r);
+    }
+    out
+}
+
+/// Layer pixels ready to write: rect and RLE-coded channels (id, data).
+struct Encoded {
+    rect: Rect,
+    channels: Vec<(i16, Vec<u8>)>,
+    mask: Option<(Rect, u8, bool)>,
+}
+
+/// Premultiplied linear tiles → trimmed rect and planar, encoded channels.
+fn encode_layer(l: &WLayer, depth: u16, convert: &crate::export::Converter, psb: bool) -> Encoded {
+    use imagine_core::TILE_SIZE;
+    let ts = TILE_SIZE as i64;
+    // Straight, encoded colour + alpha per tile (0…1).
+    let tiles: Vec<(imagine_core::TileCoord, Vec<f32>)> = l
+        .tiles
+        .iter()
+        .map(|(c, px)| {
+            let n = (ts * ts) as usize;
+            let mut rgb = vec![0.0f32; n * 3];
+            let mut a = vec![0.0f32; n];
+            for i in 0..n {
+                let al = px[i * 4 + 3].to_f32().clamp(0.0, 1.0);
+                a[i] = al;
+                if al > 0.0 {
+                    for k in 0..3 {
+                        rgb[i * 3 + k] = px[i * 4 + k].to_f32() / al;
+                    }
+                }
+            }
+            for row in rgb.chunks_mut(ts as usize * 3) {
+                convert(row);
+            }
+            let mut out = vec![0.0f32; n * 4];
+            for i in 0..n {
+                out[i * 4..i * 4 + 3].copy_from_slice(&rgb[i * 3..i * 3 + 3]);
+                out[i * 4 + 3] = a[i];
+            }
+            (*c, out)
+        })
+        .collect();
+    // Bounds of the visible pixels.
+    let (mut x0, mut y0, mut x1, mut y1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+    for (c, px) in &tiles {
+        let (ox, oy) = c.origin();
+        for y in 0..ts {
+            for x in 0..ts {
+                if px[((y * ts + x) * 4 + 3) as usize] > 0.0 {
+                    x0 = x0.min(ox + x);
+                    y0 = y0.min(oy + y);
+                    x1 = x1.max(ox + x + 1);
+                    y1 = y1.max(oy + y + 1);
+                }
+            }
+        }
+    }
+    let rect = if x1 > x0 {
+        Rect {
+            x: x0,
+            y: y0,
+            w: (x1 - x0) as u32,
+            h: (y1 - y0) as u32,
+        }
+    } else {
+        Rect::default()
+    };
+    let bpp = depth as usize / 8;
+    let (w, h) = (rect.w as usize, rect.h as usize);
+    let mut planes = vec![vec![0u8; w * h * bpp]; 4];
+    for (c, px) in &tiles {
+        let (ox, oy) = c.origin();
+        for y in 0..ts {
+            let dy = oy + y - rect.y;
+            if dy < 0 || dy >= h as i64 {
+                continue;
+            }
+            for x in 0..ts {
+                let dx = ox + x - rect.x;
+                if dx < 0 || dx >= w as i64 {
+                    continue;
+                }
+                let s = ((y * ts + x) * 4) as usize;
+                let d = (dy as usize * w + dx as usize) * bpp;
+                for (k, plane) in planes.iter_mut().enumerate() {
+                    let v = px[s + k].clamp(0.0, 1.0);
+                    if bpp == 1 {
+                        plane[d] = (v * 255.0).round() as u8;
+                    } else {
+                        plane[d..d + 2]
+                            .copy_from_slice(&((v * 65535.0).round() as u16).to_be_bytes());
+                    }
+                }
+            }
+        }
+    }
+    let ids = [0i16, 1, 2, -1];
+    let mut channels: Vec<(i16, Vec<u8>)> = ids
+        .iter()
+        .zip(&planes)
+        .map(|(id, p)| {
+            (
+                *id,
+                if w * h == 0 {
+                    0u16.to_be_bytes().to_vec()
+                } else {
+                    rle_channel(p, w * bpp, h, psb)
+                },
+            )
+        })
+        .collect();
+    // Mask: bounds of its tiles, default outside.
+    let mut mask = None;
+    if let Some(m) = &l.mask {
+        let (mut mx0, mut my0, mut mx1, mut my1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+        for (c, _) in &m.tiles {
+            let (ox, oy) = c.origin();
+            mx0 = mx0.min(ox);
+            my0 = my0.min(oy);
+            mx1 = mx1.max(ox + ts);
+            my1 = my1.max(oy + ts);
+        }
+        let mr = if mx1 > mx0 {
+            Rect {
+                x: mx0,
+                y: my0,
+                w: (mx1 - mx0) as u32,
+                h: (my1 - my0) as u32,
+            }
+        } else {
+            Rect::default()
+        };
+        let (mw, mh) = (mr.w as usize, mr.h as usize);
+        let mut plane = vec![m.default; mw * mh];
+        for (c, px) in &m.tiles {
+            let (ox, oy) = c.origin();
+            for y in 0..ts {
+                let row = ((oy + y - mr.y) as usize) * mw + (ox - mr.x) as usize;
+                plane[row..row + ts as usize]
+                    .copy_from_slice(&px[(y * ts) as usize..((y + 1) * ts) as usize]);
+            }
+        }
+        let data = if mw * mh == 0 {
+            0u16.to_be_bytes().to_vec()
+        } else if bpp == 1 {
+            rle_channel(&plane, mw, mh, psb)
+        } else {
+            let wide: Vec<u8> = plane
+                .iter()
+                .flat_map(|&v| (v as u16 * 257).to_be_bytes())
+                .collect();
+            rle_channel(&wide, mw * 2, mh, psb)
+        };
+        channels.push((-2, data));
+        mask = Some((mr, m.default, m.enabled));
+    }
+    Encoded {
+        rect,
+        channels,
+        mask,
+    }
+}
+
+fn write_rect(o: &mut Out, r: Rect) {
+    o.i32(r.y as i32);
+    o.i32(r.x as i32);
+    o.i32((r.y + r.h as i64) as i32);
+    o.i32((r.x + r.w as i64) as i32);
+}
+
+/// One layer record. `divider`: section divider type (groups).
+fn write_record(o: &mut Out, l: &WLayer, e: &Encoded, divider: Option<u32>) {
+    write_rect(o, e.rect);
+    o.u16(e.channels.len() as u16);
+    for (id, data) in &e.channels {
+        o.i16(*id);
+        o.len(data.len(), true);
+    }
+    o.b.extend(b"8BIM");
+    // imagine groups are isolated, i.e. Photoshop's "Normal" group mode.
+    o.b.extend(blend_key(l.blend));
+    o.u8((l.opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+    o.u8(0); // clipping
+    o.u8(if l.visible { 0 } else { 2 } | 8); // bit 3: bit 4 is meaningful
+    o.u8(0);
+    let extra = o.open(false);
+    // Mask.
+    match e.mask {
+        Some((r, default, enabled)) => {
+            o.u32(20);
+            write_rect(o, r);
+            o.u8(default);
+            o.u8(if enabled { 0 } else { 2 });
+            o.u16(0);
+        }
+        None => o.u32(0),
+    }
+    o.u32(0); // blending ranges
+    // Pascal name (MacRoman-ish: ASCII, '?' otherwise), padded to 4.
+    let ascii: Vec<u8> = l
+        .name
+        .chars()
+        .map(|c| if c.is_ascii() { c as u8 } else { b'?' })
+        .take(255)
+        .collect();
+    let start = o.b.len();
+    o.u8(ascii.len() as u8);
+    o.b.extend(&ascii);
+    while !(o.b.len() - start).is_multiple_of(4) {
+        o.u8(0);
+    }
+    // Unicode name.
+    o.b.extend(b"8BIMluni");
+    let units: Vec<u16> = l.name.encode_utf16().collect();
+    let blk = o.open(false);
+    o.u32(units.len() as u32);
+    for u in units {
+        o.u16(u);
+    }
+    o.close(blk, 4);
+    if let Some(t) = divider {
+        o.b.extend(b"8BIMlsct");
+        let blk = o.open(false);
+        o.u32(t);
+        if t != 3 {
+            o.b.extend(b"8BIM");
+            o.b.extend(blend_key(l.blend));
+        }
+        o.close(blk, 4);
+    }
+    o.close(extra, 1);
+}
+
+/// Writes a layered Photoshop file (PSB if the canvas is larger than PSD
+/// allows). `composite`: the flattened image (premultiplied linear tiles).
+pub fn write(
+    path: &std::path::Path,
+    (width, height): (u32, u32),
+    nodes: &[WNode],
+    composite: &[(imagine_core::TileCoord, Vec<half::f16>)],
+    opts: &crate::export::ExportOptions,
+) -> Result<()> {
+    use rayon::prelude::*;
+    let psb = width > 30000
+        || height > 30000
+        || path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("psb"));
+    let depth: u16 = if opts.sixteen_bit { 16 } else { 8 };
+    let convert = opts.space.converter()?;
+    // Flatten the tree into records, bottom → top (groups: divider, children, folder).
+    enum Rec<'a> {
+        Layer(&'a WLayer),
+        End,
+        Folder(&'a WLayer),
+    }
+    fn walk<'a>(nodes: &'a [WNode], out: &mut Vec<Rec<'a>>) {
+        for n in nodes {
+            match n {
+                WNode::Layer(l) => out.push(Rec::Layer(l)),
+                WNode::Group { layer, children } => {
+                    out.push(Rec::End);
+                    walk(children, out);
+                    out.push(Rec::Folder(layer));
+                }
+            }
+        }
+    }
+    let mut recs = Vec::new();
+    walk(nodes, &mut recs);
+    let end_marker = WLayer {
+        name: "</Layer group>".into(),
+        opacity: 1.0,
+        blend: BlendMode::Normal,
+        visible: true,
+        tiles: Vec::new(),
+        mask: None,
+    };
+    let encoded: Vec<Encoded> = recs
+        .par_iter()
+        .map(|r| match r {
+            Rec::Layer(l) => encode_layer(l, depth, &convert, psb),
+            Rec::End => encode_layer(&end_marker, depth, &convert, psb),
+            // Groups have no pixels of their own, only a mask.
+            Rec::Folder(l) => encode_layer(
+                &WLayer {
+                    name: String::new(),
+                    opacity: l.opacity,
+                    blend: l.blend,
+                    visible: l.visible,
+                    tiles: Vec::new(),
+                    mask: l.mask.clone(),
+                },
+                depth,
+                &convert,
+                psb,
+            ),
+        })
+        .collect();
+    let mut o = Out {
+        b: Vec::with_capacity(1 << 20),
+        psb,
+    };
+    o.b.extend(b"8BPS");
+    o.u16(if psb { 2 } else { 1 });
+    o.b.extend([0u8; 6]);
+    o.u16(4);
+    o.u32(height);
+    o.u32(width);
+    o.u16(depth);
+    o.u16(3); // RGB
+    o.u32(0); // colour mode data
+    // Image resources: the ICC profile.
+    let res = o.open(false);
+    let mut profile = opts.space.profile();
+    profile.description = Some(moxcms::ProfileText::PlainString(opts.space.name().into()));
+    if let Ok(icc) = profile.encode() {
+        o.b.extend(b"8BIM");
+        o.u16(1039);
+        o.u16(0); // empty name, padded
+        o.u32(icc.len() as u32);
+        o.b.extend(&icc);
+        if icc.len() % 2 == 1 {
+            o.u8(0);
+        }
+    }
+    o.close(res, 1);
+    // Layer and mask information.
+    let lm = o.open(true);
+    let li = o.open(true);
+    o.i16(-(recs.len() as i16)); // negative: the merged alpha is transparency
+    for (r, e) in recs.iter().zip(&encoded) {
+        match r {
+            Rec::Layer(l) => write_record(&mut o, l, e, None),
+            Rec::End => write_record(&mut o, &end_marker, e, Some(3)),
+            Rec::Folder(l) => write_record(&mut o, l, e, Some(1)),
+        }
+    }
+    for e in &encoded {
+        for (_, data) in &e.channels {
+            o.b.extend(data);
+        }
+    }
+    o.close(li, 2);
+    o.u32(0); // global layer mask info
+    o.close(lm, 2);
+    // Merged image, RLE: all row counts first, then the rows.
+    let merged = WLayer {
+        name: String::new(),
+        opacity: 1.0,
+        blend: BlendMode::Normal,
+        visible: true,
+        tiles: composite.to_vec(),
+        mask: None,
+    };
+    let full = encode_full(&merged, (width, height), depth, &convert);
+    let bpp = depth as usize / 8;
+    let row = width as usize * bpp;
+    let rows: Vec<Vec<u8>> = full
+        .par_iter()
+        .flat_map_iter(|plane| {
+            (0..height as usize).map(move |r| {
+                let mut v = Vec::new();
+                packbits_encode(&plane[r * row..(r + 1) * row], &mut v);
+                v
+            })
+        })
+        .collect();
+    o.u16(1);
+    for r in &rows {
+        if psb {
+            o.u32(r.len() as u32);
+        } else {
+            o.u16(r.len() as u16);
+        }
+    }
+    for r in rows {
+        o.b.extend(r);
+    }
+    std::fs::write(path, &o.b).with_context(|| path.display().to_string())?;
+    Ok(())
+}
+
+/// The whole canvas as four planes (R, G, B, A), big-endian samples.
+fn encode_full(
+    l: &WLayer,
+    (w, h): (u32, u32),
+    depth: u16,
+    convert: &crate::export::Converter,
+) -> Vec<Vec<u8>> {
+    use imagine_core::TILE_SIZE;
+    let ts = TILE_SIZE as i64;
+    let bpp = depth as usize / 8;
+    let (w, h) = (w as usize, h as usize);
+    let mut planes = vec![vec![0u8; w * h * bpp]; 4];
+    for (c, px) in &l.tiles {
+        let (ox, oy) = c.origin();
+        let n = (ts * ts) as usize;
+        let mut rgb = vec![0.0f32; n * 3];
+        let mut a = vec![0.0f32; n];
+        for i in 0..n {
+            a[i] = px[i * 4 + 3].to_f32().clamp(0.0, 1.0);
+            if a[i] > 0.0 {
+                for k in 0..3 {
+                    rgb[i * 3 + k] = px[i * 4 + k].to_f32() / a[i];
+                }
+            }
+        }
+        for row in rgb.chunks_mut(ts as usize * 3) {
+            convert(row);
+        }
+        for y in 0..ts {
+            let dy = oy + y;
+            if dy < 0 || dy >= h as i64 {
+                continue;
+            }
+            for x in 0..ts {
+                let dx = ox + x;
+                if dx < 0 || dx >= w as i64 {
+                    continue;
+                }
+                let i = (y * ts + x) as usize;
+                let d = (dy as usize * w + dx as usize) * bpp;
+                let vals = [rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], a[i]];
+                for (k, plane) in planes.iter_mut().enumerate() {
+                    let v = vals[k].clamp(0.0, 1.0);
+                    if bpp == 1 {
+                        plane[d] = (v * 255.0).round() as u8;
+                    } else {
+                        plane[d..d + 2]
+                            .copy_from_slice(&((v * 65535.0).round() as u16).to_be_bytes());
+                    }
+                }
+            }
+        }
+    }
+    planes
 }
 
 #[cfg(test)]

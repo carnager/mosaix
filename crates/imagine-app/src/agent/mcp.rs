@@ -19,7 +19,7 @@ pixels with the origin at the top-left; colours are sRGB hex (\"#rrggbb\" or \"#
 or [r, g, b(, a)] in 0–255; `layer` parameters default to the active layer and layer ids \
 are stable. Typical workflow: document_open or document_new → document_info → edit \
 (layer_add, paint_stroke, fill_rect, place_image, layer_set …) → render_preview to look at \
-the result → save (.imagine keeps layers) or export (flattened png/jpg/webp/tiff). Every \
+the result → save (.imagine keeps layers) or export (flattened png/jpg/webp/tiff, or layered psd). Every \
 edit is a single undo step (undo/redo). When attached to a running window, the user sees \
 every change immediately and may be editing too.";
 
@@ -593,7 +593,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "export",
-            "Export the flattened image; format by extension: png, jpg, webp, tif. Wide-gamut colour spaces embed their ICC profile; 16 bit works for png and tif.",
+            "Export the image; format by extension: png, jpg, webp, tif (flattened) or psd/psb (layers, groups and masks as shown; text, shapes and layer styles rasterised; adjustment layers only in the merged image). Wide-gamut colour spaces embed their ICC profile; 16 bit works for png, tif and psd.",
             json!({ "path": { "type": "string" },
                     "color_space": { "type": "string", "enum": ["srgb", "display_p3", "adobe_rgb", "rec2020"], "description": "default srgb" },
                     "bit_depth": { "type": "integer", "enum": [8, 16] },

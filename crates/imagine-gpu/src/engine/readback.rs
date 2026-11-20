@@ -235,6 +235,13 @@ impl Engine {
         v
     }
 
+    /// The document as it is composited: text and shapes rasterised, smart
+    /// filters and layer styles applied (effect layers inserted under their
+    /// layer). Call [`Engine::flush`] first.
+    pub fn layers_as_shown(&self) -> imagine_core::Document<Tile> {
+        self.render.clone().unwrap_or_else(|| self.doc.clone())
+    }
+
     /// Layer ids → their pixel tiles; helper for callers that save documents.
     pub fn layer_tile(&self, layer: LayerId, c: TileCoord) -> Option<Tile> {
         self.doc.find(layer)?.tiles()?.get(&c).cloned()

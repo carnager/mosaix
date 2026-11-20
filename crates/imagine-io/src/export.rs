@@ -35,7 +35,7 @@ impl ColorSpace {
         }
     }
 
-    fn profile(self) -> moxcms::ColorProfile {
+    pub(crate) fn profile(self) -> moxcms::ColorProfile {
         use moxcms::ColorProfile as P;
         match self {
             Self::Srgb => P::new_srgb(),
@@ -63,7 +63,7 @@ impl ColorSpace {
 
     /// Converter: straight linear sRGB triples (extended range) → encoded
     /// values of this space, clamped to 0…1.
-    fn converter(self) -> anyhow::Result<Converter> {
+    pub fn converter(self) -> anyhow::Result<Converter> {
         if self == Self::Srgb {
             return Ok(Box::new(|rgb: &mut [f32]| {
                 rgb.iter_mut()
@@ -103,14 +103,14 @@ impl ColorSpace {
 }
 
 /// Converts a row of RGB triples in place.
-type Converter = Box<dyn Fn(&mut [f32]) + Send + Sync>;
+pub type Converter = Box<dyn Fn(&mut [f32]) + Send + Sync>;
 
 /// How an image is exported.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExportOptions {
     pub space: ColorSpace,
-    /// 16 bits per channel (PNG and TIFF; other formats use 8).
+    /// 16 bits per channel (PNG, TIFF and PSD; other formats use 8).
     pub sixteen_bit: bool,
     /// JPEG quality 1–100.
     pub quality: u8,
@@ -128,7 +128,10 @@ impl Default for ExportOptions {
 
 /// Whether a file name's format can hold 16 bits per channel.
 pub fn supports_16bit(path: &Path) -> bool {
-    matches!(ext_of(path).as_str(), "png" | "tif" | "tiff")
+    matches!(
+        ext_of(path).as_str(),
+        "png" | "tif" | "tiff" | "psd" | "psb"
+    )
 }
 
 fn ext_of(path: &Path) -> String {
