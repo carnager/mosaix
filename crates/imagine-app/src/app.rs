@@ -797,6 +797,17 @@ impl App {
         }
     }
 
+    /// Zooming out stops when the image's long side is ~128 screen pixels
+    /// (a free-spinning wheel would otherwise shrink it to an invisible dot).
+    fn limit_zoom_out(&mut self, anchor: DVec2) {
+        let Some(s) = &self.session else { return };
+        let (w, h) = s.engine.size();
+        let floor = (128.0 * self.scale / w.max(h).max(1) as f64).min(1.0);
+        if self.view.zoom < floor {
+            self.view.set_zoom_at(anchor, floor);
+        }
+    }
+
     fn fit_if_needed(&mut self) {
         if !self.view_fitted
             && self.configured
@@ -1415,6 +1426,7 @@ impl App {
                 *last = pos;
                 let anchor = *anchor;
                 self.view.zoom_at(anchor, f);
+                self.limit_zoom_out(anchor);
             }
             Drag::Marquee { end, .. }
             | Drag::Gradient { end, .. }
@@ -4349,6 +4361,7 @@ impl PointerHandler for App {
                         self.view.rotate_at(pos, (steps * 7.5).to_radians());
                     } else {
                         self.view.zoom_at(pos, 1.2f64.powf(-steps));
+                        self.limit_zoom_out(pos);
                     }
                     self.cursor = Some(pos);
                     self.needs_redraw = true;
