@@ -2728,3 +2728,36 @@ fn pass_through_group_blends_with_what_is_below() {
     let c = composite_px(&e, t, 10, 10);
     assert!((c[2] - 0.5).abs() < 0.02 && c[0] < 0.01, "{c:?}");
 }
+
+#[test]
+fn transform_moves_a_whole_group() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 256));
+    // Red square 20..60 on the background, a text layer, both grouped.
+    e.select_shape(&Shape::Rect { x: 20.0, y: 20.0, w: 40.0, h: 40.0 }, CombineOp::Replace, "A").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "R").unwrap();
+    e.deselect("x").unwrap();
+    let px = e.doc().active;
+    let text = imagine_core::VectorLayer::text(imagine_core::vector::TextSpec::new("Hi", 10.0, 100.0, 30.0, [0.0, 0.0, 0.0, 1.0]));
+    let t = e.add_vector(text, "T").unwrap();
+    e.edit("group", |d| {
+        d.active = px;
+        let g = d.group_active().unwrap();
+        let tl = d.layers.iter().position(|l| l.id == t).unwrap();
+        let tl = d.layers.remove(tl);
+        if let imagine_core::doc::Content::Group(c) = &mut d.find_mut(g).unwrap().content {
+            c.push(tl);
+        }
+        d.active = g;
+        true
+    });
+    let b = e.content_bounds(e.doc().active).unwrap();
+    assert!(b.0 <= 20 && b.1 <= 20 && b.3 >= 100, "group bounds cover both: {b:?}");
+    e.transform_active(glam::DAffine2::from_translation(glam::DVec2::new(100.0, 20.0)), imagine_gpu::Interp::Bilinear, "move").unwrap();
+    e.flush();
+    let tc = TileCoord::new(0, 0);
+    assert!(composite_px(&e, tc, 140, 60)[0] > 0.99, "square moved to 120..160 / 40..80");
+    assert!(composite_px(&e, tc, 30, 30)[3] < 0.01, "old place empty");
+    let v = e.doc().find(t).unwrap().vector().unwrap().transform;
+    assert_eq!((v[4], v[5]), (100.0, 20.0), "text stays editable, transform composed");
+}

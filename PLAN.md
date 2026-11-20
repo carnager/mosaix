@@ -329,7 +329,7 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 | Ebene samt Maske verschieben | 27 ms |
 | Darstellung (Regression) | Ø 0,14 ms/Frame, unverändert |
 
-**Bekannte Grenzen:** Verschieben zeigt beim Ziehen nur den Umriss (Inhalt springt beim Loslassen); weiche Kante und Auswahl-Kombination laufen auf der CPU; Inhalte, die über den Rand geschoben werden, werden abgeschnitten; Ameisen und Werkzeug-Overlays sind nur per Offscreen-Test abgesichert (niri zeigt das Testfenster nicht an) – bitte von Hand ausprobieren.
+**Bekannte Grenzen:** ~~Verschieben zeigt beim Ziehen nur den Umriss~~ (inzwischen Live-Vorschau des Inhalts); weiche Kante und Auswahl-Kombination laufen auf der CPU; Inhalte, die über den Rand geschoben werden, werden abgeschnitten; Ameisen und Werkzeug-Overlays sind nur per Offscreen-Test abgesichert (niri zeigt das Testfenster nicht an) – bitte von Hand ausprobieren.
 
 ## Stand Phase 2b (20.11.2026) – Transformieren, Zauberstab, Pinsel
 
@@ -359,7 +359,7 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 
 **Bekannte Grenzen:**
 - Die Vorschau beim Transformieren rechnet bei 100 MP in eingepasster Ansicht alle sichtbaren Kacheln in voller Auflösung, das sind etwa 40 ms je Änderung. Eine Vorschau in reduzierter Auflösung fehlt noch.
-- Gruppen lassen sich noch nicht transformieren.
+- ~~Gruppen lassen sich noch nicht transformieren.~~ Erledigt 2026-11-20: Verschieben und Frei transformieren wirken auf ganze Gruppen (alle Ebenen, Masken, Text/Formen bleiben editierbar).
 - Der Wischfinger nimmt nur von der aktiven Ebene auf.
 - Pinselspitzen sind fest eingebaut (eigene Spitzen und ABR kommen mit Phase 7).
 - Neue Fensterwerkzeuge (Strg+T, C, W, U, Umschalt+B, J) sind nur über Engine-, Agenten- und Geometrie-Tests abgesichert und brauchen den Handtest.

@@ -1194,10 +1194,6 @@ impl App {
         let Some(l) = e.doc().active_layer() else {
             return;
         };
-        if l.is_group() {
-            tracing::warn!("{}", tr("Groups cannot be transformed yet."));
-            return;
-        }
         let id = l.id;
         // Text and shapes: the box follows their own (rotated, scaled) frame,
         // like in Photoshop, instead of the axis-aligned bounds.

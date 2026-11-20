@@ -266,6 +266,30 @@ impl Engine {
         use_selection: bool,
         only: Option<(DVec2, DVec2)>,
     ) -> Result<(LayerId, Document<Tile>), &'static str> {
+        // A group: every layer in it (and the group's own mask) moves along;
+        // the selection does not apply.
+        if self.stroke.is_none()
+            && let Some(g) = self.doc.active_layer().filter(|l| l.is_group())
+        {
+            let id = g.id;
+            let mut ids = vec![id];
+            fn collect(ls: &[imagine_core::Layer<Tile>], out: &mut Vec<LayerId>) {
+                for l in ls {
+                    out.push(l.id);
+                    if let Content::Group(c) = &l.content {
+                        collect(c, out);
+                    }
+                }
+            }
+            if let Content::Group(c) = &g.content {
+                collect(c, &mut ids);
+            }
+            let mut doc = self.doc.clone();
+            for l in ids {
+                self.warp_layer(l, fwd, interp, false, only, &mut doc)?;
+            }
+            return Ok((id, doc));
+        }
         // Text and shape layers keep their description: the transform is composed.
         let vector = self.stroke.is_none()
             && self
@@ -674,7 +698,7 @@ impl Engine {
         if !self
             .doc
             .active_layer()
-            .is_some_and(|l| l.vector().is_some())
+            .is_some_and(|l| l.vector().is_some() || l.is_group())
         {
             self.check_target(StrokeTarget::Pixels)?;
         }
@@ -876,6 +900,11 @@ impl Engine {
     /// visible pixels, restricted to the selection if there is one.
     pub fn content_bounds(&mut self, layer: LayerId) -> Option<(i64, i64, i64, i64)> {
         let l = self.doc.find(layer)?;
+        // A group: the union of what its layers contain.
+        if let Content::Group(c) = &l.content {
+            let ids: Vec<LayerId> = c.iter().map(|l| l.id).collect();
+            return ids.into_iter().filter_map(|id| self.content_bounds(id)).reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)));
+        }
         if let Some(v) = l.vector() {
             let b = imagine_vector::bounds(v)?;
             return Some((
