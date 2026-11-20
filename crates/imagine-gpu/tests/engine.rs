@@ -1041,7 +1041,7 @@ fn spot_healing_finds_a_matching_source() {
     let Some(g) = gpu() else { return };
     let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
     // Vertical stripes (8 px light, 8 px dark) on a vertical brightness ramp.
-    let want = |x: usize, y: usize| 0.2 + 0.5 * y as f32 / 512.0 + if (x / 8) % 2 == 0 { 0.15 } else { 0.0 };
+    let want = |x: usize, y: usize| 0.2 + 0.5 * y as f32 / 512.0 + if (x / 8).is_multiple_of(2) { 0.15 } else { 0.0 };
     let layer = e.doc().active;
     let ts = TILE_SIZE as usize;
     let tiles: Vec<(TileCoord, Option<Vec<f16>>)> = (0..2)
