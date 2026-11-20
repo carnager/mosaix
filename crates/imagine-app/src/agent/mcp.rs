@@ -254,6 +254,14 @@ pub fn tools() -> Vec<Value> {
              (e.g. {\"text\": \"New\", \"size\": 64, \"color\": \"#ff0000\"} or {\"fill\": \"#00ff00\", \"radius\": 12}; \
              \"transform\": [a, b, c, d, e, f] places it).",
             json!({ "layer": layer_param(), "changes": { "type": "object" } }), &["changes"], false),
+        tool("layer_effects_set",
+            "Set a layer's styles (replaces the list; [] removes all). Each effect: {\"effect\": kind, \"enabled\": true, …}. \
+             Kinds and fields (colours linear [r, g, b] 0…1, opacity 0…1, angle = light direction in degrees, 90 = from the top): \
+             stroke {size, position: outside|inside|center, color, opacity}; drop_shadow {color, opacity, angle, distance, size, spread}; \
+             inner_shadow {color, opacity, angle, distance, size}; outer_glow {color, opacity, size, spread}; inner_glow {color, opacity, size}; \
+             color_overlay {color, opacity}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
+             highlight_opacity, shadow, shadow_opacity}.",
+            json!({ "layer": layer_param(), "effects": { "type": "array", "items": { "type": "object" } } }), &["effects"], false),
         tool("layer_rasterize", "Turn a text or shape layer into ordinary pixels (needed before painting or pixel filters).",
             json!({ "layer": layer_param() }), &[], false),
         tool("content_aware_fill",
@@ -463,7 +471,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
         for t in tools() {

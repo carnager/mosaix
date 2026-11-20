@@ -2342,6 +2342,7 @@ impl App {
             recent: self.settings.recent.clone(),
             active_adjustment: active.and_then(|l| l.adjustment().cloned()),
             active_vector: active.and_then(|l| l.vector().cloned()),
+            active_effects: active.filter(|l| l.is_pixels() || l.vector().is_some()).map(|l| l.effects.clone()),
             fonts: self.fonts.clone(),
             shape_ellipse: matches!(self.tool, Tool::Shape { ellipse: true }),
             histogram: None,
@@ -2385,6 +2386,21 @@ impl App {
                 }
                 Action::SmudgeStrength(v) => self.smudge_strength = v,
                 Action::ShapeEllipse(ellipse) => self.tool = Tool::Shape { ellipse },
+                Action::SetEffects { effects, done } => {
+                    if let Some(e) = self.engine() {
+                        let id = e.doc().active;
+                        e.edit_merged("Ebenenstil", &format!("fx-{id}"), |d| {
+                            let l = d.find_mut(id).unwrap();
+                            let changed = l.effects != effects;
+                            l.effects = effects;
+                            changed
+                        });
+                        if done {
+                            e.end_merge();
+                        }
+                        self.touch();
+                    }
+                }
                 Action::SetVector { v, done } => {
                     if let Some(e) = self.engine() {
                         let id = e.doc().active;

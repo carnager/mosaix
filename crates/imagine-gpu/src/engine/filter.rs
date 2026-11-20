@@ -299,6 +299,19 @@ impl Engine {
     }
 }
 
+/// Whether any layer has a style switched on.
+fn base_has_effects(d: &Document<Tile>) -> bool {
+    let mut any = false;
+    d.for_each(&mut |l, _| any |= l.effects.iter().any(|e| e.enabled));
+    any
+}
+
+/// Ids for the layers that carry a layer's outer effects (never clash with
+/// document ids, which count up from 1).
+fn effect_layer_id(layer: LayerId, k: usize) -> LayerId {
+    u32::MAX - layer.wrapping_mul(16) - k as u32
+}
+
 /// Cached result of a layer's smart filters.
 pub(super) struct SmartEntry {
     key: u64,
@@ -331,8 +344,10 @@ impl Engine {
                 }
             }
         });
-        if want.is_empty() && self.vectors.is_empty() {
+        let styled_any = base_has_effects(base);
+        if want.is_empty() && self.vectors.is_empty() && !styled_any {
             self.smart.clear();
+            self.styles.clear();
             if self.render.take().is_some() {
                 self.recheck_all = true;
             }
@@ -358,13 +373,33 @@ impl Engine {
             self.smart.insert(id, SmartEntry { key, _src: src, tiles: Arc::new(cur) });
             changed = true;
         }
+        // Layer styles, computed from what the layer shows (after filters).
+        let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
+        let mut style_src: Vec<(LayerId, Arc<TileSet>, Vec<imagine_core::style::Effect>)> = Vec::new();
+        base.for_each(&mut |l, _| {
+            let fx = l.active_effects();
+            if fx.is_empty() {
+                return;
+            }
+            let src = match (self.smart.get(&l.id), &l.content) {
+                (Some(e), _) => Some(e.tiles.clone()),
+                (None, Content::Pixels(t)) => Some(t.clone()),
+                (None, Content::Vector(_)) => self.vectors.get(&l.id).map(|(_, t)| t.clone()),
+                _ => None,
+            };
+            if let Some(t) = src {
+                style_src.push((l.id, t, fx));
+            }
+        });
+        changed |= self.refresh_styles(&style_src);
         if changed || self.render.is_none() || self.recheck_all || !self.recheck.is_empty() {
             fn substitute(
-                ls: &mut [imagine_core::Layer<Tile>],
+                ls: &mut Vec<imagine_core::Layer<Tile>>,
                 smart: &HashMap<LayerId, SmartEntry>,
                 vectors: &HashMap<LayerId, (u64, Arc<TileSet>)>,
+                styles: &HashMap<LayerId, super::style::StyleEntry>,
             ) {
-                for l in ls {
+                for l in ls.iter_mut() {
                     let filtered = smart.get(&l.id).map(|e| e.tiles.clone());
                     match &mut l.content {
                         Content::Pixels(t) => {
@@ -376,14 +411,36 @@ impl Engine {
                             let tiles = filtered.or_else(|| vectors.get(&l.id).map(|(_, t)| t.clone())).unwrap_or_default();
                             l.content = Content::Pixels(tiles);
                         }
-                        Content::Group(c) => substitute(c, smart, vectors),
+                        Content::Group(c) => substitute(c, smart, vectors, styles),
                         Content::Adjustment(_) => {}
+                    }
+                    if let Some(st) = styles.get(&l.id) {
+                        l.content = Content::Pixels(st.content.clone());
+                    }
+                }
+                // Effect layers go right under their layer (same opacity, mask, visibility).
+                if ls.iter().any(|l| styles.get(&l.id).is_some_and(|s| !s.below.is_empty())) {
+                    let old = std::mem::take(ls);
+                    for l in old {
+                        if let Some(st) = styles.get(&l.id) {
+                            for (k, (mode, tiles)) in st.below.iter().enumerate() {
+                                let mut fx = imagine_core::Layer::pixels(effect_layer_id(l.id, k), "Effekt");
+                                fx.content = Content::Pixels(tiles.clone());
+                                fx.blend = *mode;
+                                fx.opacity = l.opacity;
+                                fx.visible = l.visible;
+                                fx.mask = l.mask.clone();
+                                fx.mask_enabled = l.mask_enabled;
+                                ls.push(fx);
+                            }
+                        }
+                        ls.push(l);
                     }
                 }
             }
             let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
             let mut d = base.clone();
-            substitute(&mut d.layers, &self.smart, &self.vectors);
+            substitute(&mut d.layers, &self.smart, &self.vectors, &self.styles);
             self.render = Some(d);
             if changed {
                 self.recheck_all = true;

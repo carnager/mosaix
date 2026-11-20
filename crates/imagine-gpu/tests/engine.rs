@@ -1299,3 +1299,46 @@ fn rotate_and_flip_image_and_layer() {
     e.rotate_layer(90.0, false, false, "Ebene drehen").unwrap();
     assert_eq!(a(&mut e, 10, 20), 1.0);
 }
+
+#[test]
+fn layer_styles_stroke_and_shadow() {
+    use imagine_core::VectorLayer;
+    use imagine_core::style::{Effect, EffectKind, StrokePosition};
+    use imagine_core::vector::{Geometry, ShapeSpec};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    e.fill(StrokeTarget::Pixels, [1.0, 1.0, 1.0, 1.0], 1.0, "Weiß").unwrap();
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let id = e
+        .add_vector(VectorLayer::shape(ShapeSpec { geometry: Geometry::Rect { x: 100.0, y: 100.0, w: 200.0, h: 200.0, radius: 0.0 }, fill: Some(red), stroke: None }), "R")
+        .unwrap();
+    let at = |e: &mut Engine, x: usize, y: usize| {
+        e.flush();
+        composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), x % 256, y % 256)
+    };
+    assert_eq!(at(&mut e, 95, 200), [1.0, 1.0, 1.0, 1.0]);
+    e.edit("Stil", |d| {
+        d.find_mut(id).unwrap().effects = vec![
+            Effect { enabled: true, kind: EffectKind::Stroke { size: 8.0, position: StrokePosition::Outside, color: [0.0, 0.0, 1.0], opacity: 1.0 } },
+            Effect { enabled: true, kind: EffectKind::DropShadow { color: [0.0; 3], opacity: 0.8, angle: 90.0, distance: 30.0, size: 4.0, spread: 0.0 } },
+        ];
+        true
+    });
+    // Outside stroke: blue just left of the shape, the shape itself stays red.
+    let p = at(&mut e, 96, 200);
+    assert!(p[2] > 0.95 && p[0] < 0.05, "stroke {p:?}");
+    assert_eq!(at(&mut e, 200, 200), red);
+    // Shadow (light from the top → below) darkens the white background.
+    let below = at(&mut e, 200, 318);
+    assert!(below[0] < 0.4, "shadow {below:?}");
+    assert_eq!(at(&mut e, 200, 85), [1.0, 1.0, 1.0, 1.0], "no shadow above");
+    // Switched off → as before.
+    e.edit("Aus", |d| {
+        for fx in &mut d.find_mut(id).unwrap().effects {
+            fx.enabled = false;
+        }
+        true
+    });
+    assert_eq!(at(&mut e, 96, 200), [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(at(&mut e, 200, 318), [1.0, 1.0, 1.0, 1.0]);
+}

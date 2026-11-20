@@ -208,6 +208,7 @@ pub enum Command {
     },
     VectorSet { layer: Option<LayerId>, changes: Value },
     LayerRasterize { layer: Option<LayerId> },
+    LayerEffectsSet { layer: Option<LayerId>, effects: Vec<imagine_core::style::Effect> },
     SmartFilterSet {
         layer: Option<LayerId>,
         index: Option<usize>,
@@ -300,6 +301,7 @@ impl Command {
             Self::ShapeAdd { .. } => "shape_add",
             Self::VectorSet { .. } => "vector_set",
             Self::LayerRasterize { .. } => "layer_rasterize",
+            Self::LayerEffectsSet { .. } => "layer_effects_set",
             Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
@@ -941,6 +943,16 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             s.engine.set_vector(id, new, "Vektor ändern", None).map_err(engine_err)?;
             vector_ok(s, id)
         }
+        Command::LayerEffectsSet { layer, effects } => {
+            let id = target_layer(s, layer)?;
+            let l = s.engine.doc().find(id).unwrap();
+            ensure!(l.is_pixels() || l.vector().is_some(), "layer {id} has no pixels (group or adjustment)");
+            s.engine.edit("Ebenenstil", |d| {
+                d.find_mut(id).unwrap().effects = effects;
+                true
+            });
+            ok(s)
+        }
         Command::LayerRasterize { layer } => {
             let id = target_layer(s, layer)?;
             s.engine.rasterize(id, "Rastern").map_err(engine_err)?;
@@ -1231,6 +1243,9 @@ pub fn info(s: &Session) -> Value {
                 }
                 if !l.filters.is_empty() {
                     v["smart_filters"] = serde_json::to_value(&l.filters).unwrap_or_default();
+                }
+                if !l.effects.is_empty() {
+                    v["effects"] = serde_json::to_value(&l.effects).unwrap_or_default();
                 }
                 match &l.content {
                     Content::Pixels(t) => {

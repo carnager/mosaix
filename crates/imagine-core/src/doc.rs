@@ -102,6 +102,8 @@ pub struct Layer<T> {
     pub mask_enabled: bool,
     /// Smart filters on a pixel layer, applied in order when compositing.
     pub filters: Vec<SmartFilter>,
+    /// Layer styles (stroke, shadows, glows, bevel …).
+    pub effects: Vec<crate::style::Effect>,
 }
 
 impl<T> Layer<T> {
@@ -439,6 +441,7 @@ impl<T: Clone> Document<T> {
             mask: None,
             mask_enabled: true,
             filters: Vec::new(),
+            effects: Vec::new(),
         };
         list.insert(i, group);
         self.active = gid;
@@ -611,6 +614,7 @@ impl<T: Clone> Document<T> {
                     mask: l.mask.as_ref().map(|m| m.map(f)),
                     mask_enabled: l.mask_enabled,
                     filters: l.filters.clone(),
+                    effects: l.effects.clone(),
                 })
                 .collect()
         }
@@ -667,7 +671,13 @@ impl<T> Layer<T> {
             mask: None,
             mask_enabled: true,
             filters: Vec::new(),
+            effects: Vec::new(),
         }
+    }
+
+    /// The layer styles that are switched on.
+    pub fn active_effects(&self) -> Vec<crate::style::Effect> {
+        self.effects.iter().filter(|e| e.enabled).cloned().collect()
     }
 
     /// The smart filters that are switched on.

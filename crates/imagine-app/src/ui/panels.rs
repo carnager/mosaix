@@ -62,6 +62,8 @@ pub struct LayerRow {
     pub filters: Vec<imagine_core::SmartFilter>,
     /// Text (true) or shape (false) layer.
     pub vector: Option<bool>,
+    /// Has layer styles switched on.
+    pub fx: bool,
 }
 
 /// The filter dialog: a new filter (destructive or smart) or an existing
@@ -137,6 +139,8 @@ pub struct Model {
     pub recent: Vec<std::path::PathBuf>,
     pub active_adjustment: Option<imagine_core::Adjustment>,
     pub active_vector: Option<imagine_core::VectorLayer>,
+    /// Layer styles of the active layer (`None` for groups and adjustments).
+    pub active_effects: Option<Vec<imagine_core::style::Effect>>,
     /// Installed font families (loaded when first needed).
     pub fonts: std::sync::Arc<Vec<String>>,
     /// Shape tool: ellipse instead of rectangle.
@@ -154,6 +158,7 @@ pub enum Action {
     SmudgeStrength(f32),
     CloneOptions { all: bool, aligned: bool },
     SetVector { v: imagine_core::VectorLayer, done: bool },
+    SetEffects { effects: Vec<imagine_core::style::Effect>, done: bool },
     ShapeEllipse(bool),
     WandTolerance(f32),
     WandContiguous(bool),
@@ -213,6 +218,8 @@ pub struct State {
     pub confirm: Option<String>,
     adj_editor: super::adjust_ui::EditorState,
     pub vec_editor: super::vector_ui::EditorState,
+    /// Expanded effect in the layer-styles section.
+    fx_open: Option<usize>,
     filter: Option<FilterDialog>,
     /// New filters are added as smart filters (remembered while running).
     smart_filters: bool,
@@ -228,6 +235,11 @@ enum Dialog {
 const ACCENT: Color32 = Color32::from_rgb(90, 150, 255);
 
 impl State {
+    /// Expands an effect in the layer-styles section.
+    pub fn open_effect(&mut self, i: usize) {
+        self.fx_open = Some(i);
+    }
+
     pub fn open_filter(&mut self, f: imagine_core::Filter) {
         self.filter = Some(FilterDialog { filter: f, preview: true, smart: self.smart_filters, edit: None });
     }
@@ -544,6 +556,14 @@ fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action
         egui::CollapsingHeader::new("Eigenschaften").default_open(true).show(ui, |ui| {
             if let Some((adj, done)) = super::adjust_ui::editor(ui, adj, &mut st.adj_editor, m.histogram.as_deref()) {
                 out.push(Action::SetAdjustment { adj, done });
+            }
+        });
+    }
+    if let Some(fx) = &m.active_effects {
+        let title = if fx.is_empty() { "Ebenenstile".to_string() } else { format!("Ebenenstile ({})", fx.len()) };
+        egui::CollapsingHeader::new(title).id_salt("layer styles").default_open(!fx.is_empty()).show(ui, |ui| {
+            if let Some((effects, done)) = super::style_ui::editor(ui, fx, &mut st.fx_open) {
+                out.push(Action::SetEffects { effects, done });
             }
         });
     }
@@ -884,7 +904,11 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
             x = t.max.x + 8.0;
         }
         // Mask badge.
-        let name_end = rect.max.x - if row.has_mask { 28.0 } else { 4.0 };
+        let name_end = rect.max.x - if row.has_mask { 28.0 } else { 4.0 } - if row.fx { 20.0 } else { 0.0 };
+        if row.fx {
+            let x = rect.max.x - if row.has_mask { 30.0 } else { 6.0 } - 8.0;
+            painter.text(egui::pos2(x, rect.center().y), egui::Align2::CENTER_CENTER, "fx", egui::FontId::proportional(11.0), Color32::from_gray(190));
+        }
         if row.has_mask {
             let badge = egui::Rect::from_center_size(egui::pos2(rect.max.x - 15.0, rect.center().y), Vec2::new(22.0, 16.0));
             let b_resp = ui.interact(badge, resp.id.with("mask"), Sense::click());
@@ -1137,6 +1161,7 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
                 adjustment: l.adjustment().is_some(),
                 filters: l.filters.clone(),
                 vector: l.vector().map(|v| matches!(v.kind, imagine_core::vector::VectorKind::Text(_))),
+                fx: l.effects.iter().any(|e| e.enabled),
             })
         })
         .collect()

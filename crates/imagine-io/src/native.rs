@@ -31,7 +31,7 @@ pub const MAGIC: &[u8; 8] = b"IMAGINE\x01";
 const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
 /// 1: layers. 2: + layer masks and selection.
-const FORMAT_VERSION: u32 = 5;
+const FORMAT_VERSION: u32 = 6;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
 const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
 
@@ -92,6 +92,8 @@ struct LayerEntry {
     mask: Option<MaskEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     filters: Vec<imagine_core::SmartFilter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    effects: Vec<imagine_core::style::Effect>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -164,6 +166,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                 },
                 mask: l.mask.as_ref().map(|m| mask_to_entry(m, l.mask_enabled)),
                 filters: l.filters.clone(),
+                effects: l.effects.clone(),
             })
             .collect()
     }
@@ -213,6 +216,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                     mask,
                     mask_enabled,
                     filters: e.filters,
+                    effects: e.effects,
                 })
             })
             .collect()

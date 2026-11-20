@@ -11,6 +11,7 @@ pub mod filter;
 pub mod heal;
 pub mod history;
 pub mod mask;
+pub mod style;
 pub mod tile;
 pub mod vector;
 pub mod view;

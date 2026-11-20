@@ -102,6 +102,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         recent: Vec::new(),
         active_adjustment: None,
         active_vector: None,
+        active_effects: Some(Vec::new()),
         fonts: Default::default(),
         shape_ellipse: false,
         histogram: None,
@@ -148,6 +149,10 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             model.layers = panels::layer_rows(s.engine.doc());
             model.active = id;
         }
+    }
+    if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_FX") {
+        model.active_effects = Some(serde_json::from_str(&j)?);
+        state.open_effect(0);
     }
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_VECTOR") {
         let v: imagine_core::VectorLayer = serde_json::from_str(&j)?;

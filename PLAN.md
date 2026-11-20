@@ -438,11 +438,15 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Drehen auffindbar gemacht:** Transformieren-Panel mit Winkelfeld, 90°/180°-Knöpfen und Spiegeln; Menüs Bild › drehen/spiegeln (exakt, Arbeitsfläche tauscht Breite/Höhe) und Ebene › drehen/spiegeln (um die Inhaltsmitte, 90°-Schritte pixelgenau). Behoben: Arbeitsfläche/Zuschneiden um ganze Kacheln verschob Vektorebenen nicht mit.
 
-**Noch offen in Phase 6:** Text direkt im Bild bearbeiten (Cursor, Auswahl), Zeichenstift/Pfade bearbeiten, Ebenenstile (Schlagschatten, Kontur, Schein, Farbüberlagerung), Text auf Pfad, OpenType-Features.
+- **Ebenenstile** (an Pixel-, Text- und Formebenen; Panel „Ebenenstile“, „fx“ in der Ebenenliste): Kontur (außen/mittig/innen), Schlagschatten, Schatten nach innen, Schein nach außen/innen, Farbüberlagerung, Abgeflachte Kante & Relief (Kante innen, Relief, Kissen; Lichtwinkel und -höhe, Tiefe, Weichheit).
+  - Berechnung auf der CPU aus dem Alpha der Ebene (nach Smart-Filtern bzw. Rastern): exakte euklidische Distanzfelder (Felzenszwalb–Huttenlocher), dreifacher Box-Blur ≈ Gauß, beleuchtetes Höhenfeld. Zwischengespeichert, bis sich Pixel oder Stil ändern; über 24 MP wird übersprungen.
+  - Effekte außerhalb der Form (Schatten: Multiplizieren, Schein: Negativ multiplizieren, äußere Kontur) werden im Render-Dokument als eigene Ebenen direkt unter die Ebene gesetzt – mit deren Deckkraft, Maske und Sichtbarkeit – und wirken so wirklich auf das Darunterliegende; Effekte innen werden in die Ebene eingerechnet. Dateiformat v6. Agent: `layer_effects_set`.
+
+**Noch offen in Phase 6:** Text direkt im Bild bearbeiten (Cursor, Auswahl), Zeichenstift/Pfade bearbeiten, Text auf Pfad, OpenType-Features; Ebenenstile: Verlaufsüberlagerung, Muster, Füllmethoden je Effekt, globale Lichtquelle.
 
 ## Nächster konkreter Schritt
 
-Phase 6 weiter: Ebenenstile, Zeichenstift, Text direkt im Bild bearbeiten.
+Phase 6 weiter: Zeichenstift, Text direkt im Bild bearbeiten.
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 

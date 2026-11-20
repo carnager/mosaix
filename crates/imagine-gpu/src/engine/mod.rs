@@ -33,6 +33,7 @@ mod magic;
 mod readback;
 mod selection;
 mod smudge;
+mod style;
 mod thumbs;
 mod tips;
 mod transform;
@@ -208,6 +209,8 @@ pub struct Engine {
     smart: HashMap<LayerId, filter::SmartEntry>,
     /// Rasterised vector layers: description hash and tiles.
     vectors: HashMap<LayerId, (u64, Arc<HashMap<TileCoord, Tile>>)>,
+    /// Layer styles: effect layers and styled pixels per layer.
+    styles: HashMap<LayerId, style::StyleEntry>,
     /// The composited document when smart filters substitute layer pixels.
     render: Option<Document<Tile>>,
     liquify: Option<liquify::Liquify>,
@@ -719,6 +722,7 @@ impl Engine {
             histogram: None,
             smart: HashMap::new(),
             vectors: HashMap::new(),
+            styles: HashMap::new(),
             render: None,
             liquify: None,
             fill_gpu: None,
