@@ -4169,9 +4169,13 @@ impl KeyboardHandler for App {
         _: &wl_surface::WlSurface,
         _: u32,
     ) {
-        // Keys released while unfocused never reach us.
+        // Keys released while unfocused never reach us – modifiers included
+        // (an Alt held while switching windows would otherwise stay "down";
+        // the compositor sends the real state again on focus).
         self.space = false;
         self.r_key = false;
+        self.mods = Modifiers::default();
+        self.gui.set_modifiers(false, false, false);
     }
 
     fn press_key(
