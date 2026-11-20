@@ -111,6 +111,66 @@ impl Engine {
         ))
     }
 
+    /// Average straight sRGB colour + alpha of the square of `radius` px
+    /// around a document pixel (0 = that pixel; eyedropper "3×3", "5×5" …).
+    pub fn sample_average(
+        &mut self,
+        x: i64,
+        y: i64,
+        radius: i64,
+        from: SampleFrom,
+    ) -> Result<[f32; 4], &'static str> {
+        let (w, h) = self.size();
+        if x < 0 || y < 0 || x >= w as i64 || y >= h as i64 {
+            return Err(imagine_core::tr("point lies outside the image"));
+        }
+        let (x0, y0) = ((x - radius).max(0), (y - radius).max(0));
+        let (x1, y1) = (
+            (x + radius).min(w as i64 - 1),
+            (y + radius).min(h as i64 - 1),
+        );
+        let wanted: Vec<TileCoord> = {
+            let (a, b) = (
+                TileCoord::containing(x0 as f64, y0 as f64),
+                TileCoord::containing(x1 as f64, y1 as f64),
+            );
+            (a.y..=b.y)
+                .flat_map(|ty| (a.x..=b.x).map(move |tx| TileCoord::new(tx, ty)))
+                .collect()
+        };
+        let tiles: Vec<(TileCoord, Tile)> = self
+            .sample_tiles(from)?
+            .into_iter()
+            .filter(|(c, _)| wanted.contains(c))
+            .collect();
+        let kind = if from == SampleFrom::Image {
+            PoolKind::Composite
+        } else {
+            PoolKind::Layer
+        };
+        let raws = self.read_tiles_raw(
+            kind,
+            &tiles.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>(),
+        );
+        // Sum premultiplied linear values; missing tiles count as transparent.
+        let mut sum = [0.0f64; 4];
+        let n = ((x1 - x0 + 1) * (y1 - y0 + 1)) as f64;
+        for ((c, _), raw) in tiles.iter().zip(&raws) {
+            let px: &[half::f16] = bytemuck::cast_slice(raw);
+            let (ox, oy) = c.origin();
+            let ts = TILE_SIZE as i64;
+            for py in y0.max(oy)..=y1.min(oy + ts - 1) {
+                for qx in x0.max(ox)..=x1.min(ox + ts - 1) {
+                    let i = ((py - oy) as usize * TILE_SIZE as usize + (qx - ox) as usize) * 4;
+                    for k in 0..4 {
+                        sum[k] += px[i + k].to_f32() as f64;
+                    }
+                }
+            }
+        }
+        Ok(straight(sum.map(|v| (v / n) as f32)))
+    }
+
     /// Similarity of every document pixel to `reference` (straight sRGB +
     /// alpha), 255 within `tolerance` (8-bit steps), fading over `band`.
     pub fn similarity_map(

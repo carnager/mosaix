@@ -302,19 +302,44 @@ pub fn find(label: &str) -> Cmd {
 pub fn search(query: &str) -> Vec<&'static Cmd> {
     let q = query.to_lowercase();
     let words: Vec<&str> = q.split_whitespace().collect();
-    let mut hits: Vec<(&Cmd, bool)> = COMMANDS
+    if words.is_empty() {
+        return COMMANDS.iter().collect();
+    }
+    // How well one query word fits a label: 0 = the label starts with it,
+    // 1 = a word of the label does, 2 = somewhere inside; menu name: 3.
+    fn fit(w: &str, label: &str, menu: &str) -> Option<u32> {
+        let label = label.to_lowercase();
+        if label.starts_with(w) {
+            Some(0)
+        } else if label
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|x| x.starts_with(w))
+        {
+            Some(1)
+        } else if label.contains(w) {
+            Some(2)
+        } else if menu.to_lowercase().contains(w) {
+            Some(3)
+        } else {
+            None
+        }
+    }
+    let score = |label: &str, menu: &str| -> Option<u32> {
+        words.iter().map(|w| fit(w, label, menu)).sum()
+    };
+    let mut hits: Vec<(&Cmd, u32, usize)> = COMMANDS
         .iter()
         .filter_map(|c| {
-            let shown = format!("{} {}", c.menu_text(), c.label_text()).to_lowercase();
-            let orig = format!("{} {}", c.menu, c.label).to_lowercase();
-            let all = |hay: &str| words.iter().all(|w| hay.contains(w));
-            let prefix = c.label_text().to_lowercase().starts_with(&q)
-                || c.label.to_lowercase().starts_with(&q);
-            (all(&shown) || all(&orig)).then_some((c, prefix))
+            // Translated text or the English original, whichever fits better.
+            let s = match (score(c.label_text(), c.menu_text()), score(c.label, c.menu)) {
+                (Some(a), Some(b)) => a.min(b),
+                (a, b) => a.or(b)?,
+            };
+            Some((c, s, c.label_text().chars().count()))
         })
         .collect();
-    hits.sort_by_key(|(_, prefix)| !*prefix);
-    hits.into_iter().map(|(c, _)| c).collect()
+    hits.sort_by_key(|(_, s, len)| (*s, *len));
+    hits.into_iter().map(|(c, ..)| c).collect()
 }
 
 #[cfg(test)]

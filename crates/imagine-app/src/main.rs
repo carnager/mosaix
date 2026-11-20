@@ -41,7 +41,7 @@ View:
 
 Tools:
   B Brush (Shift+B: tip round/chalk/bristle/spray/rough/charcoal; Shift+J: dynamics)   U Smudge
-  P Pen   S Clone Stamp (Alt+click: source)   J Spot Healing (again: Healing Brush, Alt+click: source)
+  P Pen   I Eyedropper   S Clone Stamp (Alt+click: source)   J Spot Healing (again: Healing Brush, Alt+click: source)
   E Eraser   M Rectangular Marquee (again: ellipse)   L Lasso
   G Gradient (again: radial)   V Move (arrow keys: 1 px, with Shift 10 px)
   W Magic Wand (click; Shift/Alt combine; [ / ] tolerance; W again: contiguous ↔ anywhere)
@@ -57,7 +57,7 @@ Painting:
   Paint           left mouse button / pen (pressure = size & flow), eraser end of the pen
   Size            [ / ], Ctrl + mouse wheel
   Opacity         digits 1…9, 0 (10 … 100 %; with Smudge: strength)
-  Hardness/Smoothing  H / Shift+S   Color  Shift+P (palette), X (black ↔ white)
+  Hardness/Smoothing  H / Shift+S   Color  Shift+P (palette), X swap, D black/white, I / Alt+click eyedropper
   Fill            Alt+Backspace (selection or whole layer)
 
 Selection (while dragging: Shift = add, Alt = subtract, both = intersect):
@@ -81,7 +81,7 @@ File & History:
   Undo            Ctrl+Z               Redo          Ctrl+Shift+Z / Ctrl+Y
   Save            Ctrl+S (.imagine, incremental, in the background)
   Export          Ctrl+Shift+E (PNG next to the file)
-  Other           F12 benchmark, F1 help, Ctrl+Q quit
+  Other           Ctrl+Shift+P command palette, F12 benchmark, F1 help, Ctrl+Q quit
 ";
 
 fn parse_size(s: &str) -> anyhow::Result<(u32, u32)> {

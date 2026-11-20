@@ -96,6 +96,9 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         clone_source: false,
         wand_tolerance: 32.0,
         wand_contiguous: true,
+        bg_color: [1.0; 3],
+        eyedrop_radius: 0,
+        eyedrop_all: true,
         boxed: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| "Free Transform"),
         box_angle: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| 30.0),
         mask_edit: false,
@@ -283,6 +286,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "text" => ToolId::Text,
             "shape" => ToolId::Shape,
             "move" => ToolId::Move,
+            "eyedropper" => ToolId::Eyedropper,
             _ => ToolId::Brush,
         };
         model.boxed = (t == "move").then_some("Free Transform");

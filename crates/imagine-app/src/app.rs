@@ -115,6 +115,8 @@ enum Drag {
     TextSelect,
     /// Pen tool: placing a node's handles, moving nodes or handles.
     Pen(pen::PenDrag),
+    /// Eyedropper: picks the colour under the pointer while dragging.
+    Eyedrop,
     Pan {
         last: DVec2,
     },
@@ -172,6 +174,7 @@ enum Tool {
     Text,
     Shape { ellipse: bool },
     Pen,
+    Eyedropper,
 }
 
 impl Tool {
@@ -195,6 +198,7 @@ impl Tool {
             Tool::Shape { ellipse: false } => tr("Rectangle"),
             Tool::Shape { ellipse: true } => tr("Ellipse"),
             Tool::Pen => tr("Pen"),
+            Tool::Eyedropper => tr("Eyedropper"),
         }
     }
 
@@ -387,6 +391,11 @@ pub struct App {
     liq_strength: f32,
     liq_tick: Instant,
     wand_contiguous: bool,
+    /// Background colour (linear RGB); X swaps it with the brush colour.
+    bg_color: [f32; 3],
+    /// Eyedropper: averaging radius (0 = point) and whether it samples all layers.
+    eyedrop_radius: i64,
+    eyedrop_all: bool,
     started: Instant,
 
     // Saving
@@ -614,6 +623,9 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         liq_strength: 0.6,
         liq_tick: Instant::now(),
         wand_contiguous: true,
+        bg_color: [1.0; 3],
+        eyedrop_radius: 0,
+        eyedrop_all: true,
         started: Instant::now(),
         save_job: None,
         saving: false,
@@ -954,6 +966,14 @@ impl App {
     fn begin_tool(&mut self, pos: DVec2, pressure: f32, eraser_tool: bool) -> Drag {
         let doc = self.view.screen_to_doc(pos);
         let op = self.combine_op();
+        let alt_picks = matches!(
+            self.tool,
+            Tool::Brush | Tool::Eraser | Tool::Gradient { .. } | Tool::Shape { .. } | Tool::Text
+        );
+        if self.tool == Tool::Eyedropper || (self.mods.alt && alt_picks) {
+            self.eyedrop(doc);
+            return Drag::Eyedrop;
+        }
         match self.tool {
             Tool::Clone | Tool::Heal if self.mods.alt => {
                 self.clone_source = Some(doc);
@@ -1009,6 +1029,8 @@ impl App {
                 end: doc,
             },
             Tool::Pen => self.pen_press(pos, doc),
+            // Handled above.
+            Tool::Eyedropper => Drag::None,
             Tool::Text => {
                 if self.text_edit.is_some() && self.text_edit_press(pos, doc) {
                     return Drag::TextSelect;
@@ -1343,6 +1365,10 @@ impl App {
 
     fn motion(&mut self, pos: DVec2, pressure: f32) {
         self.cursor = Some(pos);
+        if matches!(self.drag, Drag::Eyedrop) {
+            self.eyedrop(self.view.screen_to_doc(pos));
+            return;
+        }
         if let Drag::Pen(d) = self.drag {
             let doc = self.view.screen_to_doc(pos);
             self.drag = Drag::Pen(self.pen_drag(d, doc));
@@ -1351,7 +1377,7 @@ impl App {
         }
         match &mut self.drag {
             // Handled above.
-            Drag::None | Drag::Pen(_) => {}
+            Drag::None | Drag::Pen(_) | Drag::Eyedrop => {}
             Drag::Paint => {
                 let doc_pos = self.view.screen_to_doc(pos);
                 if let (Some(stroke), Some(s)) = (&mut self.stroke, &mut self.session) {
@@ -1430,6 +1456,11 @@ impl App {
     }
 
     fn release(&mut self, pos: DVec2, pressure: f32) {
+        if matches!(self.drag, Drag::Eyedrop) {
+            self.drag = Drag::None;
+            self.needs_redraw = true;
+            return;
+        }
         if matches!(self.drag, Drag::Pen(_)) {
             self.drag = Drag::None;
             self.pen_release();
@@ -1782,6 +1813,9 @@ impl App {
         st.brush.apply(&mut self.brush);
         self.wand_tolerance = st.wand_tolerance.clamp(0.0, 255.0);
         self.wand_contiguous = st.wand_contiguous;
+        self.bg_color = st.bg_color;
+        self.eyedrop_radius = st.eyedrop_radius;
+        self.eyedrop_all = st.eyedrop_all;
         self.smudge_strength = st.smudge_strength.clamp(0.0, 1.0);
         self.tool = match st.tool.as_str() {
             "eraser" => Tool::Eraser,
@@ -1792,6 +1826,7 @@ impl App {
             "text" => Tool::Text,
             "shape" => Tool::Shape { ellipse: false },
             "pen" => Tool::Pen,
+            "eyedropper" => Tool::Eyedropper,
             "marquee" => Tool::Marquee { ellipse: false },
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
@@ -1809,6 +1844,9 @@ impl App {
         self.settings.brush = (&b).into();
         self.settings.wand_tolerance = self.wand_tolerance;
         self.settings.wand_contiguous = self.wand_contiguous;
+        self.settings.bg_color = self.bg_color;
+        self.settings.eyedrop_radius = self.eyedrop_radius;
+        self.settings.eyedrop_all = self.eyedrop_all;
         self.settings.smudge_strength = self.smudge_strength;
         self.settings.tool = match self.tool {
             Tool::Brush => "brush",
@@ -1820,6 +1858,7 @@ impl App {
             Tool::Text => "text",
             Tool::Shape { .. } => "shape",
             Tool::Pen => "pen",
+            Tool::Eyedropper => "eyedropper",
             Tool::Marquee { ellipse: false } => "marquee",
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
@@ -2637,12 +2676,9 @@ impl App {
                 self.quick_mask = !self.quick_mask;
                 tracing::info!("{}", if self.quick_mask { tr("Quick Mask view on") } else { tr("Quick Mask view off") });
             }
-            Keysym::x => {
-                let [r, g, b] = self.brush.color;
-                let dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.2;
-                self.brush.color = if dark { [1.0; 3] } else { [0.0; 3] };
-                tracing::info!("{}", if dark { tr("Color: White") } else { tr("Color: Black") });
-            }
+            Keysym::x => self.swap_colors(),
+            Keysym::d if !ctrl => self.reset_colors(),
+            Keysym::i if !ctrl => self.set_tool(Tool::Eyedropper),
             Keysym::c => self.set_tool(Tool::Crop),
             Keysym::w => {
                 if self.tool == Tool::Wand {
@@ -2680,6 +2716,42 @@ impl App {
             _ => return,
         }
         self.needs_redraw = true;
+    }
+
+    /// X: swaps brush and background colour.
+    fn swap_colors(&mut self) {
+        std::mem::swap(&mut self.brush.color, &mut self.bg_color);
+        self.needs_redraw = true;
+    }
+
+    /// D: black brush, white background.
+    fn reset_colors(&mut self) {
+        self.brush.color = [0.0; 3];
+        self.bg_color = [1.0; 3];
+        self.needs_redraw = true;
+    }
+
+    /// Eyedropper: the (averaged) colour at a document point becomes the brush colour.
+    fn eyedrop(&mut self, doc: DVec2) {
+        let (r, all) = (self.eyedrop_radius, self.eyedrop_all);
+        let Some(e) = self.engine() else { return };
+        let (x, y) = (doc.x.floor() as i64, doc.y.floor() as i64);
+        let from = if all {
+            SampleFrom::Image
+        } else {
+            SampleFrom::Layer
+        };
+        // A text/shape/group layer has no pixels of its own: use the image.
+        let c = e
+            .sample_average(x, y, r, from)
+            .or_else(|_| e.sample_average(x, y, r, SampleFrom::Image));
+        if let Ok(c) = c
+            && c[3] > 0.0
+        {
+            let lin = |v: f32| imagine_core::color::srgb_to_linear(v);
+            self.brush.color = [lin(c[0]), lin(c[1]), lin(c[2])];
+            self.needs_redraw = true;
+        }
     }
 
     fn set_tool(&mut self, tool: Tool) {
@@ -2941,6 +3013,7 @@ impl App {
             Tool::Text => ToolId::Text,
             Tool::Shape { .. } => ToolId::Shape,
             Tool::Pen => ToolId::Pen,
+            Tool::Eyedropper => ToolId::Eyedropper,
             Tool::Marquee { ellipse: false } => ToolId::Marquee,
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
@@ -2998,6 +3071,9 @@ impl App {
             clone_source: self.clone_source.is_some(),
             wand_tolerance: self.wand_tolerance,
             wand_contiguous: self.wand_contiguous,
+            bg_color: self.bg_color,
+            eyedrop_radius: self.eyedrop_radius,
+            eyedrop_all: self.eyedrop_all,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
                 BoxKind::Transform => tr("Free Transform"),
                 BoxKind::Crop => tr("Crop"),
@@ -3068,6 +3144,7 @@ impl App {
                         ToolId::Text => Tool::Text,
                         ToolId::Shape => Tool::Shape { ellipse: false },
                         ToolId::Pen => Tool::Pen,
+                        ToolId::Eyedropper => Tool::Eyedropper,
                         ToolId::Marquee => Tool::Marquee { ellipse: false },
                         ToolId::Ellipse => Tool::Marquee { ellipse: true },
                         ToolId::Lasso => Tool::Lasso,
@@ -3080,6 +3157,13 @@ impl App {
                     self.set_tool(tool);
                 }
                 Action::Color(c) => self.brush.color = c,
+                Action::BgColor(c) => self.bg_color = c,
+                Action::SwapColors => self.swap_colors(),
+                Action::ResetColors => self.reset_colors(),
+                Action::Eyedrop { radius, all } => {
+                    self.eyedrop_radius = radius;
+                    self.eyedrop_all = all;
+                }
                 Action::Brush(m) => {
                     let b = &mut self.brush;
                     (

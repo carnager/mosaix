@@ -2567,3 +2567,38 @@ fn copy_pixels_layer_selection_and_merged() {
     .unwrap();
     assert!(e.copy_pixels(false).is_err());
 }
+
+#[test]
+fn sample_average_point_and_area() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 400));
+    // Red square 100..200 on an empty layer.
+    e.select_shape(
+        &Shape::Rect {
+            x: 100.0,
+            y: 100.0,
+            w: 100.0,
+            h: 100.0,
+        },
+        CombineOp::Replace,
+        "A",
+    )
+    .unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "R")
+        .unwrap();
+    e.deselect("x").unwrap();
+    use imagine_gpu::SampleFrom;
+    let c = e.sample_average(150, 150, 0, SampleFrom::Layer).unwrap();
+    assert!(
+        (c[0] - 1.0).abs() < 1e-3 && c[1] < 1e-3 && (c[3] - 1.0).abs() < 1e-3,
+        "{c:?}"
+    );
+    // 3×3 across the left edge: x 99..101 → 2 of 3 columns red.
+    let c = e.sample_average(100, 150, 1, SampleFrom::Layer).unwrap();
+    assert!((c[3] - 2.0 / 3.0).abs() < 1e-2, "{c:?}");
+    assert!(
+        (c[0] - 1.0).abs() < 1e-2,
+        "straight colour stays red: {c:?}"
+    );
+    assert!(e.sample_average(-1, 0, 0, SampleFrom::Layer).is_err());
+}

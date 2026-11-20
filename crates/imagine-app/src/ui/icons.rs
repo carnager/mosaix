@@ -188,6 +188,13 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.line_segment([at(10.0, 4.0), at(10.0, 17.0)], Stroke::new(2.4 * u, color));
             p.line_segment([at(7.5, 17.0), at(12.5, 17.0)], Stroke::new(1.6 * u, color));
         }
+        Icon::Tool(ToolId::Eyedropper) => {
+            // A pipette: bulb top right, glass tube down to the tip.
+            p.circle_filled(at(14.5, 5.5), 2.6 * u, color);
+            p.line_segment([at(12.5, 7.5), at(5.0, 15.0)], Stroke::new(2.2 * u, color));
+            p.line_segment([at(5.0, 15.0), at(3.5, 16.5)], Stroke::new(1.2 * u, color));
+            p.line_segment([at(11.0, 4.5), at(15.5, 9.0)], Stroke::new(1.4 * u, color));
+        }
         Icon::Tool(ToolId::Pen) => {
             // A fountain-pen nib.
             p.add(Shape::convex_polygon(

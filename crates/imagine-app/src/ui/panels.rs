@@ -9,7 +9,7 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 17] = [
+pub const TOOLS: [(ToolId, &str, &str); 18] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
@@ -25,6 +25,7 @@ pub const TOOLS: [(ToolId, &str, &str); 17] = [
     (ToolId::Text, "Text", "T"),
     (ToolId::Shape, "Shape (Rectangle / Ellipse)", "Shift+U"),
     (ToolId::Pen, "Pen", "P"),
+    (ToolId::Eyedropper, "Eyedropper", "I"),
     (ToolId::Gradient, "Linear Gradient", "G"),
     (ToolId::Radial, "Radial Gradient", "G"),
 ];
@@ -45,6 +46,7 @@ pub enum ToolId {
     Text,
     Shape,
     Pen,
+    Eyedropper,
     Eraser,
     Gradient,
     Radial,
@@ -144,6 +146,9 @@ pub struct Model {
     pub clone_source: bool,
     pub wand_tolerance: f32,
     pub wand_contiguous: bool,
+    pub bg_color: [f32; 3],
+    pub eyedrop_radius: i64,
+    pub eyedrop_all: bool,
     pub boxed: Option<&'static str>,
     /// Free transform: current angle (degrees).
     pub box_angle: Option<f64>,
@@ -183,6 +188,13 @@ pub enum Action {
     Command(Cmd),
     Tool(ToolId),
     Color([f32; 3]),
+    BgColor([f32; 3]),
+    SwapColors,
+    ResetColors,
+    Eyedrop {
+        radius: i64,
+        all: bool,
+    },
     Brush(BrushModel),
     SmudgeStrength(f32),
     CloneOptions {
@@ -313,6 +325,8 @@ pub struct State {
     /// Layout as last saved / loaded; a changed layout lands in `layout_changed`.
     pub saved_layout: Option<serde_json::Value>,
     pub layout_changed: Option<serde_json::Value>,
+    /// The colour panel edits the background colour (else the brush colour).
+    edit_bg: bool,
 }
 
 enum Dialog {
@@ -639,6 +653,16 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
             });
         }
         ui.menu_button(tr("Window"), |ui| super::dock::window_menu(ui, st));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let text = RichText::new(format!("{}   Ctrl+Shift+P", tr("Search commands …")))
+                .color(Color32::from_gray(150));
+            let b = egui::Button::new(text)
+                .min_size(Vec2::new(240.0, 20.0))
+                .fill(Color32::from_rgb(30, 31, 35));
+            if ui.add(b).on_hover_text(tr("Command Palette")).clicked() {
+                st.palette = Some((String::new(), 0));
+            }
+        });
     });
 }
 
@@ -712,21 +736,7 @@ fn toolbar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) 
             }
         }
         ui.add_space(10.0);
-        // Current colour; click for the picker in the side panel.
-        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::click());
-        ui.painter().rect_filled(rect, 4.0, linear_color(m.color));
-        ui.painter().rect_stroke(
-            rect,
-            4.0,
-            Stroke::new(1.0, Color32::from_gray(160)),
-            egui::StrokeKind::Outside,
-        );
-        if resp
-            .on_hover_text(tr("Brush color (X: black/white)"))
-            .clicked()
-        {
-            st.focus_pane = Some(super::dock::Pane::Color);
-        }
+        color_chips(ui, m, st, out);
     });
 }
 
@@ -891,24 +901,174 @@ const SWATCHES: [[u8; 3]; 12] = [
     [139, 94, 60],
 ];
 
+/// Photoshop's colour squares: brush colour over background colour, a swap
+/// arrow (X) and a reset to black/white (D).
+fn color_chips(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(38.0), Sense::hover());
+    let o = rect.min;
+    let r = |x: f32, y: f32, w: f32| egui::Rect::from_min_size(o + Vec2::new(x, y), Vec2::splat(w));
+    let (fg_r, bg_r, swap_r, reset_r) = (
+        r(2.0, 2.0, 22.0),
+        r(14.0, 14.0, 22.0),
+        r(27.0, 1.0, 10.0),
+        r(1.0, 27.0, 10.0),
+    );
+    let chip = |ui: &mut egui::Ui, rect: egui::Rect, c: [f32; 3], id: &str, active: bool| {
+        let resp = ui.interact(rect, ui.scope_id().with(id), Sense::click());
+        let p = ui.painter();
+        p.rect_filled(rect, 2.0, linear_color(c));
+        p.rect_stroke(
+            rect,
+            2.0,
+            Stroke::new(1.0, Color32::from_gray(20)),
+            egui::StrokeKind::Inside,
+        );
+        let ring = if active {
+            ACCENT
+        } else {
+            Color32::from_gray(170)
+        };
+        p.rect_stroke(rect, 2.0, Stroke::new(1.0, ring), egui::StrokeKind::Outside);
+        resp
+    };
+    // Background first so the brush colour lies on top.
+    if chip(ui, bg_r, m.bg_color, "bg chip", st.edit_bg)
+        .on_hover_text(tr("Background color – click to edit"))
+        .clicked()
+    {
+        st.edit_bg = true;
+        st.focus_pane = Some(super::dock::Pane::Color);
+    }
+    if chip(ui, fg_r, m.color, "fg chip", !st.edit_bg)
+        .on_hover_text(tr("Brush color – click to edit"))
+        .clicked()
+    {
+        st.edit_bg = false;
+        st.focus_pane = Some(super::dock::Pane::Color);
+    }
+    let p = ui.painter();
+    let line = Stroke::new(1.2, Color32::from_gray(200));
+    // Swap: a bent double arrow.
+    let (a, b, c) = (
+        swap_r.left_top() + Vec2::new(2.0, 2.0),
+        swap_r.right_top() + Vec2::new(-2.0, 2.0),
+        swap_r.right_bottom() + Vec2::new(-2.0, -1.0),
+    );
+    p.line_segment([a, b], line);
+    p.line_segment([b, c], line);
+    p.line_segment([a, a + Vec2::new(2.5, -2.0)], line);
+    p.line_segment([a, a + Vec2::new(2.5, 2.0)], line);
+    p.line_segment([c, c + Vec2::new(-2.0, -2.5)], line);
+    p.line_segment([c, c + Vec2::new(2.0, -2.5)], line);
+    if ui
+        .interact(swap_r, ui.scope_id().with("swap"), Sense::click())
+        .on_hover_text(tr("Swap colors (X)"))
+        .clicked()
+    {
+        out.push(Action::SwapColors);
+    }
+    // Reset: small black over white.
+    let p = ui.painter();
+    p.rect_filled(
+        egui::Rect::from_min_size(reset_r.min + Vec2::new(3.0, 3.0), Vec2::splat(6.0)),
+        0.0,
+        Color32::WHITE,
+    );
+    p.rect_filled(
+        egui::Rect::from_min_size(reset_r.min, Vec2::splat(6.0)),
+        0.0,
+        Color32::BLACK,
+    );
+    p.rect_stroke(
+        egui::Rect::from_min_size(reset_r.min, Vec2::splat(6.0)),
+        0.0,
+        Stroke::new(0.8, Color32::from_gray(200)),
+        egui::StrokeKind::Outside,
+    );
+    if ui
+        .interact(reset_r, ui.scope_id().with("reset"), Sense::click())
+        .on_hover_text(tr("Default colors: black/white (D)"))
+        .clicked()
+    {
+        out.push(Action::ResetColors);
+    }
+}
+
 pub(super) fn color_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     use egui::ecolor::Hsva;
-    let current: Color32 = linear_color(m.color);
+    let target = if st.edit_bg { m.bg_color } else { m.color };
+    // Which colour is edited, plus swap / reset / eyedropper.
+    ui.horizontal(|ui| {
+        for (bg, c, label) in [
+            (false, m.color, tr("Brush")),
+            (true, m.bg_color, tr("Background")),
+        ] {
+            let active = st.edit_bg == bg;
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(28.0, 20.0), Sense::click());
+            ui.painter().rect_filled(rect, 3.0, linear_color(c));
+            ui.painter().rect_stroke(
+                rect,
+                3.0,
+                Stroke::new(
+                    if active { 2.0 } else { 1.0 },
+                    if active {
+                        ACCENT
+                    } else {
+                        Color32::from_gray(110)
+                    },
+                ),
+                egui::StrokeKind::Outside,
+            );
+            if resp.on_hover_text(label).clicked() {
+                st.edit_bg = bg;
+            }
+            if ui.selectable_label(active, label).clicked() {
+                st.edit_bg = bg;
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        if icons::button(
+            ui,
+            Icon::Tool(ToolId::Eyedropper),
+            22.0,
+            m.tool == ToolId::Eyedropper,
+        )
+        .on_hover_text(tr("Eyedropper (I) – or Alt+click while painting"))
+        .clicked()
+        {
+            out.push(Action::Tool(ToolId::Eyedropper));
+        }
+        if ui
+            .small_button(tr("Swap"))
+            .on_hover_text(tr("Swap colors (X)"))
+            .clicked()
+        {
+            out.push(Action::SwapColors);
+        }
+        if ui
+            .small_button(tr("Reset"))
+            .on_hover_text(tr("Default colors: black/white (D)"))
+            .clicked()
+        {
+            out.push(Action::ResetColors);
+        }
+    });
+    ui.add_space(4.0);
+    let current: Color32 = linear_color(target);
     // Keep our own HSV so hue survives black/grey colours.
-    let hsv = match st.hsv {
-        Some((hsv, seen)) if seen == m.color => hsv,
+    let mut hsv = match st.hsv {
+        Some((hsv, seen)) if seen == target => hsv,
         _ => {
             let h = Hsva::from(current);
             [h.h, h.s, h.v]
         }
     };
-    let mut hsv = hsv;
-    let width = ui.available_width().min(260.0);
+    let width = ui.available_width().clamp(120.0, 320.0);
     let (sv_rect, sv) =
         ui.allocate_exact_size(Vec2::new(width, width * 0.62), Sense::click_and_drag());
     let (hue_rect, hue) = ui.allocate_exact_size(Vec2::new(width, 14.0), Sense::click_and_drag());
     let p = ui.painter();
-    // Saturation/value field: a grid of vertex-coloured quads.
     let n = 16;
     let mut mesh = egui::Mesh::default();
     for j in 0..=n {
@@ -979,36 +1139,77 @@ pub(super) fn color_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
         Stroke::new(1.5, Color32::WHITE),
         egui::StrokeKind::Outside,
     );
+    let edit_bg = st.edit_bg;
     let mut emit = |c: Color32, hsv: [f32; 3], st: &mut State| {
         let r = egui::Rgba::from(c);
         let lin = [r.r(), r.g(), r.b()];
         st.hsv = Some((hsv, lin));
-        out.push(Action::Color(lin));
+        out.push(if edit_bg {
+            Action::BgColor(lin)
+        } else {
+            Action::Color(lin)
+        });
     };
+    // Numeric fields: HSB and 8-bit sRGB, plus hex.
+    ui.add_space(4.0);
+    let [r8, g8, b8, _] = current.to_array();
+    let (mut h, mut sat, mut bri) = (hsv[0] * 360.0, hsv[1] * 100.0, hsv[2] * 100.0);
+    let mut rgb = [r8, g8, b8];
+    let mut hsv_changed = false;
+    let mut rgb_changed = false;
+    egui::Grid::new("color fields")
+        .num_columns(4)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            let dv = |ui: &mut egui::Ui, v: &mut f32, max: f32, suffix: &str| {
+                ui.add(
+                    egui::DragValue::new(v)
+                        .range(0.0..=max)
+                        .max_decimals(0)
+                        .suffix(suffix)
+                        .speed(0.5),
+                )
+                .changed()
+            };
+            ui.label("H");
+            hsv_changed |= dv(ui, &mut h, 359.0, "°");
+            ui.label("R");
+            rgb_changed |= ui
+                .add(egui::DragValue::new(&mut rgb[0]).range(0..=255))
+                .changed();
+            ui.end_row();
+            ui.label("S");
+            hsv_changed |= dv(ui, &mut sat, 100.0, " %");
+            ui.label("G");
+            rgb_changed |= ui
+                .add(egui::DragValue::new(&mut rgb[1]).range(0..=255))
+                .changed();
+            ui.end_row();
+            ui.label("B");
+            hsv_changed |= dv(ui, &mut bri, 100.0, " %");
+            ui.label("B");
+            rgb_changed |= ui
+                .add(egui::DragValue::new(&mut rgb[2]).range(0..=255))
+                .changed();
+            ui.end_row();
+        });
+    if hsv_changed {
+        hsv = [(h / 360.0).clamp(0.0, 0.9999), sat / 100.0, bri / 100.0];
+        changed = true;
+    }
     if changed {
         emit(Hsva::new(hsv[0], hsv[1], hsv[2], 1.0).into(), hsv, st);
+    } else if rgb_changed {
+        let col = Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+        let hs = Hsva::from(col);
+        emit(col, [hs.h, hs.s, hs.v], st);
     }
-    ui.add_space(2.0);
-    ui.horizontal_wrapped(|ui| {
-        for s in SWATCHES {
-            let col = Color32::from_rgb(s[0], s[1], s[2]);
-            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
-            ui.painter().rect_filled(rect, 3.0, col);
-            if resp.clicked() {
-                let h = Hsva::from(col);
-                emit(col, [h.h, h.s, h.v], st);
-            }
-        }
-    });
-    // Hex field.
-    let [r, g, b, _] = current.to_array();
     let mut hex = st
         .hex
         .clone()
-        .unwrap_or_else(|| format!("#{r:02x}{g:02x}{b:02x}"));
+        .unwrap_or_else(|| format!("#{r8:02x}{g8:02x}{b8:02x}"));
     ui.horizontal(|ui| {
-        let (sw, _) = ui.allocate_exact_size(Vec2::new(28.0, 18.0), Sense::hover());
-        ui.painter().rect_filled(sw, 3.0, current);
+        ui.label("#");
         let resp = ui.add(
             egui::TextEdit::singleline(&mut hex)
                 .desired_width(80.0)
@@ -1020,12 +1221,37 @@ pub(super) fn color_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
         if resp.lost_focus() {
             st.hex = None;
             let h = hex.trim().trim_start_matches('#');
+            let h: String = if h.len() == 3 {
+                h.chars().flat_map(|c| [c, c]).collect()
+            } else {
+                h.to_string()
+            };
             if h.len() == 6
-                && let Ok(v) = u32::from_str_radix(h, 16)
+                && let Ok(v) = u32::from_str_radix(&h, 16)
             {
                 let col = Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
                 let hs = Hsva::from(col);
                 emit(col, [hs.h, hs.s, hs.v], st);
+            }
+        }
+    });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        for s in SWATCHES {
+            let col = Color32::from_rgb(s[0], s[1], s[2]);
+            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
+            ui.painter().rect_filled(rect, 3.0, col);
+            if resp.hovered() {
+                ui.painter().rect_stroke(
+                    rect,
+                    3.0,
+                    Stroke::new(1.0, Color32::WHITE),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            if resp.clicked() {
+                let h = Hsva::from(col);
+                emit(col, [h.h, h.s, h.v], st);
             }
         }
     });
@@ -1213,6 +1439,35 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                 out.push(Action::WandContiguous(c));
             }
             hint(ui, tr("Samples all layers. Shift = add, Alt = subtract."));
+        }
+        ToolId::Eyedropper => {
+            let (mut radius, mut all) = (m.eyedrop_radius, m.eyedrop_all);
+            ui.label(tr("Sample Size"));
+            egui::ComboBox::from_id_salt("sample size")
+                .selected_text(match radius {
+                    0 => tr("Point Sample").to_string(),
+                    r => format!("{n} × {n}", n = 2 * r + 1),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut radius, 0, tr("Point Sample"));
+                    for r in [1, 2, 5, 15] {
+                        ui.selectable_value(
+                            &mut radius,
+                            r,
+                            format!("{n} × {n} {avg}", n = 2 * r + 1, avg = tr("Average")),
+                        );
+                    }
+                });
+            ui.checkbox(&mut all, tr("Sample All Layers"));
+            if (radius, all) != (m.eyedrop_radius, m.eyedrop_all) {
+                out.push(Action::Eyedrop { radius, all });
+            }
+            hint(
+                ui,
+                tr(
+                    "Click or drag: picks the brush color. Alt+click does the same with the brush, eraser, gradient, shape and text tools.",
+                ),
+            );
         }
         ToolId::Marquee | ToolId::Ellipse | ToolId::Lasso => {
             hint(ui, tr("Shift = add, Alt = subtract, both = intersect"))
@@ -1707,31 +1962,79 @@ fn command_palette(
         *close = true;
         return;
     }
+    let screen = ctx.content_rect();
+    let width = (screen.width() - 80.0).clamp(320.0, 640.0);
+    let list_h = (screen.height() * 0.55).clamp(160.0, 520.0);
     egui::Window::new(tr("Command"))
         .title_bar(false)
-        .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 60.0))
-        .fixed_size(Vec2::new(460.0, 0.0))
+        .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 70.0))
+        .fixed_size(Vec2::new(width, list_h + 60.0))
+        .frame(egui::Frame::window(&ctx.global_style()).inner_margin(10.0))
         .show(ctx, |ui| {
             let r = ui.add(
                 egui::TextEdit::singleline(query)
                     .hint_text(tr("Search commands …"))
+                    .font(egui::FontId::proportional(17.0))
+                    .margin(Vec2::new(8.0, 6.0))
                     .desired_width(f32::INFINITY),
             );
             r.request_focus();
-            ui.separator();
+            ui.add_space(6.0);
             egui::ScrollArea::vertical()
-                .max_height(360.0)
+                .max_height(list_h)
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
+                    if hits.is_empty() {
+                        ui.label(RichText::new(tr("No matching command")).weak());
+                    }
+                    let w = ui.available_width();
                     for (i, c) in hits.iter().enumerate() {
-                        let text = format!("{} › {}", c.menu_text(), c.label_text());
-                        let resp = ui.add(
-                            egui::Button::new(text)
-                                .shortcut_text(c.shortcut())
-                                .selected(i == *sel)
-                                .frame(i == *sel),
+                        let active = i == *sel;
+                        let (rect, resp) =
+                            ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::click());
+                        let p = ui.painter();
+                        if active || resp.hovered() {
+                            p.rect_filled(
+                                rect,
+                                4.0,
+                                if active {
+                                    Color32::from_rgb(52, 98, 196)
+                                } else {
+                                    Color32::from_gray(58)
+                                },
+                            );
+                        }
+                        let y = rect.center().y;
+                        p.text(
+                            egui::pos2(rect.left() + 10.0, y),
+                            egui::Align2::LEFT_CENTER,
+                            c.label_text(),
+                            egui::FontId::proportional(14.5),
+                            Color32::from_gray(240),
                         );
-                        if i == *sel {
+                        let menu_col = if active {
+                            Color32::from_gray(215)
+                        } else {
+                            Color32::from_gray(150)
+                        };
+                        let shortcut = c.shortcut();
+                        let right = if shortcut.is_empty() {
+                            c.menu_text().to_string()
+                        } else {
+                            format!("{}    {}", c.menu_text(), shortcut)
+                        };
+                        p.text(
+                            egui::pos2(rect.right() - 10.0, y),
+                            egui::Align2::RIGHT_CENTER,
+                            right,
+                            egui::FontId::proportional(12.5),
+                            menu_col,
+                        );
+                        if active && (up || down) {
                             resp.scroll_to_me(None);
+                        }
+                        if resp.hovered() && ui.ctx().input(|i| i.pointer.delta() != Vec2::ZERO) {
+                            *sel = i;
                         }
                         if resp.clicked() {
                             out.push(Action::Command(**c));
@@ -1739,6 +2042,12 @@ fn command_palette(
                         }
                     }
                 });
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(tr("↑↓ choose · Enter run · Esc close"))
+                    .weak()
+                    .small(),
+            );
         });
 }
 
