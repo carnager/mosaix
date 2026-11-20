@@ -89,7 +89,7 @@ Zielhardware für Entwicklung: AMD RX 6700 XT (Navi 22, 12 GB VRAM, RADV/Vulkan)
 
 ### 3.4 Threads
 - **UI-Thread:** Input, egui, Command-Dispatch. Nie GPU-Waits.
-- **Render-Thread:** besitzt Queue, baut Frames, präsentiert (Mailbox/FIFO-relaxed, Frame-Pacing über `wp_presentation`).
+- **Render-Thread:** (zurückgestellt, siehe Stand Phase 2b) besitzt Queue, baut Frames, präsentiert (Mailbox/FIFO-relaxed, Frame-Pacing über `wp_presentation`).
 - **Worker-Pool (rayon):** Decoding, Encoding, Kompression, CPU-Fallbacks, Histogramme.
 - **IO-Thread(s):** Laden/Speichern, Autosave.
 
@@ -331,9 +331,42 @@ Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md
 
 **Bekannte Grenzen:** Verschieben zeigt beim Ziehen nur den Umriss (Inhalt springt beim Loslassen); weiche Kante und Auswahl-Kombination laufen auf der CPU; Inhalte, die über den Rand geschoben werden, werden abgeschnitten; Ameisen und Werkzeug-Overlays sind nur per Offscreen-Test abgesichert (niri zeigt das Testfenster nicht an) – bitte von Hand ausprobieren.
 
+## Stand Phase 2b (20.11.2026) – Transformieren, Zauberstab, Pinsel
+
+- **Warp-Kernel:** affines Resampling ganzer Ebenen auf der GPU (nächster Nachbar / bilinear / bikubisch Catmull-Rom; beim Verkleinern Supersampling). Quellkacheln werden über eine Nachschlagetabelle gefunden, Zielkacheln über einen exakten Parallelogramm-Kachel-Test bestimmt. Ersetzt den alten Verschiebe-Pfad.
+- **Schwebende Auswahl:** Mit Auswahl bewegen/transformieren V und Strg+T nur die ausgewählten Pixel. Die Auswahl wandert mit, das Loch bleibt zurück (wie Photoshop).
+- **Live-Vorschau:** Beim Verschieben und Transformieren wird nur der sichtbare Bereich (plus Rand) neu berechnet, ohne Undo-Schritt. Bei Ansichtswechsel wird nachgerechnet.
+- **Inhalt außerhalb der Leinwand bleibt erhalten** (wird nur nicht angezeigt). Zuschneiden ist damit verlustfrei, das Vergrößern der Arbeitsfläche holt alles zurück. Zuschneiden auf Kachelgrenzen nummeriert nur Kacheln um.
+- **Frei transformieren (Strg+T):** Rahmen mit 8 Anfassern. Ecken skalieren proportional (Umschalt = frei), Kanten strecken, Alt = um die Mitte, außen drehen (Umschalt = 15°), innen verschieben, Enter/Esc. Inhaltsgrenzen pixelgenau per GPU-Reduktion.
+- **Zuschneiden (C)**, Arbeitsfläche und Bildgröße (Agenten), alle Ebenen und Masken.
+- **Zauberstab (W) und Farbbereich:** GPU-Ähnlichkeitskarte (aktive Ebene oder Gesamtbild), Scanline-Füllung auf der CPU mit weichem 1-px-Rand, Toleranz wie Photoshop in 8-Bit-Stufen.
+- **Pinsel-Engine v1:** fünf prozedurale Textur-Spitzen (Kreide, Borsten, Spray, rau, Kohle) mit Mipmaps; Winkel, Rundheit, Richtung folgen; Zufall für Größe, Winkel, Fluss und Streuung (deterministisch pro Strich).
+- **Wischfinger (U):** Strich-Kacheln starten als Kopie der Ebene. Je Tupfer nimmt ein 128²-Puffer Farbe auf und wird durch die Spitze gestempelt (Tupfer nacheinander, voneinander abhängig).
+- **UI bleibt bedienbar:** weiche Kante, Zauberstab-Füllung und Export-Kodierung laufen in Worker-Threads, der Export liest asynchron zurück. Ergebnisse auf veralteter Auswahl werden verworfen.
+- **Agenten:** `layer_transform`, `layer_bounds`, `crop`, `canvas_size`, `image_resize`, `select_magic_wand`, `select_color_range`; `paint_stroke` mit Spitzen, Dynamik und `smudge`.
+
+| Messung (100 MP, RX 6700 XT, headless) | Ergebnis |
+|---|---|
+| Drehen 17° bikubisch | ≈ 40 ms |
+| Skalieren ×1,3 bikubisch (→ 169 MP) | ≈ 73 ms |
+| Ganzpixliges Verschieben (exakt) | ≈ 20 ms |
+| Zuschneiden außerhalb / auf Kachelgrenzen | ≈ 20 ms / < 1 ms |
+| Inhaltsgrenzen (GPU-Reduktion) | ≈ 19 ms |
+| Zauberstab zusammenhängend / überall | 120–190 ms / 70 ms |
+| Farbbereich | 70 ms |
+
+**Entscheidung Render-Thread:** Ein eigener Render-Thread hätte das eigentliche Problem nicht gelöst. Die GPU-Arbeit ist bereits asynchron, und Eingaben laufen ohnehin über den UI-Thread. Gehakt hat es bei schwerer CPU-Arbeit auf dem UI-Thread, die jetzt in Worker-Threads läuft. Ein echter Render-Thread wird wieder interessant, wenn egui (Phase 3) Layout-Zeit kostet.
+
+**Bekannte Grenzen:**
+- Die Vorschau beim Transformieren rechnet bei 100 MP in eingepasster Ansicht alle sichtbaren Kacheln in voller Auflösung, das sind etwa 40 ms je Änderung. Eine Vorschau in reduzierter Auflösung fehlt noch.
+- Gruppen lassen sich noch nicht transformieren.
+- Der Wischfinger nimmt nur von der aktiven Ebene auf.
+- Pinselspitzen sind fest eingebaut (eigene Spitzen und ABR kommen mit Phase 7).
+- Neue Fensterwerkzeuge (Strg+T, C, W, U, Umschalt+B, J) sind nur über Engine-, Agenten- und Geometrie-Tests abgesichert und brauchen den Handtest.
+
 ## Nächster konkreter Schritt
 
-**Phase 2b:** Zauberstab (GPU-Floodfill) und Farbbereich, freies Transformieren (Skalieren/Drehen mit Live-Vorschau), Verschieben mit Live-Inhalt, Zuschneiden, Pinsel-Engine v1 (Textur-Spitzen, Smudge), Render-Thread vom UI-Thread trennen.
+**Phase 3 – UI (MVP):** egui-Overlay mit Werkzeugleiste, Ebenen-Panel (Sichtbarkeit, Deckkraft, Füllmethode, Masken-Vorschau, Ziehen zum Sortieren), Farbwähler, Pinsel-Einstellungen, Statusleiste und Verlaufsliste; Command-Palette; Autosave.
 
 ## Nächster konkreter Schritt (Phase 0, erledigt)
 
