@@ -122,6 +122,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         active_vector: None,
         active_effects: Some(Vec::new()),
         fonts: Default::default(),
+        paths: Vec::new(),
         favourite_fonts: vec!["IBM Plex Sans".into()],
         recent_fonts: vec!["IBM Plex Mono".into()],
         shape_ellipse: false,

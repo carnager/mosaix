@@ -453,7 +453,10 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Ebenenstile erweitert** (2026-11-20): Füllmethode je Effekt (Standard wie Photoshop), Verlaufsüberlagerung (zwei Farben, linear/radial, Winkel, Skalierung, umkehren), „Globalen Lichteinfall verwenden“ für Schatten und Abgeflachte Kante (ein Winkel für alle Ebenen, ein Rückgängig-Schritt). Überlagerungen behalten weiche Kanten.
 
-**Noch offen in Phase 6:** Text auf Pfad, OpenType-Features, Musterüberlagerung (braucht eine Musterbibliothek), PSD-Import der Ebenenstile.
+- **OpenType-Features** (Ligaturen, Kapitälchen, Mediäval-/Tabellenziffern, Brüche, Ordinalzeichen, Schwungschrift, Stilvarianten, Hoch-/Tiefstellung, Kerning); was die Schrift nicht hat, ist ausgegraut; PSD-Import übernimmt Photoshops Schalter.
+- **Text auf Pfad:** Eigenschaften › Pfad wählt eine Pfadebene (Zeichenstift), Pfadanfang und Spiegeln; jede Glyphe wird auf der Kurve platziert und gedreht, offene Pfade schneiden überstehenden Text ab, geschlossene laufen herum. Bearbeitet wird im Textfeld der Eigenschaften (kein Cursor auf der Kurve).
+
+**Noch offen in Phase 6:** Musterüberlagerung (braucht eine Musterbibliothek), PSD-Import der Ebenenstile, Cursor direkt in Text auf Pfad.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)
 

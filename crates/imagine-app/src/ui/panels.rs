@@ -75,6 +75,14 @@ pub struct LayerRow {
     pub mask_thumb: Option<(egui::TextureId, (f32, f32))>,
 }
 
+/// A path layer offered for text on a path.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathChoice {
+    pub name: String,
+    pub nodes: Vec<imagine_core::vector::PathNode>,
+    pub closed: bool,
+}
+
 /// Side of a thumbnail in pixels (matches the engine's THUMB).
 pub const THUMB_PX: usize = 64;
 
@@ -186,6 +194,8 @@ pub struct Model {
     pub active_effects: Option<Vec<imagine_core::style::Effect>>,
     /// Installed font families (loaded when first needed).
     pub fonts: std::sync::Arc<Vec<imagine_vector::FontGroup>>,
+    /// Path layers a text can follow: name, nodes in document coordinates, closed.
+    pub paths: Vec<PathChoice>,
     pub favourite_fonts: Vec<String>,
     pub recent_fonts: Vec<String>,
     /// Shape tool: ellipse instead of rectangle.
@@ -881,6 +891,7 @@ pub(super) fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: 
         let e = super::vector_ui::editor(
             ui,
             v,
+            &m.paths,
             &m.fonts,
             &m.favourite_fonts,
             &m.recent_fonts,

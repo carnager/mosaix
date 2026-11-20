@@ -3160,6 +3160,30 @@ impl App {
                 .filter(|l| l.is_pixels() || l.vector().is_some())
                 .map(|l| l.effects.clone()),
             fonts: self.fonts.clone(),
+            paths: {
+                // Bézier path layers, in document coordinates.
+                let mut v = Vec::new();
+                doc.for_each(&mut |l, _| {
+                    if let Some(vl) = l.vector()
+                        && let imagine_core::vector::VectorKind::Shape(imagine_core::vector::ShapeSpec {
+                            geometry: imagine_core::vector::Geometry::Bezier { nodes, closed },
+                            ..
+                        }) = &vl.kind
+                    {
+                        let m = DAffine2::from_cols_array(&vl.transform);
+                        let t = |p: [f64; 2]| {
+                            let q = m.transform_point2(DVec2::new(p[0], p[1]));
+                            [q.x, q.y]
+                        };
+                        let nodes = nodes
+                            .iter()
+                            .map(|n| imagine_core::vector::PathNode { p: t(n.p), h_in: t(n.h_in), h_out: t(n.h_out) })
+                            .collect();
+                        v.push(ui::panels::PathChoice { name: l.name.clone(), nodes, closed: *closed });
+                    }
+                });
+                v
+            },
             favourite_fonts: self.settings.favourite_fonts.clone(),
             recent_fonts: self.settings.recent_fonts.clone(),
             shape_ellipse: matches!(self.tool, Tool::Shape { ellipse: true }),

@@ -593,6 +593,9 @@ msgstr "Reiter ziehen verschiebt Bedienfelder; herausziehen macht sie schwebend.
 msgid "Drag: from the brush color to transparent"
 msgstr "Ziehen: von der Pinselfarbe zu transparent"
 
+msgid "Draw a path with the pen (P) first."
+msgstr "Zuerst mit dem Zeichenstift (P) einen Pfad zeichnen."
+
 msgid "Drop Shadow"
 msgstr "Schlagschatten"
 
@@ -1205,6 +1208,9 @@ msgstr "keine Wayland-Verbindung (WAYLAND_DISPLAY?)"
 msgid "Non-destructive: stays on the layer, can be changed or switched off at any time (affects the whole layer)"
 msgstr "Nicht-destruktiv: bleibt an der Ebene, jederzeit änderbar oder abschaltbar (wirkt auf die ganze Ebene)"
 
+msgid "None"
+msgstr "Keiner"
+
 msgid "not a Photoshop file"
 msgstr "keine Photoshop-Datei"
 
@@ -1243,6 +1249,9 @@ msgstr "Mediävalziffern"
 
 msgid "On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag moves one handle, Del deletes the point. Color: brush color."
 msgstr "Auf einem Pfad: Punkte und Griffe ziehen, Alt+Klick Ecke ↔ Kurve, Alt+Ziehen Griff einzeln, Entf löscht den Punkt. Farbe: Pinselfarbe."
+
+msgid "On path"
+msgstr "Auf Pfad"
 
 msgid "On/Off"
 msgstr "ein/aus"
@@ -1324,6 +1333,9 @@ msgstr "Eingefügt als neue Ebene ({w}×{h} px)"
 
 msgid "Path"
 msgstr "Pfad"
+
+msgid "Path Start"
+msgstr "Pfadanfang"
 
 msgid "Pen"
 msgstr "Zeichenstift"
@@ -1519,6 +1531,9 @@ msgstr "rund"
 
 msgid "Roundness"
 msgstr "Rundheit"
+
+msgid "Run along the other side of the path"
+msgstr "Auf der anderen Seite des Pfads laufen"
 
 msgid "Sample All Layers"
 msgstr "Alle Ebenen aufnehmen"
@@ -2029,6 +2044,9 @@ msgstr "Sichtbarkeit"
 
 msgid "Warning: end of file damaged, older version restored"
 msgstr "Warnung: Dateiende beschädigt, ältere Version wiederhergestellt"
+
+msgid "Where the text starts on the path"
+msgstr "Wo der Text auf dem Pfad beginnt"
 
 msgid "White"
 msgstr "Weiß"

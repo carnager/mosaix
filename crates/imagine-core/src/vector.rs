@@ -104,8 +104,25 @@ pub struct TextSpec {
     /// ("liga" → 0, "smcp" → 1 …).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub features: std::collections::BTreeMap<String, u16>,
+    /// Text on a path: one line set along the curve (x/y and width unused).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<TextPath>,
     pub x: f64,
     pub y: f64,
+}
+
+/// The curve a text runs along (in the text layer's own coordinates).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextPath {
+    pub nodes: Vec<PathNode>,
+    #[serde(default)]
+    pub closed: bool,
+    /// Where the text starts, as a fraction of the path length (0…1).
+    #[serde(default)]
+    pub offset: f32,
+    /// Run along the other side (reversed direction).
+    #[serde(default)]
+    pub flip: bool,
 }
 
 /// The OpenType features offered in the UI: tag, label, on by default.
@@ -163,6 +180,7 @@ impl TextSpec {
             letter_spacing: 0.0,
             width: None,
             features: Default::default(),
+            path: None,
             x,
             y,
         }

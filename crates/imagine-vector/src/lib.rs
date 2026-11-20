@@ -481,6 +481,55 @@ struct TextLayout {
     runs: Vec<Run>,
     width: f32,
     height: f32,
+    /// Text on a path: per glyph (run, index) its transform onto the curve.
+    on_path: Option<Vec<(usize, usize, Affine)>>,
+}
+
+/// A path flattened into points with cumulative lengths.
+struct Polyline {
+    pts: Vec<(f64, f64)>,
+    len: Vec<f64>,
+}
+
+impl Polyline {
+    fn new(nodes: &[imagine_core::vector::PathNode], closed: bool, flip: bool) -> Option<Self> {
+        let path = geometry_path(&Geometry::Bezier { nodes: nodes.to_vec(), closed })?;
+        let mut pts = Vec::new();
+        vello_cpu::kurbo::flatten(path, 0.1, |el| match el {
+            vello_cpu::kurbo::PathEl::MoveTo(p) | vello_cpu::kurbo::PathEl::LineTo(p) => pts.push((p.x, p.y)),
+            vello_cpu::kurbo::PathEl::ClosePath => {
+                if let Some(&f) = pts.first() {
+                    pts.push(f);
+                }
+            }
+            _ => {}
+        });
+        if flip {
+            pts.reverse();
+        }
+        if pts.len() < 2 {
+            return None;
+        }
+        let mut len = vec![0.0];
+        for w in pts.windows(2) {
+            let d = (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1);
+            len.push(len.last().unwrap() + d);
+        }
+        Some(Self { pts, len })
+    }
+
+    fn total(&self) -> f64 {
+        *self.len.last().unwrap()
+    }
+
+    /// Point and direction (radians) at arc length `s`.
+    fn at(&self, s: f64) -> (f64, f64, f64) {
+        let i = self.len.partition_point(|&l| l <= s).clamp(1, self.pts.len() - 1);
+        let (a, b) = (self.pts[i - 1], self.pts[i]);
+        let seg = (self.len[i] - self.len[i - 1]).max(1e-9);
+        let t = ((s - self.len[i - 1]) / seg).clamp(0.0, 1.0);
+        (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, (b.1 - a.1).atan2(b.0 - a.0))
+    }
 }
 
 /// The parley layout of a text spec (positions relative to the text box).
@@ -548,6 +597,18 @@ pub fn font_feature_tags(t: &TextSpec) -> std::collections::BTreeSet<String> {
 }
 
 fn layout_text(t: &TextSpec) -> TextLayout {
+    // Text on a path is one line.
+    let single;
+    let t = match &t.path {
+        Some(_) => {
+            let mut s = t.clone();
+            s.text = s.text.replace(['\n', '\r'], " ");
+            s.width = None;
+            single = s;
+            &single
+        }
+        None => t,
+    };
     let l = build_layout(t);
     let mut runs = Vec::new();
     for line in l.lines() {
@@ -574,10 +635,36 @@ fn layout_text(t: &TextSpec) -> TextLayout {
             }
         }
     }
+    let on_path = t.path.as_ref().and_then(|p| {
+        let line = Polyline::new(&p.nodes, p.closed, p.flip)?;
+        let total = line.total();
+        let baseline = l.lines().next().map_or(t.size as f64 * 0.8, |ln| ln.metrics().baseline as f64);
+        let start = p.offset.clamp(0.0, 1.0) as f64 * total;
+        let mut out = Vec::new();
+        for (ri, run) in runs.iter().enumerate() {
+            let n = run.glyphs.len();
+            for (gi, g) in run.glyphs.iter().enumerate() {
+                // Advance ≈ distance to the next glyph (the last: a quarter em).
+                let next = if gi + 1 < n { run.glyphs[gi + 1].x } else { g.x + run.size * 0.5 };
+                let mid = g.x as f64 + ((next - g.x) as f64).max(0.0) * 0.5;
+                let mut s = start + mid;
+                if p.closed {
+                    s = s.rem_euclid(total);
+                } else if s > total {
+                    continue; // does not fit on the path
+                }
+                let (x, y, a) = line.at(s);
+                let m = Affine::translate((x, y)) * Affine::rotate(a) * Affine::translate((-mid, -baseline));
+                out.push((ri, gi, m));
+            }
+        }
+        Some(out)
+    });
     TextLayout {
         runs,
         width: t.width.unwrap_or(l.width()).max(l.width()),
         height: l.height(),
+        on_path,
     }
 }
 
@@ -671,6 +758,18 @@ fn local_bounds(p: &Prepared) -> Option<Rect> {
             if l.runs.is_empty() {
                 return None;
             }
+            if let Some(gs) = &l.on_path {
+                // Around every placed glyph.
+                let m = t.size as f64 * 1.2;
+                let mut r: Option<Rect> = None;
+                for (ri, gi, a) in gs {
+                    let g = l.runs[*ri].glyphs[*gi];
+                    let p = *a * vello_cpu::kurbo::Point::new(g.x as f64, g.y as f64);
+                    let b = Rect::new(p.x - m, p.y - m, p.x + m, p.y + m);
+                    r = Some(r.map_or(b, |r| r.union(b)));
+                }
+                return r;
+            }
             // Generous margin for overhanging glyphs (italics, swashes).
             let m = t.size as f64 * 0.5 + t.letter_spacing.abs() as f64;
             Some(Rect::new(
@@ -703,6 +802,20 @@ fn draw(ctx: &mut RenderContext, res: &mut Resources, p: &Prepared) {
         Prepared::Text(t, l) => {
             ctx.set_paint(color(t.color));
             let base = *ctx.transform();
+            if let Some(gs) = &l.on_path {
+                for (ri, gi, a) in gs {
+                    let run = &l.runs[*ri];
+                    ctx.set_transform(base * *a);
+                    let _ = ctx
+                        .glyph_run(res, &run.font)
+                        .font_size(run.size)
+                        .normalized_coords(&run.coords)
+                        .hint(false)
+                        .fill_glyphs(std::iter::once(run.glyphs[*gi]));
+                }
+                ctx.set_transform(base);
+                return;
+            }
             ctx.set_transform(base * Affine::translate((t.x, t.y)));
             for run in &l.runs {
                 let _ = ctx
@@ -871,6 +984,35 @@ mod tests {
         );
         let b = bounds(&v).unwrap();
         assert!(b[0] <= 200.0 && b[2] >= 600.0);
+    }
+
+    #[test]
+    fn text_follows_a_path() {
+        use imagine_core::vector::{PathNode, TextPath};
+        // An arc over the top: from (100, 300) up through (300, 100) to (500, 300).
+        let mut a = PathNode::corner([100.0, 300.0]);
+        a.h_out = [100.0, 150.0];
+        let mut b = PathNode::corner([500.0, 300.0]);
+        b.h_in = [500.0, 150.0];
+        let mut t = TextSpec::new("Hello curved world", 0.0, 0.0, 40.0, [0.0, 0.0, 0.0, 1.0]);
+        t.path = Some(TextPath { nodes: vec![a, b], closed: false, offset: 0.0, flip: false });
+        let v = VectorLayer::text(t);
+        let [x0, y0, x1, y1] = bounds(&v).unwrap();
+        assert!(x0 < 150.0 && x1 > 400.0 && y0 < 200.0 && y1 > 280.0, "follows the arc: {:?}", [x0, y0, x1, y1]);
+        let tiles = render(&v);
+        let ink = |x: i64, y: i64| tiles.iter().any(|(c, px)| {
+            let (ox, oy) = c.origin();
+            let ts = TILE_SIZE as i64;
+            (ox..ox + ts).contains(&x) && (oy..oy + ts).contains(&y) && {
+                // Any ink within 25 px.
+                (-25..=25).any(|dy| (-25..=25).any(|dx| {
+                    let (lx, ly) = (x + dx - ox, y + dy - oy);
+                    (0..ts).contains(&lx) && (0..ts).contains(&ly) && px[((ly * ts + lx) * 4 + 3) as usize].to_f32() > 0.5
+                }))
+            }
+        });
+        assert!(ink(130, 230), "start of the arc, left side going up");
+        assert!(!ink(300, 300), "nothing where straight text would sit");
     }
 
     #[test]

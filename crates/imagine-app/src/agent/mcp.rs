@@ -444,7 +444,8 @@ pub fn tools() -> Vec<Value> {
             "vector_set",
             "Change a text or shape layer: `changes` is merged into its description as shown by document_info \
              (e.g. {\"text\": \"New\", \"size\": 64, \"color\": \"#ff0000\"} or {\"fill\": \"#00ff00\", \"radius\": 12}; \
-             \"transform\": [a, b, c, d, e, f] places it).",
+             \"transform\": [a, b, c, d, e, f] places it). Text on a path: {\"path\": {\"nodes\": [{\"p\": [x, y], \"h_in\": [x, y], \"h_out\": [x, y]}, …], \
+             \"closed\": false, \"offset\": 0.0–1.0, \"flip\": false}} (null removes it). OpenType: {\"features\": {\"smcp\": 1, \"liga\": 0}}.",
             json!({ "layer": layer_param(), "changes": { "type": "object" } }),
             &["changes"],
             false,

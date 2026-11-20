@@ -73,9 +73,11 @@ fn color_button(ui: &mut egui::Ui, c: &mut [f32; 4]) -> egui::Response {
     r
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn editor(
     ui: &mut egui::Ui,
     v: &VectorLayer,
+    paths: &[super::panels::PathChoice],
     fonts: &[imagine_vector::FontGroup],
     favourites: &[String],
     recent: &[String],
@@ -248,6 +250,61 @@ pub fn editor(
                         },
                         &mut t,
                     );
+                    // Text on a path: follow one of the document's path layers.
+                    ui.label(tr("Path"));
+                    ui.horizontal(|ui| {
+                        let current = if s.path.is_some() { tr("On path").to_string() } else { tr("None").to_string() };
+                        egui::ComboBox::from_id_salt("text path")
+                            .selected_text(current)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(s.path.is_none(), tr("None")).clicked() && s.path.is_some() {
+                                    s.path = None;
+                                    t.changed = true;
+                                    t.done = true;
+                                }
+                                if paths.is_empty() {
+                                    ui.label(RichText::new(tr("Draw a path with the pen (P) first.")).weak());
+                                }
+                                for p in paths {
+                                    if ui.selectable_label(false, &p.name).clicked() {
+                                        // Into this layer's own coordinates.
+                                        let inv = glam::DAffine2::from_cols_array(&v.transform).inverse();
+                                        let t2 = |q: [f64; 2]| {
+                                            let r = inv.transform_point2(glam::DVec2::new(q[0], q[1]));
+                                            [r.x, r.y]
+                                        };
+                                        let nodes = p.nodes.iter().map(|n| imagine_core::vector::PathNode { p: t2(n.p), h_in: t2(n.h_in), h_out: t2(n.h_out) }).collect();
+                                        let keep = s.path.as_ref().map_or((0.0, false), |o| (o.offset, o.flip));
+                                        s.path = Some(imagine_core::vector::TextPath { nodes, closed: p.closed, offset: keep.0, flip: keep.1 });
+                                        t.changed = true;
+                                        t.done = true;
+                                    }
+                                }
+                            });
+                    });
+                    ui.end_row();
+                    if let Some(p) = &mut s.path {
+                        ui.label(tr("Path Start"));
+                        ui.horizontal(|ui| {
+                            let mut pct = p.offset * 100.0;
+                            let r = ui
+                                .add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %").max_decimals(0))
+                                .on_hover_text(tr("Where the text starts on the path"));
+                            if r.changed() {
+                                p.offset = pct / 100.0;
+                            }
+                            t.add(&r);
+                            if ui
+                                .checkbox(&mut p.flip, tr("Flip"))
+                                .on_hover_text(tr("Run along the other side of the path"))
+                                .changed()
+                            {
+                                t.changed = true;
+                                t.done = true;
+                            }
+                        });
+                        ui.end_row();
+                    }
                     ui.label(tr("Paragraph"));
                     ui.horizontal(|ui| {
                         let mut wrap = s.width.is_some();

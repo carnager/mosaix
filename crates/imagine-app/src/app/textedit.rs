@@ -75,6 +75,12 @@ impl App {
             return;
         };
         let VectorKind::Text(t) = &v.kind else { return };
+        // Text on a path is edited in the properties panel.
+        if t.path.is_some() {
+            self.ui_state.vec_editor.focus_text = true;
+            self.needs_redraw = true;
+            return;
+        }
         let sel = match at {
             Some(p) => {
                 let (x, y) = Self::to_box(t, affine(&v.transform), p);
