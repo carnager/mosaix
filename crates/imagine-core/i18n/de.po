@@ -2182,3 +2182,24 @@ msgstr "„{name}“ {blend} {opacity} % (aus)"
 
 msgid "↑↓ choose · Enter run · Esc close"
 msgstr "↑↓ wählen · Enter ausführen · Esc schließen"
+
+msgid "Layer style: {n} × {what} not carried over"
+msgstr "Ebenenstil: {n} × {what} nicht übernommen"
+
+msgid "Range"
+msgstr "Bereich"
+
+msgid "satin"
+msgstr "Glanz"
+
+msgid "pattern overlay"
+msgstr "Musterüberlagerung"
+
+msgid "bevel style"
+msgstr "Abgeflachte Kante außen / Konturrelief"
+
+msgid "stroke fill"
+msgstr "Kontur mit Verlauf oder Muster"
+
+msgid "gradient stops"
+msgstr "Verläufe mit mehr als zwei Farben"

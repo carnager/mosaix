@@ -105,6 +105,7 @@ mod roundtrip {
             clip: false,
             pass_through: false,
             adjustment: None,
+            effects: Vec::new(),
             tiles,
             mask: None,
         }
@@ -125,6 +126,22 @@ mod roundtrip {
         red.blend = BlendMode::Multiply;
         red.opacity = 0.5;
         red.clip = true;
+        red.effects = vec![
+            imagine_core::style::Effect::new(imagine_core::style::EffectKind::Stroke {
+                size: 3.0,
+                position: imagine_core::style::StrokePosition::Inside,
+                color: [0.0, 0.0, 0.0],
+                opacity: 1.0,
+            }),
+            imagine_core::style::Effect::new(imagine_core::style::EffectKind::DropShadow {
+                color: [0.0; 3],
+                opacity: 0.5,
+                angle: 45.0,
+                distance: 5.0,
+                size: 6.0,
+                spread: 2.0,
+            }),
+        ];
         let mut green = layer(
             "Green",
             vec![(
@@ -181,6 +198,20 @@ mod roundtrip {
         assert_eq!(info.blend, BlendMode::Multiply);
         assert!((info.opacity - 0.5).abs() < 0.01);
         assert_eq!((rect.x, rect.y, rect.w, rect.h), (10, 20, 50, 30));
+        // The layer style survives (Photoshop's stacking order: shadow first).
+        assert_eq!(info.effects.len(), 2);
+        match &info.effects[0].kind {
+            imagine_core::style::EffectKind::DropShadow { angle, distance, size, spread, .. } => {
+                assert!(info.effects[0].global_light);
+                assert_eq!((*angle, *distance), (45.0, 5.0));
+                assert!((size - 6.0).abs() < 1e-3 && (spread - 2.0).abs() < 1e-3);
+            }
+            k => panic!("{k:?}"),
+        }
+        assert!(matches!(
+            info.effects[1].kind,
+            imagine_core::style::EffectKind::Stroke { position: imagine_core::style::StrokePosition::Inside, .. }
+        ));
         match pixels.as_ref().unwrap() {
             Raster::U8(v) => assert_eq!(&v[..4], &[255, 0, 0, 255]),
             Raster::U16(v) => assert_eq!(&v[..4], &[65535, 0, 0, 65535]),
@@ -300,6 +331,7 @@ fn adjustment_layers_roundtrip() {
                 clip: false,
                 pass_through: false,
                 adjustment: Some(a.clone()),
+                effects: Vec::new(),
                 tiles: Vec::new(),
                 mask: None,
             })

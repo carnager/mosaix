@@ -411,9 +411,10 @@ impl Session {
 }
 
 impl Session {
-    /// Starts reading back every layer and mask as shown (PSD export).
+    /// Starts reading back every layer and mask as shown, layer styles
+    /// kept live (PSD export).
     fn start_psd_layers(&mut self) -> PsdLayers {
-        let doc = self.engine.layers_as_shown();
+        let doc = self.engine.layers_unstyled();
         let (mut layer_keys, mut layer_tiles, mut mask_keys, mut mask_tiles) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         doc.for_each(&mut |l, _| {
@@ -510,6 +511,7 @@ impl PsdLayers {
                     clip: l.clip,
                     pass_through: l.pass_through,
                     adjustment: None,
+                    effects: l.effects.clone(),
                     tiles: Vec::new(),
                     mask,
                 };

@@ -455,7 +455,7 @@ pub fn tools() -> Vec<Value> {
             "Set a layer's styles (replaces the list; [] removes all). Each effect: {\"effect\": kind, \"enabled\": true, …}. \
              Kinds and fields (colours linear [r, g, b] 0…1, opacity 0…1, angle = light direction in degrees, 90 = from the top): \
              stroke {size, position: outside|inside|center, color, opacity}; drop_shadow {color, opacity, angle, distance, size, spread}; \
-             inner_shadow {color, opacity, angle, distance, size}; outer_glow {color, opacity, size, spread}; inner_glow {color, opacity, size}; \
+             inner_shadow {color, opacity, angle, distance, size}; outer_glow {color, opacity, size, spread, range}; inner_glow {color, opacity, size, range} (range 0…1, default 0.5); \
              color_overlay {color, opacity}; gradient_overlay {start, end, opacity, angle (90 = bottom to top), style: linear|radial, \
              scale, reverse}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
              highlight_opacity, shadow, shadow_opacity}. Optional on every effect: \"blend\" (a blend mode key; default: \

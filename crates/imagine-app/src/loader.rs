@@ -334,6 +334,7 @@ fn load_psd(
         l.blend = i.blend;
         l.visible = i.visible;
         l.clip = i.clipped;
+        l.effects = i.effects.clone();
     }
     let mut fonts: Option<Vec<imagine_vector::FontGroup>> = None;
     let mut missing_fonts = std::collections::BTreeSet::new();
@@ -413,6 +414,7 @@ fn load_psd(
                 special: None,
                 adjustment: None,
                 text: None,
+                effects: Vec::new(),
             },
             rect: Rect { x: 0, y: 0, w, h },
             pixels: Some(merged),

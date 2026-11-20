@@ -510,60 +510,6 @@ impl Engine {
         });
         changed |= self.refresh_styles(&style_src);
         if changed || self.render.is_none() || self.recheck_all || !self.recheck.is_empty() {
-            fn substitute(
-                ls: &mut Vec<imagine_core::Layer<Tile>>,
-                smart: &HashMap<LayerId, SmartEntry>,
-                vectors: &HashMap<LayerId, (u64, Arc<TileSet>)>,
-                styles: &HashMap<LayerId, super::style::StyleEntry>,
-            ) {
-                for l in ls.iter_mut() {
-                    let filtered = smart.get(&l.id).map(|e| e.tiles.clone());
-                    match &mut l.content {
-                        Content::Pixels(t) => {
-                            if let Some(f) = filtered {
-                                *t = f;
-                            }
-                        }
-                        Content::Vector(_) => {
-                            let tiles = filtered
-                                .or_else(|| vectors.get(&l.id).map(|(_, t)| t.clone()))
-                                .unwrap_or_default();
-                            l.content = Content::Pixels(tiles);
-                        }
-                        Content::Group(c) => substitute(c, smart, vectors, styles),
-                        Content::Adjustment(_) => {}
-                    }
-                    if let Some(st) = styles.get(&l.id) {
-                        l.content = Content::Pixels(st.content.clone());
-                    }
-                }
-                // Effect layers go right under their layer (same opacity, mask, visibility).
-                if ls
-                    .iter()
-                    .any(|l| styles.get(&l.id).is_some_and(|s| !s.below.is_empty()))
-                {
-                    let old = std::mem::take(ls);
-                    for l in old {
-                        if let Some(st) = styles.get(&l.id) {
-                            for (k, (mode, tiles)) in st.below.iter().enumerate() {
-                                let mut fx = imagine_core::Layer::pixels(
-                                    effect_layer_id(l.id, k),
-                                    &imagine_core::tr!("{layer} – Effect", layer = l.name),
-                                );
-                                fx.content = Content::Pixels(tiles.clone());
-                                fx.blend = *mode;
-                                fx.opacity = l.opacity;
-                                fx.visible = l.visible;
-                                fx.mask = l.mask.clone();
-                                fx.mask_enabled = l.mask_enabled;
-                                fx.clip = l.clip;
-                                ls.push(fx);
-                            }
-                        }
-                        ls.push(l);
-                    }
-                }
-            }
             let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
             let mut d = base.clone();
             substitute(&mut d.layers, &self.smart, &self.vectors, &self.styles);
@@ -572,6 +518,16 @@ impl Engine {
                 self.recheck_all = true;
             }
         }
+    }
+
+    /// Like the render document, but without layer styles baked in: the
+    /// layers keep their effects as a description (PSD export, where
+    /// Photoshop renders them). Call [`Engine::flush`] first.
+    pub fn layers_unstyled(&self) -> imagine_core::Document<Tile> {
+        let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
+        let mut d = base.clone();
+        substitute(&mut d.layers, &self.smart, &self.vectors, &HashMap::new());
+        d
     }
 
     /// Rasterises vector layers whose description changed. True if any did.
@@ -633,5 +589,62 @@ impl Engine {
             changed = true;
         }
         changed
+    }
+}
+
+/// The render document's layers: filters applied, vectors rasterised and
+/// (with `styles`) layer styles baked in, effect layers inserted.
+fn substitute(
+    ls: &mut Vec<imagine_core::Layer<Tile>>,
+    smart: &HashMap<LayerId, SmartEntry>,
+    vectors: &HashMap<LayerId, (u64, Arc<TileSet>)>,
+    styles: &HashMap<LayerId, super::style::StyleEntry>,
+) {
+    for l in ls.iter_mut() {
+        let filtered = smart.get(&l.id).map(|e| e.tiles.clone());
+        match &mut l.content {
+            Content::Pixels(t) => {
+                if let Some(f) = filtered {
+                    *t = f;
+                }
+            }
+            Content::Vector(_) => {
+                let tiles = filtered
+                    .or_else(|| vectors.get(&l.id).map(|(_, t)| t.clone()))
+                    .unwrap_or_default();
+                l.content = Content::Pixels(tiles);
+            }
+            Content::Group(c) => substitute(c, smart, vectors, styles),
+            Content::Adjustment(_) => {}
+        }
+        if let Some(st) = styles.get(&l.id) {
+            l.content = Content::Pixels(st.content.clone());
+        }
+    }
+    // Effect layers go right under their layer (same opacity, mask, visibility).
+    if ls
+        .iter()
+        .any(|l| styles.get(&l.id).is_some_and(|s| !s.below.is_empty()))
+    {
+        let old = std::mem::take(ls);
+        for l in old {
+            if let Some(st) = styles.get(&l.id) {
+                for (k, (mode, tiles)) in st.below.iter().enumerate() {
+                    let mut fx = imagine_core::Layer::pixels(
+                        effect_layer_id(l.id, k),
+                        &imagine_core::tr!("{layer} – Effect", layer = l.name),
+                    );
+                    fx.content = Content::Pixels(tiles.clone());
+                    fx.blend = *mode;
+                    fx.opacity = l.opacity;
+                    fx.visible = l.visible;
+                    fx.mask = l.mask.clone();
+                    fx.mask_enabled = l.mask_enabled;
+                    fx.clip = l.clip;
+                    ls.push(fx);
+                }
+            }
+            ls.push(l);
+        }
     }
 }

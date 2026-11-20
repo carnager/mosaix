@@ -207,20 +207,24 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track) {
             opacity,
             size,
             spread,
+            range,
         } => {
             colour(ui, t, "Color", color);
             percent(ui, t, "Opacity", opacity);
             slider(ui, t, "Size", size, 0.0..=150.0, " px");
             slider(ui, t, "Spread", spread, 0.0..=50.0, " px");
+            percent(ui, t, "Range", range);
         }
         EffectKind::InnerGlow {
             color,
             opacity,
             size,
+            range,
         } => {
             colour(ui, t, "Color", color);
             percent(ui, t, "Opacity", opacity);
             slider(ui, t, "Size", size, 0.0..=100.0, " px");
+            percent(ui, t, "Range", range);
         }
         EffectKind::ColorOverlay { color, opacity } => {
             colour(ui, t, "Color", color);

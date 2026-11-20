@@ -131,11 +131,17 @@ pub enum EffectKind {
         size: f32,
         #[serde(default)]
         spread: f32,
+        /// Share of the glow's falloff that is mapped to full strength
+        /// (Photoshop's "Range"; smaller = stronger, harder glow).
+        #[serde(default = "half")]
+        range: f32,
     },
     InnerGlow {
         color: [f32; 3],
         opacity: f32,
         size: f32,
+        #[serde(default = "half")]
+        range: f32,
     },
     ColorOverlay {
         color: [f32; 3],
@@ -185,6 +191,9 @@ pub enum EffectKind {
 
 fn one() -> f32 {
     1.0
+}
+fn half() -> f32 {
+    0.5
 }
 fn thirty() -> f32 {
     30.0
@@ -271,11 +280,13 @@ impl EffectKind {
                 opacity: 0.75,
                 size: 12.0,
                 spread: 0.0,
+                range: 0.5,
             },
             Self::InnerGlow {
                 color: [1.0, 0.85, 0.4],
                 opacity: 0.75,
                 size: 8.0,
+                range: 0.5,
             },
             Self::ColorOverlay {
                 color: [0.8, 0.1, 0.1],
@@ -793,8 +804,10 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 opacity,
                 size,
                 spread,
+                range,
             } => {
-                let a = blur(w, h, &grown(spread), size);
+                let r = range.clamp(0.01, 1.0);
+                let a: Vec<f32> = blur(w, h, &grown(spread), size).iter().map(|v| (v / r).min(1.0)).collect();
                 below.push((mode, solid(&a, color, opacity, w, h)));
             }
             _ => {}
@@ -832,14 +845,16 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 color,
                 opacity,
                 size,
+                range,
             } => {
                 // Bright at the edge, fading inwards.
                 let inv: Vec<f32> = alpha.iter().map(|a| 1.0 - a).collect();
                 let b = blur(w, h, &inv, size * 2.0);
+                let r = range.clamp(0.01, 1.0);
                 let a: Vec<f32> = b
                     .iter()
                     .zip(&alpha)
-                    .map(|(g, a)| (g * 2.0).min(1.0) * a * opacity)
+                    .map(|(g, a)| (g / r).min(1.0) * a * opacity)
                     .collect();
                 blend_into(&mut out.px, color, &a, mode);
             }
@@ -880,7 +895,9 @@ pub fn apply(effects: &[Effect], content: &Region) -> Styled {
                 .iter()
                 .map(|&d| {
                     let t = (-d / size).clamp(-1.0, 1.0);
-                    let s = |t: f32| t * t * (3.0 - 2.0 * t);
+                    // Rounded (Photoshop's "Smooth"): steepest at the edge, flat on top,
+                    // so thin shapes with a wide bevel still show their relief.
+                    let s = |t: f32| 1.0 - (1.0 - t) * (1.0 - t);
                     match style {
                         BevelStyle::Inner => s(t.max(0.0)),
                         BevelStyle::Emboss => 0.5 + 0.5 * if t >= 0.0 { s(t) } else { -s(-t) },
@@ -1067,6 +1084,7 @@ mod tests {
                 opacity: 1.0,
                 size: 10.0,
                 spread: 0.0,
+                range: 1.0,
             }),
             &reg,
         );
@@ -1213,5 +1231,31 @@ mod tests {
                 assert!((b[0] / b[3] - 1.0).abs() < 1e-3 && b[1] < 1e-3, "red: {b:?}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod gradient_angle_tests {
+    use super::*;
+
+    #[test]
+    fn near_vertical_gradient_varies_vertically() {
+        let (w, h) = (600, 60);
+        let mut r = Region::new(w, h);
+        r.px.fill([0.5, 0.5, 0.5, 1.0]);
+        let fx = vec![Effect::new(EffectKind::GradientOverlay {
+            start: [0.0; 3],
+            end: [1.0; 3],
+            opacity: 1.0,
+            angle: 87.0,
+            style: GradientStyle::Linear,
+            scale: 1.0,
+            reverse: false,
+        })];
+        let s = apply(&fx, &r);
+        let at = |x: usize, y: usize| s.content.px[y * w + x][0];
+        // 90° runs from the bottom up: top bright, bottom dark.
+        assert!(at(300, 2) > 0.55, "top {}", at(300, 2));
+        assert!(at(300, 57) < 0.05, "bottom {}", at(300, 57));
     }
 }

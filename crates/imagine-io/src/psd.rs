@@ -74,6 +74,8 @@ pub struct Info {
     pub adjustment: Option<imagine_core::Adjustment>,
     /// A text layer (editable if the font is available).
     pub text: Option<Text>,
+    /// Layer style.
+    pub effects: Vec<imagine_core::style::Effect>,
 }
 
 /// A Photoshop text layer, as far as imagine can use it.
@@ -315,6 +317,8 @@ struct Record {
     special: Option<&'static str>,
     adjustment: Option<imagine_core::Adjustment>,
     text: Option<Text>,
+    /// Layer style ("lfx2" / "lmfx" descriptor).
+    fx: Option<crate::psd_data::Desc>,
 }
 
 fn rect(c: &mut Cur) -> Result<Rect> {
@@ -420,6 +424,7 @@ fn record(c: &mut Cur) -> Result<Record> {
     let mut adjustment = None;
     let mut text = None;
     let mut cged: Option<crate::psd_data::Desc> = None;
+    let mut fx: Option<crate::psd_data::Desc> = None;
     while e.left() >= 12 {
         let sig = e.bytes(4)?;
         if sig != b"8BIM" && sig != b"8B64" {
@@ -444,6 +449,16 @@ fn record(c: &mut Cur) -> Result<Record> {
                 if d.left() > 4 {
                     d.skip(4)?;
                     cged = crate::psd_data::read_desc(d.bytes(d.left())?).ok();
+                }
+            }
+            b"lfx2" | b"lmfx" => {
+                // Effects version, descriptor version, descriptor. "lmfx"
+                // (several strokes/shadows) supersedes "lfx2".
+                if d.left() > 8 && (fx.is_none() || &key == b"lmfx") {
+                    d.skip(8)?;
+                    if let Ok(desc) = crate::psd_data::read_desc(d.bytes(d.left())?) {
+                        fx = Some(desc);
+                    }
                 }
             }
             b"TySh" => {
@@ -486,6 +501,7 @@ fn record(c: &mut Cur) -> Result<Record> {
             (a, _) => a,
         },
         text,
+        fx,
     })
 }
 
@@ -686,6 +702,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     let n = c.u32()? as usize;
     let mut res = c.sub(n)?;
     let mut icc = None;
+    let mut light = crate::psd_fx::GlobalLight::default();
     while res.left() >= 12 {
         if res.bytes(4)? != b"8BIM" {
             break;
@@ -701,6 +718,14 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         }
         if id == 1039 {
             icc = Some(data.to_vec());
+        }
+        if data.len() >= 4 && (id == 1037 || id == 1049) {
+            let v = i32::from_be_bytes(data[..4].try_into()?) as f32;
+            if id == 1037 {
+                light.angle = v;
+            } else {
+                light.altitude = v;
+            }
         }
     }
     // Layer and mask information.
@@ -826,6 +851,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     // Records (bottom → top) → tree.
     let mut stack: Vec<Vec<Node>> = vec![Vec::new()];
     let mut specials = std::collections::BTreeMap::<&str, usize>::new();
+    let mut lost_fx = std::collections::BTreeMap::<&str, usize>::new();
     let mut unknown_blend = 0;
     for (r, data) in records.into_iter().zip(layer_data) {
         let get_mask = |id: i16| data.iter().find(|(i, _)| *i == id).map(|(_, v)| v.clone());
@@ -852,7 +878,18 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         if let Some(f) = r.fill_opacity {
             opacity *= f as f32 / 255.0;
         }
+        let effects = match &r.fx {
+            Some(fx) => {
+                let (fx, lost) = crate::psd_fx::read(fx, light);
+                for l in lost {
+                    *lost_fx.entry(l).or_default() += 1;
+                }
+                fx
+            }
+            None => Vec::new(),
+        };
         let info = Info {
+            effects,
             name: r.name.clone(),
             opacity,
             blend: blend.unwrap_or_default(),
@@ -915,6 +952,13 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
             what = tr(what)
         ));
     }
+    for (what, n) in lost_fx {
+        warnings.push(imagine_core::tr!(
+            "Layer style: {n} × {what} not carried over",
+            n = n,
+            what = tr(what)
+        ));
+    }
     if unknown_blend > 0 {
         warnings.push(imagine_core::tr!(
             "{n} layers use a blend mode imagine does not have yet (shown as Normal)",
@@ -957,6 +1001,8 @@ pub struct WLayer {
     pub pass_through: bool,
     /// An adjustment layer (written as Photoshop's adjustment layer).
     pub adjustment: Option<imagine_core::Adjustment>,
+    /// Layer style (written as Photoshop's "lfx2").
+    pub effects: Vec<imagine_core::style::Effect>,
     pub tiles: Vec<(imagine_core::TileCoord, Vec<half::f16>)>,
     pub mask: Option<WMask>,
 }
@@ -1242,7 +1288,13 @@ fn write_rect(o: &mut Out, r: Rect) {
 }
 
 /// One layer record. `divider`: section divider type (groups).
-fn write_record(o: &mut Out, l: &WLayer, e: &Encoded, divider: Option<u32>) {
+fn write_record(
+    o: &mut Out,
+    l: &WLayer,
+    e: &Encoded,
+    divider: Option<u32>,
+    light: crate::psd_fx::GlobalLight,
+) {
     write_rect(o, e.rect);
     o.u16(e.channels.len() as u16);
     for (id, data) in &e.channels {
@@ -1303,6 +1355,14 @@ fn write_record(o: &mut Out, l: &WLayer, e: &Encoded, divider: Option<u32>) {
             o.close(blk, 2);
         }
     }
+    if let Some(fx) = crate::psd_fx::write(&l.effects, light) {
+        o.b.extend(b"8BIMlfx2");
+        let blk = o.open(false);
+        o.u32(0); // effects version
+        o.u32(16); // descriptor version
+        crate::psd_data::w_desc(&mut o.b, &fx);
+        o.close(blk, 4);
+    }
     if let Some(t) = divider {
         o.b.extend(b"8BIMlsct");
         let blk = o.open(false);
@@ -1357,6 +1417,23 @@ pub fn write(
     }
     let mut recs = Vec::new();
     walk(nodes, &mut recs);
+    // The global light: from the first effect that uses it.
+    let light = {
+        let mut l = crate::psd_fx::GlobalLight::default();
+        let found = recs.iter().find_map(|r| match r {
+            Rec::Layer(w) | Rec::Folder(w) => w.effects.iter().find(|e| e.global_light).cloned(),
+            Rec::End => None,
+        });
+        if let Some(e) = found {
+            if let Some(a) = e.kind.angle() {
+                l.angle = a;
+            }
+            if let imagine_core::style::EffectKind::Bevel { altitude, .. } = e.kind {
+                l.altitude = altitude;
+            }
+        }
+        l
+    };
     let end_marker = WLayer {
         name: "</Layer group>".into(),
         opacity: 1.0,
@@ -1365,6 +1442,7 @@ pub fn write(
         clip: false,
         pass_through: false,
         adjustment: None,
+        effects: Vec::new(),
         tiles: Vec::new(),
         mask: None,
     };
@@ -1383,6 +1461,7 @@ pub fn write(
                     clip: false,
                     pass_through: l.pass_through,
                     adjustment: None,
+                    effects: Vec::new(),
                     tiles: Vec::new(),
                     mask: l.mask.clone(),
                 },
@@ -1419,6 +1498,14 @@ pub fn write(
             o.u8(0);
         }
     }
+    // The global light (angle 1037, altitude 1049).
+    for (id, v) in [(1037u16, light.angle), (1049, light.altitude)] {
+        o.b.extend(b"8BIM");
+        o.u16(id);
+        o.u16(0);
+        o.u32(4);
+        o.i32(v.round() as i32);
+    }
     o.close(res, 1);
     // Layer and mask information.
     let lm = o.open(true);
@@ -1426,9 +1513,9 @@ pub fn write(
     o.i16(-(recs.len() as i16)); // negative: the merged alpha is transparency
     for (r, e) in recs.iter().zip(&encoded) {
         match r {
-            Rec::Layer(l) => write_record(&mut o, l, e, None),
-            Rec::End => write_record(&mut o, &end_marker, e, Some(3)),
-            Rec::Folder(l) => write_record(&mut o, l, e, Some(1)),
+            Rec::Layer(l) => write_record(&mut o, l, e, None, light),
+            Rec::End => write_record(&mut o, &end_marker, e, Some(3), light),
+            Rec::Folder(l) => write_record(&mut o, l, e, Some(1), light),
         }
     }
     for e in &encoded {
@@ -1448,6 +1535,7 @@ pub fn write(
         clip: false,
         pass_through: false,
         adjustment: None,
+        effects: Vec::new(),
         tiles: composite.to_vec(),
         mask: None,
     };
