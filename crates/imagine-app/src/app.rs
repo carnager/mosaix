@@ -5,6 +5,7 @@
 //! and at most one frame is rendered per compositor refresh.
 
 mod clipboard;
+pub(crate) mod pen;
 pub(crate) mod textedit;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -94,6 +95,8 @@ enum Drag {
     Shape { start: DVec2, end: DVec2 },
     /// Selecting text with the mouse while editing it on the canvas.
     TextSelect,
+    /// Pen tool: placing a node's handles, moving nodes or handles.
+    Pen(pen::PenDrag),
     Pan { last: DVec2 },
     Rotate { last: DVec2 },
     Zoom { last: DVec2, anchor: DVec2 },
@@ -124,6 +127,7 @@ enum Tool {
     SpotHeal,
     Text,
     Shape { ellipse: bool },
+    Pen,
 }
 
 impl Tool {
@@ -146,6 +150,7 @@ impl Tool {
             Tool::Text => "Text",
             Tool::Shape { ellipse: false } => "Rechteck",
             Tool::Shape { ellipse: true } => "Ellipse",
+            Tool::Pen => "Zeichenstift",
         }
     }
 
@@ -297,6 +302,7 @@ pub struct App {
     /// Text being edited on the canvas.
     text_edit: Option<textedit::TextEdit>,
     clipboard: clipboard::Clipboard,
+    pen: pen::Pen,
     liq_tool: LiquifyTool,
     /// Liquify brush diameter (document px) and strength 0…1.
     liq_size: f32,
@@ -508,6 +514,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         clone_aligned: true,
         fonts: Default::default(),
         text_edit: None,
+        pen: Default::default(),
         clipboard: clipboard::Clipboard::new(smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(&globals, &qh).ok()),
         liq_tool: LiquifyTool::Push,
         liq_size: 200.0,
@@ -788,6 +795,7 @@ impl App {
             Tool::Gradient { .. } => Drag::Gradient { start: doc, end: doc },
             Tool::Move => Drag::Move { start: doc, end: doc },
             Tool::Shape { .. } => Drag::Shape { start: doc, end: doc },
+            Tool::Pen => self.pen_press(pos, doc),
             Tool::Text => {
                 if self.text_edit.is_some() && self.text_edit_press(pos, doc) {
                     return Drag::TextSelect;
@@ -1043,8 +1051,15 @@ impl App {
 
     fn motion(&mut self, pos: DVec2, pressure: f32) {
         self.cursor = Some(pos);
+        if let Drag::Pen(d) = self.drag {
+            let doc = self.view.screen_to_doc(pos);
+            self.drag = Drag::Pen(self.pen_drag(d, doc));
+            self.needs_redraw = true;
+            return;
+        }
         match &mut self.drag {
-            Drag::None => {}
+            // Handled above.
+            Drag::None | Drag::Pen(_) => {}
             Drag::Paint => {
                 let doc_pos = self.view.screen_to_doc(pos);
                 if let (Some(stroke), Some(s)) = (&mut self.stroke, &mut self.session) {
@@ -1109,6 +1124,12 @@ impl App {
     }
 
     fn release(&mut self, pos: DVec2, pressure: f32) {
+        if matches!(self.drag, Drag::Pen(_)) {
+            self.drag = Drag::None;
+            self.pen_release();
+            self.needs_redraw = true;
+            return;
+        }
         let drag = std::mem::replace(&mut self.drag, Drag::None);
         let target = self.stroke_target();
         let tool = self.tool;
@@ -1388,6 +1409,7 @@ impl App {
             "spot_heal" => Tool::SpotHeal,
             "text" => Tool::Text,
             "shape" => Tool::Shape { ellipse: false },
+            "pen" => Tool::Pen,
             "marquee" => Tool::Marquee { ellipse: false },
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
@@ -1415,6 +1437,7 @@ impl App {
             Tool::SpotHeal => "spot_heal",
             Tool::Text => "text",
             Tool::Shape { .. } => "shape",
+            Tool::Pen => "pen",
             Tool::Marquee { ellipse: false } => "marquee",
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
@@ -1763,6 +1786,11 @@ impl App {
             self.needs_redraw = true;
             return;
         }
+        // Pen: finishing, removing nodes.
+        if self.tool == Tool::Pen && pressed && self.pen_key(ev) {
+            self.needs_redraw = true;
+            return;
+        }
         // Typing into a text on the canvas.
         if self.text_edit.is_some() {
             if pressed && self.text_edit_key(ev) {
@@ -2081,7 +2109,8 @@ impl App {
                     if self.wand_contiguous { "nur zusammenhängend" } else { "überall im Bild" }
                 );
             }
-            Keysym::p => {
+            Keysym::p if !ctrl => self.set_tool(Tool::Pen),
+            Keysym::P if shift && !ctrl => {
                 self.palette_idx = (self.palette_idx + 1) % PALETTE.len();
                 self.brush.color = PALETTE[self.palette_idx];
             }
@@ -2107,6 +2136,9 @@ impl App {
     fn set_tool(&mut self, tool: Tool) {
         if tool != Tool::Text {
             self.end_text_edit();
+        }
+        if tool != Tool::Pen {
+            self.pen_finish(false);
         }
         match self.boxed.as_ref().map(|b| b.0) {
             Some(BoxKind::Transform) => self.commit_box(),
@@ -2313,6 +2345,7 @@ impl App {
             Tool::SpotHeal => ToolId::SpotHeal,
             Tool::Text => ToolId::Text,
             Tool::Shape { .. } => ToolId::Shape,
+            Tool::Pen => ToolId::Pen,
             Tool::Marquee { ellipse: false } => ToolId::Marquee,
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
@@ -2378,6 +2411,7 @@ impl App {
             },
             liquify: e.liquify_active().then_some((self.liq_tool, self.liq_size, self.liq_strength)),
             text_overlay: self.text_overlay(),
+            path_overlay: (self.tool == Tool::Pen).then(|| self.path_overlay()).flatten(),
             layers: ui::panels::layer_rows(doc),
             active: doc.active,
             active_opacity: active.map_or(1.0, |l| l.opacity),
@@ -2420,6 +2454,7 @@ impl App {
                         ToolId::SpotHeal => Tool::SpotHeal,
                         ToolId::Text => Tool::Text,
                         ToolId::Shape => Tool::Shape { ellipse: false },
+                        ToolId::Pen => Tool::Pen,
                         ToolId::Marquee => Tool::Marquee { ellipse: false },
                         ToolId::Ellipse => Tool::Marquee { ellipse: true },
                         ToolId::Lasso => Tool::Lasso,

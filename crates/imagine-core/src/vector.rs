@@ -143,6 +143,32 @@ pub enum Geometry {
     },
     /// SVG path data ("M 0 0 L 10 0 C …").
     Path { d: String },
+    /// An editable Bézier path (pen tool).
+    Bezier {
+        nodes: Vec<PathNode>,
+        #[serde(default)]
+        closed: bool,
+    },
+}
+
+/// A node of a Bézier path: position and the two handles (absolute; a
+/// handle at the node itself means a corner on that side).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PathNode {
+    pub p: [f64; 2],
+    pub h_in: [f64; 2],
+    pub h_out: [f64; 2],
+}
+
+impl PathNode {
+    pub fn corner(p: [f64; 2]) -> Self {
+        Self { p, h_in: p, h_out: p }
+    }
+
+    /// Has handles (a smooth curve point).
+    pub fn is_smooth(&self) -> bool {
+        self.h_in != self.p || self.h_out != self.p
+    }
 }
 
 fn yes() -> bool {
@@ -191,7 +217,7 @@ impl VectorLayer {
                 Geometry::Rect { .. } => "Rechteck".into(),
                 Geometry::Ellipse { .. } => "Ellipse".into(),
                 Geometry::Polygon { .. } => "Polygon".into(),
-                Geometry::Path { .. } => "Pfad".into(),
+                Geometry::Path { .. } | Geometry::Bezier { .. } => "Pfad".into(),
             },
         }
     }

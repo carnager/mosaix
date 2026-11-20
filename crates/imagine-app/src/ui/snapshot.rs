@@ -90,6 +90,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         box_angle: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| 30.0),
         mask_edit: false,
         text_overlay: None,
+        path_overlay: None,
         liquify: std::env::var_os("IMAGINE_SNAPSHOT_LIQUIFY").map(|_| (imagine_gpu::LiquifyTool::TwirlCw, 300.0, 0.6)),
         layers: panels::layer_rows(doc),
         active: active.id,
@@ -156,6 +157,13 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_FX") {
         model.active_effects = Some(serde_json::from_str(&j)?);
         state.open_effect(0);
+    }
+    if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_PATH") {
+        // A path being drawn (JSON list of nodes), the cursor near its start.
+        let nodes: Vec<imagine_core::vector::PathNode> = serde_json::from_str(&j)?;
+        let cursor = nodes.first().map(|n| view.doc_to_screen(DVec2::new(n.p[0] + 3.0, n.p[1])));
+        model.path_overlay = Some(crate::app::pen::overlay(&nodes, false, glam::DAffine2::IDENTITY, true, None, cursor, &view, ppp));
+        model.tool = ToolId::Pen;
     }
     if let Ok(j) = std::env::var("IMAGINE_SNAPSHOT_VECTOR") {
         let v: imagine_core::VectorLayer = serde_json::from_str(&j)?;

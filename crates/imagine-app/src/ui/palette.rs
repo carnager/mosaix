@@ -73,6 +73,8 @@ pub const COMMANDS: &[Cmd] = &[
     c("Auswahl", "Maskierungsmodus-Ansicht", K::q, false, false, false),
     c("Werkzeug", "Pinsel", K::b, false, false, false),
     c("Werkzeug", "Text", K::t, false, false, false),
+    c("Werkzeug", "Zeichenstift", K::p, false, false, false),
+    c("Werkzeug", "Nächste Palettenfarbe", K::P, false, true, false),
     c("Werkzeug", "Form (Rechteck / Ellipse)", K::U, false, true, false),
     c("Werkzeug", "Wischfinger", K::u, false, false, false),
     c("Werkzeug", "Kopierstempel", K::s, false, false, false),

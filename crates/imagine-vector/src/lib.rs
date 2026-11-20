@@ -427,6 +427,26 @@ fn geometry_path(g: &Geometry) -> Option<BezPath> {
             p
         }
         Geometry::Path { d } => BezPath::from_svg(d).ok()?,
+        Geometry::Bezier { nodes, closed } => {
+            let mut p = BezPath::new();
+            let first = nodes.first()?;
+            p.move_to((first.p[0], first.p[1]));
+            let seg = |p: &mut BezPath, a: &imagine_core::vector::PathNode, b: &imagine_core::vector::PathNode| {
+                if a.h_out == a.p && b.h_in == b.p {
+                    p.line_to((b.p[0], b.p[1]));
+                } else {
+                    p.curve_to((a.h_out[0], a.h_out[1]), (b.h_in[0], b.h_in[1]), (b.p[0], b.p[1]));
+                }
+            };
+            for w in nodes.windows(2) {
+                seg(&mut p, &w[0], &w[1]);
+            }
+            if *closed && nodes.len() > 2 {
+                seg(&mut p, nodes.last().unwrap(), first);
+                p.close_path();
+            }
+            p
+        }
     })
 }
 
@@ -610,6 +630,21 @@ mod tests {
         assert!(t.iter().all(|(c, _)| c.y == 0) && t.len() == 3, "{:?}", t.iter().map(|(c, _)| *c).collect::<Vec<_>>());
         let b = bounds(&v).unwrap();
         assert!(b[0] <= 200.0 && b[2] >= 600.0);
+    }
+
+    #[test]
+    fn bezier_path_fills_a_closed_curve() {
+        use imagine_core::vector::PathNode;
+        let red = [1.0, 0.0, 0.0, 1.0];
+        // A closed square with one rounded side.
+        let mut n = vec![PathNode::corner([100.0, 100.0]), PathNode::corner([300.0, 100.0]), PathNode::corner([300.0, 300.0]), PathNode::corner([100.0, 300.0])];
+        n[1].h_out = [400.0, 150.0];
+        n[2].h_in = [400.0, 250.0];
+        let v = VectorLayer::shape(ShapeSpec { geometry: Geometry::Bezier { nodes: n, closed: true }, fill: Some(red), stroke: None });
+        let t = render(&v);
+        assert_eq!(px(&t, 200, 200), red);
+        assert_eq!(px(&t, 360, 200), red, "bulging side");
+        assert_eq!(px(&t, 360, 120)[3], 0.0);
     }
 
     #[test]

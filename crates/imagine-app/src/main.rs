@@ -40,7 +40,7 @@ Ansicht:
 
 Werkzeuge:
   B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   U Wischfinger
-  S Kopierstempel (Alt+Klick: Quelle)   J Bereichsreparatur (nochmal: Reparaturpinsel, Alt+Klick: Quelle)
+  P Zeichenstift   S Kopierstempel (Alt+Klick: Quelle)   J Bereichsreparatur (nochmal: Reparaturpinsel, Alt+Klick: Quelle)
   E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso
   G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)
   W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)
@@ -56,7 +56,7 @@ Malen:
   Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts
   Größe           [ / ], Strg + Mausrad
   Deckkraft       Ziffern 1…9, 0 (10 … 100 %; beim Wischfinger: Stärke)
-  Härte/Glättung  H / Umschalt+S   Farbe  P (Palette), X (Schwarz ↔ Weiß)
+  Härte/Glättung  H / Umschalt+S   Farbe  Umschalt+P (Palette), X (Schwarz ↔ Weiß)
   Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)
 
 Auswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):

@@ -8,7 +8,7 @@ use super::icons::{self, Icon};
 use super::palette::{self, Cmd, COMMANDS, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut).
-pub const TOOLS: [(ToolId, &str, &str); 16] = [
+pub const TOOLS: [(ToolId, &str, &str); 17] = [
     (ToolId::Move, "Verschieben", "V"),
     (ToolId::Marquee, "Auswahlrechteck", "M"),
     (ToolId::Ellipse, "Auswahlellipse", "M"),
@@ -23,6 +23,7 @@ pub const TOOLS: [(ToolId, &str, &str); 16] = [
     (ToolId::Eraser, "Radierer", "E"),
     (ToolId::Text, "Text", "T"),
     (ToolId::Shape, "Form (Rechteck / Ellipse)", "Umschalt+U"),
+    (ToolId::Pen, "Zeichenstift", "P"),
     (ToolId::Gradient, "Verlauf linear", "G"),
     (ToolId::Radial, "Verlauf radial", "G"),
 ];
@@ -42,6 +43,7 @@ pub enum ToolId {
     SpotHeal,
     Text,
     Shape,
+    Pen,
     Eraser,
     Gradient,
     Radial,
@@ -73,6 +75,17 @@ pub struct TextOverlay {
     pub selection: Vec<[[f32; 2]; 4]>,
     pub caret: [[f32; 2]; 4],
     pub frame: [[f32; 2]; 4],
+}
+
+/// The pen's path on screen: curve, nodes (position, selected, smooth),
+/// handles (node → handle), rubber band to the cursor, closing hint.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathOverlay {
+    pub curve: Vec<[f32; 2]>,
+    pub nodes: Vec<([f32; 2], bool, bool)>,
+    pub handles: Vec<([f32; 2], [f32; 2])>,
+    pub rubber: Option<([f32; 2], [f32; 2])>,
+    pub closing: bool,
 }
 
 /// The filter dialog: a new filter (destructive or smart) or an existing
@@ -137,6 +150,8 @@ pub struct Model {
     pub liquify: Option<(imagine_gpu::LiquifyTool, f32, f32)>,
     /// Text edited on the canvas: caret, selection, frame (screen points).
     pub text_overlay: Option<TextOverlay>,
+    /// Pen: the path being drawn or edited (screen points).
+    pub path_overlay: Option<PathOverlay>,
     pub mask_edit: bool,
     pub layers: Vec<LayerRow>,
     pub active: LayerId,
@@ -284,6 +299,33 @@ pub fn style(ctx: &egui::Context) {
 
 pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
     let mut out = Vec::new();
+    if let Some(po) = &m.path_overlay {
+        let p = ctx.layer_painter(egui::LayerId::background());
+        let pt = |v: [f32; 2]| egui::pos2(v[0], v[1]);
+        let line = Color32::from_rgb(70, 150, 255);
+        if po.curve.len() > 1 {
+            p.add(egui::Shape::line(po.curve.iter().map(|v| pt(*v)).collect(), Stroke::new(1.5, line)));
+        }
+        if let Some((a, b)) = po.rubber {
+            p.add(egui::Shape::dashed_line(&[pt(a), pt(b)], Stroke::new(1.0, line), 4.0, 3.0));
+        }
+        for (n, h) in &po.handles {
+            p.line_segment([pt(*n), pt(*h)], Stroke::new(1.0, Color32::from_gray(200)));
+            p.circle(pt(*h), 3.5, Color32::from_gray(30), Stroke::new(1.2, Color32::WHITE));
+        }
+        for (i, (n, sel, smooth)) in po.nodes.iter().enumerate() {
+            let r = egui::Rect::from_center_size(pt(*n), egui::vec2(7.0, 7.0));
+            let fill = if *sel { line } else { Color32::WHITE };
+            if *smooth {
+                p.circle(pt(*n), 4.0, fill, Stroke::new(1.0, Color32::BLACK));
+            } else {
+                p.rect(r, 0.0, fill, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Middle);
+            }
+            if i == 0 && po.closing {
+                p.circle_stroke(pt(*n), 8.0, Stroke::new(1.5, line));
+            }
+        }
+    }
     if let Some(t) = &m.text_overlay {
         // Under the panels, over the canvas.
         let p = ctx.layer_painter(egui::LayerId::background());
@@ -748,6 +790,10 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
         ToolId::Text => {
             ui.label("Klick ins Bild: neuer Text. Klick auf einen Text: bearbeiten.");
             ui.label(RichText::new("Schrift, Größe und Farbe stehen unter Eigenschaften; neue Texte nehmen die Pinselfarbe.").weak().small());
+        }
+        ToolId::Pen => {
+            ui.label("Klicken: Ecke · Ziehen: Kurve · Startpunkt: schließen (gefüllt) · Enter/Esc: offen beenden (Linie)");
+            ui.label(RichText::new("Auf einem Pfad: Punkte und Griffe ziehen, Alt+Klick Ecke ↔ Kurve, Alt+Ziehen Griff einzeln, Entf löscht den Punkt. Farbe: Pinselfarbe.").weak().small());
         }
         ToolId::Shape => {
             ui.horizontal(|ui| {
