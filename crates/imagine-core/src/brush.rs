@@ -9,8 +9,10 @@ pub struct BrushSettings {
     pub size: f32,
     /// 0 = soft, 1 = hard edge.
     pub hardness: f32,
-    /// Alpha deposited per dab at full pressure.
+    /// Alpha deposited per dab at full pressure (builds up within a stroke).
     pub flow: f32,
+    /// Maximum coverage of one stroke (applied when the stroke is composited).
+    pub opacity: f32,
     /// Dab distance as a fraction of the current diameter.
     pub spacing: f32,
     /// Diameter at zero pressure, as a fraction of `size`.
@@ -28,6 +30,7 @@ impl Default for BrushSettings {
             size: 40.0,
             hardness: 0.8,
             flow: 0.25,
+            opacity: 1.0,
             spacing: 0.1,
             min_size: 0.15,
             smoothing: 0.4,

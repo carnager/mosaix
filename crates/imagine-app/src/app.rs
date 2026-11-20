@@ -6,13 +6,12 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::ptr::NonNull;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use glam::DVec2;
-use half::f16;
-use imagine_core::{BrushSettings, InputSample, Stroke, TileCoord, View};
-use imagine_gpu::{Canvas, GpuContext, Overlay};
+use imagine_core::{BlendSpace, BrushSettings, InputSample, LayerId, Stroke, View};
+use imagine_gpu::{Engine, GpuContext, Overlay, StrokeParams};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
@@ -53,14 +52,19 @@ use wayland_protocols::wp::{
     viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter},
 };
 
-use crate::loader::{self, LoaderMsg, Source};
+use crate::loader::{self, LoaderMsg, Source, TileData};
+use crate::session::Session;
 use crate::tablet::{self, TabletFrame};
 
 const BTN_LEFT: u32 = 0x110;
 const BTN_MIDDLE: u32 = 0x112;
+/// evdev codes of the digit row: KEY_1 = 2 … KEY_9 = 10, KEY_0 = 11.
+const KEY_1: u32 = 2;
+const KEY_0: u32 = 11;
 /// Tiles uploaded per frame while loading (≈ 64 MB at 512 KB/tile).
 const UPLOADS_PER_FRAME: usize = 128;
 const BENCH_FRAMES: u32 = 900;
+const QUIT_CONFIRM: Duration = Duration::from_secs(3);
 const PALETTE: [[f32; 3]; 6] = [
     [0.02, 0.02, 0.025],
     [0.80, 0.05, 0.03],
@@ -97,7 +101,7 @@ struct Bench {
 pub struct App {
     // Field order matters for drop order: the wgpu surface must go before the window.
     surface: wgpu::Surface<'static>,
-    canvas: Option<Canvas>,
+    session: Option<Session>,
     gpu: GpuContext,
     surface_config: wgpu::SurfaceConfiguration,
 
@@ -123,14 +127,15 @@ pub struct App {
     needs_redraw: bool,
     frame_pending: bool,
     exit: bool,
+    quit_armed: Option<Instant>,
 
     // Document & view
-    doc_name: String,
     view: View,
     view_fitted: bool,
-    pending_uploads: VecDeque<(TileCoord, Vec<f16>)>,
+    pending_uploads: VecDeque<(LayerId, TileData)>,
     loading: bool,
-    capacity_warned: bool,
+    upload_failures: usize,
+    modified: bool,
 
     // Input
     mods: Modifiers,
@@ -141,7 +146,6 @@ pub struct App {
     stroke: Option<Stroke>,
     brush: BrushSettings,
     palette_idx: usize,
-    tablet_eraser: bool,
     tablet_contact: bool,
 
     // Stats
@@ -203,12 +207,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
     };
     let gpu = pollster::block_on(GpuContext::new(instance, Some(&surface)))?;
     let caps = surface.get_capabilities(&gpu.adapter);
-    let format = caps
-        .formats
-        .iter()
-        .copied()
-        .find(|f| f.is_srgb())
-        .unwrap_or(caps.formats[0]);
+    let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
     let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
         wgpu::PresentMode::Mailbox
     } else {
@@ -240,7 +239,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
 
     let mut app = App {
         surface,
-        canvas: None,
+        session: None,
         gpu,
         surface_config,
         qh: qh.clone(),
@@ -263,12 +262,13 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         needs_redraw: true,
         frame_pending: false,
         exit: false,
-        doc_name: String::new(),
+        quit_armed: None,
         view: View::default(),
         view_fitted: false,
         pending_uploads: VecDeque::new(),
         loading: true,
-        capacity_warned: false,
+        upload_failures: 0,
+        modified: false,
         mods: Modifiers::default(),
         space: false,
         r_key: false,
@@ -277,7 +277,6 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         stroke: None,
         brush: BrushSettings::default(),
         palette_idx: 0,
-        tablet_eraser: false,
         tablet_contact: false,
         bench: None,
         bench_on_load: bench,
@@ -308,10 +307,7 @@ impl App {
 
     fn physical_size(&self) -> (u32, u32) {
         let (w, h) = self.logical;
-        (
-            ((w as f64 * self.scale).round() as u32).max(1),
-            ((h as f64 * self.scale).round() as u32).max(1),
-        )
+        (((w as f64 * self.scale).round() as u32).max(1), ((h as f64 * self.scale).round() as u32).max(1))
     }
 
     fn reconfigure_surface(&mut self) {
@@ -330,7 +326,6 @@ impl App {
 
     fn set_scale(&mut self, scale: f64) {
         if (scale - self.scale).abs() > 1e-6 {
-            // Keep the view centred on the same document point at the same physical zoom ratio.
             self.view.zoom *= scale / self.scale;
             self.scale = scale;
             if self.configured {
@@ -340,45 +335,51 @@ impl App {
     }
 
     fn fit_if_needed(&mut self) {
-        if !self.view_fitted && self.configured
-            && let Some(c) = &self.canvas {
-                let (w, h) = c.size();
-                self.view.fit(w, h);
-                self.view_fitted = true;
-            }
+        if !self.view_fitted
+            && self.configured
+            && let Some(s) = &self.session
+        {
+            let (w, h) = s.engine.size();
+            self.view.fit(w, h);
+            self.view_fitted = true;
+        }
     }
 
     fn to_physical(&self, (x, y): (f64, f64)) -> DVec2 {
         DVec2::new(x, y) * self.scale
     }
 
+    fn engine(&mut self) -> Option<&mut Engine> {
+        self.session.as_mut().map(|s| &mut s.engine)
+    }
+
+    fn print_layers(&self) {
+        if let Some(s) = &self.session {
+            let d = s.engine.doc();
+            println!("── Ebenen (oben → unten), Blend-Raum: {} ──\n{}", d.blend_space.name(), d.describe());
+        }
+    }
+
     // ---- loader -----------------------------------------------------------
 
     fn on_loader(&mut self, msg: LoaderMsg) {
         match msg {
-            LoaderMsg::Size { width, height, name, expected_tiles } => {
-                tracing::info!("Dokument {name}: {width}×{height}");
-                let mut canvas = Canvas::new(
-                    &self.gpu.device,
-                    &self.gpu.queue,
-                    self.surface_config.format,
-                    width,
-                    height,
-                );
-                if expected_tiles > canvas.max_tiles() {
+            LoaderMsg::Structure { doc, name, source, native_len, expected_tiles } => {
+                tracing::info!("Dokument {name}: {}×{}", doc.width, doc.height);
+                let engine = Engine::new(&self.gpu.device, &self.gpu.queue, self.surface_config.format, &doc);
+                if expected_tiles > engine.max_layer_tiles() {
                     tracing::warn!(
-                        "Bild braucht {expected_tiles} Kacheln, GPU-Array fasst {} – Rest wird nicht geladen (Phase-0-Limit)",
-                        canvas.max_tiles()
+                        "Dokument braucht {expected_tiles} Kacheln, der Ebenen-Speicher fasst {} – Rest fehlt",
+                        engine.max_layer_tiles()
                     );
                 }
-                canvas.reserve(expected_tiles);
-                self.canvas = Some(canvas);
-                self.doc_name = name;
+                self.session = Some(Session::new(engine, name, source, native_len));
                 self.fit_if_needed();
+                self.print_layers();
                 self.needs_redraw = true;
             }
-            LoaderMsg::Tiles(tiles) => {
-                self.pending_uploads.extend(tiles);
+            LoaderMsg::Tiles { layer, tiles } => {
+                self.pending_uploads.extend(tiles.into_iter().map(|t| (layer, t)));
                 self.needs_redraw = true;
             }
             LoaderMsg::Done { decode_ms, total_ms } => {
@@ -389,7 +390,7 @@ impl App {
             LoaderMsg::Error(e) => {
                 tracing::error!("Laden fehlgeschlagen: {e}");
                 self.loading = false;
-                if self.canvas.is_none() {
+                if self.session.is_none() {
                     self.exit = true;
                 }
             }
@@ -405,19 +406,25 @@ impl App {
             Button::Primary if self.space && self.mods.ctrl => Drag::Zoom { last: pos, anchor: pos },
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
-            Button::Primary => {
-                let mut settings = self.brush;
-                settings.eraser |= eraser_tool;
-                let mut stroke = Stroke::new(settings);
-                let dabs = stroke.add(InputSample { pos: self.view.screen_to_doc(pos), pressure });
-                if let Some(c) = &mut self.canvas {
-                    c.paint(&dabs, settings.eraser);
-                }
-                self.stroke = Some(stroke);
-                Drag::Paint
-            }
+            Button::Primary => self.begin_stroke(pos, pressure, eraser_tool),
         };
         self.needs_redraw = true;
+    }
+
+    fn begin_stroke(&mut self, pos: DVec2, pressure: f32, eraser_tool: bool) -> Drag {
+        let mut settings = self.brush;
+        settings.eraser |= eraser_tool;
+        let doc_pos = self.view.screen_to_doc(pos);
+        let Some(engine) = self.engine() else { return Drag::None };
+        if let Err(e) = engine.begin_stroke(StrokeParams { opacity: settings.opacity, erase: settings.eraser }) {
+            tracing::warn!("Malen nicht möglich: {e}");
+            return Drag::None;
+        }
+        let mut stroke = Stroke::new(settings);
+        let dabs = stroke.add(InputSample { pos: doc_pos, pressure });
+        engine.stroke_dabs(&dabs);
+        self.stroke = Some(stroke);
+        Drag::Paint
     }
 
     fn motion(&mut self, pos: DVec2, pressure: f32) {
@@ -425,9 +432,9 @@ impl App {
         match &mut self.drag {
             Drag::None => {}
             Drag::Paint => {
-                if let (Some(stroke), Some(canvas)) = (&mut self.stroke, &mut self.canvas) {
-                    let dabs = stroke.add(InputSample { pos: self.view.screen_to_doc(pos), pressure });
-                    canvas.paint(&dabs, stroke.settings.eraser);
+                let doc_pos = self.view.screen_to_doc(pos);
+                if let (Some(stroke), Some(s)) = (&mut self.stroke, &mut self.session) {
+                    s.engine.stroke_dabs(&stroke.add(InputSample { pos: doc_pos, pressure }));
                 }
             }
             Drag::Pan { last } => {
@@ -454,11 +461,14 @@ impl App {
     }
 
     fn release(&mut self, pos: DVec2, pressure: f32) {
-        if let Drag::Paint = self.drag
-            && let (Some(mut stroke), Some(canvas)) = (self.stroke.take(), &mut self.canvas) {
-                let dabs = stroke.finish(InputSample { pos: self.view.screen_to_doc(pos), pressure });
-                canvas.paint(&dabs, stroke.settings.eraser);
+        if let Drag::Paint = self.drag {
+            let doc_pos = self.view.screen_to_doc(pos);
+            if let (Some(mut stroke), Some(s)) = (self.stroke.take(), &mut self.session) {
+                s.engine.stroke_dabs(&stroke.finish(InputSample { pos: doc_pos, pressure }));
+                s.engine.end_stroke(if stroke.settings.eraser { "Radieren" } else { "Pinselstrich" });
+                self.modified = true;
             }
+        }
         self.drag = Drag::None;
         self.needs_redraw = true;
     }
@@ -474,7 +484,6 @@ impl App {
             self.needs_redraw = true;
             return;
         }
-        self.tablet_eraser = f.is_eraser;
         for (button, pressed) in &f.buttons {
             match (*button, *pressed) {
                 (tablet::BTN_STYLUS, true) => self.drag = Drag::Pan { last: pos },
@@ -496,24 +505,126 @@ impl App {
         }
     }
 
-    fn key(&mut self, sym: Keysym, pressed: bool) {
+    /// Undoable document edit with terminal feedback.
+    fn edit(&mut self, label: &str, f: impl FnOnce(&mut imagine_core::Document<imagine_gpu::Tile>) -> bool) {
+        let Some(engine) = self.engine() else { return };
+        if engine.edit(label, f) {
+            self.modified = true;
+            self.print_layers();
+        }
+    }
+
+    fn request_quit(&mut self) {
+        if !self.modified || self.quit_armed.is_some_and(|t| t.elapsed() < QUIT_CONFIRM) {
+            self.exit = true;
+            return;
+        }
+        tracing::warn!("Ungespeicherte Änderungen! Strg+S speichert, nochmal Strg+Q (innerhalb 3 s) verwirft sie.");
+        self.quit_armed = Some(Instant::now());
+        self.update_title();
+    }
+
+    fn save(&mut self) {
+        let Some(s) = &mut self.session else { return };
+        match s.save(None) {
+            Ok(r) => {
+                self.modified = false;
+                tracing::info!(
+                    "Gespeichert: {} ({} Kacheln geschrieben, {}, {:.1} MB, {:.0} ms)",
+                    r.path.display(),
+                    r.tiles_written,
+                    if r.incremental { "inkrementell" } else { "komplett" },
+                    r.bytes as f64 / 1e6,
+                    r.ms
+                );
+            }
+            Err(e) => tracing::error!("Speichern fehlgeschlagen: {e:#}"),
+        }
+    }
+
+    fn export(&mut self) {
+        let Some(s) = &mut self.session else { return };
+        let path = s.default_export_path();
+        match s.export(&path) {
+            Ok(ms) => tracing::info!("Exportiert: {} ({ms:.0} ms)", path.display()),
+            Err(e) => tracing::error!("Export fehlgeschlagen: {e:#}"),
+        }
+    }
+
+    fn key(&mut self, ev: &KeyEvent, pressed: bool) {
+        let sym = ev.keysym;
         match sym {
             Keysym::space => self.space = pressed,
             Keysym::r => self.r_key = pressed,
             _ => {}
         }
-        if !pressed {
+        if !pressed || self.stroke.is_some() {
             return;
         }
+        let (ctrl, shift, alt) = (self.mods.ctrl, self.mods.shift, self.mods.alt);
         let center = self.view.viewport * 0.5;
         let anchor = self.cursor.unwrap_or(center);
+
+        // Digit row by physical key, so Shift+digit works on every layout.
+        if (KEY_1..=KEY_0).contains(&ev.raw_code) && !ctrl && !alt {
+            let pct = if ev.raw_code == KEY_0 { 1.0 } else { (ev.raw_code - KEY_1 + 1) as f32 / 10.0 };
+            if shift {
+                self.edit("Deckkraft", |d| {
+                    let id = d.active;
+                    let l = d.find_mut(id).unwrap();
+                    let changed = l.opacity != pct;
+                    l.opacity = pct;
+                    changed
+                });
+            } else {
+                self.brush.opacity = pct;
+                tracing::info!("Pinsel-Deckkraft {:.0} %", pct * 100.0);
+            }
+            self.needs_redraw = true;
+            return;
+        }
+
         match sym {
-            Keysym::q | Keysym::Q if self.mods.ctrl => self.exit = true,
-            Keysym::_0 => {
+            Keysym::q | Keysym::Q if ctrl => self.request_quit(),
+            Keysym::z | Keysym::Z if ctrl && shift => self.redo(),
+            Keysym::z if ctrl => self.undo(),
+            Keysym::y if ctrl => self.redo(),
+            Keysym::s | Keysym::S if ctrl => self.save(),
+            Keysym::e | Keysym::E if ctrl && shift => self.export(),
+            Keysym::n | Keysym::N if ctrl && shift => self.edit("Neue Ebene", |d| {
+                d.add_pixel_layer();
+                true
+            }),
+            Keysym::j if ctrl => self.edit("Ebene duplizieren", |d| d.duplicate_active().is_some()),
+            Keysym::g | Keysym::G if ctrl && shift => self.edit("Gruppierung aufheben", |d| d.ungroup_active()),
+            Keysym::g if ctrl => self.edit("Gruppieren", |d| d.group_active().is_some()),
+            Keysym::Delete => self.edit("Ebene löschen", |d| d.remove_active()),
+            Keysym::comma if ctrl => self.edit("Sichtbarkeit", |d| {
+                let id = d.active;
+                let l = d.find_mut(id).unwrap();
+                l.visible = !l.visible;
+                true
+            }),
+            Keysym::bracketleft if alt => self.select_layer(1),
+            Keysym::bracketright if alt => self.select_layer(-1),
+            Keysym::bracketleft if ctrl => self.edit("Ebene nach unten", |d| d.move_active(-1)),
+            Keysym::bracketright if ctrl => self.edit("Ebene nach oben", |d| d.move_active(1)),
+            Keysym::plus | Keysym::asterisk | Keysym::KP_Add if shift || sym == Keysym::KP_Add => self.cycle_blend(1),
+            Keysym::minus | Keysym::underscore | Keysym::KP_Subtract if shift || sym == Keysym::KP_Subtract => {
+                self.cycle_blend(-1)
+            }
+            Keysym::F7 => self.edit("Blend-Farbraum", |d| {
+                d.blend_space = match d.blend_space {
+                    BlendSpace::Srgb => BlendSpace::Linear,
+                    BlendSpace::Linear => BlendSpace::Srgb,
+                };
+                true
+            }),
+            Keysym::_0 if ctrl => {
                 self.view_fitted = false;
                 self.fit_if_needed();
             }
-            Keysym::_1 => self.view.set_zoom_at(anchor, 1.0),
+            Keysym::_1 if ctrl => self.view.set_zoom_at(anchor, 1.0),
             Keysym::R => {
                 let r = self.view.rotation;
                 self.view.rotate_at(center, -r);
@@ -545,10 +656,42 @@ impl App {
         self.needs_redraw = true;
     }
 
+    fn undo(&mut self) {
+        if let Some(label) = self.engine().and_then(|e| e.undo()) {
+            tracing::info!("Rückgängig: {label}");
+            self.modified = true;
+            self.print_layers();
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(label) = self.engine().and_then(|e| e.redo()) {
+            tracing::info!("Wiederholen: {label}");
+            self.modified = true;
+            self.print_layers();
+        }
+    }
+
+    fn select_layer(&mut self, step: i32) {
+        if let Some(e) = self.engine() {
+            e.select(|d| d.select_relative(step));
+        }
+        self.print_layers();
+    }
+
+    fn cycle_blend(&mut self, step: i32) {
+        self.edit("Füllmethode", |d| {
+            let id = d.active;
+            let l = d.find_mut(id).unwrap();
+            l.blend = l.blend.cycle(step);
+            true
+        });
+    }
+
     // ---- rendering --------------------------------------------------------
 
     fn start_bench(&mut self, exit_after: bool) {
-        if self.canvas.is_none() {
+        if self.session.is_none() {
             return;
         }
         tracing::info!("Benchmark: {BENCH_FRAMES} Frames Zoom/Rotation/Pan …");
@@ -567,12 +710,7 @@ impl App {
 
     fn step_bench(&mut self) {
         let Some(b) = &mut self.bench else { return };
-        let t = b.frame as f64 / BENCH_FRAMES as f64 * std::f64::consts::TAU;
-        let mut v = b.base;
-        v.zoom = b.base.zoom * 2f64.powf((1.0 - t.cos()) * 3.5); // fit → ~128× fit
-        v.rotation = t * 0.5;
-        v.center = b.base.center + DVec2::new(t.sin(), (2.0 * t).sin() * 0.5) * b.base.viewport / b.base.zoom * 0.25;
-        self.view = v;
+        self.view = bench_view(&b.base, b.frame, BENCH_FRAMES);
     }
 
     fn finish_bench(&mut self) {
@@ -586,7 +724,7 @@ impl App {
         let (mut cpu, mut iv) = (b.cpu_ms, b.interval_ms);
         let c = stat(&mut cpu);
         let i = stat(&mut iv);
-        let tiles = self.canvas.as_ref().map_or(0, |c| c.tile_count());
+        let tiles = self.session.as_ref().map_or(0, |s| s.engine.composite_tiles_live());
         println!(
             "\n=== Benchmark ({} Frames, {}×{} px, {tiles} Kacheln) ===\n\
              CPU pro Frame:    Ø {:.2} ms   p50 {:.2}   p99 {:.2}   max {:.2}\n\
@@ -594,8 +732,14 @@ impl App {
             cpu.len(),
             self.surface_config.width,
             self.surface_config.height,
-            c.0, c.1, c.2, c.3,
-            i.0, i.1, i.2, i.3,
+            c.0,
+            c.1,
+            c.2,
+            c.3,
+            i.0,
+            i.1,
+            i.2,
+            i.3,
             1000.0 / i.0.max(1e-6),
         );
         self.view = b.base;
@@ -606,8 +750,12 @@ impl App {
 
     fn draw(&mut self) {
         let t0 = Instant::now();
-        if self.bench_on_load && !self.loading && self.pending_uploads.is_empty() {
+        let busy = self.session.as_ref().is_some_and(|s| s.engine.busy());
+        if self.bench_on_load && !self.loading && self.pending_uploads.is_empty() && !busy {
             self.bench_on_load = false;
+            if let Some(s) = &mut self.session {
+                s.engine.clear_history();
+            }
             self.start_bench(true);
         }
         self.step_bench();
@@ -618,32 +766,34 @@ impl App {
                 self.reconfigure_surface();
                 return;
             }
-            other => {
-                tracing::debug!("kein Swapchain-Bild: {:?}", std::mem::discriminant(&other));
-                return;
-            }
+            _ => return,
         };
         let target = frame.texture.create_view(&Default::default());
 
-        if let Some(canvas) = &mut self.canvas {
+        let show_ring = !matches!(self.drag, Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. })
+            && !self.space
+            && self.bench.is_none();
+        let overlay = Overlay {
+            cursor: self.cursor.filter(|_| show_ring).map(|p| (p, self.brush.size * 0.5 * self.view.zoom as f32)),
+            checker_px: (8.0 * self.scale) as f32,
+        };
+        if let Some(s) = &mut self.session {
+            let mut batch: Vec<(LayerId, TileData)> = Vec::new();
             for _ in 0..UPLOADS_PER_FRAME {
-                let Some((c, px)) = self.pending_uploads.pop_front() else { break };
-                if !canvas.upload_tile(c, &px) && !self.capacity_warned {
-                    tracing::warn!("Kachel {c:?} passt nicht mehr ins GPU-Array");
-                    self.capacity_warned = true;
+                match self.pending_uploads.pop_front() {
+                    Some(u) => batch.push(u),
+                    None => break,
                 }
             }
-            let show_ring = !matches!(self.drag, Drag::Pan { .. } | Drag::Rotate { .. } | Drag::Zoom { .. })
-                && !self.space
-                && self.bench.is_none();
-            let overlay = Overlay {
-                cursor: self
-                    .cursor
-                    .filter(|_| show_ring)
-                    .map(|p| (p, (self.brush.size * 0.5) * self.view.zoom as f32)),
-                checker_px: (8.0 * self.scale) as f32,
-            };
-            canvas.render(&target, &self.view, &overlay);
+            for (layer, group) in batch.chunk_by(|a, b| a.0 == b.0).map(|g| (g[0].0, g)) {
+                let tiles: Vec<TileData> = group.iter().map(|(_, t)| t.clone()).collect();
+                self.upload_failures += s.add_tiles(layer, &tiles);
+            }
+            if self.pending_uploads.is_empty() && !self.loading && self.upload_failures > 0 {
+                tracing::warn!("{} Kacheln passten nicht in den GPU-Speicher", self.upload_failures);
+                self.upload_failures = 0;
+            }
+            s.engine.render(&target, &self.view, &overlay);
         } else {
             clear(&self.gpu, &target);
         }
@@ -670,7 +820,7 @@ impl App {
         self.needs_redraw = !self.pending_uploads.is_empty()
             || self.bench.is_some()
             || (self.bench_on_load && !self.loading)
-            || self.canvas.as_ref().is_some_and(|c| c.has_pending_work());
+            || self.session.as_ref().is_some_and(|s| s.engine.busy());
         if now.duration_since(self.title_at).as_millis() > 250 {
             self.title_at = now;
             self.update_title();
@@ -678,21 +828,54 @@ impl App {
     }
 
     fn update_title(&self) {
-        let Some(c) = &self.canvas else { return };
-        let (w, h) = c.size();
+        let Some(s) = &self.session else { return };
+        let e = &s.engine;
+        let (w, h) = e.size();
         let tool = if self.brush.eraser { "Radierer" } else { "Pinsel" };
-        let loading = if self.loading || !self.pending_uploads.is_empty() { " – lädt …" } else { "" };
+        let layer = e
+            .doc()
+            .active_layer()
+            .map(|l| {
+                format!(
+                    "„{}“ {} {:.0} %{}",
+                    l.name,
+                    l.blend.name(),
+                    l.opacity * 100.0,
+                    if l.visible { "" } else { " (aus)" }
+                )
+            })
+            .unwrap_or_default();
+        let status = if self.quit_armed.is_some_and(|t| t.elapsed() < QUIT_CONFIRM) {
+            " – NOCHMAL Strg+Q ZUM VERWERFEN"
+        } else if self.loading || !self.pending_uploads.is_empty() {
+            " – lädt …"
+        } else {
+            ""
+        };
         self.window.set_title(format!(
-            "{} – {w}×{h} – {:.1} % – {:.0}° – {tool} {:.0} px – {} Kacheln ({:.0} MB VRAM) – {:.2} ms{loading}",
-            self.doc_name,
+            "{}{} – {w}×{h} – {:.1} % – {:.0}° – {layer} – {tool} {:.0} px {:.0} % – {}+{} Kacheln ({:.0} MB) – {:.2} ms{status}",
+            if self.modified { "• " } else { "" },
+            s.name,
             self.view.zoom * 100.0 / self.scale,
             self.view.rotation.to_degrees(),
             self.brush.size,
-            c.tile_count(),
-            c.gpu_bytes() as f64 / 1e6,
+            self.brush.opacity * 100.0,
+            e.layer_tiles_live(),
+            e.composite_tiles_live(),
+            e.gpu_bytes() as f64 / 1e6,
             self.frame_cpu_ms,
         ));
     }
+}
+
+/// Benchmark camera path: fit → ~128× zoom and back, half a turn, some panning.
+pub fn bench_view(base: &View, frame: u32, frames: u32) -> View {
+    let t = frame as f64 / frames as f64 * std::f64::consts::TAU;
+    let mut v = *base;
+    v.zoom = base.zoom * 2f64.powf((1.0 - t.cos()) * 3.5);
+    v.rotation = t * 0.5;
+    v.center = base.center + DVec2::new(t.sin(), (2.0 * t).sin() * 0.5) * base.viewport / base.zoom * 0.25;
+    v
 }
 
 fn clear(gpu: &GpuContext, target: &wgpu::TextureView) {
@@ -781,7 +964,7 @@ impl OutputHandler for App {
 
 impl WindowHandler for App {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        self.exit = true;
+        self.request_quit();
     }
 
     fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window, configure: WindowConfigure, _: u32) {
@@ -858,13 +1041,13 @@ impl KeyboardHandler for App {
     }
 
     fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
-        self.key(ev.keysym, true);
+        self.key(&ev, true);
     }
 
     fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, _: KeyEvent) {}
 
     fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, ev: KeyEvent) {
-        self.key(ev.keysym, false);
+        self.key(&ev, false);
     }
 
     fn update_modifiers(

@@ -273,6 +273,33 @@ Umgesetzt und gemessen auf RX 6700 XT / RADV / niri, 1872×2046-px-Fenster:
 
 **Bekannte Grenzen (bewusst, für Phase 1):** ein einziges Texture-Array → max. 2048 Kacheln (~130 MP voll belegt; leere Dokumente beliebig groß); keine Ebenen, kein Undo; Strich-Deckkraft akkumuliert (kein Stroke-Buffer); Rendering noch im UI-Thread; Tablet-Druck erst mit echtem Stift verifizieren.
 
+## Stand Phase 1 (20.11.2026) – Engine
+
+Umgesetzt (Bedienung noch per Tastatur, Ebenenliste im Terminal – das UI kommt in Phase 3):
+
+- **Dokumentmodell:** Ebenen, Gruppen (isoliert, beliebig tief bis 7), Deckkraft, Sichtbarkeit, 19 Füllmethoden (W3C/Photoshop-Formeln) mit CPU-Referenz; GPU weicht max. 7,6·10⁻⁴ ab
+- **Blend-Raum pro Dokument:** sRGB (Photoshop-kompatibel, Standard) oder linear – F7. *Offene Entscheidung 2 damit vorläufig entschieden.*
+- **Undo/Redo auf der GPU:** Dokument-Schnappschüsse mit geteilten, ref-gezählten Kacheln; ein Schritt kostet nur die geänderten Kacheln; Ebene duplizieren kostet nichts
+- **Strich-Puffer:** Fluss baut innerhalb eines Strichs auf, Deckkraft begrenzt ihn (wie Photoshop); Radierer über denselben Mechanismus
+- **Kachel-Pools in Blöcken** (256 Kacheln/Block, Binding-Arrays): kein Kopieren beim Wachsen, bis 16 384 Ebenen- + 16 384 Bildkacheln – das 130-MP-Limit aus Phase 0 ist weg
+- **Composite-Cache mit Signaturen:** pro Kachel wird das Ebenen-Programm gehasht; nur Kacheln mit geänderter Signatur werden neu zusammengesetzt – sichtbare zuerst, im Budget pro Frame
+- **Natives Format `.imagine`:** zstd-Kacheln + JSON-Manifest, append-only (Speichern schreibt nur geänderte Kacheln), Wiederherstellung nach Absturz beim Anhängen, Kompaktierung bei viel totem Platz
+- **Export** PNG/JPEG/WebP/TIFF; **Headless-CLI** (`--save`, `--export`, `--bench-offscreen`)
+
+| Messung (RX 6700 XT) | Ergebnis |
+|---|---|
+| Darstellung 100 MP / 192 MP, 2560×1440, inkl. GPU-Wartezeit | Ø 0,14 / 0,17 ms pro Frame |
+| Füllmethode ändern → 100 MP, 2 Ebenen komplett neu zusammensetzen (inkl. Mips) | 10–11 ms |
+| 100 MP `.imagine` speichern (komplett) / laden | 457 ms / 96 ms |
+| inkrementell speichern nach Pinselstrich | nur berührte Kacheln (Test: 1 von 16) |
+| PNG → .imagine → PNG | bitgenau identisch |
+
+**Bekannte Grenzen:** kein UI (Phase 3), kein Datei-Dialog (Speichern neben die Quelldatei); Speichern läuft noch im UI-Thread (erstes Speichern 100 MP ≈ 0,5 s Pause, danach inkrementell); Pinsel-Kanten werden linear geblendet; Pass-Through-Gruppen fehlen; Kacheln liegen komplett im VRAM (Auslagerung = Residency-Manager, später); Fenster-Benchmark braucht ein sichtbares Fenster (niri drosselt verdeckte Fenster) – dafür gibt es `--bench-offscreen`.
+
 ## Nächster konkreter Schritt
+
+**Phase 2 – Malen & Auswählen:** Auswahlwerkzeuge (Rechteck, Ellipse, Lasso, Zauberstab per GPU-Floodfill) als Masken-Kacheln, Ebenenmasken, Transformieren, Füllen/Verlauf, Pinsel-Engine v1 (Textur-Spitzen, Smudge). Parallel: Render-Thread vom UI-Thread trennen, Speichern im Hintergrund.
+
+## Nächster konkreter Schritt (Phase 0, erledigt)
 
 **Phase 0 starten:** Cargo-Workspace anlegen, wgpu + winit-Fenster, Tablet-Events über `tablet-v2` auslesen und mit Druck auf eine sparse Tile-Canvas malen, ein 100-MP-Bild öffnen und mit 165 Hz schwenken/zoomen/drehen. Wenn das sitzt, steht der Stack.

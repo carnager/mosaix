@@ -1,8 +1,10 @@
 //! imagine-gpu: wgpu device setup and the tiled canvas renderer.
 
-pub mod canvas;
+pub mod engine;
+pub mod pool;
 
-pub use canvas::{Canvas, Overlay, RenderStats};
+pub use engine::{Engine, Overlay, RenderStats, StrokeParams};
+pub use pool::Tile;
 
 pub struct GpuContext {
     pub instance: wgpu::Instance,
@@ -35,6 +37,10 @@ impl GpuContext {
                 apply_limit_buckets: false,
             })
             .await?;
+        let missing = engine::required_features() - adapter.features();
+        if !missing.is_empty() {
+            anyhow::bail!("GPU/Treiber unterstützt benötigte Features nicht: {missing:?}");
+        }
         let info = adapter.get_info();
         tracing::info!(
             "GPU: {} ({:?}, {} {})",
@@ -46,6 +52,7 @@ impl GpuContext {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("imagine"),
+                required_features: engine::required_features(),
                 required_limits: adapter.limits(),
                 ..Default::default()
             })

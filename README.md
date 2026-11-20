@@ -2,36 +2,39 @@
 
 GPU-first Bildeditor für Linux/Wayland – siehe [PLAN.md](PLAN.md).
 
-Aktueller Stand: **Phase-0-Spike** (Stack-Validierung).
+Aktueller Stand: **Phase 1 – Engine** (Ebenen, Undo, Füllmethoden, natives Format). Siehe Stand in PLAN.md.
 
 ## Bauen & Starten
 
 ```sh
-cargo run --release -- bild.jpg              # Bild öffnen (PNG, JPEG, WebP, TIFF, EXR)
+cargo run --release -- bild.jpg              # Bild öffnen (PNG, JPEG, WebP, TIFF, EXR, .imagine)
 cargo run --release -- --new 30000x30000     # leeres Dokument
 cargo run --release -- --demo 10000x10000    # 100-MP-Testbild
-cargo run --release -- --demo 10000x10000 --bench   # Benchmark, beendet sich danach
+cargo run --release -- in.jpg --save out.imagine --export out.png   # ohne Fenster konvertieren
+cargo run --release -- --demo 10000x10000 --bench-offscreen         # Benchmark ohne Fenster
 cargo run --release --features profile -- …  # mit Tracy-Profiling
 cargo test --workspace                       # inkl. Headless-GPU-Tests (Vulkan)
 ```
 
-Voraussetzungen: Wayland-Compositor, Vulkan-Treiber.
+Voraussetzungen: Wayland-Compositor, Vulkan-Treiber mit Descriptor Indexing (RADV, ANV, NVIDIA).
 
 ## Bedienung
 
+Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) im Terminal, die aktive Ebene im Fenstertitel.
+
 | Aktion | Eingabe |
 |---|---|
-| Malen | linke Maustaste / Stift (Druck = Größe & Deckkraft) |
-| Radieren | `E` umschalten, oder Radierer-Ende des Stifts |
-| Schwenken | Leertaste + Ziehen, mittlere Maustaste, Stifttaste 1 |
-| Zoomen | Mausrad (zum Cursor), Strg + Leertaste + Ziehen |
-| Drehen | `R` halten + Ziehen, Umschalt + Mausrad, Stifttaste 2; Umschalt+`R` zurücksetzen |
-| Ansicht | `0` einpassen, `1` = 100 % |
-| Pinsel | `[` / `]` oder Strg + Mausrad Größe, `H` Härte, `S` Glättung, `C` Farbe, `B` Pinsel |
+| Malen / Radieren | linke Maustaste / Stift; `E` Radierer, `B` Pinsel, Radierer-Ende des Stifts |
+| Pinsel | `[` `]` Größe, Ziffern `1`…`0` Deckkraft, `H` Härte, `S` Glättung, `C` Farbe |
+| Ansicht | Leertaste+Ziehen schwenken, Mausrad zoomen, `R`+Ziehen drehen, Strg+`0` einpassen, Strg+`1` 100 % |
+| Ebenen | Strg+Umschalt+`N` neu, Strg+`J` duplizieren, `Entf` löschen, Alt+`[` `]` auswählen, Strg+`[` `]` verschieben |
+| Ebenen-Eigenschaften | Umschalt+Ziffer Deckkraft, Umschalt+`+`/`-` Füllmethode, Strg+`,` ein/aus, Strg+`G` gruppieren, Strg+Umschalt+`G` aufheben, `F7` Blend-Raum |
+| Verlauf & Datei | Strg+`Z` / Strg+Umschalt+`Z` / Strg+`Y`, Strg+`S` speichern, Strg+Umschalt+`E` PNG exportieren |
 | Sonstiges | `F12` Benchmark, `F1` Hilfe, Strg+`Q` beenden |
 
 ## Aufbau
 
-- `crates/imagine-core` – Kachel-Mathematik, View-Transformation, Farbkonvertierung, Pinselstrich → Dabs (ohne GPU)
-- `crates/imagine-gpu` – wgpu-Device, sparse Kachel-Canvas, WGSL-Shader (Anzeige, Pinsel, Mips)
-- `crates/imagine-app` – Wayland (smithay-client-toolkit), Tablet-Protokoll, Eingabe, Loader
+- `crates/imagine-core` – Dokumentmodell, Füllmethoden (CPU-Referenz), Verlauf, Kachel-Mathematik, View, Pinselstrich → Dabs (ohne GPU)
+- `crates/imagine-gpu` – wgpu-Engine: Kachel-Pools, Strich-Puffer, Composite-Cache, WGSL-Shader
+- `crates/imagine-io` – natives `.imagine`-Format (append-only), Export
+- `crates/imagine-app` – Wayland (smithay-client-toolkit), Tablet-Protokoll, Eingabe, Loader, Headless-CLI
