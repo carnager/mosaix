@@ -493,8 +493,7 @@ impl Engine {
         }
         // Layer styles, computed from what the layer shows (after filters).
         let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
-        let mut style_src: Vec<(LayerId, Arc<TileSet>, Vec<imagine_core::style::Effect>, f32)> =
-            Vec::new();
+        let mut style_src: Vec<super::style::StyleSource> = Vec::new();
         base.for_each(&mut |l, _| {
             let fx = l.active_effects();
             if fx.is_empty() {
@@ -507,7 +506,13 @@ impl Engine {
                 _ => None,
             };
             if let Some(t) = src {
-                style_src.push((l.id, t, fx, l.fill_opacity));
+                style_src.push(super::style::StyleSource {
+                    id: l.id,
+                    src: t,
+                    effects: fx,
+                    fill: l.fill_opacity,
+                    mask: l.mask.clone().filter(|_| l.mask_enabled),
+                });
             }
         });
         changed |= self.refresh_styles(&style_src);
@@ -623,13 +628,18 @@ fn substitute(
         }
         if let Some(st) = styles.get(&l.id) {
             l.content = Content::Pixels(st.content.clone());
+            if st.masked {
+                // Already in the styled pixels (and the effects follow it).
+                l.mask = None;
+            }
         } else if bake_fill && !l.is_group() {
             // Without effects, fill opacity is plain opacity.
             l.opacity *= l.fill_opacity;
             l.fill_opacity = 1.0;
         }
     }
-    // Effect layers go right under their layer (same opacity, mask, visibility).
+    // Effect layers go right under their layer (same opacity, visibility; a
+    // mask only if it was not already applied before the effects).
     if ls
         .iter()
         .any(|l| styles.get(&l.id).is_some_and(|s| !s.below.is_empty()))

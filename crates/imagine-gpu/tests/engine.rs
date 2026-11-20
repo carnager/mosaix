@@ -2839,3 +2839,43 @@ fn fill_opacity_fades_the_pixels_but_not_the_style() {
     let edge = at(&mut e, 52, 100);
     assert!(edge[0] > 0.95 && edge[1] < 0.05, "stroke {edge:?}");
 }
+
+#[test]
+fn layer_style_follows_the_layer_mask() {
+    use imagine_core::style::{Effect, EffectKind, StrokePosition};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(300, 200));
+    e.fill(StrokeTarget::Pixels, [1.0, 1.0, 1.0, 1.0], 1.0, "White").unwrap();
+    let mut id = 0;
+    e.edit("New layer", |d| {
+        id = d.add_pixel_layer();
+        true
+    });
+    e.select_shape(&Shape::Rect { x: 50.0, y: 50.0, w: 200.0, h: 100.0 }, CombineOp::Replace, "Sel").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Fill").unwrap();
+    // Mask: only the left half of the rectangle (x < 150) shows.
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 150.0, h: 200.0 }, CombineOp::Replace, "Sel").unwrap();
+    e.add_layer_mask("Mask").unwrap();
+    e.deselect("Deselect").unwrap();
+    e.edit("Style", |d| {
+        d.find_mut(id).unwrap().effects = vec![Effect::new(EffectKind::Stroke {
+            size: 6.0,
+            position: StrokePosition::Outside,
+            color: [0.0, 0.0, 1.0],
+            opacity: 1.0,
+        })];
+        true
+    });
+    let at = |e: &mut Engine, x: usize, y: usize| {
+        e.flush();
+        composite_px(e, TileCoord::new((x / 256) as i32, (y / 256) as i32), x % 256, y % 256)
+    };
+    // The stroke runs along the mask edge (x = 150), like in Photoshop …
+    let p = at(&mut e, 152, 100);
+    assert!(p[2] > 0.95 && p[0] < 0.05, "stroke at the mask edge {p:?}");
+    // … and still along the visible part of the shape.
+    let p = at(&mut e, 47, 100);
+    assert!(p[2] > 0.95 && p[0] < 0.05, "stroke at the left edge {p:?}");
+    assert_eq!(at(&mut e, 100, 100), [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(at(&mut e, 200, 100), [1.0, 1.0, 1.0, 1.0], "masked part hidden");
+}

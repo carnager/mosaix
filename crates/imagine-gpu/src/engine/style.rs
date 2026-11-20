@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use half::f16;
 use imagine_core::style::{Effect, Region, apply_with_fill, reach};
+use imagine_core::doc::{Mask, MaskTile};
 use imagine_core::{BlendMode, LayerId, TILE_SIZE, TileCoord};
 
 use super::Engine;
@@ -21,8 +22,22 @@ type TileSet = HashMap<TileCoord, Tile>;
 /// Larger styled areas are skipped (CPU time).
 const MAX_PIXELS: usize = 24 << 20;
 
+/// What a layer style is computed from.
+pub(super) struct StyleSource {
+    pub id: LayerId,
+    /// The layer's pixels (after smart filters / rasterisation).
+    pub src: Arc<TileSet>,
+    pub effects: Vec<Effect>,
+    pub fill: f32,
+    /// The layer mask (switched on): like Photoshop, the effects follow the
+    /// masked content, and the mask is applied here instead of afterwards.
+    pub mask: Option<Mask<Tile>>,
+}
+
 pub(super) struct StyleEntry {
     key: u64,
+    /// The layer mask is already applied to the result.
+    pub masked: bool,
     _src: Arc<TileSet>,
     pub below: Vec<(BlendMode, Arc<TileSet>)>,
     pub content: Arc<TileSet>,
@@ -33,28 +48,33 @@ impl Engine {
     /// the pixels the style is computed from. True if anything changed.
     pub(super) fn refresh_styles(
         &mut self,
-        sources: &[(LayerId, Arc<TileSet>, Vec<Effect>, f32)],
+        sources: &[StyleSource],
     ) -> bool {
         let before = self.styles.len();
         self.styles
-            .retain(|id, _| sources.iter().any(|s| s.0 == *id));
+            .retain(|id, _| sources.iter().any(|s| s.id == *id));
         let mut changed = self.styles.len() != before;
-        for (id, src, effects, fill) in sources {
+        for StyleSource { id, src, effects, fill, mask } in sources {
             let mut h = DefaultHasher::new();
             (Arc::as_ptr(src) as usize).hash(&mut h);
             format!("{effects:?}").hash(&mut h);
             fill.to_bits().hash(&mut h);
+            if let Some(m) = mask {
+                (Arc::as_ptr(&m.tiles) as usize).hash(&mut h);
+                m.default.hash(&mut h);
+            }
             let key = h.finish();
             if self.styles.get(id).is_some_and(|e| e.key == key) {
                 continue;
             }
             let t0 = std::time::Instant::now();
-            match self.compute_style(src, effects, *fill) {
+            match self.compute_style(src, effects, *fill, mask.as_ref()) {
                 Some((below, content)) => {
                     self.styles.insert(
                         *id,
                         StyleEntry {
                             key,
+                            masked: mask.is_some(),
                             _src: src.clone(),
                             below,
                             content,
@@ -84,6 +104,7 @@ impl Engine {
         src: &Arc<TileSet>,
         effects: &[Effect],
         fill: f32,
+        mask: Option<&Mask<Tile>>,
     ) -> Option<(Vec<(BlendMode, Arc<TileSet>)>, Arc<TileSet>)> {
         if src.is_empty() {
             return None;
@@ -149,6 +170,9 @@ impl Engine {
                 }
             }
         }
+        if let Some(m) = mask {
+            self.apply_mask(&mut region, (x0, y0), m);
+        }
         let styled = apply_with_fill(effects, &region, fill);
         let mut upload = |r: &Region| -> Option<Arc<TileSet>> {
             let mut map = TileSet::new();
@@ -193,5 +217,56 @@ impl Engine {
             below.push((*mode, upload(r)?));
         }
         Some((below, content))
+    }
+}
+
+impl Engine {
+    /// Multiplies the region (origin `o` in document px) by the layer mask.
+    fn apply_mask(&self, region: &mut Region, o: (i64, i64), m: &Mask<Tile>) {
+        let ts = TILE_SIZE as i64;
+        let (w, h) = (region.w as i64, region.h as i64);
+        let coords: Vec<TileCoord> = (o.1.div_euclid(ts)..=(o.1 + h - 1).div_euclid(ts))
+            .flat_map(|ty| (o.0.div_euclid(ts)..=(o.0 + w - 1).div_euclid(ts)).map(move |tx| TileCoord::new(tx as i32, ty as i32)))
+            .collect();
+        // Pixel tiles are read back in one go.
+        let wanted: Vec<(TileCoord, Tile)> = coords
+            .iter()
+            .filter_map(|c| match m.tiles.get(c) {
+                Some(MaskTile::Pixels(t)) => Some((*c, t.clone())),
+                _ => None,
+            })
+            .collect();
+        let data = self.read_mask_tiles(&wanted.iter().map(|w| w.1.clone()).collect::<Vec<_>>());
+        let pixels: HashMap<TileCoord, &Vec<u8>> = wanted.iter().map(|w| w.0).zip(&data).collect();
+        for c in coords {
+            let (tx, ty) = (c.x as i64 * ts - o.0, c.y as i64 * ts - o.1);
+            let solid = match m.tiles.get(&c) {
+                Some(MaskTile::Solid(v)) => Some(*v),
+                Some(MaskTile::Pixels(_)) => None,
+                None => Some(m.default),
+            };
+            if solid == Some(255) {
+                continue;
+            }
+            for ly in 0..ts {
+                let y = ty + ly;
+                if y < 0 || y >= h {
+                    continue;
+                }
+                for lx in 0..ts {
+                    let x = tx + lx;
+                    if x < 0 || x >= w {
+                        continue;
+                    }
+                    let v = match solid {
+                        Some(v) => v,
+                        None => pixels[&c][(ly * ts + lx) as usize],
+                    } as f32
+                        / 255.0;
+                    let p = &mut region.px[(y * w + x) as usize];
+                    *p = p.map(|c| c * v);
+                }
+            }
+        }
     }
 }

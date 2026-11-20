@@ -461,6 +461,8 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 - **Form- und Füllebenen aus PSD** (2026-11-20): Volltonfarbe-Füllebenen (`SoCo`/`vscg`) mit Vektormaske (`vmsk`/`vsms`) und Kontur (`vstk`) werden editierbare Formebenen; ein Pfad bleibt ein Bézier-Pfad (Zeichenstift), mehrere werden mit Photoshops Pfadoperationen (Vereinigen, Subtrahieren, Schnittmenge, Ausschließen, auch Formgruppen) über i_overlay zu einer Kontur verrechnet. Füllebenen ohne Pfad: Rechteck über die Fläche. Konturen jetzt innen/mittig/außen mit Gehrungs-/Rund-/Abgeflachten Ecken und Linienenden (auch im Formen-Panel und für Agenten: `stroke_align`). Verlaufs- und Musterfüllungen bleiben Pixel.
 - **Fläche (Fill)** (2026-11-20): Deckkraft nur der Ebenenpixel, der Ebenenstil bleibt voll sichtbar (Ebenen-Panel neben Deckkraft, Agent `layer_set fill_opacity`, PSD `iOpa` in beide Richtungen, Dateiformat v7). Überlagerungen werden „in der Form“ verrechnet und wirken auch bei 0 % Fläche.
 
+- **Ebenenmaske vor Ebenenstil** (2026-11-20): wie in Photoshop werden die Effekte aus dem maskierten Inhalt berechnet – eine Kontur läuft an der Maskenkante entlang, statt von der Maske abgeschnitten zu werden.
+
 **Noch offen in Phase 6:** Musterüberlagerung (braucht eine Musterbibliothek), Cursor direkt in Text auf Pfad.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)
