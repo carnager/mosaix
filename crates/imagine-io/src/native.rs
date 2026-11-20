@@ -31,7 +31,7 @@ pub const MAGIC: &[u8; 8] = b"IMAGINE\x01";
 const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
 /// 1: layers. 2: + layer masks and selection.
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
 const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
 
@@ -97,6 +97,8 @@ struct LayerEntry {
 enum ContentEntry {
     Pixels { tiles: Vec<TileEntry> },
     Group { children: Vec<LayerEntry> },
+    /// Since format 3.
+    Adjustment { adjustment: imagine_core::Adjustment },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -154,6 +156,7 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                         ContentEntry::Pixels { tiles }
                     }
                     Content::Group(c) => ContentEntry::Group { children: layers(c) },
+                    Content::Adjustment(a) => ContentEntry::Adjustment { adjustment: a.clone() },
                 },
                 mask: l.mask.as_ref().map(|m| mask_to_entry(m, l.mask_enabled)),
             })
@@ -185,6 +188,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                         Content::Pixels(Arc::new(map))
                     }
                     ContentEntry::Group { children } => Content::Group(layers(children, file_len)?),
+                    ContentEntry::Adjustment { adjustment } => Content::Adjustment(adjustment),
                 };
                 let (mask, mask_enabled) = match e.mask {
                     Some(m) => {

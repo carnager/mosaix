@@ -14,6 +14,7 @@ pub enum Icon {
     Mask,
     Duplicate,
     Trash,
+    Adjust,
 }
 
 fn dashed_poly(p: &Painter, pts: &[Pos2], stroke: Stroke) {
@@ -149,6 +150,17 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Duplicate => {
             p.rect_stroke(Rect::from_min_max(at(2.5, 6.0), at(13.0, 17.0)), 1.5, thin, egui::StrokeKind::Inside);
             p.add(Shape::line(vec![at(7.0, 6.0), at(7.0, 2.5), at(17.5, 2.5), at(17.5, 13.0), at(13.0, 13.0)], thin));
+        }
+        Icon::Adjust => {
+            let c0 = at(10.0, 10.0);
+            p.circle_stroke(c0, 7.0 * u, thin);
+            let half: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = -std::f32::consts::FRAC_PI_2 + i as f32 / 16.0 * std::f32::consts::PI;
+                    c0 + vec2(a.cos(), a.sin()) * 7.0 * u
+                })
+                .collect();
+            p.add(Shape::convex_polygon(half, color, Stroke::NONE));
         }
         Icon::Trash => {
             p.line_segment([at(3.0, 5.0), at(17.0, 5.0)], thin);

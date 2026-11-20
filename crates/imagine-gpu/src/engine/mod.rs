@@ -174,6 +174,7 @@ pub struct Engine {
     params: Params,
     ops_buf: DynBuf,
     jobs_buf: DynBuf,
+    adjust_buf: DynBuf,
     apply_buf: DynBuf,
     grid_buf: DynBuf,
     bounds_jobs: DynBuf,
@@ -306,7 +307,11 @@ impl Engine {
         let brush_shader = shader("brush", format!("{}\n{tip_src}", include_str!("../shaders/brush.wgsl")));
         let flatten_shader = shader(
             "flatten",
-            format!("enable wgpu_binding_array;\n{blend_src}\n{}", include_str!("../shaders/flatten.wgsl")),
+            format!(
+                "enable wgpu_binding_array;\n{blend_src}\n{}\n{}",
+                include_str!("../shaders/adjust.wgsl"),
+                include_str!("../shaders/flatten.wgsl")
+            ),
         );
         let apply_shader = shader("apply", include_str!("../shaders/apply.wgsl").into());
         let mip_shader = shader("mip", include_str!("../shaders/mip.wgsl").into());
@@ -377,6 +382,7 @@ impl Engine {
                 buffer(1, S::COMPUTE, storage, false),
                 buffer(2, S::COMPUTE, uniform, true),
                 storage_tex(3),
+                buffer(4, S::COMPUTE, storage, false),
             ],
         );
         let apply_bgl = bgl("apply", &[buffer(0, S::FRAGMENT, storage, false), buffer(1, S::FRAGMENT, uniform, true)]);
@@ -656,6 +662,7 @@ impl Engine {
             params: Params::new(device),
             ops_buf: DynBuf::new(device, "ops", B::STORAGE, 64 << 10),
             jobs_buf: DynBuf::new(device, "jobs", B::STORAGE, 16 << 10),
+            adjust_buf: DynBuf::new(device, "adjustment params", B::STORAGE, 16 << 10),
             apply_buf: DynBuf::new(device, "apply jobs", B::STORAGE, 16 << 10),
             grid_buf: DynBuf::new(device, "warp grids", B::STORAGE, 16 << 10),
             bounds_jobs: DynBuf::new(device, "bounds jobs", B::STORAGE, 16 << 10),
@@ -928,6 +935,9 @@ impl Engine {
         let l = self.doc.active_layer().ok_or("keine aktive Ebene")?;
         if l.is_group() {
             return Err("auf Gruppen kann nicht gemalt werden");
+        }
+        if l.adjustment().is_some() && params.target != StrokeTarget::Mask {
+            return Err("Einstellungsebenen haben keine Pixel – Maske anlegen und hineinmalen");
         }
         if !l.visible {
             return Err("die Ebene ist ausgeblendet");

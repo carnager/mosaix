@@ -209,6 +209,18 @@ pub fn tools() -> Vec<Value> {
                 "interp": { "type": "string", "enum": ["bicubic", "bilinear", "nearest"], "description": "default bicubic; nearest for pixel art" },
                 "use_selection": { "type": "boolean" }
             }), &[], false),
+        tool("adjustment_add",
+            "Add a non-destructive adjustment layer above the active layer; it changes everything below it (within its group). \
+             With a selection, the selection becomes its mask. \
+             and can be edited later with adjustment_set, masked (layer_mask_add, paint_stroke target mask) and faded with layer_set opacity. \
+             adjustment is an object with \"kind\" and parameters, e.g. {\"kind\": \"curves\", \"master\": [[0,0],[0.25,0.18],[0.75,0.85],[1,1]]}. \
+             Kinds: brightness_contrast {brightness −150…150, contrast −50…100}; levels {master/red/green/blue: {in_black, in_white, gamma, out_black, out_white} 0…1}; \
+             curves {master/red/green/blue: [[x,y],…] 0…1}; exposure {exposure stops, offset, gamma}; vibrance {vibrance, saturation −100…100}; \
+             hue_saturation {hue −180…180, saturation, lightness −100…100, colorize}; black_white {weights: 6 percentages for red, yellow, green, cyan, blue, magenta}; \
+             invert; posterize {levels}; threshold {level 1…255}. Omitted parameters are neutral.",
+            json!({ "adjustment": { "type": "object" }, "name": { "type": "string" } }), &["adjustment"], false),
+        tool("adjustment_set", "Change the parameters of an adjustment layer (same kind; see adjustment_add).",
+            json!({ "layer": layer_param(), "adjustment": { "type": "object" } }), &["adjustment"], false),
         tool("layer_bounds", "Pixel-exact bounding box of a layer's visible content (within the selection, if any); null if empty.",
             json!({ "layer": layer_param() }), &[], true),
         tool("crop", "Crop the canvas to a rectangle (may extend beyond the canvas to enlarge it). Pixels outside are kept, not deleted. Drops the selection.",
@@ -389,7 +401,8 @@ mod tests {
         let more = json!({
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
-            "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"}
+            "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
         for t in tools() {
@@ -416,6 +429,7 @@ mod tests {
                         ("anchor", _) => json!("top-left"),
                         ("sample", _) => json!("image"),
                         ("tip", _) => json!("chalk"),
+                        ("adjustment", _) => json!({"kind": "invert"}),
                         (_, Some("boolean")) => json!(true),
                         (_, Some("string")) => json!("x"),
                         _ => json!(1),

@@ -826,7 +826,8 @@ impl App {
     }
 
     fn stroke_target(&self) -> StrokeTarget {
-        if self.mask_edit { StrokeTarget::Mask } else { StrokeTarget::Pixels }
+        let adjustment = self.session.as_ref().and_then(|s| s.engine.doc().active_layer()).is_some_and(|l| l.adjustment().is_some());
+        if self.mask_edit || adjustment { StrokeTarget::Mask } else { StrokeTarget::Pixels }
     }
 
     fn begin_stroke(&mut self, pos: DVec2, pressure: f32, eraser: bool) -> Drag {
@@ -1976,6 +1977,7 @@ impl App {
             status: self.ui_status.clone(),
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
             recent: self.settings.recent.clone(),
+            active_adjustment: active.and_then(|l| l.adjustment().cloned()),
         })
     }
 
@@ -2081,6 +2083,29 @@ impl App {
                     let y = ((oh as f64 - h as f64) * anchor.1).round() as i64;
                     self.engine_op(|e| e.crop(x, y, w, h, "Arbeitsfläche"));
                     self.view_fitted = false;
+                }
+                Action::AddAdjustment(adj) => {
+                    let label = format!("Einstellungsebene {}", adj.name());
+                    if self.engine().and_then(|e| e.add_adjustment(adj, &label)).is_some() {
+                        self.touch();
+                    }
+                }
+                Action::SetAdjustment { adj, done } => {
+                    if let Some(e) = self.engine() {
+                        let id = e.doc().active;
+                        let changed = e.edit_merged("Einstellung ändern", &format!("adjust-{id}"), |d| {
+                            let l = d.find_mut(id).unwrap();
+                            let c = l.adjustment() != Some(&adj);
+                            l.content = imagine_core::Content::Adjustment(adj);
+                            c
+                        });
+                        if done {
+                            e.end_merge();
+                        }
+                        if changed {
+                            self.touch();
+                        }
+                    }
                 }
                 Action::OpenFile(p) => self.guard_unsaved(Pending::Open(p)),
                 Action::NewDocument { w, h, white } => self.guard_unsaved(Pending::New { w, h, white }),

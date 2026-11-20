@@ -309,8 +309,12 @@ impl Engine {
             return Err("während eines Pinselstrichs nicht möglich");
         }
         let l = self.doc.active_layer().ok_or("keine aktive Ebene")?;
-        if l.is_group() {
-            return Err("Gruppen haben keine Pixel");
+        if target == StrokeTarget::Pixels && !l.is_pixels() {
+            return Err(if l.is_group() {
+                "Gruppen haben keine Pixel"
+            } else {
+                "Einstellungsebenen haben keine Pixel – in die Maske malen (\\)"
+            });
         }
         if target == StrokeTarget::Mask && l.mask.is_none() {
             return Err("die Ebene hat keine Maske");

@@ -618,3 +618,57 @@ fn textured_tips_and_smudge() {
     let undone = composite_px(&e, TileCoord::new(1, 0), 340 - 256, 150);
     assert!(undone[0] < 0.01);
 }
+
+#[test]
+fn adjustment_layers_match_cpu_reference() {
+    use imagine_core::Adjustment;
+    use imagine_core::adjust::Levels;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let base = [0.6f32, 0.25, 0.05];
+    e.fill(StrokeTarget::Pixels, [base[0], base[1], base[2], 1.0], 1.0, "Füllen").unwrap();
+    let mut cases = Adjustment::defaults();
+    cases.extend([
+        Adjustment::BrightnessContrast { brightness: 60.0, contrast: 40.0 },
+        Adjustment::Levels {
+            master: Levels { in_black: 0.1, in_white: 0.9, gamma: 1.4, ..Default::default() },
+            red: Levels { out_white: 0.8, ..Default::default() },
+            green: Levels::default(),
+            blue: Levels { out_black: 0.2, ..Default::default() },
+        },
+        Adjustment::Curves {
+            master: vec![[0.0, 0.0], [0.3, 0.2], [0.7, 0.85], [1.0, 1.0]],
+            red: vec![[0.0, 0.1], [1.0, 0.9]],
+            green: vec![[0.0, 0.0], [1.0, 1.0]],
+            blue: vec![[0.0, 0.0], [0.5, 0.7], [1.0, 1.0]],
+        },
+        Adjustment::HueSaturation { hue: 70.0, saturation: 40.0, lightness: -20.0, colorize: false },
+        Adjustment::HueSaturation { hue: 200.0, saturation: -30.0, lightness: 10.0, colorize: true },
+        Adjustment::Vibrance { vibrance: 60.0, saturation: -10.0 },
+        Adjustment::Exposure { exposure: 0.7, offset: 0.02, gamma: 1.2 },
+        Adjustment::Threshold { level: 90.0 },
+    ]);
+    for adj in cases {
+        let want = adj.apply(base);
+        let name = adj.name();
+        e.edit("Einstellung", |d| {
+            d.add_adjustment(adj.clone());
+            true
+        });
+        e.flush();
+        let got = composite_px(&e, TileCoord::new(0, 0), 10, 10);
+        let ok = (0..3).all(|i| (got[i] - want[i]).abs() < 0.004 + want[i] * 0.01);
+        assert!(ok, "{name}: GPU {got:?} vs CPU {want:?}");
+        // Half opacity mixes with what is below.
+        e.edit("Deckkraft", |d| {
+            let id = d.active;
+            d.find_mut(id).unwrap().opacity = 0.5;
+            true
+        });
+        e.flush();
+        let half = composite_px(&e, TileCoord::new(0, 0), 10, 10);
+        assert!((half[0] - (want[0] + base[0]) / 2.0).abs() < 0.01, "{name} at 50 %");
+        e.undo();
+        e.undo();
+    }
+}

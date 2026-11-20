@@ -48,6 +48,7 @@ pub struct LayerRow {
     pub mask_enabled: bool,
     /// Thumbnail texture and the used part of it (u, v).
     pub thumb: Option<(egui::TextureId, (f32, f32))>,
+    pub adjustment: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,6 +96,7 @@ pub struct Model {
     pub status: String,
     pub busy: bool,
     pub recent: Vec<std::path::PathBuf>,
+    pub active_adjustment: Option<imagine_core::Adjustment>,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +127,8 @@ pub enum Action {
     ExportAs(std::path::PathBuf),
     NewDocument { w: u32, h: u32, white: bool },
     Unsaved(super::files::Answer),
+    AddAdjustment(imagine_core::Adjustment),
+    SetAdjustment { adj: imagine_core::Adjustment, done: bool },
 }
 
 /// UI state that lives across frames.
@@ -144,6 +148,7 @@ pub struct State {
     pub new_doc: Option<super::files::NewDialog>,
     /// Unsaved-changes question: what happens if the user discards.
     pub confirm: Option<String>,
+    adj_editor: super::adjust_ui::EditorState,
 }
 
 enum Dialog {
@@ -249,6 +254,17 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                             if ui.button(name).on_hover_text(p.display().to_string()).clicked() {
                                 out.push(Action::OpenFile(p.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+                if menu == "Ebene" {
+                    ui.separator();
+                    ui.menu_button("Neue Einstellungsebene", |ui| {
+                        for a in imagine_core::Adjustment::defaults() {
+                            if ui.button(a.name()).clicked() {
+                                out.push(Action::AddAdjustment(a));
                                 ui.close();
                             }
                         }
@@ -364,6 +380,13 @@ fn side_panel(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action
     }
     egui::CollapsingHeader::new("Farbe").default_open(true).show(ui, |ui| color_section(ui, m, st, out));
     egui::CollapsingHeader::new("Werkzeug").default_open(true).show(ui, |ui| tool_section(ui, m, out));
+    if let Some(adj) = &m.active_adjustment {
+        egui::CollapsingHeader::new("Eigenschaften").default_open(true).show(ui, |ui| {
+            if let Some((adj, done)) = super::adjust_ui::editor(ui, adj, &mut st.adj_editor) {
+                out.push(Action::SetAdjustment { adj, done });
+            }
+        });
+    }
     egui::CollapsingHeader::new("Ebenen").default_open(true).show(ui, |ui| layer_section(ui, m, st, out));
     egui::CollapsingHeader::new("Verlauf").default_open(false).show(ui, |ui| history_section(ui, m, out));
 }
@@ -638,8 +661,12 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
             out.push(Action::ToggleVisible(row.id));
         }
         let mut x = eye.max.x + 6.0 + row.depth as f32 * 14.0;
-        // Thumbnail on a checkerboard.
-        if !row.group {
+        // Adjustment icon, or thumbnail on a checkerboard.
+        if row.adjustment {
+            let t = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 3.0), Vec2::splat(row_h - 6.0));
+            icons::paint(&painter, t.shrink(4.0), Icon::Adjust, Color32::from_gray(210));
+            x = t.max.x + 8.0;
+        } else if !row.group {
             let t = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 3.0), Vec2::splat(row_h - 6.0));
             let n = 4;
             let c = t.width() / n as f32;
@@ -746,6 +773,14 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
                 out.push(Action::Command(c));
             }
         }
+        let r = icons::button(ui, Icon::Adjust, 24.0, false).on_hover_text("Neue Einstellungsebene");
+        egui::Popup::menu(&r).show(|ui| {
+            for a in imagine_core::Adjustment::defaults() {
+                if ui.button(a.name()).clicked() {
+                    out.push(Action::AddAdjustment(a));
+                }
+            }
+        });
         if icons::button(ui, Icon::Trash, 24.0, false).on_hover_text("Ebene löschen").clicked() {
             out.push(Action::DeleteLayer);
         }
@@ -898,6 +933,7 @@ pub fn layer_rows<T: Clone>(doc: &imagine_core::Document<T>) -> Vec<LayerRow> {
                 has_mask: l.mask.is_some(),
                 mask_enabled: l.mask_enabled,
                 thumb: None,
+                adjustment: l.adjustment().is_some(),
             })
         })
         .collect()

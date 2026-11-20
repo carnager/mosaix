@@ -160,6 +160,8 @@ pub enum Command {
         use_selection: Option<bool>,
     },
     LayerBounds { layer: Option<LayerId> },
+    AdjustmentAdd { adjustment: imagine_core::Adjustment, name: Option<String> },
+    AdjustmentSet { layer: Option<LayerId>, adjustment: imagine_core::Adjustment },
     Crop { x: i64, y: i64, width: u32, height: u32 },
     CanvasSize { width: u32, height: u32, anchor: Option<String> },
     ImageResize { width: Option<u32>, height: Option<u32>, interp: Option<String> },
@@ -230,6 +232,8 @@ impl Command {
             Self::SelectMagicWand { .. } => "select_magic_wand",
             Self::SelectColorRange { .. } => "select_color_range",
             Self::LayerBounds { .. } => "layer_bounds",
+            Self::AdjustmentAdd { .. } => "adjustment_add",
+            Self::AdjustmentSet { .. } => "adjustment_set",
             Self::Crop { .. } => "crop",
             Self::CanvasSize { .. } => "canvas_size",
             Self::ImageResize { .. } => "image_resize",
@@ -770,6 +774,29 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let bounds = s.engine.content_bounds(id).map(bounds_json);
             Ok(Output::json(json!({ "ok": true, "active_layer": id, "bounds": bounds })))
         }
+        Command::AdjustmentAdd { adjustment, name } => {
+            let label = format!("Einstellungsebene {}", adjustment.name());
+            let id = s.engine.add_adjustment(adjustment, &label).context("not possible right now (painting?)")?;
+            if let Some(n) = name {
+                s.engine.select(|d| d.find_mut(id).unwrap().name = n);
+            }
+            ok(s)
+        }
+        Command::AdjustmentSet { layer, adjustment } => {
+            let id = target_layer(s, layer)?;
+            let l = s.engine.doc().find(id).unwrap();
+            let old = l.adjustment().with_context(|| format!("layer {id} is not an adjustment layer"))?;
+            ensure!(
+                old.key() == adjustment.key(),
+                "layer {id} is a {} adjustment; delete it and add a new one to change the kind",
+                old.key()
+            );
+            s.engine.edit("Einstellung ändern", |d| {
+                d.find_mut(id).unwrap().content = Content::Adjustment(adjustment);
+                true
+            });
+            ok(s)
+        }
         Command::LayerBounds { layer } => {
             let id = target_layer(s, layer)?;
             let b = s.engine.content_bounds(id).map(bounds_json);
@@ -871,6 +898,10 @@ pub fn info(s: &Session) -> Value {
                     Content::Group(c) => {
                         v["type"] = "group".into();
                         v["children"] = layers(c).into();
+                    }
+                    Content::Adjustment(a) => {
+                        v["type"] = "adjustment".into();
+                        v["adjustment"] = serde_json::to_value(a).unwrap_or_default();
                     }
                 }
                 v

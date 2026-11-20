@@ -6,7 +6,7 @@ const NONE: u32 = 0xffffffffu;
 const MAX_DEPTH: u32 = 7u;
 
 struct Op {
-    kind: u32,           // 0 layer, 1 push group, 2 pop group
+    kind: u32,           // 0 layer, 1 push group, 2 pop group, 3 adjustment (slot = params, blend = kind)
     slot: u32,           // packed chunk<<16 | layer, or NONE
     blend: u32,
     opacity: f32,
@@ -41,6 +41,7 @@ struct Params {
 @group(1) @binding(1) var<storage, read> jobs: array<Job>;
 @group(1) @binding(2) var<uniform> params: Params;
 @group(1) @binding(3) var dst: texture_storage_2d_array<rgba16float, write>;
+@group(1) @binding(4) var<storage, read> adjust: array<vec4<f32>>;
 
 fn load_slot(slot: u32, p: vec2<i32>) -> vec4<f32> {
     if slot == NONE {
@@ -81,6 +82,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 }
             }
             stack[sp] = composite(stack[sp], src * (m * op.opacity), op.blend, params.blend_space);
+        } else if op.kind == 3u {
+            var m = load_mask(op.mask_slot, op.mask_const, p);
+            if op.stroke_mode >= 3u {
+                let s = load_slot(op.stroke_slot, p) * (op.stroke_opacity * load_mask(op.sel_slot, op.sel_const, p));
+                if op.stroke_mode == 3u {
+                    m = s.r + m * (1.0 - s.a);
+                } else {
+                    m = m * (1.0 - s.a);
+                }
+            }
+            let w = m * op.opacity;
+            let d = stack[sp];
+            if w > 0.0 && d.a > 0.0 {
+                stack[sp] = mix(d, adjust_premul(d, op.blend, op.slot), w);
+            }
         } else if op.kind == 1u {
             sp = min(sp + 1u, MAX_DEPTH);
             stack[sp] = vec4<f32>(0.0);

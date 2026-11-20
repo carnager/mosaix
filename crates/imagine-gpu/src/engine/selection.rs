@@ -146,6 +146,23 @@ impl Engine {
         Ok(())
     }
 
+    /// Adds an adjustment layer above the active one; with a selection, the
+    /// selection becomes its mask (shared tiles, no copy).
+    pub fn add_adjustment(&mut self, adj: imagine_core::Adjustment, label: &str) -> Option<LayerId> {
+        let mut id = None;
+        self.edit(label, |d| {
+            let new = d.add_adjustment(adj);
+            // Like Photoshop: always a mask to paint into (free while uniform).
+            let mask = d.selection.clone().unwrap_or_else(|| Mask { tiles: Arc::new(HashMap::new()), default: 255 });
+            let l = d.find_mut(new).unwrap();
+            l.mask = Some(mask);
+            l.mask_enabled = true;
+            id = Some(new);
+            true
+        });
+        id
+    }
+
     /// Adds a mask to the active layer: from the selection, or revealing everything.
     pub fn add_layer_mask(&mut self, label: &str) -> Result<(), &'static str> {
         let layer = self.doc.active;

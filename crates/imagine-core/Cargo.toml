@@ -9,3 +9,7 @@ glam.workspace = true
 half.workspace = true
 bytemuck.workspace = true
 rayon.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

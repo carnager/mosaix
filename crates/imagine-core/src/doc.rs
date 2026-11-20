@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::adjust::Adjustment;
 use crate::blend::{BlendMode, BlendSpace};
 use crate::tile::TileCoord;
 
@@ -20,6 +21,8 @@ pub enum Content<T> {
     Pixels(Arc<TileMap<T>>),
     /// Children, bottom → top.
     Group(Vec<Layer<T>>),
+    /// Non-destructive correction of everything below.
+    Adjustment(Adjustment),
 }
 
 /// One tile of a GPU-side mask.
@@ -103,7 +106,19 @@ impl<T> Layer<T> {
     pub fn tiles(&self) -> Option<&Arc<TileMap<T>>> {
         match &self.content {
             Content::Pixels(t) => Some(t),
-            Content::Group(_) => None,
+            _ => None,
+        }
+    }
+
+    /// Whether the layer has pixels (it can be painted on).
+    pub fn is_pixels(&self) -> bool {
+        matches!(self.content, Content::Pixels(_))
+    }
+
+    pub fn adjustment(&self) -> Option<&Adjustment> {
+        match &self.content {
+            Content::Adjustment(a) => Some(a),
+            _ => None,
         }
     }
 
@@ -125,6 +140,8 @@ pub enum Op<'a, T> {
     Push,
     /// Composite the group onto what is below.
     Pop { opacity: f32, blend: BlendMode, mask: Option<MaskRef<'a, T>> },
+    /// Apply an adjustment to what is below (mixed by opacity × mask).
+    Adjust { id: LayerId, adj: &'a Adjustment, opacity: f32, mask: Option<MaskRef<'a, T>> },
 }
 
 #[derive(Debug, Clone)]
@@ -235,7 +252,7 @@ impl<T: Clone> Document<T> {
     pub fn tiles_mut(&mut self, id: LayerId) -> Option<&mut TileMap<T>> {
         match &mut self.find_mut(id)?.content {
             Content::Pixels(t) => Some(Arc::make_mut(t)),
-            Content::Group(_) => None,
+            _ => None,
         }
     }
 
@@ -255,6 +272,15 @@ impl<T: Clone> Document<T> {
         }
         self.active = id;
         id
+    }
+
+    /// Adds an adjustment layer above the active one (with a revealing mask
+    /// slot left empty; masks are added like for any layer).
+    pub fn add_adjustment(&mut self, adj: Adjustment) -> LayerId {
+        let id = self.alloc_id();
+        let mut l = Layer::pixels(id, adj.name());
+        l.content = Content::Adjustment(adj);
+        self.insert_above_active(l)
     }
 
     pub fn add_pixel_layer(&mut self) -> LayerId {
@@ -474,6 +500,12 @@ impl<T: Clone> Document<T> {
                             out.push(Op::Layer { id: l.id, tile, opacity, blend: l.blend, mask: m });
                         }
                     }
+                    Content::Adjustment(adj) => {
+                        // Nothing below in this group: nothing to adjust.
+                        if !out.is_empty() && !matches!(out.last(), Some(Op::Push)) {
+                            out.push(Op::Adjust { id: l.id, adj, opacity, mask: m });
+                        }
+                    }
                     Content::Group(children) => {
                         let start = out.len();
                         out.push(Op::Push);
@@ -530,6 +562,7 @@ impl<T: Clone> Document<T> {
                             Content::Pixels(Arc::new(t.iter().map(|(c, v)| (*c, f(v))).collect()))
                         }
                         Content::Group(c) => Content::Group(map(c, f)),
+                        Content::Adjustment(a) => Content::Adjustment(a.clone()),
                     },
                     mask: l.mask.as_ref().map(|m| m.map(f)),
                     mask_enabled: l.mask_enabled,
@@ -554,7 +587,13 @@ impl<T: Clone> Document<T> {
             let l = self.find(id).unwrap();
             let marker = if id == self.active { "▶" } else { " " };
             let vis = if l.visible { "●" } else { "○" };
-            let icon = if l.is_group() { "▾ " } else { "" };
+            let icon = if l.is_group() {
+                "▾ "
+            } else if l.adjustment().is_some() {
+                "◐ "
+            } else {
+                ""
+            };
             let mask = match (&l.mask, l.mask_enabled) {
                 (Some(_), true) => " [Maske]",
                 (Some(_), false) => " [Maske aus]",
@@ -599,6 +638,14 @@ pub fn hash_program<T>(ops: &[Op<'_, T>], key: impl Fn(&T) -> u64, h: &mut impl 
                 hash_mask(mask, &key, h);
             }
             Op::Push => 1u8.hash(h),
+            Op::Adjust { id, adj, opacity, mask } => {
+                3u8.hash(h);
+                id.hash(h);
+                // Parameters change the result: hash their serialised form.
+                format!("{adj:?}").hash(h);
+                opacity.to_bits().hash(h);
+                hash_mask(mask, &key, h);
+            }
             Op::Pop { opacity, blend, mask } => {
                 2u8.hash(h);
                 opacity.to_bits().hash(h);
@@ -614,6 +661,29 @@ fn hash_mask<T>(m: &Option<MaskRef<'_, T>>, key: impl Fn(&T) -> u64, h: &mut imp
         None => 0u8.hash(h),
         Some(MaskRef::Solid(v)) => (1u8, *v).hash(h),
         Some(MaskRef::Tile(t)) => (2u8, key(t)).hash(h),
+    }
+}
+
+#[cfg(test)]
+mod adjust_tests {
+    use super::*;
+
+    #[test]
+    fn adjustments_apply_to_what_is_below_only() {
+        let mut d = Document::<u32>::new(512, 256);
+        let bg = d.active;
+        d.tiles_mut(bg).unwrap().insert(TileCoord::new(0, 0), 7);
+        let adj = d.add_adjustment(Adjustment::Invert);
+        assert!(d.find(adj).unwrap().tiles().is_none() && !d.find(adj).unwrap().is_pixels());
+        let p = d.program(TileCoord::new(0, 0), None);
+        assert!(matches!(p.as_slice(), [Op::Layer { .. }, Op::Adjust { .. }]));
+        // Nothing below at (1, 0): no adjust op (and no program).
+        assert!(d.program(TileCoord::new(1, 0), None).is_empty());
+        // Inside a group as first child: nothing below within the group.
+        d.active = adj;
+        d.group_active();
+        let p = d.program(TileCoord::new(0, 0), None);
+        assert!(matches!(p.as_slice(), [Op::Layer { .. }]), "{:?}", p.len());
     }
 }
 

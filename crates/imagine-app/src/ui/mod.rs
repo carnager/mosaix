@@ -5,6 +5,7 @@
 //! app state and return [`panels::Action`]s, which the app applies after the
 //! UI pass (no borrowing of the engine from inside the UI code).
 
+pub mod adjust_ui;
 pub mod files;
 pub mod icons;
 pub mod log;

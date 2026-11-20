@@ -2,11 +2,12 @@
 //! composite tiles are stale (signatures), re-flattening them and rebuilding
 //! their mips.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use bytemuck::{Pod, Zeroable};
 use glam::DVec2;
+use imagine_core::adjust::{GpuAdjust, KIND_LUT};
 use imagine_core::doc::hash_program;
 use imagine_core::tile::tiles_in_rect;
 use imagine_core::{LayerId, MaskRef, Op, TILE_MIP_LEVELS, TILE_SIZE, TileCoord};
@@ -233,6 +234,9 @@ impl Engine {
 
         let mut ops: Vec<GpuOp> = Vec::new();
         let mut jobs: BTreeMap<u16, Vec<GpuJob>> = BTreeMap::new();
+        // Adjustment parameters, once per adjustment layer: id → (offset, kind).
+        let mut adjust: Vec<[f32; 4]> = vec![[0.0; 4]];
+        let mut adjust_at: HashMap<LayerId, (u32, u32)> = HashMap::new();
         let mut deep_warned = false;
         for c in list {
             self.dirty.remove(&c);
@@ -283,6 +287,39 @@ impl Engine {
                             _pad: 0,
                         }
                     }
+                    Op::Adjust { id, adj, opacity, mask } => {
+                        let (off, kind) = *adjust_at.entry(id).or_insert_with(|| {
+                            let off = adjust.len() as u32;
+                            match adj.gpu() {
+                                GpuAdjust::Lut(lut) => {
+                                    adjust.extend(lut.iter().map(|c| [c[0], c[1], c[2], 0.0]));
+                                    (off, KIND_LUT)
+                                }
+                                GpuAdjust::Shader(kind, p) => {
+                                    adjust.push([p[0], p[1], p[2], p[3]]);
+                                    adjust.push([p[4], p[5], p[6], p[7]]);
+                                    (off, kind)
+                                }
+                            }
+                        });
+                        let (mask_slot, mask_const) = mask_slot(mask);
+                        // A stroke into this adjustment's mask (preview).
+                        let st = stroke.filter(|s| s.0 == id && s.2.target == StrokeTarget::Mask);
+                        GpuOp {
+                            kind: 3,
+                            slot: off,
+                            blend: kind,
+                            opacity,
+                            mask_slot,
+                            mask_const,
+                            stroke_slot: st.map_or(NONE, |s| s.1.packed()),
+                            stroke_opacity: st.map_or(0.0, |s| s.2.opacity),
+                            stroke_mode: st.map_or(0, |s| if s.2.erase { 4 } else { 3 }),
+                            sel_slot,
+                            sel_const,
+                            ..Zeroable::zeroed()
+                        }
+                    }
                     Op::Push => {
                         depth += 1;
                         if depth > MAX_GROUP_DEPTH && !deep_warned {
@@ -320,6 +357,7 @@ impl Engine {
         }
         self.ops_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&ops));
         self.jobs_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&all_jobs));
+        self.adjust_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&adjust));
         self.rebuild_arrays_bg();
         let space = self.doc.blend_space as u32;
         let mut dispatches = Vec::new();
@@ -336,6 +374,7 @@ impl Engine {
                         binding: 3,
                         resource: wgpu::BindingResource::TextureView(&self.comp_pool.chunks[chunk as usize].mip_views[0]),
                     },
+                    wgpu::BindGroupEntry { binding: 4, resource: self.adjust_buf.buf.as_entire_binding() },
                 ],
             });
             dispatches.push((bg, off, count));
