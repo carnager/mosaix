@@ -38,6 +38,7 @@ egui.workspace = true
 egui-wgpu.workspace = true
 moxcms.workspace = true
 tracing-tracy = { workspace = true, optional = true }
+egui_dock = { version = "0.22", features = ["serde"] }
 
 [dev-dependencies]
 tempfile.workspace = true

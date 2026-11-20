@@ -304,20 +304,15 @@ pub struct State {
     smart_filters: bool,
     /// What the canvas should preview right now (set by the dialog).
     pub filter_preview: Option<FilterPreview>,
-    /// Upper tab of the right dock.
-    pub dock_tab: DockTab,
-    /// Whether the active layer had properties last frame (switches the tab).
+    /// Whether the active layer had properties last frame (shows that panel).
     had_props: bool,
-}
-
-/// Tabs above the layers in the right dock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DockTab {
-    #[default]
-    Properties,
-    Styles,
-    Color,
-    History,
+    /// The dock layout (panels, tabs, floating windows).
+    pub dock: Option<egui_dock::DockState<super::dock::Pane>>,
+    /// A panel to bring to the front on the next pass.
+    pub focus_pane: Option<super::dock::Pane>,
+    /// Layout as last saved / loaded; a changed layout lands in `layout_changed`.
+    pub saved_layout: Option<serde_json::Value>,
+    pub layout_changed: Option<serde_json::Value>,
 }
 
 enum Dialog {
@@ -331,7 +326,7 @@ impl State {
     /// Expands an effect in the layer-styles section.
     pub fn open_effect(&mut self, i: usize) {
         self.fx_open = Some(i);
-        self.dock_tab = DockTab::Styles;
+        self.focus_pane = Some(super::dock::Pane::Styles);
     }
 
     pub fn open_filter(&mut self, f: imagine_core::Filter) {
@@ -521,11 +516,13 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
             .exact_size(46.0)
             .resizable(false)
             .show(ui, |ui| toolbar(ui, m, st, &mut out));
-        egui::Panel::right("side")
-            .default_size(300.0)
-            .min_size(240.0)
-            .show(ui, |ui| dock(ui, m, st, &mut out));
-        st.canvas = Some(ui.available_rect_before_wrap());
+        // A newly selected text, shape or adjustment layer shows its properties.
+        let has_props = m.active_vector.is_some() || m.active_adjustment.is_some();
+        if has_props && !st.had_props {
+            st.focus_pane = Some(super::dock::Pane::Properties);
+        }
+        st.had_props = has_props;
+        super::dock::show(ui, m, st, &mut out);
     });
     dialogs(ctx, m, st, &mut out);
     if st.show_log {
@@ -641,11 +638,7 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                 }
             });
         }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.label(
-                RichText::new(format!("{}{}", if m.modified { "• " } else { "" }, m.name)).strong(),
-            );
-        });
+        ui.menu_button(tr("Window"), |ui| super::dock::window_menu(ui, st));
     });
 }
 
@@ -732,7 +725,7 @@ fn toolbar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) 
             .on_hover_text(tr("Brush color (X: black/white)"))
             .clicked()
         {
-            st.dock_tab = DockTab::Color;
+            st.focus_pane = Some(super::dock::Pane::Color);
         }
     });
 }
@@ -834,72 +827,20 @@ fn hint(ui: &mut egui::Ui, text: &str) {
         .on_hover_text(text);
 }
 
-/// The right dock: tabs (properties, styles, colour, history) above the
-/// layers, which always stay visible; the divider can be dragged.
-fn dock(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
-    // A newly selected text, shape or adjustment layer shows its properties.
-    let has_props = m.active_vector.is_some() || m.active_adjustment.is_some();
-    if has_props && !st.had_props {
-        st.dock_tab = DockTab::Properties;
-    }
-    st.had_props = has_props;
-    egui::Panel::bottom("layers dock")
-        .resizable(true)
-        .default_size(340.0)
-        .min_size(140.0)
-        .max_size((ui.available_height() - 120.0).max(140.0))
-        .show(ui, |ui| {
-            // Lay out in a fixed child: egui stores a panel's size from what
-            // its content used, so a few pixels of overflow per frame would
-            // make it creep up.
-            let rect = ui.available_rect_before_wrap();
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-            child.set_clip_rect(rect.intersect(ui.clip_rect()));
-            child.add_space(4.0);
-            child.label(RichText::new(tr("Layers")).strong());
-            layer_section(&mut child, m, st, out);
-            ui.allocate_rect(rect, Sense::hover());
-        });
-    let fx = m.active_effects.as_ref().map_or(0, Vec::len);
-    let styles = if fx > 0 {
-        tr!("Styles ({n})", n = fx)
-    } else {
-        tr("Styles").to_string()
-    };
-    ui.horizontal(|ui| {
-        for (tab, label) in [
-            (DockTab::Properties, tr("Properties").to_string()),
-            (DockTab::Styles, styles),
-            (DockTab::Color, tr("Color").to_string()),
-            (DockTab::History, tr("History").to_string()),
-        ] {
-            if ui.selectable_label(st.dock_tab == tab, label).clicked() {
-                st.dock_tab = tab;
+pub(super) fn styles_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    match &m.active_effects {
+        Some(fx) => {
+            if let Some((effects, done)) = super::style_ui::editor(ui, fx, &mut st.fx_open) {
+                out.push(Action::SetEffects { effects, done });
             }
         }
-    });
-    ui.separator();
-    egui::ScrollArea::vertical()
-        .auto_shrink([false; 2])
-        .show(ui, |ui| match st.dock_tab {
-            DockTab::Properties => properties_tab(ui, m, st, out),
-            DockTab::Styles => match &m.active_effects {
-                Some(fx) => {
-                    if let Some((effects, done)) = super::style_ui::editor(ui, fx, &mut st.fx_open)
-                    {
-                        out.push(Action::SetEffects { effects, done });
-                    }
-                }
-                None => {
-                    ui.label(RichText::new(tr("Select a layer to add effects.")).weak());
-                }
-            },
-            DockTab::Color => color_section(ui, m, st, out),
-            DockTab::History => history_section(ui, m, out),
-        });
+        None => {
+            ui.label(RichText::new(tr("Select a layer to add effects.")).weak());
+        }
+    }
 }
 
-fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+pub(super) fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     if let Some(v) = &m.active_vector {
         let e = super::vector_ui::editor(
             ui,
@@ -950,7 +891,7 @@ const SWATCHES: [[u8; 3]; 12] = [
     [139, 94, 60],
 ];
 
-fn color_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+pub(super) fn color_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     use egui::ecolor::Hsva;
     let current: Color32 = linear_color(m.color);
     // Keep our own HSV so hue survives black/grey colours.
@@ -1301,7 +1242,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     }
 }
 
-fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("blend")
             .width(130.0)
@@ -1621,7 +1562,7 @@ fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Act
     });
 }
 
-fn history_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
+pub(super) fn history_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     let mut entry = |ui: &mut egui::Ui, i: usize, label: &str| {
         let done = i <= m.history_done;
         let text = RichText::new(label).color(if done {

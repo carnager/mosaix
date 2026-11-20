@@ -260,6 +260,9 @@ msgstr "Malen nicht möglich: {error}"
 msgid "cannot save during a brush stroke"
 msgstr "während eines Pinselstrichs kann nicht gespeichert werden"
 
+msgid "Canvas"
+msgstr "Leinwand"
+
 msgid "Canvas Size"
 msgstr "Arbeitsfläche"
 
@@ -313,6 +316,12 @@ msgstr "Stempelquelle: {x}, {y}"
 
 msgid "Clone Stamp"
 msgstr "Kopierstempel"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Close all"
+msgstr "Alle schließen"
 
 msgid "Color"
 msgstr "Farbe"
@@ -485,6 +494,9 @@ msgstr "Tiefe"
 msgid "Deselect"
 msgstr "Auswahl aufheben"
 
+msgid "Detach"
+msgstr "Abtrennen"
+
 msgid "Difference"
 msgstr "Differenz"
 
@@ -520,6 +532,9 @@ msgstr "Ziehen oder Pfeiltasten (Umschalt: 10 px). Mit Auswahl nur die ausgewäh
 
 msgid "Drag out (Shift: square/circle, Alt: from the center). Fill in the brush color; stroke and corners under Properties."
 msgstr "Aufziehen (Umschalt: Quadrat/Kreis, Alt: von der Mitte). Fläche in Pinselfarbe; Kontur und Ecken unter Eigenschaften."
+
+msgid "Drag tabs to move panels; drag a tab out to float it."
+msgstr "Reiter ziehen verschiebt Bedienfelder; herausziehen macht sie schwebend."
 
 msgid "Drag: from the brush color to transparent"
 msgstr "Ziehen: von der Pinselfarbe zu transparent"
@@ -778,6 +793,9 @@ msgstr "Höhe"
 
 msgid "Hide"
 msgstr "Ausblenden"
+
+msgid "Hide tab bar"
+msgstr "Reiterleiste ausblenden"
 
 msgid "High Pass"
 msgstr "Hochpass"
@@ -1331,6 +1349,9 @@ msgstr "{path} ersetzen"
 msgid "Reset"
 msgstr "Zurücksetzen"
 
+msgid "Reset Panel Layout"
+msgstr "Bedienfelder zurücksetzen"
+
 msgid "Reset Rotation"
 msgstr "Drehung zurücksetzen"
 
@@ -1481,6 +1502,9 @@ msgstr "Alle Meldungen anzeigen"
 msgid "Show settings"
 msgstr "Einstellungen zeigen"
 
+msgid "Show tab bar"
+msgstr "Reiterleiste einblenden"
+
 msgid "Show/hide"
 msgstr "ein-/ausblenden"
 
@@ -1618,6 +1642,9 @@ msgstr "Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Raste
 
 msgid "the active layer is not a text or shape layer"
 msgstr "die aktive Ebene ist keine Text- oder Formebene"
+
+msgid "The canvas cannot be closed"
+msgstr "Die Leinwand kann nicht geschlossen werden"
 
 msgid "The clipboard is empty"
 msgstr "Die Zwischenablage ist leer"
@@ -1807,6 +1834,9 @@ msgstr "Weiß"
 
 msgid "Width"
 msgstr "Breite"
+
+msgid "Window"
+msgstr "Fenster"
 
 msgid "wl_compositor missing"
 msgstr "wl_compositor fehlt"

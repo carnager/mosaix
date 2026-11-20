@@ -3419,6 +3419,15 @@ impl App {
         if !self.gui.needs_pass(size, self.scale, changed) {
             return;
         }
+        // First pass: the saved panel layout.
+        if self.ui_state.dock.is_none() {
+            self.ui_state.saved_layout = self.settings.dock_layout.clone();
+            self.ui_state.dock = self
+                .settings
+                .dock_layout
+                .as_ref()
+                .and_then(ui::dock::layout_from_json);
+        }
         let mut actions = Vec::new();
         let state = &mut self.ui_state;
         self.gui.run(size, self.scale, |ctx| {
@@ -3441,6 +3450,15 @@ impl App {
         }
         self.ui_log_gen = ui::log::generation();
         self.last_model = Some(model);
+        if let Some(v) = self.ui_state.layout_changed.take() {
+            self.settings.dock_layout = Some(v);
+            if let Err(e) = self.settings.save_to(&settings::config_path()) {
+                tracing::warn!(
+                    "{}",
+                    tr!("Settings not saved: {error}", error = format!("{e:#}"))
+                );
+            }
+        }
         if let Some(t) = self.gui.copied.take() {
             self.ui_copied(t);
         }

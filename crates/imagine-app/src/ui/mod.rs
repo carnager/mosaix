@@ -6,6 +6,7 @@
 //! UI pass (no borrowing of the engine from inside the UI code).
 
 pub mod adjust_ui;
+pub mod dock;
 pub mod files;
 pub mod font_ui;
 pub mod icons;

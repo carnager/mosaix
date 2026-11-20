@@ -92,6 +92,8 @@ pub struct Settings {
     /// Interface language: "auto" (from LANGUAGE / LC_ALL / LC_MESSAGES / LANG), "en", "de".
     pub language: String,
     pub favourite_fonts: Vec<String>,
+    /// Panel layout (egui_dock state); `None` = default.
+    pub dock_layout: Option<serde_json::Value>,
     pub recent_fonts: Vec<String>,
 }
 
@@ -108,6 +110,7 @@ impl Default for Settings {
             export: Default::default(),
             language: "auto".into(),
             favourite_fonts: Vec::new(),
+            dock_layout: None,
             recent_fonts: Vec::new(),
         }
     }

@@ -265,12 +265,13 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         }
     }
     if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TAB") {
-        state.dock_tab = match t.as_str() {
-            "styles" => panels::DockTab::Styles,
-            "color" => panels::DockTab::Color,
-            "history" => panels::DockTab::History,
-            _ => panels::DockTab::Properties,
-        };
+        state.focus_pane = Some(match t.as_str() {
+            "styles" => crate::ui::dock::Pane::Styles,
+            "color" => crate::ui::dock::Pane::Color,
+            "history" => crate::ui::dock::Pane::History,
+            "layers" => crate::ui::dock::Pane::Layers,
+            _ => crate::ui::dock::Pane::Properties,
+        });
     }
     if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TOOL") {
         model.tool = match t.as_str() {
