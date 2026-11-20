@@ -11,6 +11,8 @@ pub struct EditorState {
     pub focus_text: bool,
     /// The font window (its live preview is read by the app).
     pub fonts: super::font_ui::FontWindow,
+    /// OpenType features of the current font (font, weight, italic → tags).
+    feature_cache: Option<((String, u32, bool), std::collections::BTreeSet<String>)>,
 }
 
 /// What the properties editor changed.
@@ -269,6 +271,35 @@ pub fn editor(
                         }
                     });
                     ui.end_row();
+                });
+            // OpenType features (unsupported ones greyed out).
+            let key = (s.font.clone(), s.weight as u32, s.italic);
+            if st.feature_cache.as_ref().is_none_or(|(k, _)| *k != key) {
+                st.feature_cache = Some((key, imagine_vector::font_feature_tags(s)));
+            }
+            let tags = &st.feature_cache.as_ref().unwrap().1;
+            let changed_count = s.features.len();
+            egui::CollapsingHeader::new(if changed_count > 0 { format!("OpenType ({changed_count})") } else { "OpenType".to_string() })
+                .id_salt("opentype")
+                .show(ui, |ui| {
+                    egui::Grid::new("ot features").num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
+                        for (i, (tag, label, _)) in imagine_core::vector::FEATURES.iter().enumerate() {
+                            let mut on = s.feature(tag);
+                            let has = tags.contains(*tag);
+                            let r = ui
+                                .add_enabled(has, egui::Checkbox::new(&mut on, tr(label)))
+                                .on_hover_text(if has { format!("OpenType “{tag}”") } else { tr("This font does not have it").to_string() })
+                                .on_disabled_hover_text(tr("This font does not have it"));
+                            if r.changed() {
+                                s.set_feature(tag, on);
+                                t.changed = true;
+                                t.done = true;
+                            }
+                            if i % 2 == 1 {
+                                ui.end_row();
+                            }
+                        }
+                    });
                 });
         }
         VectorKind::Shape(s) => {

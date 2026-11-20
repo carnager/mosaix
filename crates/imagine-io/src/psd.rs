@@ -97,6 +97,8 @@ pub struct Text {
     pub width: Option<f32>,
     /// [xx, xy, yx, yy, tx, ty]: baseline origin of the first line.
     pub transform: [f64; 6],
+    /// OpenType features Photoshop switched (tag → value).
+    pub features: std::collections::BTreeMap<String, u16>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

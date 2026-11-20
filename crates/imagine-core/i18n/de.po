@@ -281,6 +281,9 @@ msgstr "Arbeitsfläche"
 msgid "Canvas Size …"
 msgstr "Arbeitsfläche …"
 
+msgid "Capitals to Small Caps"
+msgstr "Großbuchstaben als Kapitälchen"
+
 msgid "Center"
 msgstr "zentriert"
 
@@ -416,6 +419,9 @@ msgstr "Inhaltsbasiert füllen …"
 msgid "Content-Aware Fill: {error}"
 msgstr "Inhaltsbasiert füllen: {error}"
 
+msgid "Contextual Alternates"
+msgstr "Kontextbedingte Varianten"
+
 msgid "Contiguous"
 msgstr "Benachbart"
 
@@ -547,6 +553,9 @@ msgstr "Differenz"
 
 msgid "Discard"
 msgstr "Verwerfen"
+
+msgid "Discretionary Ligatures"
+msgstr "Bedingte Ligaturen"
 
 msgid "Distance"
 msgstr "Abstand"
@@ -770,6 +779,9 @@ msgstr "Schrift, Größe und Farbe stehen unter Eigenschaften; neue Texte nehmen
 msgid "Fonts not installed, those text layers stay pixels: {fonts}"
 msgstr "Schriften nicht installiert, diese Textebenen bleiben Pixel: {fonts}"
 
+msgid "Fractions"
+msgstr "Brüche"
+
 msgid "Free Transform"
 msgstr "Frei transformieren"
 
@@ -952,6 +964,9 @@ msgstr "Block"
 
 msgid "Justify"
 msgstr "Blocksatz"
+
+msgid "Kerning"
+msgstr "Kerning"
 
 msgid "Keyboard Shortcuts"
 msgstr "Tastaturbefehle"
@@ -1223,6 +1238,9 @@ msgstr "Aus"
 msgid "Offset"
 msgstr "Versatz"
 
+msgid "Old-Style Figures"
+msgstr "Mediävalziffern"
+
 msgid "On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag moves one handle, Del deletes the point. Color: brush color."
 msgstr "Auf einem Pfad: Punkte und Griffe ziehen, Alt+Klick Ecke ↔ Kurve, Alt+Ziehen Griff einzeln, Entf löscht den Punkt. Farbe: Pinselfarbe."
 
@@ -1249,6 +1267,9 @@ msgstr "Öffnen …"
 
 msgid "opening {path}"
 msgstr "{path} öffnen"
+
+msgid "Ordinals"
+msgstr "Ordinalzeichen"
 
 msgid "other writing systems"
 msgstr "andere Schriftsysteme"
@@ -1631,6 +1652,9 @@ msgstr "Größe muss > 0 sein"
 msgid "Size ±"
 msgstr "Größe ±"
 
+msgid "Small Caps"
+msgstr "Kapitälchen"
+
 msgid "smart filter not found"
 msgstr "Smart-Filter nicht gefunden"
 
@@ -1700,6 +1724,9 @@ msgstr "Quadrat 2048"
 msgid "sRGB (Photoshop-compatible)"
 msgstr "sRGB (Photoshop-kompatibel)"
 
+msgid "Standard Ligatures"
+msgstr "Standardligaturen"
+
 msgid "Start"
 msgstr "Anfang"
 
@@ -1733,14 +1760,26 @@ msgstr "Stile"
 msgid "Styles ({n})"
 msgstr "Stile ({n})"
 
+msgid "Stylistic Alternates"
+msgstr "Stilvarianten"
+
+msgid "Subscript"
+msgstr "Tiefgestellt"
+
 msgid "Subtract"
 msgstr "Subtrahieren"
+
+msgid "Superscript"
+msgstr "Hochgestellt"
 
 msgid "Swap"
 msgstr "Tauschen"
 
 msgid "Swap colors (X)"
 msgstr "Farben tauschen (X)"
+
+msgid "Swash"
+msgstr "Schwungschrift"
 
 msgid "Switch Brush Tip"
 msgstr "Pinselspitze wechseln"
@@ -1753,6 +1792,9 @@ msgstr "Inhaltsverzeichnis ungültig"
 
 msgid "table of contents unreadable"
 msgstr "Inhaltsverzeichnis unlesbar"
+
+msgid "Tabular Figures"
+msgstr "Tabellenziffern"
 
 msgid "Target: {target}"
 msgstr "Ziel: {target}"
@@ -1837,6 +1879,9 @@ msgstr "Beim Beenden gehen sie verloren."
 
 msgid "They will be lost when you quit."
 msgstr "Beim Beenden gehen sie verloren."
+
+msgid "This font does not have it"
+msgstr "Diese Schrift hat das nicht"
 
 msgid "Threshold"
 msgstr "Schwellenwert"

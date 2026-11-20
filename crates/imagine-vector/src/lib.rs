@@ -502,6 +502,10 @@ fn build_layout(t: &TextSpec) -> parley::Layout<()> {
     if t.letter_spacing != 0.0 {
         b.push_default(StyleProperty::LetterSpacing(t.letter_spacing));
     }
+    let css = t.feature_css();
+    if !css.is_empty() {
+        b.push_default(StyleProperty::FontFeatures(parley::FontFeatures::Source(css.as_str().into())));
+    }
     let mut l = b.build(&t.text);
     let align = match t.align {
         TextAlign::Left => Alignment::Left,
@@ -512,6 +516,35 @@ fn build_layout(t: &TextSpec) -> parley::Layout<()> {
     l.set_alignment(align, AlignmentOptions::default());
     l.break_all_lines(t.width);
     l
+}
+
+/// OpenType feature tags (GSUB and GPOS) of the font a text is set in.
+pub fn font_feature_tags(t: &TextSpec) -> std::collections::BTreeSet<String> {
+    use read_fonts::{FontRef, TableProvider};
+    let mut probe = t.clone();
+    probe.text = "a".into();
+    probe.features.clear();
+    let l = build_layout(&probe);
+    let mut out = std::collections::BTreeSet::new();
+    for line in l.lines() {
+        for item in line.items() {
+            if let PositionedLayoutItem::GlyphRun(g) = item {
+                let fd = g.run().font();
+                let Ok(f) = FontRef::from_index(fd.data.data(), fd.index) else { continue };
+                if let Ok(gsub) = f.gsub()
+                    && let Ok(list) = gsub.feature_list()
+                {
+                    out.extend(list.feature_records().iter().map(|r| r.feature_tag().to_string()));
+                }
+                if let Ok(gpos) = f.gpos()
+                    && let Ok(list) = gpos.feature_list()
+                {
+                    out.extend(list.feature_records().iter().map(|r| r.feature_tag().to_string()));
+                }
+            }
+        }
+    }
+    out
 }
 
 fn layout_text(t: &TextSpec) -> TextLayout {
@@ -838,6 +871,39 @@ mod tests {
         );
         let b = bounds(&v).unwrap();
         assert!(b[0] <= 200.0 && b[2] >= 600.0);
+    }
+
+    #[test]
+    fn opentype_features_change_shaping() {
+        let glyphs = |t: &TextSpec| -> usize {
+            let l = build_layout(t);
+            l.lines()
+                .flat_map(|line| line.items().collect::<Vec<_>>())
+                .map(|i| match i {
+                    PositionedLayoutItem::GlyphRun(g) => g.positioned_glyphs().count(),
+                    _ => 0,
+                })
+                .sum()
+        };
+        // Any installed serif with standard ligatures will do.
+        let mut t = TextSpec::new("office", 0.0, 0.0, 40.0, [0.0, 0.0, 0.0, 1.0]);
+        for family in ["Liberation Serif", "DejaVu Serif", "Noto Serif", "serif"] {
+            t.font = family.into();
+            if font_feature_tags(&t).contains("liga") {
+                break;
+            }
+        }
+        if !font_feature_tags(&t).contains("liga") {
+            eprintln!("skipping: no font with ligatures");
+            return;
+        }
+        let with = glyphs(&t);
+        t.set_feature("liga", false);
+        assert_eq!(t.feature_css(), "\"liga\" 0");
+        let without = glyphs(&t);
+        assert!(with < without, "ffi ligature: {with} vs {without} glyphs");
+        t.set_feature("liga", true);
+        assert!(t.features.is_empty(), "back to default, nothing stored");
     }
 
     #[test]

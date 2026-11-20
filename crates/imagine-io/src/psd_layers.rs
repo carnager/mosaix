@@ -465,6 +465,27 @@ pub(crate) fn read_text(data: &[u8]) -> Result<crate::psd::Text> {
     } else {
         None
     };
+    // Photoshop's OpenType switches.
+    let flag = |k: &str| sget(k).map(|v| *v == Ps::Bool(true));
+    let mut features = std::collections::BTreeMap::new();
+    let mut set = |tag: &str, on: Option<bool>, default: bool| {
+        if let Some(on) = on.filter(|on| *on != default) {
+            features.insert(tag.to_string(), on as u16);
+        }
+    };
+    set("liga", flag("Ligatures"), true);
+    set("dlig", flag("DLigatures"), false);
+    set("onum", flag("OldStyle"), false);
+    set("frac", flag("Fractions"), false);
+    set("ordn", flag("Ordinals"), false);
+    set("swsh", flag("Swash"), false);
+    set("salt", flag("StylisticAlternates"), false);
+    set("smcp", sget("FontCaps").and_then(Ps::num).map(|v| v == 1.0), false);
+    match sget("FontBaseline").and_then(Ps::num).unwrap_or(0.0) as i32 {
+        1 => set("sups", Some(true), false),
+        2 => set("subs", Some(true), false),
+        _ => {}
+    }
     Ok(crate::psd::Text {
         text,
         font,
@@ -477,6 +498,7 @@ pub(crate) fn read_text(data: &[u8]) -> Result<crate::psd::Text> {
         faux_italic,
         width,
         transform: t,
+        features,
     })
 }
 

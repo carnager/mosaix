@@ -100,11 +100,56 @@ pub struct TextSpec {
     /// Paragraph text: wrap at this width (px); point text if `None`.
     #[serde(default)]
     pub width: Option<f32>,
+    /// OpenType features switched away from the font's defaults
+    /// ("liga" → 0, "smcp" → 1 …).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub features: std::collections::BTreeMap<String, u16>,
     pub x: f64,
     pub y: f64,
 }
 
+/// The OpenType features offered in the UI: tag, label, on by default.
+pub const FEATURES: &[(&str, &str, bool)] = &[
+    ("liga", "Standard Ligatures", true),
+    ("calt", "Contextual Alternates", true),
+    ("kern", "Kerning", true),
+    ("dlig", "Discretionary Ligatures", false),
+    ("smcp", "Small Caps", false),
+    ("c2sc", "Capitals to Small Caps", false),
+    ("onum", "Old-Style Figures", false),
+    ("tnum", "Tabular Figures", false),
+    ("frac", "Fractions", false),
+    ("ordn", "Ordinals", false),
+    ("swsh", "Swash", false),
+    ("salt", "Stylistic Alternates", false),
+    ("sups", "Superscript", false),
+    ("subs", "Subscript", false),
+];
+
 impl TextSpec {
+    /// Whether a feature is on (switched, or by default).
+    pub fn feature(&self, tag: &str) -> bool {
+        match self.features.get(tag) {
+            Some(v) => *v != 0,
+            None => FEATURES.iter().any(|(t, _, on)| *t == tag && *on),
+        }
+    }
+
+    /// Switches a feature; values equal to the default are not stored.
+    pub fn set_feature(&mut self, tag: &str, on: bool) {
+        let default = FEATURES.iter().any(|(t, _, d)| *t == tag && *d);
+        if on == default {
+            self.features.remove(tag);
+        } else {
+            self.features.insert(tag.to_string(), on as u16);
+        }
+    }
+
+    /// The features as CSS `font-feature-settings` ("" if none).
+    pub fn feature_css(&self) -> String {
+        self.features.iter().map(|(t, v)| format!("\"{t}\" {v}")).collect::<Vec<_>>().join(", ")
+    }
+
     pub fn new(text: &str, x: f64, y: f64, size: f32, color: [f32; 4]) -> Self {
         Self {
             text: text.into(),
@@ -117,6 +162,7 @@ impl TextSpec {
             line_height: default_line_height(),
             letter_spacing: 0.0,
             width: None,
+            features: Default::default(),
             x,
             y,
         }
