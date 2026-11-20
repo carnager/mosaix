@@ -267,6 +267,7 @@ impl State {
             || self.new_doc.is_some()
             || self.dialog.is_some()
             || self.filter.is_some()
+            || self.vec_editor.fonts.open
     }
 }
 

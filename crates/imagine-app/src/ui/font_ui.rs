@@ -57,6 +57,12 @@ impl FontWindow {
         }
     }
 
+    /// Tries a family as if it had been clicked (snapshots).
+    pub fn try_family(&mut self, name: &str) {
+        self.sel = Some(name.into());
+        self.trying = Some(name.into());
+    }
+
     fn close(&mut self) {
         self.open = false;
         self.preview = None;

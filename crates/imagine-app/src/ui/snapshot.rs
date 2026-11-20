@@ -173,6 +173,9 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         if let Ok(q) = std::env::var("IMAGINE_SNAPSHOT_FONTS") {
             let fonts = model.fonts.clone();
             state.vec_editor.fonts.open_for(&v, &fonts, &q);
+            if let Ok(f) = std::env::var("IMAGINE_SNAPSHOT_TRY_FONT") {
+                state.vec_editor.fonts.try_family(&f);
+            }
         }
         model.fonts = std::sync::Arc::new(imagine_vector::font_groups());
         model.layers = panels::layer_rows(s.engine.doc());
@@ -217,6 +220,10 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         let _ = match &state.filter_preview {
             Some(panels::FilterPreview::Pixels(f)) => s.engine.set_filter_preview(Some(f)),
             Some(panels::FilterPreview::Smart(i, f)) => s.engine.set_smart_filter_preview(Some((*i, f))),
+            None if state.vec_editor.fonts.preview.is_some() => {
+                let id = s.engine.doc().active;
+                s.engine.set_vector_preview(state.vec_editor.fonts.preview.as_ref().map(|v| (id, v)))
+            }
             None => Ok(()),
         };
         s.engine.render(&target, &view, &Overlay { checker_px: 8.0, ..Default::default() });

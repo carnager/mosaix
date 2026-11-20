@@ -1458,3 +1458,53 @@ fn merged_edits_refresh_an_open_transform_preview() {
     assert_eq!(colour(&mut e, [0.0, 1.0, 0.0, 1.0])[1], 1.0, "first change of a drag");
     assert_eq!(colour(&mut e, [0.0, 0.0, 1.0, 1.0])[2], 1.0, "later changes of the same drag");
 }
+
+#[test]
+fn font_preview_keeps_the_rest_of_the_image() {
+    use imagine_core::VectorLayer;
+    use imagine_core::vector::{TextSpec, VectorKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    e.fill(StrokeTarget::Pixels, [0.2, 0.4, 0.6, 1.0], 1.0, "BG").unwrap();
+    let v = VectorLayer::text(TextSpec::new("Text", 50.0, 50.0, 60.0, [1.0, 1.0, 0.0, 1.0]));
+    let id = e.add_vector(v.clone(), "T").unwrap();
+    e.flush();
+    let bg = composite_px(&e, TileCoord::new(1, 1), 100, 100);
+    assert!(bg[3] > 0.99);
+    let mut w = v.clone();
+    if let VectorKind::Text(t) = &mut w.kind {
+        t.font = "serif".into();
+    }
+    for _ in 0..3 {
+        // Like the app: set every frame, then render.
+        e.set_vector_preview(Some((id, &w))).unwrap();
+        e.flush();
+        assert_eq!(composite_px(&e, TileCoord::new(1, 1), 100, 100), bg, "background stays during the preview");
+    }
+    let ink = |e: &Engine| e.read_composite(&[TileCoord::new(0, 0)])[0].chunks(4).filter(|p| p[1].to_f32() > 0.9 && p[2].to_f32() < 0.1).count();
+    let previewed = ink(&e);
+    assert!(previewed > 100);
+    // Apply: the same description becomes the document; the window closes.
+    e.set_vector(id, w.clone(), "Text ändern", Some(&format!("vector-{id}"))).unwrap();
+    e.end_merge();
+    e.set_transform_preview(None).unwrap();
+    e.flush();
+    assert_eq!(composite_px(&e, TileCoord::new(1, 1), 100, 100), bg, "background after applying");
+    assert_eq!(ink(&e), previewed, "the text after applying");
+}
+
+#[test]
+fn vector_preview_never_replaces_pixels() {
+    use imagine_core::VectorLayer;
+    use imagine_core::vector::TextSpec;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    e.fill(StrokeTarget::Pixels, [0.2, 0.4, 0.6, 1.0], 1.0, "BG").unwrap();
+    e.flush();
+    let bg = composite_px(&e, TileCoord::new(0, 0), 100, 100);
+    let pixels = e.doc().active;
+    let v = VectorLayer::text(TextSpec::new("", 0.0, 0.0, 40.0, [1.0; 4]));
+    assert!(e.set_vector_preview(Some((pixels, &v))).is_err());
+    e.flush();
+    assert_eq!(composite_px(&e, TileCoord::new(0, 0), 100, 100), bg);
+}

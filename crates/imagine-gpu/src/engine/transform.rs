@@ -568,6 +568,10 @@ impl Engine {
             PreviewKind::Vector(id, v) => {
                 let mut d = self.doc.clone();
                 let l = d.find_mut(*id).ok_or("Ebene existiert nicht")?;
+                // Only ever replaces a text or shape layer (never pixels or a group).
+                if l.vector().is_none() {
+                    return Err("die aktive Ebene ist keine Text- oder Formebene");
+                }
                 l.content = imagine_core::doc::Content::Vector((**v).clone());
                 d
             }
