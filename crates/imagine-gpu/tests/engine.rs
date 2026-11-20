@@ -1403,3 +1403,58 @@ fn text_resize_speed() {
         eprintln!("styled {styled}: {:?} per change", t.elapsed() / 10);
     }
 }
+
+#[test]
+fn styled_rotated_text_updates_when_resized() {
+    use imagine_core::VectorLayer;
+    use imagine_core::style::{Effect, EffectKind, StrokePosition};
+    use imagine_core::vector::{TextSpec, VectorKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(1024, 512));
+    let mut v = VectorLayer::text(TextSpec::new("Hallo", 100.0, 100.0, 60.0, [1.0, 1.0, 0.0, 1.0]));
+    v.transform = [0.966, -0.259, 0.259, 0.966, -20.0, 60.0];
+    let id = e.add_vector(v.clone(), "T").unwrap();
+    e.edit("fx", |d| {
+        d.find_mut(id).unwrap().effects = vec![Effect { enabled: true, kind: EffectKind::Stroke { size: 4.0, position: StrokePosition::Outside, color: [1.0; 3], opacity: 1.0 } }];
+        true
+    });
+    e.flush();
+    let ink = |e: &Engine| -> usize {
+        (0..4).flat_map(|tx| (0..2).map(move |ty| TileCoord::new(tx, ty))).map(|c| e.read_composite(&[c])[0].chunks(4).filter(|p| p[3].to_f32() > 0.5).count()).sum()
+    };
+    let before = ink(&e);
+    assert!(before > 1000);
+    let mut big = v.clone();
+    if let VectorKind::Text(t) = &mut big.kind {
+        t.size = 120.0;
+    }
+    e.set_vector(id, big, "Größe", Some("size")).unwrap();
+    e.flush();
+    let after = ink(&e);
+    assert!(after > before * 2, "bigger text must show: {before} → {after}");
+}
+
+#[test]
+fn merged_edits_refresh_an_open_transform_preview() {
+    use imagine_core::VectorLayer;
+    use imagine_core::vector::{Geometry, ShapeSpec, VectorKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    let v = VectorLayer::shape(ShapeSpec { geometry: Geometry::Rect { x: 100.0, y: 100.0, w: 100.0, h: 100.0, radius: 0.0 }, fill: Some([1.0, 0.0, 0.0, 1.0]), stroke: None });
+    let id = e.add_vector(v.clone(), "R").unwrap();
+    let rot = glam::DAffine2::from_angle(0.1);
+    let colour = |e: &mut Engine, c: [f32; 4]| {
+        let mut w = v.clone();
+        if let VectorKind::Shape(s) = &mut w.kind {
+            s.fill = Some(c);
+        }
+        e.set_vector(id, w, "Farbe", Some("fill")).unwrap();
+        // The app re-sets the transform preview every frame.
+        e.set_transform_preview(Some((rot, imagine_gpu::Interp::Bicubic))).unwrap();
+        e.flush();
+        composite_px(e, TileCoord::new(0, 0), 150, 160)
+    };
+    e.set_transform_preview(Some((rot, imagine_gpu::Interp::Bicubic))).unwrap();
+    assert_eq!(colour(&mut e, [0.0, 1.0, 0.0, 1.0])[1], 1.0, "first change of a drag");
+    assert_eq!(colour(&mut e, [0.0, 0.0, 1.0, 1.0])[2], 1.0, "later changes of the same drag");
+}

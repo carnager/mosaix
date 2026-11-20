@@ -838,6 +838,8 @@ impl Engine {
     pub fn edit_merged(&mut self, label: &str, key: &str, f: impl FnOnce(&mut Document<Tile>) -> bool) -> bool {
         if self.merge_key.as_deref() == Some(key) && self.stroke.is_none() {
             if f(&mut self.doc) {
+                // A preview was computed from the old document: recompute it.
+                self.preview = None;
                 self.recheck_all = true;
                 return true;
             }
