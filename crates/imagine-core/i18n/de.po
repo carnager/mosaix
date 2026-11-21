@@ -2355,3 +2355,6 @@ msgstr "Kein Objektivprofil gefunden"
 
 msgid "Clipped Highlights"
 msgstr "Ausgefressene Lichter"
+
+msgid "embedded in the DNG"
+msgstr "in der DNG enthalten"

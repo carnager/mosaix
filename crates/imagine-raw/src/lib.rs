@@ -16,6 +16,7 @@ use rayon::prelude::*;
 pub use imagine_core::raw::{Develop, Highlights, NoiseReduction, Tone, WhiteBalance};
 
 mod denoise;
+pub mod dng;
 pub mod lens;
 mod tone;
 
@@ -119,6 +120,9 @@ pub struct RawFile {
     /// Camera → linear sRGB.
     cam_to_rgb: [[f32; 4]; 3],
     lens: Option<lens::LensProfile>,
+    /// DNG opcodes: lens shading (applied to the mosaic) and geometry.
+    gain_maps: Vec<dng::GainMap>,
+    warp: Option<dng::Warp>,
 }
 
 const SRGB_TO_XYZ: [[f32; 3]; 3] = [
@@ -185,6 +189,59 @@ fn planckian_xy(t: f32) -> (f32, f32) {
         3.0817580 * x3 - 5.87338670 * x2 + 3.75112997 * x - 0.37001483
     };
     (x as f32, y as f32)
+}
+
+/// Markesteijn passes for X-Trans: 3 measured no better than 1 against LibRaw, at twice the time.
+const XTRANS_PASSES: usize = 1;
+
+/// Reads the DNG opcode lists (lens shading, warp, radial vignetting).
+fn dng_opcodes(decoder: &dyn rawler::decoders::Decoder, raw: &RawImage) -> (Vec<dng::GainMap>, Option<dng::Warp>) {
+    use rawler::decoders::WellKnownIFD;
+    use rawler::formats::tiff::Value;
+    use rawler::tags::DngTag;
+    let Ok(Some(ifd)) = decoder.ifd(WellKnownIFD::VirtualDngRawTags) else {
+        return (Vec::new(), None);
+    };
+    let mut ops = dng::Opcodes::default();
+    for tag in [DngTag::OpcodeList2, DngTag::OpcodeList3] {
+        if let Some(e) = ifd.get_entry(tag)
+            && let Value::Undefined(b) | Value::Byte(b) = &e.value
+        {
+            dng::parse(b, &mut ops);
+        }
+    }
+    // Stage 3 is the demosaiced active area; our image is the default crop of it.
+    let (aw, ah) = raw.active_area.map_or((raw.width, raw.height), |a| (a.d.w, a.d.h));
+    let (ox, oy) = {
+        let mut c = raw.crop_area.or(raw.active_area);
+        if let (Some(cc), Some(a)) = (&mut c, &raw.active_area) {
+            *cc = cc.adapt(a);
+        }
+        c.map_or((0, 0), |c| (c.p.x, c.p.y))
+    };
+    let place = |(cx, cy): (f64, f64)| {
+        let (px, py) = (cx * aw as f64, cy * ah as f64);
+        let norm = [(0.0, 0.0), (aw as f64, 0.0), (0.0, ah as f64), (aw as f64, ah as f64)]
+            .iter()
+            .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
+            .fold(0.0, f64::max)
+            .max(1.0);
+        ((px - ox as f64, py - oy as f64), norm)
+    };
+    let warp = match (&ops.warp, &ops.vignette) {
+        (None, None) => None,
+        _ => {
+            let c = ops.warp.as_ref().map(|w| w.1).or(ops.vignette.map(|v| v.1)).unwrap_or((0.5, 0.5));
+            let (center, norm) = place(c);
+            Some(dng::Warp {
+                planes: ops.warp.as_ref().map(|w| w.0.clone()).unwrap_or_default(),
+                vignette: ops.vignette.map(|v| v.0),
+                center,
+                norm,
+            })
+        }
+    };
+    (ops.gain_maps, warp)
 }
 
 /// Demosaiced camera values at or above this count as sensor saturation.
@@ -260,7 +317,8 @@ impl RawFile {
             }
         }
         let cam_to_rgb = pseudo_inverse(&norm, channels);
-        let mut f = Self { raw, info: Info::default(), channels, rgb_to_cam, cam_to_rgb, lens: None };
+        let (gain_maps, warp) = dng_opcodes(&*decoder, &raw);
+        let mut f = Self { raw, info: Info::default(), channels, rgb_to_cam, cam_to_rgb, lens: None, gain_maps, warp };
         let r = |v: &rawler::formats::tiff::Rational| if v.d == 0 { None } else { Some(v.n as f32 / v.d as f32) };
         f.info = Info {
             camera: format!("{} {}", f.raw.clean_make, f.raw.clean_model).trim().to_string(),
@@ -279,7 +337,11 @@ impl RawFile {
         f.lens = f.info.lens.as_deref().and_then(|l| {
             lens::find(&f.raw.clean_make, &f.raw.clean_model, l, f.info.focal_length, f.info.aperture)
         });
-        f.info.lens_profile = f.lens.as_ref().map(|l| l.name.clone());
+        f.info.lens_profile = if f.warp.is_some() {
+            Some(imagine_core::tr("embedded in the DNG").to_string())
+        } else {
+            f.lens.as_ref().map(|l| l.name.clone())
+        };
         Ok(f)
     }
 
@@ -354,27 +416,90 @@ impl RawFile {
 
     /// Demosaics the sensor data (the slow part; cache the result).
     pub fn camera_image(&self) -> Result<CameraImage> {
-        let steps = [
-            ProcessingStep::Rescale,
-            ProcessingStep::Demosaic,
-            ProcessingStep::FujiRotate,
-            ProcessingStep::CropActiveArea,
-            ProcessingStep::CropDefault,
-        ];
-        let im = RawDevelop::new_with(&steps).develop_intermediate(&self.raw).map_err(|e| anyhow!("{e}"))?;
-        Ok(match im {
-            Intermediate::Monochrome(p) => CameraImage {
-                width: p.width,
-                height: p.height,
-                data: p.data.iter().map(|v| [*v, *v, *v, 0.0]).collect(),
-            },
-            Intermediate::ThreeColor(p) => CameraImage {
-                width: p.width,
-                height: p.height,
-                data: p.data.iter().map(|v| [v[0], v[1], v[2], 0.0]).collect(),
-            },
-            Intermediate::FourColor(p) => CameraImage { width: p.width, height: p.height, data: p.data },
-        })
+        use rawler::imgop::sensor::Demosaic;
+        use rawler::rawimage::RawPhotometricInterpretation as Pi;
+        let mosaic = match &self.raw.photometric {
+            Pi::Cfa(c) if self.raw.cpp == 1 && self.raw.fuji_rotation_width.is_none() => Some(c.clone()),
+            _ => None,
+        };
+        let Some(config) = mosaic else {
+            // Already demosaiced (linear DNG, sRAW) or rotated Fuji SuperCCD: rawler's pipeline.
+            let steps = [
+                ProcessingStep::Rescale,
+                ProcessingStep::Demosaic,
+                ProcessingStep::FujiRotate,
+                ProcessingStep::CropActiveArea,
+                ProcessingStep::CropDefault,
+            ];
+            let im = RawDevelop::new_with(&steps).develop_intermediate(&self.raw).map_err(|e| anyhow!("{e}"))?;
+            return Ok(match im {
+                Intermediate::Monochrome(p) => CameraImage {
+                    width: p.width,
+                    height: p.height,
+                    data: p.data.iter().map(|v| [*v, *v, *v, 0.0]).collect(),
+                },
+                Intermediate::ThreeColor(p) => CameraImage {
+                    width: p.width,
+                    height: p.height,
+                    data: p.data.iter().map(|v| [v[0], v[1], v[2], 0.0]).collect(),
+                },
+                Intermediate::FourColor(p) => CameraImage { width: p.width, height: p.height, data: p.data },
+            });
+        };
+        // Black and white level, then lens shading, then demosaicing.
+        let im = RawDevelop::new_with(&[ProcessingStep::Rescale])
+            .develop_intermediate(&self.raw)
+            .map_err(|e| anyhow!("{e}"))?;
+        let Intermediate::Monochrome(mut px) = im else {
+            return Err(anyhow!("unexpected RAW layout"));
+        };
+        let roi = self.raw.active_area.unwrap_or(px.rect());
+        if !self.gain_maps.is_empty() {
+            // Gain maps address the active area (stage 2 of the DNG pipeline).
+            let mut area = px.crop(roi);
+            for m in &self.gain_maps {
+                m.apply(&mut area.data, area.width, area.height, CLIPPED);
+            }
+            px = area;
+        }
+        let roi = if self.gain_maps.is_empty() { roi } else { px.rect() };
+        let cfa = if self.gain_maps.is_empty() { config.cfa.clone() } else { config.cfa.shift(self.raw.active_area.map_or(0, |a| a.p.x), self.raw.active_area.map_or(0, |a| a.p.y)) };
+        let t0 = std::time::Instant::now();
+        let mut img: CameraImage = if config.cfa.unique_colors() == 4 {
+            let c = rawler::imgop::sensor::bayer::bilinear::Bilinear4Channel::new().demosaic(&px, &cfa, &config.colors, roi);
+            CameraImage { width: c.width, height: c.height, data: c.data }
+        } else {
+            let c = if config.sensor == rawler::imgop::sensor::SensorType::Xtrans {
+                rawler::imgop::sensor::xtrans::markesteijn::XTransMarkesteijnDemosaic::new(XTRANS_PASSES)
+                    .demosaic(&px, &cfa, &config.colors, roi)
+            } else {
+                rawler::imgop::sensor::bayer::ppg::PPGDemosaic::new().demosaic(&px, &cfa, &config.colors, roi)
+            };
+            CameraImage { width: c.width, height: c.height, data: c.data.iter().map(|v| [v[0], v[1], v[2], 0.0]).collect() }
+        };
+        let _ = t0;
+        // Default crop (relative to the active area).
+        if let Some((x, y, w, h)) = self.default_crop()
+            && (w, h) != (img.width, img.height)
+            && x + w <= img.width
+            && y + h <= img.height
+        {
+            let mut data = Vec::with_capacity(w * h);
+            for row in y..y + h {
+                data.extend_from_slice(&img.data[row * img.width + x..row * img.width + x + w]);
+            }
+            img = CameraImage { width: w, height: h, data };
+        }
+        Ok(img)
+    }
+
+    /// The default crop within the active area: (x, y, width, height).
+    fn default_crop(&self) -> Option<(usize, usize, usize, usize)> {
+        let mut crop = self.raw.crop_area.or(self.raw.active_area)?;
+        if let Some(a) = &self.raw.active_area {
+            crop = crop.adapt(a);
+        }
+        Some((crop.p.x, crop.p.y, crop.d.w, crop.d.h))
     }
 
     /// The multipliers a setting stands for, normalised so the smallest is 1
@@ -460,7 +585,16 @@ impl RawFile {
         let wb = self.multipliers(d.white_balance, cam);
         let reconstruct = d.highlights == Highlights::Reconstruct;
         let tone = tone::ToneOp::new(&d.tone);
-        let corr = if d.lens { self.lens.clone().map(|p| lens::Corrector::new(p, cam.width, cam.height)) } else { None };
+        // Scale between this camera image and the full-size one (previews are smaller).
+        let (fw, _) = self.default_crop().map_or((cam.width, cam.height), |c| (c.2, c.3));
+        let scale = fw as f32 / cam.width as f32;
+        let corr = if !d.lens {
+            None
+        } else if let Some(w) = &self.warp {
+            Some(Geometry::Dng(w.clone(), scale))
+        } else {
+            self.lens.clone().map(|p| Geometry::Lens(lens::Corrector::new(p, cam.width, cam.height)))
+        };
         let chroma = if reconstruct { self.highlight_chroma(cam, &wb) } else { [0.0; 4] };
         let gain = d.exposure.exp2();
         let n = self.channels;
@@ -495,10 +629,10 @@ impl RawFile {
                         let mut q = [0.0f32; 4];
                         for (ch, v) in q.iter_mut().enumerate().take(n) {
                             let c = if ch == 2 && n == 3 { 2 } else if ch == 0 { 0 } else { 1 };
-                            let (u, v2) = k.source(x, y, c, k.zoom);
+                            let (u, v2) = k.source(x, y, c);
                             *v = sample(cam, u - 0.5, v2 - 0.5, ch);
                         }
-                        let (gx, gy) = k.source(x, y, 1, k.zoom);
+                        let (gx, gy) = k.source(x, y, 1);
                         let g = k.vignetting_gain(gx, gy);
                         // Clipping is judged before the gain (it is a sensor limit).
                         let sat = q.map(|v| v >= CLIPPED);
@@ -543,6 +677,32 @@ impl RawFile {
             }
         });
         (ow as u32, oh as u32, out)
+    }
+}
+
+/// Lens geometry while developing: a lensfun profile or the DNG's own warp
+/// (the latter in full-size pixels; the factor converts from this image).
+enum Geometry {
+    Lens(lens::Corrector),
+    Dng(dng::Warp, f32),
+}
+
+impl Geometry {
+    fn source(&self, x: f32, y: f32, ch: usize) -> (f32, f32) {
+        match self {
+            Geometry::Lens(k) => k.source(x, y, ch, k.zoom),
+            Geometry::Dng(w, s) => {
+                let (u, v) = w.source(x * s, y * s, ch);
+                (u / s, v / s)
+            }
+        }
+    }
+
+    fn vignetting_gain(&self, x: f32, y: f32) -> f32 {
+        match self {
+            Geometry::Lens(k) => k.vignetting_gain(x, y),
+            Geometry::Dng(w, s) => w.vignetting_gain(x * s, y * s),
+        }
     }
 }
 
