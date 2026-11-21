@@ -359,6 +359,8 @@ pub enum Action {
 #[derive(Default)]
 pub struct State {
     pub hidden: bool,
+    /// UI snapshots: a menu drawn open (English menu name, horizontal offset).
+    pub snapshot_menu: Option<(&'static str, f32)>,
     /// Area left for the canvas (points); `None` = whole window.
     pub canvas: Option<egui::Rect>,
     pub palette: Option<(String, usize)>,
@@ -650,6 +652,19 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
             });
         st.show_log = open;
     }
+    if let Some((menu, x)) = st.snapshot_menu {
+        egui::Area::new(egui::Id::unique("snapshot menu"))
+            .fixed_pos(egui::pos2(x, 26.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::containers::menu::menu_style(ui.style_mut());
+                egui::Frame::menu(ui.style()).show(ui, |ui| {
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                        menu_contents(ui, menu, m, st, &mut Vec::new())
+                    })
+                });
+            });
+    }
     out
 }
 
@@ -662,12 +677,12 @@ fn level_color(l: tracing::Level) -> Color32 {
 }
 
 /// File › Actions: macros and scripts, recording.
-fn actions_menu(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+fn actions_menu(ui: &mut egui::Ui, icon: egui::Atom<'static>, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     let label = match m.recording {
         Some(n) => tr!("Actions (recording, {n} steps)", n = n),
         None => tr("Actions").to_string(),
     };
-    ui.menu_button(label, |ui| {
+    ui.menu_button((icon, label), |ui| {
         for e in m.actions.iter() {
             let (text, hint) = match e.kind {
                 crate::app::actions::Kind::Macro => (e.name.clone(), tr("Play on the open image")),
@@ -778,131 +793,7 @@ fn record_name_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>
 fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     egui::MenuBar::new().ui(ui, |ui| {
         for menu in MENUS {
-            ui.menu_button(palette::menu_text(menu), |ui| {
-                for c in COMMANDS.iter().filter(|c| c.menu == menu) {
-                    if ui
-                        .add(egui::Button::new(c.label_text()).shortcut_text(palette::shortcut_text(c, &m.keymap)))
-                        .clicked()
-                    {
-                        out.push(Action::Command(*c));
-                        ui.close();
-                    }
-                }
-                if menu == "File" {
-                    ui.separator();
-                    actions_menu(ui, m, st, out);
-                }
-                if menu == "File" && !m.recent.is_empty() {
-                    ui.separator();
-                    ui.menu_button(tr("Open Recent"), |ui| {
-                        for p in &m.recent {
-                            let name = p
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_default();
-                            if ui
-                                .button(name)
-                                .on_hover_text(p.display().to_string())
-                                .clicked()
-                            {
-                                out.push(Action::OpenFile(p.clone()));
-                                ui.close();
-                            }
-                        }
-                    });
-                }
-                if menu == "Image" {
-                    ui.separator();
-                    ui.menu_button("Filter", |ui| {
-                        for f in mosaix_core::Filter::defaults() {
-                            if ui.button(format!("{} …", f.name())).clicked() {
-                                st.open_filter(f);
-                                ui.close();
-                            }
-                        }
-                        ui.separator();
-                        ui.menu_button(tr("Plugins"), |ui| {
-                            for p in m.filter_plugins.iter() {
-                                match &p.result {
-                                    Ok(f) => {
-                                        let r = ui.button(format!("{} …", f.name()));
-                                        let d = p.description();
-                                        let r = if d.is_empty() { r } else { r.on_hover_text(d) };
-                                        if r.clicked() {
-                                            st.open_filter(f.clone());
-                                            ui.close();
-                                        }
-                                    }
-                                    Err(e) => {
-                                        ui.add_enabled(false, egui::Button::new(&p.file))
-                                            .on_disabled_hover_text(e);
-                                    }
-                                }
-                            }
-                            ui.separator();
-                            if ui
-                                .button(tr("Reload Plugins"))
-                                .on_hover_text(crate::app::filters::filter_dir().display().to_string())
-                                .clicked()
-                            {
-                                out.push(Action::ReloadFilterPlugins);
-                                ui.close();
-                            }
-                        });
-                    });
-                }
-                if menu == "Layer" {
-                    ui.separator();
-                    ui.menu_button(tr("New Adjustment Layer"), |ui| {
-                        for a in mosaix_core::Adjustment::defaults() {
-                            if ui.button(a.name()).clicked() {
-                                out.push(Action::AddAdjustment(a));
-                                ui.close();
-                            }
-                        }
-                    });
-                }
-                if menu == "Image" {
-                    ui.separator();
-                    if ui.button(tr("Canvas Size …")).clicked() {
-                        st.dialog = Some(Dialog::Canvas {
-                            w: m.doc_size.0,
-                            h: m.doc_size.1,
-                            anchor: (1, 1),
-                        });
-                        ui.close();
-                    }
-                    if ui.button(tr("Image Size …")).clicked() {
-                        st.dialog = Some(Dialog::Image {
-                            w: m.doc_size.0,
-                            h: m.doc_size.1,
-                            keep: true,
-                        });
-                        ui.close();
-                    }
-                    ui.menu_button(tr("Upscale (AI)"), |ui| {
-                        let (w, h) = m.doc_size;
-                        for k in [2u32, 4] {
-                            let secs = crate::ai::upscale_estimate(w as usize * h as usize);
-                            let b = ui.button(format!("{k}×  ({} × {} px)", w * k, h * k)).on_hover_text(tr!(
-                                "Enlarges every pixel layer with local AI (Real-ESRGAN) – adds plausible detail instead of blur. About {s} s here.",
-                                s = format!("{:.0}", secs.max(1.0))
-                            ));
-                            if b.clicked() {
-                                out.push(Action::Upscale(k));
-                                ui.close();
-                            }
-                        }
-                    });
-                }
-                if menu == "View" {
-                    ui.separator();
-                    if ui.button(tr("Messages")).clicked() {
-                        st.show_log = true;
-                        ui.close();
-                    }
-                }
-            });
+            ui.menu_button(palette::menu_text(menu), |ui| menu_contents(ui, menu, m, st, out));
         }
         ui.menu_button(tr("Window"), |ui| super::dock::window_menu(ui, st));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -916,6 +807,154 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
             }
         });
     });
+}
+
+/// The entries of one menu, in the order and groups of [`super::menus`].
+pub(super) fn menu_contents(ui: &mut egui::Ui, menu: &str, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    use super::menus::{Item, atom};
+    ui.set_min_width(220.0);
+    for item in super::menus::layout(menu) {
+        match *item {
+            Item::Sep => {
+                ui.separator();
+            }
+            Item::Cmd(label, icon) => {
+                let Some(c) = COMMANDS.iter().find(|c| c.menu == menu && c.label == label) else {
+                    continue;
+                };
+                let b = egui::Button::new((atom(icon), c.label_text()))
+                    .shortcut_text(palette::shortcut_text(c, &m.keymap));
+                if ui.add(b).clicked() {
+                    out.push(Action::Command(*c));
+                    ui.close();
+                }
+            }
+            Item::Special(sp, icon) => special_entry(ui, sp, atom(icon), m, st, out),
+        }
+    }
+}
+
+fn special_entry(
+    ui: &mut egui::Ui,
+    sp: super::menus::Special,
+    icon: egui::Atom<'static>,
+    m: &Model,
+    st: &mut State,
+    out: &mut Vec<Action>,
+) {
+    use super::menus::Special;
+    match sp {
+        Special::Recent => {
+            ui.add_enabled_ui(!m.recent.is_empty(), |ui| {
+                ui.menu_button((icon, tr("Open Recent")), |ui| {
+                    for p in &m.recent {
+                        let name = p
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if ui.button(name).on_hover_text(p.display().to_string()).clicked() {
+                            out.push(Action::OpenFile(p.clone()));
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        }
+        Special::Actions => actions_menu(ui, icon, m, st, out),
+        Special::Filters => {
+            ui.menu_button((icon, tr("Filter")), |ui| {
+                for f in mosaix_core::Filter::defaults() {
+                    if ui.button(format!("{} …", f.name())).clicked() {
+                        st.open_filter(f);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                ui.menu_button((super::menus::atom(super::menus::Icon::Glyph(super::glyphs::PUZZLE_PIECE)), tr("Plugins")), |ui| {
+                    for p in m.filter_plugins.iter() {
+                        match &p.result {
+                            Ok(f) => {
+                                let r = ui.button(format!("{} …", f.name()));
+                                let d = p.description();
+                                let r = if d.is_empty() { r } else { r.on_hover_text(d) };
+                                if r.clicked() {
+                                    st.open_filter(f.clone());
+                                    ui.close();
+                                }
+                            }
+                            Err(e) => {
+                                ui.add_enabled(false, egui::Button::new(&p.file)).on_disabled_hover_text(e);
+                            }
+                        }
+                    }
+                    if m.filter_plugins.is_empty() {
+                        ui.label(RichText::new(tr("No plugins yet")).weak());
+                    }
+                    ui.separator();
+                    if ui
+                        .button(tr("Reload Plugins"))
+                        .on_hover_text(crate::app::filters::filter_dir().display().to_string())
+                        .clicked()
+                    {
+                        out.push(Action::ReloadFilterPlugins);
+                        ui.close();
+                    }
+                });
+            });
+        }
+        Special::Adjustments => {
+            ui.menu_button((icon, tr("New Adjustment Layer")), |ui| {
+                for a in mosaix_core::Adjustment::defaults() {
+                    if ui.button(a.name()).clicked() {
+                        out.push(Action::AddAdjustment(a));
+                        ui.close();
+                    }
+                }
+            });
+        }
+        Special::CanvasSize => {
+            if ui.button((icon, tr("Canvas Size …"))).clicked() {
+                st.dialog = Some(Dialog::Canvas {
+                    w: m.doc_size.0,
+                    h: m.doc_size.1,
+                    anchor: (1, 1),
+                });
+                ui.close();
+            }
+        }
+        Special::ImageSize => {
+            if ui.button((icon, tr("Image Size …"))).clicked() {
+                st.dialog = Some(Dialog::Image {
+                    w: m.doc_size.0,
+                    h: m.doc_size.1,
+                    keep: true,
+                });
+                ui.close();
+            }
+        }
+        Special::Upscale => {
+            ui.menu_button((icon, tr("Upscale (AI)")), |ui| {
+                let (w, h) = m.doc_size;
+                for k in [2u32, 4] {
+                    let secs = crate::ai::upscale_estimate(w as usize * h as usize);
+                    let b = ui.button(format!("{k}×  ({} × {} px)", w * k, h * k)).on_hover_text(tr!(
+                        "Enlarges every pixel layer with local AI (Real-ESRGAN) – adds plausible detail instead of blur. About {s} s here.",
+                        s = format!("{:.0}", secs.max(1.0))
+                    ));
+                    if b.clicked() {
+                        out.push(Action::Upscale(k));
+                        ui.close();
+                    }
+                }
+            });
+        }
+        Special::Messages => {
+            if ui.button((icon, tr("Messages"))).clicked() {
+                st.show_log = true;
+                ui.close();
+            }
+        }
+    }
 }
 
 fn status_bar(ui: &mut egui::Ui, m: &Model, st: &mut State) {

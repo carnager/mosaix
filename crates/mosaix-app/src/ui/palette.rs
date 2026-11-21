@@ -374,10 +374,10 @@ impl Cmd {
             K::plus => "+".to_string(),
             K::bracketleft => "[".to_string(),
             K::bracketright => "]".to_string(),
-            K::Left => tr("Left Arrow").to_string(),
-            K::Right => tr("Right Arrow").to_string(),
-            K::Up => tr("Up Arrow").to_string(),
-            K::Down => tr("Down Arrow").to_string(),
+            K::Left => super::glyphs::ARROW_LEFT.to_string(),
+            K::Right => super::glyphs::ARROW_RIGHT.to_string(),
+            K::Up => super::glyphs::ARROW_UP.to_string(),
+            K::Down => super::glyphs::ARROW_DOWN.to_string(),
             k => {
                 let n = k
                     .name()

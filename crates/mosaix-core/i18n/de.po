@@ -2611,3 +2611,9 @@ msgstr "JPEG-Qualität"
 
 msgid "16-bit (PNG, TIFF, PSD)"
 msgstr "16 Bit (PNG, TIFF, PSD)"
+
+msgid "Filter"
+msgstr "Filter"
+
+msgid "No plugins yet"
+msgstr "Noch keine Plugins"

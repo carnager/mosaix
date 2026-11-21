@@ -9,9 +9,11 @@ pub mod adjust_ui;
 pub mod dock;
 pub mod files;
 pub mod font_ui;
+pub mod glyphs;
 pub mod gradient_ui;
 pub mod icons;
 pub mod log;
+pub mod menus;
 pub mod palette;
 pub mod panels;
 pub mod raw_ui;
@@ -49,6 +51,7 @@ impl Gui {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let ctx = egui::Context::default();
         panels::style(&ctx);
+        add_icon_font(&ctx);
         let renderer =
             egui_wgpu::Renderer::new(device, format, egui_wgpu::RendererOptions::default());
         Self {
@@ -281,4 +284,20 @@ pub fn egui_key(sym: smithay_client_toolkit::seat::keyboard::Keysym) -> Option<e
         K::z | K::Z => Key::Z,
         _ => return None,
     })
+}
+
+/// Phosphor icons as a fallback of the proportional font, so glyphs from
+/// [`glyphs`] can sit in any label.
+fn add_icon_font(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "phosphor".into(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../../assets/Phosphor.ttf"))),
+    );
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        if let Some(list) = fonts.families.get_mut(&family) {
+            list.push("phosphor".into());
+        }
+    }
+    ctx.set_fonts(fonts);
 }

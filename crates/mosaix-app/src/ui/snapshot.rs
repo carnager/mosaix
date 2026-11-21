@@ -136,6 +136,13 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         histogram: None,
     };
     tracing::info!("{}", tr!("UI snapshot {w}×{h}", w = w, h = h));
+    if let Ok(menu) = std::env::var("MOSAIX_SNAPSHOT_MENU")
+        && let Some(i) = super::palette::MENUS.iter().position(|m| m.eq_ignore_ascii_case(&menu))
+    {
+        // Roughly where the menu bar puts it.
+        const X: [f32; 7] = [4.0, 34.0, 68.0, 114.0, 154.0, 200.0, 236.0];
+        state.snapshot_menu = Some((super::palette::MENUS[i], X[i]));
+    }
     let palette = std::env::var("MOSAIX_SNAPSHOT_PALETTE").ok();
     if let Some(q) = &palette {
         state.palette = Some((q.clone(), 0));
