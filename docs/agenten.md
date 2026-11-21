@@ -38,7 +38,8 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 
 | Werkzeug | Zweck |
 |---|---|
-| `document_new`, `document_open`, `document_info` | Dokument anlegen/öffnen; Struktur, Ebenenbaum, Verlauf abfragen |
+| `document_new`, `document_open`, `document_info` | Dokument anlegen/öffnen; Struktur, Ebenenbaum, Verlauf abfragen. Kamera-RAW (CR2/CR3, NEF, ARW, RAF, ORF, RW2, DNG …) wird szenenlinear entwickelt; `raw: {"white_balance": {"mode": "as_shot"\|"auto"\|"daylight"} oder {"mode": "custom", "temperature": 5200, "tint": 10}, "exposure": 0.5}` |
+| `raw_info` | Kamera, Objektiv, Aufnahmedaten und Weißabgleich (Temperatur/Tönung) einer RAW-Datei, ohne sie zu öffnen |
 | `layer_add`, `layer_duplicate`, `layer_delete`, `layer_select`, `layer_move`, `layer_group`, `layer_ungroup` | Ebenenverwaltung |
 | `layer_set` | Name, Deckkraft, Füllmethode (`multiply`, `screen`, `overlay`, … 19 Stück), Sichtbarkeit |
 | `set_blend_space` | `srgb` (Photoshop-artig) oder `linear` |

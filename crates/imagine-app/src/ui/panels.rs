@@ -213,6 +213,8 @@ pub struct Model {
 #[derive(Debug, Clone)]
 pub enum Action {
     Command(Cmd),
+    /// Open a camera RAW file developed with these settings.
+    OpenRaw(std::path::PathBuf, imagine_io::raw::Develop),
     Tool(ToolId),
     Color([f32; 3]),
     BgColor([f32; 3]),
@@ -345,6 +347,8 @@ pub struct State {
     hex: Option<String>,
     pub file: Option<super::files::FileDialog>,
     pub new_doc: Option<super::files::NewDialog>,
+    /// Developing a camera RAW file before it opens.
+    pub raw: Option<super::raw_ui::RawDialog>,
     /// Unsaved-changes question: what happens if the user discards.
     pub confirm: Option<String>,
     adj_editor: super::adjust_ui::EditorState,
@@ -398,6 +402,7 @@ impl State {
             || self.confirm.is_some()
             || self.file.is_some()
             || self.new_doc.is_some()
+            || self.raw.is_some()
             || self.dialog.is_some()
             || self.filter.is_some()
             || self.vec_editor.fonts.open
@@ -549,6 +554,11 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
         && !d.show(ctx, &mut out)
     {
         st.new_doc = None;
+    }
+    if let Some(d) = &mut st.raw
+        && !d.show(ctx, &mut out)
+    {
+        st.raw = None;
     }
     filter_dialog(ctx, st, &mut out);
     shortcuts_dialog(ctx, m, st, &mut out);

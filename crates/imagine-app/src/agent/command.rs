@@ -80,6 +80,13 @@ pub enum Command {
     },
     DocumentOpen {
         path: PathBuf,
+        /// How to develop a camera RAW file (default: as shot, no exposure change).
+        #[serde(default)]
+        raw: Option<imagine_io::raw::Develop>,
+    },
+    /// Camera, shot data and as-shot white balance of a RAW file.
+    RawInfo {
+        path: PathBuf,
     },
     DocumentInfo,
     LayerAdd {
@@ -423,6 +430,7 @@ impl Command {
         match self {
             Self::DocumentNew { .. } => "document_new",
             Self::DocumentOpen { .. } => "document_open",
+            Self::RawInfo { .. } => "raw_info",
             Self::DocumentInfo => "document_info",
             Self::LayerAdd { .. } => "layer_add",
             Self::LayerDuplicate { .. } => "layer_duplicate",
@@ -724,12 +732,29 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
             out.replaced_document = true;
             Ok(out)
         }
-        Command::DocumentOpen { path } => {
+        Command::DocumentOpen { path, raw } => {
             ensure!(path.exists(), "{} does not exist", path.display());
-            *ctx.session = Some(session::load(ctx.gpu, ctx.format, Source::File(path))?);
+            let source = match raw {
+                Some(d) => {
+                    ensure!(imagine_io::raw::is_raw(&path), "{} is not a camera RAW file", path.display());
+                    Source::Raw(path, d)
+                }
+                None => Source::File(path),
+            };
+            *ctx.session = Some(session::load(ctx.gpu, ctx.format, source)?);
             let mut out = Output::json(info(session(ctx.session)?));
             out.replaced_document = true;
             Ok(out)
+        }
+        Command::RawInfo { path } => {
+            ensure!(imagine_io::raw::is_raw(&path), "{} is not a camera RAW file", path.display());
+            let f = imagine_io::raw::RawFile::open(&path)?;
+            let i = &f.info;
+            Ok(Output::json(json!({
+                "camera": i.camera, "lens": i.lens, "iso": i.iso, "exposure_time": i.exposure_time,
+                "aperture": i.aperture, "focal_length": i.focal_length,
+                "as_shot": i.as_shot.map(|(t, tint)| json!({ "temperature": t.round(), "tint": tint.round() })),
+            })))
         }
         Command::PatternList => {
             let lib = crate::app::patterns::load_library(&crate::app::patterns::pattern_dir());
@@ -1559,7 +1584,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             });
             ok(s)
         }
-        Command::PatternList | Command::PatternImport { .. } => unreachable!(),
+        Command::PatternList | Command::PatternImport { .. } | Command::RawInfo { .. } => unreachable!(),
         Command::PatternDefine { name } => {
             let c = s.engine.copy_pixels(true).map_err(engine_err)?;
             let img = crate::app::clipboard::to_rgba8(c.w, c.h, &c.px);

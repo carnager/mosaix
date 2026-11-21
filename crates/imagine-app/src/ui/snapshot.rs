@@ -148,6 +148,11 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             ));
         }
         Ok("new") => state.new_doc = Some(Default::default()),
+        Ok(d) if d.starts_with("raw:") => {
+            let mut r = super::raw_ui::RawDialog::new(d[4..].into());
+            r.wait();
+            state.raw = Some(r);
+        }
         Ok("export") => {
             let mut d = super::files::FileDialog::new(
                 super::files::FileMode::ExportAs,

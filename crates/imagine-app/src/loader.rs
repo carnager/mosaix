@@ -19,6 +19,8 @@ use std::collections::HashMap;
 
 pub enum Source {
     File(PathBuf),
+    /// A camera RAW file developed with these settings (plain `File` uses the defaults).
+    Raw(PathBuf, imagine_io::raw::Develop),
     /// Procedural test image.
     Demo(u32, u32),
     /// Empty transparent document.
@@ -126,7 +128,33 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
         };
         (msg, layer)
     };
+    let source = match source {
+        Source::File(p) if imagine_io::raw::is_raw(&p) => Source::Raw(p, Default::default()),
+        s => s,
+    };
     match source {
+        Source::Raw(path, develop) => {
+            let name = file_name(&path);
+            let (w, h, px, info) = imagine_io::raw::load(&path, &develop)?;
+            let decode_ms = ms(t0);
+            tracing::info!(
+                "{}",
+                tr!(
+                    "developed {camera} RAW ({shot}) in {ms} ms",
+                    camera = info.camera,
+                    shot = info.shot(),
+                    ms = format!("{decode_ms:.0}")
+                )
+            );
+            let (msg, layer) = single_layer(w, h, name, Some(path.clone()));
+            send(msg)?;
+            let px = Pixels::Linear32(&px);
+            stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
+            send(LoaderMsg::Done {
+                decode_ms,
+                total_ms: ms(t0),
+            })?;
+        }
         Source::Blank(w, h) => {
             let (mut msg, _) = single_layer(w, h, tr("Untitled").into(), None);
             if let LoaderMsg::Structure { expected_tiles, .. } = &mut msg {

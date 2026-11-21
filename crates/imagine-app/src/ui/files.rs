@@ -77,7 +77,8 @@ fn list(dir: &Path, mode: FileMode) -> Result<Vec<Entry>, String> {
             let dir = md.is_dir();
             let ext_ok = Path::new(&name)
                 .extension()
-                .is_some_and(|x| exts.iter().any(|e| x.eq_ignore_ascii_case(e)));
+                .is_some_and(|x| exts.iter().any(|e| x.eq_ignore_ascii_case(e)))
+                || (mode == FileMode::Open && imagine_io::raw::is_raw(Path::new(&name)));
             (dir || ext_ok).then_some(Entry {
                 name,
                 dir,
@@ -347,11 +348,11 @@ impl FileDialog {
                 if self.mode == FileMode::ExportAs {
                     self.export_options(ui);
                 }
-                ui.label(
-                    RichText::new(self.mode.extensions().join(", "))
-                        .weak()
-                        .small(),
-                );
+                let mut exts = self.mode.extensions().join(", ");
+                if self.mode == FileMode::Open {
+                    exts = format!("{exts}, {}", tr("camera RAW"));
+                }
+                ui.label(RichText::new(exts).weak().small());
             });
         open && !done
     }

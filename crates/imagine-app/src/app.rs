@@ -1762,6 +1762,11 @@ impl App {
     fn run_pending(&mut self, action: Pending) {
         match action {
             Pending::Quit => self.exit = true,
+            Pending::Open(p) if imagine_io::raw::is_raw(&p) => {
+                self.ui_state.raw = Some(ui::raw_ui::RawDialog::new(p));
+                self.ui_state.hidden = false;
+                self.needs_redraw = true;
+            }
             Pending::Open(p) => self.open_source(Source::File(p), false),
             Pending::New { w, h, white } => self.open_source(Source::Blank(w, h), white),
         }
@@ -3577,6 +3582,7 @@ impl App {
                     self.engine_op(|e| e.bake_smart_filters(layer, tr("Apply Smart Filters")))
                 }
                 Action::OpenFile(p) => self.guard_unsaved(Pending::Open(p)),
+                Action::OpenRaw(p, d) => self.open_source(Source::Raw(p, d), false),
                 Action::NewDocument { w, h, white } => {
                     self.guard_unsaved(Pending::New { w, h, white })
                 }

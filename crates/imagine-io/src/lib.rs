@@ -10,6 +10,7 @@ pub mod psd_data;
 pub mod psd_fx;
 pub mod psd_patterns;
 pub mod psd_shape;
+pub mod raw;
 mod psd_layers;
 
 pub use native::BlobRef;

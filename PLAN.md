@@ -497,6 +497,11 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 **Noch offen in Phase 7:** editierbarer Text im PSD-Export, AVIF/JPEG XL in weiten Farbräumen, Pinsel-Dynamik aus ABR.
 
+### Phase 8 – Erweiterbarkeit & Kür (begonnen 2026-11-21)
+
+- **Kamera-RAW** (2026-11-21): CR2/CR3, NEF, ARW, RAF (auch X-Trans), ORF, RW2, PEF, DNG … über `rawler` (Dekodieren, Demosaicing PPG/X-Trans bilinear, Zuschnitt); eigener Farbschritt in `imagine-io/raw.rs`: Weißabgleich (Wie Aufnahme, Automatisch = Grauwelt, Tageslicht, Temperatur/Tönung über die Planck-Kurve), Kameramatrix nach linearem sRGB ohne Gamut-Beschneidung (szenenlinear, Farben außerhalb sRGB bleiben), ausgefressene Lichter neutral, Belichtung, Ausrichtung. Beim Öffnen erscheint „RAW entwickeln“ mit Vorschau (1400 px, Regler live); Kommandozeile/`--export` entwickeln mit „Wie Aufnahme“. 24 MP in 0,3–0,4 s. Geprüft gegen LibRaw (`dcraw_emu -w -o 1 -4`) mit Canon 6D, Nikon D750, Sony A7 III, Fuji X-T2, iPhone-DNG: deckungsgleich bis auf die Canon, bei der rawler die Kamera-Automatik statt „Wie Aufnahme“ (1,1,1) liest. Agent: `document_open raw: {white_balance, exposure}`, `raw_info`. Werkzeug: `cargo run --example rawdev`.
+  Offen: Lichter-Rekonstruktion, Rauschminderung, Objektivkorrektur, besseres X-Trans-Demosaicing, RAW als Smart-Objekt (später neu entwickeln).
+
 ## Nächster konkreter Schritt
 
 Phase 6 weiter: Zeichenstift, Text direkt im Bild bearbeiten.
