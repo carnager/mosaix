@@ -1,2 +1,5 @@
 target/
 *.tracy
+# Documents saved into the repo by accident
+/*.mosaix
+/*.imagine
