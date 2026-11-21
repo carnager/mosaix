@@ -2085,14 +2085,22 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                 egui::pos2(name_end, rect.max.y - 1.0),
                             );
                             let r = ui.put(edit_rect, egui::TextEdit::singleline(text));
-                            r.request_focus();
-                            if r.lost_focus() {
+                            // Enter (or clicking elsewhere) renames, Escape cancels.
+                            // The focus is only requested while editing: asking
+                            // every frame took it back right after Enter.
+                            let (enter, escape) = ui.input(|i| {
+                                (
+                                    i.key_pressed(egui::Key::Enter),
+                                    i.key_pressed(egui::Key::Escape),
+                                )
+                            });
+                            if enter || escape || r.lost_focus() || r.clicked_elsewhere() {
                                 let (id, name) = st.rename.take().unwrap();
-                                if ui.input(|i| !i.key_pressed(egui::Key::Escape))
-                                    && !name.trim().is_empty()
-                                {
+                                if !escape && !name.trim().is_empty() {
                                     out.push(Action::RenameLayer(id, name.trim().to_string()));
                                 }
+                            } else if !r.has_focus() {
+                                r.request_focus();
                             }
                         } else {
                             if row.group {
