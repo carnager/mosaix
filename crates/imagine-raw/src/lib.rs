@@ -1,4 +1,4 @@
-//! Camera RAW development: decoding and demosaicing via `rawler`, then our
+//! Camera RAW development (crate imagine-raw): decoding and demosaicing via `rawler`, then our
 //! own colour step – white balance (as shot, automatic, daylight or a colour
 //! temperature), the camera matrix to linear sRGB and exposure. The result is
 //! scene-linear and keeps colours outside sRGB (negative components), as the
@@ -13,7 +13,7 @@ use rawler::imgop::xyz::Illuminant;
 use rawler::rawsource::RawSource;
 use rawler::{Orientation, RawImage};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+pub use imagine_core::raw::{Develop, WhiteBalance};
 
 /// File extensions treated as camera RAW.
 pub const EXTENSIONS: &[&str] = &[
@@ -27,36 +27,8 @@ pub fn is_raw(path: &Path) -> bool {
         .is_some_and(|e| EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum WhiteBalance {
-    /// What the camera recorded.
-    AsShot,
-    /// Grey world over the unclipped pixels.
-    Auto,
-    /// Neutral under D65.
-    Daylight,
-    /// A colour temperature in kelvin; positive tint is more magenta.
-    Custom { temperature: f32, tint: f32 },
-}
-
-/// How to develop a RAW file.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Develop {
-    pub white_balance: WhiteBalance,
-    /// In stops.
-    pub exposure: f32,
-}
-
-impl Default for Develop {
-    fn default() -> Self {
-        Self { white_balance: WhiteBalance::AsShot, exposure: 0.0 }
-    }
-}
-
 /// What the file says about the shot.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Info {
     pub camera: String,
     pub lens: Option<String>,
@@ -101,7 +73,12 @@ pub struct CameraImage {
 impl CameraImage {
     /// A box-filtered copy whose longer side is at most `max`.
     pub fn downscale(&self, max: usize) -> CameraImage {
-        let f = self.width.max(self.height).div_ceil(max.max(1)).max(1);
+        self.shrink(self.width.max(self.height).div_ceil(max.max(1)))
+    }
+
+    /// A box-filtered copy, `f` times smaller (rounded down).
+    pub fn shrink(&self, f: usize) -> CameraImage {
+        let f = f.max(1);
         if f == 1 {
             return self.clone();
         }
@@ -210,6 +187,15 @@ const TINT_SCALE: f32 = 300.0;
 impl RawFile {
     pub fn open(path: &Path) -> Result<Self> {
         let src = RawSource::new(path).with_context(|| path.display().to_string())?;
+        Self::decode(src)
+    }
+
+    /// Decodes a RAW file held in memory; `name` is its file name.
+    pub fn from_bytes(bytes: std::sync::Arc<Vec<u8>>, name: &str) -> Result<Self> {
+        Self::decode(RawSource::new_from_shared_vec(bytes).with_path(name))
+    }
+
+    fn decode(src: RawSource) -> Result<Self> {
         let decoder = rawler::get_decoder(&src).map_err(|e| anyhow!("{e}"))?;
         let params = RawDecodeParams::default();
         let raw = decoder.raw_image(&src, &params, false).map_err(|e| anyhow!("{e}"))?;
@@ -280,6 +266,12 @@ impl RawFile {
         };
         f.info.as_shot = f.as_shot_wb().map(|wb| f.temperature_of(wb));
         Ok(f)
+    }
+
+    /// Size of the developed image of `cam` (after orientation).
+    pub fn output_size(&self, cam: &CameraImage) -> (u32, u32) {
+        let (w, h) = (cam.width as u32, cam.height as u32);
+        if self.swaps_axes() { (h, w) } else { (w, h) }
     }
 
     fn swaps_axes(&self) -> bool {

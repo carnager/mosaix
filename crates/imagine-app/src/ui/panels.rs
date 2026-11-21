@@ -195,6 +195,7 @@ pub struct Model {
     pub busy: bool,
     pub recent: Vec<std::path::PathBuf>,
     pub active_adjustment: Option<imagine_core::Adjustment>,
+    pub active_raw: Option<super::raw_ui::ActiveRaw>,
     pub active_vector: Option<imagine_core::VectorLayer>,
     /// Layer styles of the active layer (`None` for groups and adjustments).
     pub active_effects: Option<Vec<imagine_core::style::Effect>>,
@@ -240,6 +241,11 @@ pub enum Action {
     },
     SetVector {
         v: imagine_core::VectorLayer,
+        done: bool,
+    },
+    /// Re-develop the active RAW layer.
+    SetRaw {
+        d: imagine_core::raw::Develop,
         done: bool,
     },
     FontUsed(String),
@@ -588,7 +594,7 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
             .resizable(false)
             .show(ui, |ui| toolbar(ui, m, st, &mut out));
         // A newly selected text, shape or adjustment layer shows its properties.
-        let has_props = m.active_vector.is_some() || m.active_adjustment.is_some();
+        let has_props = m.active_vector.is_some() || m.active_adjustment.is_some() || m.active_raw.is_some();
         if has_props && !st.had_props {
             st.focus_pane = Some(super::dock::Pane::Properties);
         }
@@ -929,6 +935,10 @@ pub(super) fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: 
         if let Some(f) = e.toggle_favourite {
             out.push(Action::ToggleFavouriteFont(f));
         }
+    } else if let Some(r) = &m.active_raw {
+        if let Some((d, done)) = super::raw_ui::layer_editor(ui, r) {
+            out.push(Action::SetRaw { d, done });
+        }
     } else if let Some(adj) = &m.active_adjustment {
         if let Some((adj, done)) =
             super::adjust_ui::editor(ui, adj, &mut st.adj_editor, m.histogram.as_deref())
@@ -938,7 +948,7 @@ pub(super) fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: 
     } else {
         ui.label(
             RichText::new(tr(
-                "Pixel layer – text, shape and adjustment layers show their settings here.",
+                "Pixel layer – text, shape, RAW and adjustment layers show their settings here.",
             ))
             .weak(),
         );

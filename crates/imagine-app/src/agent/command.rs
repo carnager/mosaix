@@ -324,6 +324,12 @@ pub enum Command {
     LayerRasterize {
         layer: Option<LayerId>,
     },
+    /// Re-develops a RAW layer.
+    RawSet {
+        layer: Option<LayerId>,
+        white_balance: Option<imagine_core::raw::WhiteBalance>,
+        exposure: Option<f32>,
+    },
     LayerEffectsSet {
         layer: Option<LayerId>,
         effects: Vec<imagine_core::style::Effect>,
@@ -471,6 +477,7 @@ impl Command {
             Self::ShapeAdd { .. } => "shape_add",
             Self::VectorSet { .. } => "vector_set",
             Self::LayerRasterize { .. } => "layer_rasterize",
+            Self::RawSet { .. } => "raw_set",
             Self::PatternList => "pattern_list",
             Self::PatternImport { .. } => "pattern_import",
             Self::PatternDefine { .. } => "pattern_define",
@@ -1571,6 +1578,31 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 .map_err(engine_err)?;
             vector_ok(s, id)
         }
+        Command::RawSet { layer, white_balance, exposure } => {
+            let id = target_layer(s, layer)?;
+            let mut d = s
+                .engine
+                .doc()
+                .find(id)
+                .and_then(|l| l.raw().map(|r| r.develop))
+                .with_context(|| format!("layer {id} is not a RAW layer"))?;
+            if let Some(wb) = white_balance {
+                d.white_balance = wb;
+            }
+            if let Some(e) = exposure {
+                ensure!((-10.0..=10.0).contains(&e), "exposure must be −10…10 stops");
+                d.exposure = e;
+            }
+            s.engine.set_raw(id, d, tr("Develop RAW"), None).map_err(engine_err)?;
+            s.engine.flush();
+            let sum = s.engine.raw_summary(id);
+            Ok(Output::json(json!({
+                "layer": id,
+                "develop": d,
+                "temperature": sum.as_ref().map(|m| m.temperature(d.white_balance).0.round()),
+                "tint": sum.as_ref().map(|m| m.temperature(d.white_balance).1.round()),
+            })))
+        }
         Command::LayerEffectsSet { layer, effects } => {
             let id = target_layer(s, layer)?;
             let l = s.engine.doc().find(id).unwrap();
@@ -2020,6 +2052,10 @@ pub fn info(s: &Session) -> Value {
                         v["type"] = "group".into();
                         v["children"] = layers(c).into();
                     }
+                    Content::Raw(r) => {
+                        v["type"] = "raw".into();
+                        v["raw"] = json!({ "file": r.data.name, "develop": r.develop, "transform": r.transform });
+                    }
                     Content::Vector(vl) => {
                         v["type"] = "vector".into();
                         v["vector"] = serde_json::to_value(vl).unwrap_or_default();
@@ -2105,6 +2141,22 @@ fn place_image(
     name: Option<String>,
 ) -> anyhow::Result<Output> {
     not_painting(s)?;
+    if imagine_io::raw::is_raw(path) {
+        // A RAW file stays a RAW layer (developed as shot, editable with raw_set).
+        let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let data = imagine_core::raw::RawData::new(
+            std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?,
+            fname,
+        );
+        let mut r = imagine_core::raw::RawLayer::new(data, Default::default());
+        r.transform[4] = x as f64;
+        r.transform[5] = y as f64;
+        let name = name.unwrap_or_else(|| path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        let id = s.engine.add_raw(r, &name, tr("Place Image")).context("cannot add the layer")?;
+        s.engine.flush();
+        ensure!(s.engine.raw_summary(id).is_some(), "cannot develop {}", path.display());
+        return Ok(Output::json(json!({ "layer": id })));
+    }
     let mut reader = image::ImageReader::open(path)?.with_guessed_format()?;
     reader.no_limits();
     let img = reader

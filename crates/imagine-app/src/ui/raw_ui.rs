@@ -189,74 +189,118 @@ impl RawDialog {
 
     fn controls(&mut self, ui: &mut egui::Ui, name: &str) {
         ui.label(RichText::new(name).strong());
-        if let Some(l) = &self.loaded {
-            let i = &l.file.info;
-            ui.label(RichText::new(&i.camera).weak());
-            if let Some(lens) = &i.lens {
-                ui.label(RichText::new(lens).weak());
-            }
-            ui.label(RichText::new(i.shot()).weak());
-        }
-        ui.add_space(8.0);
         let Some(l) = &self.loaded else {
             return;
         };
-        let wb = self.develop.white_balance;
-        let mut mode = Mode::of(wb);
-        // What the current setting is as temperature and tint.
-        let (mut temp, mut tint) = match wb {
-            WhiteBalance::Custom { temperature, tint } => (temperature, tint),
-            _ => l.file.temperature_of(l.file.multipliers(wb, &l.cam)),
-        };
-        // Sliders round what they show; only a real move switches to Custom.
-        let (temp0, tint0) = (temp, tint);
-        let mut changed = false;
-        egui::Grid::new("raw controls").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-            ui.label(tr("White Balance"));
-            egui::ComboBox::from_id_salt("raw wb").selected_text(mode.label()).show_ui(ui, |ui| {
-                for m in Mode::ALL {
-                    if ui.selectable_label(mode == m, m.label()).clicked() && mode != m {
-                        mode = m;
-                        changed = true;
-                    }
-                }
-            });
-            ui.end_row();
-            ui.label(tr("Temperature"));
-            ui.add(egui::Slider::new(&mut temp, 2000.0..=25000.0).logarithmic(true).suffix(" K").max_decimals(0));
-            if (temp - temp0).abs() > 1.0 {
-                mode = Mode::Custom;
-                changed = true;
-            }
-            ui.end_row();
-            ui.label(tr("Tint"));
-            ui.add(egui::Slider::new(&mut tint, -150.0..=150.0).max_decimals(0));
-            if (tint - tint0).abs() > 0.5 {
-                mode = Mode::Custom;
-                changed = true;
-            }
-            ui.end_row();
-            ui.label(tr("Exposure"));
-            if ui
-                .add(egui::Slider::new(&mut self.develop.exposure, -5.0..=5.0).suffix(" EV").max_decimals(2))
-                .changed()
-            {
-                self.dirty = true;
-            }
-            ui.end_row();
-        });
-        if changed {
-            self.develop.white_balance = match mode {
-                Mode::AsShot => WhiteBalance::AsShot,
-                Mode::Auto => WhiteBalance::Auto,
-                Mode::Daylight => WhiteBalance::Daylight,
-                Mode::Custom => WhiteBalance::Custom { temperature: temp, tint },
-            };
-            self.dirty = true;
-        }
-        if ui.small_button(tr("Reset")).clicked() {
-            self.develop = Develop::default();
-            self.dirty = true;
-        }
+        info_lines(ui, &l.file.info);
+        ui.add_space(8.0);
+        let (file, cam) = (&l.file, &l.cam);
+        let e = develop_controls(ui, &mut self.develop, "raw dialog", |wb| file.temperature_of(file.multipliers(wb, cam)));
+        self.dirty |= e.changed;
     }
+}
+
+/// Camera, lens and shot data.
+pub fn info_lines(ui: &mut egui::Ui, i: &imagine_io::raw::Info) {
+    ui.label(RichText::new(&i.camera).weak());
+    if let Some(lens) = &i.lens {
+        ui.label(RichText::new(lens).weak());
+    }
+    ui.label(RichText::new(i.shot()).weak());
+}
+
+/// White balance, temperature, tint and exposure. `temperature_of` gives
+/// what the non-custom settings stand for.
+pub fn develop_controls(
+    ui: &mut egui::Ui,
+    develop: &mut Develop,
+    salt: &str,
+    temperature_of: impl Fn(WhiteBalance) -> (f32, f32),
+) -> super::gradient_ui::Out {
+    let mut out = super::gradient_ui::Out::default();
+    let wb = develop.white_balance;
+    let mut mode = Mode::of(wb);
+    let (mut temp, mut tint) = temperature_of(wb);
+    // Sliders round what they show; only a real move switches to Custom.
+    let (temp0, tint0) = (temp, tint);
+    let mut wb_changed = false;
+    let track = |out: &mut super::gradient_ui::Out, r: &egui::Response| {
+        if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged() && !r.has_focus()) {
+            out.done = true;
+        }
+    };
+    egui::Grid::new(("raw controls", salt)).num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+        ui.label(tr("White Balance"));
+        egui::ComboBox::from_id_salt(("raw wb", salt)).selected_text(mode.label()).show_ui(ui, |ui| {
+            for m in Mode::ALL {
+                if ui.selectable_label(mode == m, m.label()).clicked() && mode != m {
+                    mode = m;
+                    wb_changed = true;
+                    out.done = true;
+                }
+            }
+        });
+        ui.end_row();
+        ui.label(tr("Temperature"));
+        let r = ui.add(egui::Slider::new(&mut temp, 2000.0..=25000.0).logarithmic(true).suffix(" K").max_decimals(0));
+        if (temp - temp0).abs() > 1.0 {
+            mode = Mode::Custom;
+            wb_changed = true;
+        }
+        track(&mut out, &r);
+        ui.end_row();
+        ui.label(tr("Tint"));
+        let r = ui.add(egui::Slider::new(&mut tint, -150.0..=150.0).max_decimals(0));
+        if (tint - tint0).abs() > 0.5 {
+            mode = Mode::Custom;
+            wb_changed = true;
+        }
+        track(&mut out, &r);
+        ui.end_row();
+        ui.label(tr("Exposure"));
+        let r = ui.add(egui::Slider::new(&mut develop.exposure, -5.0..=5.0).suffix(" EV").max_decimals(2));
+        out.changed |= r.changed();
+        track(&mut out, &r);
+        ui.end_row();
+    });
+    if wb_changed {
+        develop.white_balance = match mode {
+            Mode::AsShot => WhiteBalance::AsShot,
+            Mode::Auto => WhiteBalance::Auto,
+            Mode::Daylight => WhiteBalance::Daylight,
+            Mode::Custom => WhiteBalance::Custom { temperature: temp, tint },
+        };
+        out.changed = true;
+    }
+    if ui.small_button(tr("Reset")).clicked() && *develop != Develop::default() {
+        *develop = Develop::default();
+        out.changed = true;
+        out.done = true;
+    }
+    out
+}
+
+/// The Properties panel of a RAW layer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveRaw {
+    pub file: String,
+    pub develop: Develop,
+    pub summary: Option<imagine_gpu::engine::raw::RawSummary>,
+}
+
+/// Returns the new settings and whether the edit is finished.
+pub fn layer_editor(ui: &mut egui::Ui, a: &ActiveRaw) -> Option<(Develop, bool)> {
+    ui.label(RichText::new(&a.file).strong());
+    let Some(sum) = &a.summary else {
+        ui.add(egui::Spinner::new());
+        return None;
+    };
+    info_lines(ui, &sum.info);
+    ui.label(RichText::new(format!("{} × {} px", sum.size.0, sum.size.1)).weak());
+    ui.add_space(8.0);
+    let mut d = a.develop;
+    let e = develop_controls(ui, &mut d, "raw layer", |wb| sum.temperature(wb));
+    ui.add_space(6.0);
+    ui.label(RichText::new(tr("Ctrl+T transforms losslessly, Layer › Rasterize turns it into pixels")).weak().small());
+    (e.changed || e.done).then_some((d, e.done))
 }

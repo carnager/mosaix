@@ -122,6 +122,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         busy: false,
         recent: Vec::new(),
         active_adjustment: None,
+        active_raw: None,
         active_vector: None,
         active_effects: Some(Vec::new()),
         fonts: Default::default(),
@@ -270,6 +271,20 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         if super::adjust_ui::wants_histogram(model.active_adjustment.as_ref()) {
             model.histogram = Some(s.engine.histogram(Some(model.active)));
         }
+    }
+    if let Ok(path) = std::env::var("IMAGINE_SNAPSHOT_RAW") {
+        // A RAW layer (its Properties panel).
+        let p = std::path::Path::new(&path);
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let data = imagine_core::raw::RawData::new(std::fs::read(p)?, name.clone());
+        let mut r = imagine_core::raw::RawLayer::new(data, Default::default());
+        r.develop.exposure = 0.5;
+        r.transform = [0.4, 0.0, 0.0, 0.4, 0.0, 0.0];
+        let id = s.engine.add_raw(r.clone(), "RAW", tr("Place Image")).unwrap_or_default();
+        s.engine.flush();
+        model.active_raw = Some(super::raw_ui::ActiveRaw { file: name, develop: r.develop, summary: s.engine.raw_summary(id) });
+        model.layers = panels::layer_rows(s.engine.doc());
+        model.active = s.engine.doc().active;
     }
     if std::env::var_os("IMAGINE_SNAPSHOT_CLIP").is_some() {
         // Clip the second-lowest layer to the one below (row display only).

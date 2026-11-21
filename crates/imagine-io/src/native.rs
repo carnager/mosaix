@@ -12,6 +12,7 @@
 //! footer; if the tail is damaged (crash during an append) they fall back to
 //! the previous valid footer. Dead space is reclaimed by a full rewrite.
 
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
@@ -31,8 +32,8 @@ pub const MAGIC: &[u8; 8] = b"IMAGINE\x01";
 const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
 /// 1: layers. 2: + layer masks and selection. … 7: fill opacity. 8: gradient /
-/// pattern fills and multi-stop gradient overlays.
-const FORMAT_VERSION: u32 = 8;
+/// pattern fills and multi-stop gradient overlays. 9: RAW layers.
+const FORMAT_VERSION: u32 = 9;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
 const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
 
@@ -127,6 +128,15 @@ enum ContentEntry {
     Vector {
         vector: imagine_core::VectorLayer,
     },
+    /// Since format 9: a camera RAW file (stored as is) and its development.
+    Raw {
+        /// The RAW file's name.
+        file: String,
+        develop: imagine_core::raw::Develop,
+        transform: imagine_core::vector::Affine,
+        offset: u64,
+        len: u64,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -194,8 +204,8 @@ fn entry_to_mask(e: MaskEntry, file_len: u64) -> anyhow::Result<(Mask<BlobRef>, 
     ))
 }
 
-fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
-    fn layers(ls: &[Layer<BlobRef>]) -> Vec<LayerEntry> {
+fn to_manifest(doc: &Document<BlobRef>, raw: &HashMap<u64, BlobRef>) -> Manifest {
+    fn layers(ls: &[Layer<BlobRef>], raw: &HashMap<u64, BlobRef>) -> Vec<LayerEntry> {
         ls.iter()
             .map(|l| LayerEntry {
                 id: l.id,
@@ -218,12 +228,22 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
                         ContentEntry::Pixels { tiles }
                     }
                     Content::Group(c) => ContentEntry::Group {
-                        children: layers(c),
+                        children: layers(c, raw),
                     },
                     Content::Adjustment(a) => ContentEntry::Adjustment {
                         adjustment: a.clone(),
                     },
                     Content::Vector(v) => ContentEntry::Vector { vector: v.clone() },
+                    Content::Raw(r) => {
+                        let b = raw[&r.data.id];
+                        ContentEntry::Raw {
+                            file: r.data.name.clone(),
+                            develop: r.develop,
+                            transform: r.transform,
+                            offset: b.offset,
+                            len: b.len,
+                        }
+                    }
                 },
                 mask: l.mask.as_ref().map(|m| mask_to_entry(m, l.mask_enabled)),
                 filters: l.filters.clone(),
@@ -240,12 +260,16 @@ fn to_manifest(doc: &Document<BlobRef>) -> Manifest {
         height: doc.height,
         blend_space: doc.blend_space.key().into(),
         active: doc.active,
-        layers: layers(&doc.layers),
+        layers: layers(&doc.layers, raw),
         selection: doc.selection.as_ref().map(|m| mask_to_entry(m, true)),
     }
 }
 
-fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>> {
+/// Reads a blob; remembers where each RAW file (by id) came from.
+type ReadBlob<'a> = &'a dyn Fn(BlobRef) -> anyhow::Result<Vec<u8>>;
+type RawRefs<'a> = &'a std::cell::RefCell<HashMap<u64, BlobRef>>;
+
+fn from_manifest(m: Manifest, file_len: u64, read: ReadBlob, raws: RawRefs) -> anyhow::Result<Document<BlobRef>> {
     ensure!(
         m.format <= FORMAT_VERSION,
         "{}",
@@ -254,7 +278,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
             version = m.format
         )
     );
-    fn layers(es: Vec<LayerEntry>, file_len: u64) -> anyhow::Result<Vec<Layer<BlobRef>>> {
+    fn layers(es: Vec<LayerEntry>, file_len: u64, read: ReadBlob, raws: RawRefs) -> anyhow::Result<Vec<Layer<BlobRef>>> {
         es.into_iter()
             .map(|e| {
                 let content = match e.content {
@@ -276,9 +300,18 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
                         }
                         Content::Pixels(Arc::new(map))
                     }
-                    ContentEntry::Group { children } => Content::Group(layers(children, file_len)?),
+                    ContentEntry::Group { children } => Content::Group(layers(children, file_len, read, raws)?),
                     ContentEntry::Adjustment { adjustment } => Content::Adjustment(adjustment),
                     ContentEntry::Vector { vector } => Content::Vector(vector),
+                    ContentEntry::Raw { file: name, develop, transform, offset, len } => {
+                        ensure!(offset + len <= file_len, "{}", imagine_core::tr("tile outside the file"));
+                        let b = BlobRef { offset, len };
+                        let data = imagine_core::raw::RawData::new(read(b)?, name);
+                        raws.borrow_mut().insert(data.id, b);
+                        let mut r = imagine_core::raw::RawLayer::new(data, develop);
+                        r.transform = transform;
+                        Content::Raw(r)
+                    }
                 };
                 let (mask, mask_enabled) = match e.mask {
                     Some(m) => {
@@ -307,7 +340,7 @@ fn from_manifest(m: Manifest, file_len: u64) -> anyhow::Result<Document<BlobRef>
     }
     let mut doc = Document::empty(m.width, m.height);
     doc.blend_space = BlendSpace::from_key(&m.blend_space).unwrap_or_default();
-    doc.layers = layers(m.layers, file_len)?;
+    doc.layers = layers(m.layers, file_len, read, raws)?;
     doc.selection = m
         .selection
         .map(|e| entry_to_mask(e, file_len).map(|m| m.0))
@@ -373,6 +406,8 @@ pub struct Writer {
     pos: u64,
     /// For full writes: temp file to rename over `path` on finish.
     rename: Option<(PathBuf, PathBuf)>,
+    /// RAW files (by id) already in the file.
+    raw: HashMap<u64, BlobRef>,
 }
 
 impl Writer {
@@ -386,6 +421,7 @@ impl Writer {
             file,
             pos: MAGIC.len() as u64,
             rename: Some((tmp, path.to_path_buf())),
+            raw: HashMap::new(),
         })
     }
 
@@ -410,6 +446,7 @@ impl Writer {
             file,
             pos: len,
             rename: None,
+            raw: HashMap::new(),
         })
     }
 
@@ -423,10 +460,34 @@ impl Writer {
         Ok(r)
     }
 
+    /// Blobs already in the file (incremental saves): RAW files among them
+    /// (ids with the top bit set) are not written again.
+    pub fn reuse(&mut self, known: &HashMap<u64, BlobRef>) {
+        self.raw.extend(known.iter().filter(|(k, _)| **k & 1 << 63 != 0).map(|(k, v)| (*k, *v)));
+    }
+
     /// Writes manifest and footer, syncs, and (for full writes) renames into place.
     /// Returns the final file length.
-    pub fn finish(mut self, doc: &Document<BlobRef>) -> anyhow::Result<u64> {
-        let json = serde_json::to_vec(&to_manifest(doc))?;
+    pub fn finish(self, doc: &Document<BlobRef>) -> anyhow::Result<u64> {
+        self.finish_refs(doc).map(|(len, _)| len)
+    }
+
+    /// Like [`Writer::finish`], also returning where the RAW files are stored.
+    pub fn finish_refs(mut self, doc: &Document<BlobRef>) -> anyhow::Result<(u64, HashMap<u64, BlobRef>)> {
+        let mut missing: Vec<imagine_core::raw::RawData> = Vec::new();
+        doc.for_each(&mut |l, _| {
+            if let Some(r) = l.raw()
+                && !self.raw.contains_key(&r.data.id)
+                && !missing.iter().any(|m| m.id == r.data.id)
+            {
+                missing.push(r.data.clone());
+            }
+        });
+        for d in missing {
+            let b = self.write_blob(&d.bytes)?;
+            self.raw.insert(d.id, b);
+        }
+        let json = serde_json::to_vec(&to_manifest(doc, &self.raw))?;
         let manifest = zstd::bulk::compress(&json, 3)?;
         let m = self.write_blob(&manifest)?;
         self.file.write_all(&m.offset.to_le_bytes())?;
@@ -438,7 +499,7 @@ impl Writer {
             std::fs::rename(&tmp, &path)
                 .with_context(|| imagine_core::tr!("replacing {path}", path = path.display()))?;
         }
-        Ok(self.pos)
+        Ok((self.pos, std::mem::take(&mut self.raw)))
     }
 }
 
@@ -454,6 +515,8 @@ impl Drop for Writer {
 pub struct Reader {
     file: File,
     pub len: u64,
+    /// Where the RAW files of the document are stored (by id).
+    pub raw: HashMap<u64, BlobRef>,
 }
 
 impl Reader {
@@ -469,14 +532,14 @@ impl Reader {
             "{}",
             imagine_core::tr("not an imagine file")
         );
-        let r = Self { file, len };
+        let r = Self { file, len, raw: Default::default() };
 
         // Newest footer first; fall back to older ones if the tail is damaged.
         let mut end = len;
         let mut last_err = None;
         while let Some(footer_at) = r.find_footer_before(end)? {
             match r.read_manifest(footer_at) {
-                Ok(doc) => {
+                Ok((doc, raw)) => {
                     if end != len {
                         eprintln!(
                             "{}",
@@ -488,6 +551,7 @@ impl Reader {
                     return Ok((
                         Self {
                             len: footer_at + FOOTER_LEN,
+                            raw,
                             ..r
                         },
                         doc,
@@ -533,7 +597,7 @@ impl Reader {
         Ok(None)
     }
 
-    fn read_manifest(&self, footer_at: u64) -> anyhow::Result<Document<BlobRef>> {
+    fn read_manifest(&self, footer_at: u64) -> anyhow::Result<(Document<BlobRef>, HashMap<u64, BlobRef>)> {
         let mut f = [0u8; 16];
         self.file.read_exact_at(&mut f, footer_at)?;
         let offset = u64::from_le_bytes(f[..8].try_into().unwrap());
@@ -545,7 +609,9 @@ impl Reader {
         let json = zstd::stream::decode_all(&data[..])?;
         let manifest: Manifest = serde_json::from_slice(&json)
             .context(imagine_core::tr("table of contents unreadable"))?;
-        from_manifest(manifest, footer_at)
+        let raws = std::cell::RefCell::new(HashMap::new());
+        let doc = from_manifest(manifest, footer_at, &|b| self.read_blob(b), &raws)?;
+        Ok((doc, raws.into_inner()))
     }
 
     /// Reads one blob (thread-safe, positional read).
@@ -644,6 +710,32 @@ mod tests {
 
         // Stale length → append refused.
         assert!(Writer::append(&path, len).is_err());
+    }
+
+    #[test]
+    fn raw_layers_are_stored_once() {
+        use imagine_core::raw::{Develop, RawData, RawLayer, WhiteBalance};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("r.imagine");
+        let mut doc = Document::<BlobRef>::new(64, 64);
+        let bytes: Vec<u8> = (0..100_000u32).map(|i| (i * 7) as u8).collect();
+        let mut r = RawLayer::new(RawData::new(bytes.clone(), "x.NEF".into()), Develop::default());
+        r.develop.white_balance = WhiteBalance::Custom { temperature: 4000.0, tint: 5.0 };
+        r.transform[4] = 12.0;
+        doc.add_raw(r.clone(), "photo");
+        doc.add_raw(r.clone(), "same file again");
+        let (len, refs) = Writer::create(&path).unwrap().finish_refs(&doc).unwrap();
+        assert!(len > 100_000 && len < 200_000, "stored once: {len}");
+        let (rd, loaded) = Reader::open(&path).unwrap();
+        assert_eq!(rd.raw, refs);
+        let l = loaded.find(loaded.active).unwrap().raw().unwrap();
+        assert_eq!(l, &r);
+        assert_eq!(*l.data.bytes, bytes);
+        // An incremental save reuses the stored file.
+        let mut w = Writer::append(&path, len).unwrap();
+        w.reuse(&rd.raw);
+        let (len2, _) = w.finish_refs(&loaded).unwrap();
+        assert!(len2 - len < 10_000, "{}", len2 - len);
     }
 
     #[test]

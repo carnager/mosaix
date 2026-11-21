@@ -42,10 +42,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Converts a vector layer into ordinary pixels.
+    /// Converts a vector or RAW layer into ordinary pixels.
     pub fn rasterize(&mut self, layer: LayerId, label: &str) -> Result<(), &'static str> {
-        if self.doc.find(layer).is_none_or(|l| l.vector().is_none()) {
-            return Err(imagine_core::tr("not a text or shape layer"));
+        if self.doc.find(layer).is_none_or(|l| !l.is_rendered()) {
+            return Err(imagine_core::tr("not a text, shape or RAW layer"));
         }
         self.refresh_smart();
         let tiles = self

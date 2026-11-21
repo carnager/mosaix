@@ -27,6 +27,8 @@ pub enum Content<T> {
     /// Text or shape, rasterised when composited (the engine substitutes
     /// the rendered pixels; `program` skips it in the raw document).
     Vector(crate::vector::VectorLayer),
+    /// A camera RAW file, developed when composited (like `Vector`).
+    Raw(crate::raw::RawLayer),
 }
 
 /// One tile of a GPU-side mask.
@@ -144,6 +146,18 @@ impl<T> Layer<T> {
             Content::Vector(v) => Some(v),
             _ => None,
         }
+    }
+
+    pub fn raw(&self) -> Option<&crate::raw::RawLayer> {
+        match &self.content {
+            Content::Raw(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Text, shape or RAW: pixels the engine produces from a description.
+    pub fn is_rendered(&self) -> bool {
+        matches!(self.content, Content::Vector(_) | Content::Raw(_))
     }
 
     pub fn adjustment(&self) -> Option<&Adjustment> {
@@ -364,6 +378,13 @@ impl<T: Clone> Document<T> {
         let id = self.alloc_id();
         let mut l = Layer::pixels(id, &v.default_name());
         l.content = Content::Vector(v);
+        self.insert_above_active(l)
+    }
+
+    pub fn add_raw(&mut self, r: crate::raw::RawLayer, name: &str) -> LayerId {
+        let id = self.alloc_id();
+        let mut l = Layer::pixels(id, name);
+        l.content = Content::Raw(r);
         self.insert_above_active(l)
     }
 
@@ -651,7 +672,7 @@ impl<T: Clone> Document<T> {
                         });
                     }
                 }
-                Content::Vector(_) => {}
+                Content::Vector(_) | Content::Raw(_) => {}
                 Content::Adjustment(adj) => {
                     // Nothing below in this group: nothing to adjust.
                     if !out.is_empty() && !matches!(out.last(), Some(Op::Push { pass: false })) {
@@ -789,6 +810,7 @@ impl<T: Clone> Document<T> {
                         Content::Group(c) => Content::Group(map(c, f)),
                         Content::Adjustment(a) => Content::Adjustment(a.clone()),
                         Content::Vector(v) => Content::Vector(v.clone()),
+                        Content::Raw(r) => Content::Raw(r.clone()),
                     },
                     mask: l.mask.as_ref().map(|m| m.map(f)),
                     mask_enabled: l.mask_enabled,

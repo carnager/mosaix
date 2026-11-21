@@ -14,6 +14,7 @@ pub mod history;
 pub mod i18n;
 pub mod mask;
 pub mod pattern;
+pub mod raw;
 pub mod style;
 pub mod tile;
 pub mod vector;

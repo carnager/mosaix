@@ -94,9 +94,11 @@ impl SaveJob {
                 refs.insert(*serial, writer.write_blob(&blob)?);
             }
             let doc_blobs = doc.map_tiles(&mut |s| refs[s]);
-            let len = writer
-                .finish(&doc_blobs)
+            writer.reuse(&refs);
+            let (len, raw_refs) = writer
+                .finish_refs(&doc_blobs)
                 .with_context(|| tr!("saving {path}", path = path.display()))?;
+            refs.extend(raw_refs);
             debug_assert!(live_bytes(&doc_blobs) <= len);
             let report = SaveReport {
                 path,
@@ -161,6 +163,9 @@ pub fn load(
                     .context(tr("mask before document structure"))?;
                 s.add_mask(m)?;
             }
+            m @ (LoaderMsg::RawDecoded { .. } | LoaderMsg::RawBlobs(_)) => {
+                session.as_mut().context(tr("tiles before document structure"))?.add_raw(m);
+            }
             LoaderMsg::Done { .. } => break,
             LoaderMsg::Error(e) => bail!("{}", tr!("Loading failed: {error}", error = e)),
         }
@@ -202,6 +207,15 @@ impl Session {
             }
         }
         failed
+    }
+
+    /// RAW data from the loader: a decoded file or where a native file stores RAW files.
+    pub fn add_raw(&mut self, m: LoaderMsg) {
+        match m {
+            LoaderMsg::RawDecoded { id, file, cam } => self.engine.prime_raw(id, file, cam),
+            LoaderMsg::RawBlobs(b) => self.saved.extend(b),
+            _ => {}
+        }
     }
 
     /// Installs a loaded layer mask or selection.
@@ -266,7 +280,11 @@ impl Session {
         // All referenced tiles, by pool.
         let mut layer_tiles: HashMap<u64, Tile> = HashMap::new();
         let mut mask_tiles: HashMap<u64, Tile> = HashMap::new();
+        let mut raws: Vec<u64> = Vec::new();
         doc.for_each(&mut |l, _| {
+            if let Some(r) = l.raw() {
+                raws.push(r.data.id);
+            }
             if let Some(t) = l.tiles() {
                 for tile in t.values() {
                     layer_tiles
@@ -300,6 +318,7 @@ impl Session {
         let reusable: u64 = layer_tiles
             .keys()
             .chain(mask_tiles.keys())
+            .chain(raws.iter())
             .filter_map(|s| self.saved.get(s))
             .map(|b| b.len)
             .sum();
@@ -309,6 +328,7 @@ impl Session {
             layer_tiles
                 .keys()
                 .chain(mask_tiles.keys())
+                .chain(raws.iter())
                 .filter_map(|s| self.saved.get(s).map(|b| (*s, *b)))
                 .collect()
         } else {
@@ -606,7 +626,7 @@ impl PsdLayers {
                         out.push(WNode::Layer(w));
                     }
                     // The render document has no vector layers left (rasterised).
-                    Content::Vector(_) => *skipped += 1,
+                    Content::Vector(_) | Content::Raw(_) => *skipped += 1,
                 }
             }
             out

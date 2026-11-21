@@ -11,6 +11,7 @@ license = "GPL-3.0-or-later"
 imagine-core = { path = "crates/imagine-core" }
 imagine-gpu = { path = "crates/imagine-gpu" }
 imagine-io = { path = "crates/imagine-io" }
+imagine-raw = { path = "crates/imagine-raw" }
 imagine-vector = { path = "crates/imagine-vector" }
 wgpu = "30"
 smithay-client-toolkit = "0.21"

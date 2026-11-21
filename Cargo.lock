@@ -1483,8 +1483,10 @@ dependencies = [
  "glam",
  "half",
  "imagine-core",
+ "imagine-raw",
  "imagine-vector",
  "pollster",
+ "rayon",
  "serde",
  "tracing",
  "wgpu",
@@ -1501,17 +1503,28 @@ dependencies = [
  "i_overlay",
  "image",
  "imagine-core",
+ "imagine-raw",
  "jpegxl-rs",
  "jpegxl-sys",
  "miniz_oxide 0.8.9",
  "moxcms",
  "ravif",
- "rawler",
  "rayon",
  "serde",
  "serde_json",
  "tempfile",
  "zstd",
+]
+
+[[package]]
+name = "imagine-raw"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "imagine-core",
+ "rawler",
+ "rayon",
 ]
 
 [[package]]

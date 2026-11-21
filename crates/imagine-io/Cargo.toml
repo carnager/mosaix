@@ -21,7 +21,7 @@ i_overlay = "9.2.0"
 jpegxl-sys = "0.13.0"
 ravif = { version = "0.13.0", default-features = false, features = ["threading"] }
 avif-serialize = "0.8.9"
-rawler = "0.8.0"
+imagine-raw.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -131,6 +131,17 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "raw_set",
+            "Re-develop a RAW layer (opened or placed camera RAW files stay RAW layers): white balance and exposure. Returns the settings and the resulting temperature/tint. layer_rasterize turns it into plain pixels.",
+            json!({ "layer": layer_param(),
+                "white_balance": { "type": "object", "description": "{mode: as_shot|auto|daylight} or {mode: custom, temperature: kelvin, tint: -150…150}",
+                    "properties": { "mode": { "type": "string", "enum": ["as_shot", "auto", "daylight", "custom"] },
+                        "temperature": { "type": "number" }, "tint": { "type": "number" } }, "required": ["mode"] },
+                "exposure": { "type": "number", "description": "stops" } }),
+            &[],
+            false,
+        ),
+        tool(
             "raw_info",
             "Camera, lens, shot data (ISO, shutter, aperture, focal length) and the as-shot white balance (temperature/tint) of a camera RAW file, without opening it.",
             json!({ "path": { "type": "string" } }),
@@ -838,7 +849,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples
             .as_object_mut()
@@ -879,6 +890,7 @@ mod tests {
                         ("sample", _) => json!("image"),
                         ("tip", _) => json!("chalk"),
                         ("adjustment", _) => json!({"kind": "invert"}),
+                        ("white_balance", _) => json!({"mode": "auto"}),
                         ("raw", _) => json!({"white_balance": {"mode": "custom", "temperature": 5000, "tint": 0}, "exposure": 1}),
                         ("filter", _) => json!({"kind": "high_pass", "radius": 3}),
                         (_, Some("boolean")) => json!(true),

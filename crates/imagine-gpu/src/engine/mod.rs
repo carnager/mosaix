@@ -31,6 +31,7 @@ mod heal;
 mod histogram;
 mod liquify;
 mod magic;
+pub mod raw;
 mod readback;
 mod selection;
 mod smudge;
@@ -222,6 +223,9 @@ pub struct Engine {
     vectors: HashMap<LayerId, (u64, Arc<HashMap<TileCoord, Tile>>)>,
     /// CPU copies of small rasterised vector layers, keyed by their tile map.
     vector_cpu: HashMap<usize, Arc<HashMap<TileCoord, Vec<half::f16>>>>,
+    /// The last decoded RAW file (demosaiced) and facts about RAW files by id.
+    raw_cache: Option<raw::RawCache>,
+    raw_summaries: HashMap<u64, raw::RawSummary>,
     /// Layer styles: effect layers and styled pixels per layer.
     styles: HashMap<LayerId, style::StyleEntry>,
     /// The composited document when smart filters substitute layer pixels.
@@ -972,6 +976,8 @@ impl Engine {
             smart: HashMap::new(),
             vectors: HashMap::new(),
             vector_cpu: HashMap::new(),
+            raw_cache: None,
+            raw_summaries: HashMap::new(),
             styles: HashMap::new(),
             render: None,
             liquify: None,

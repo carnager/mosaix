@@ -1379,8 +1379,8 @@ msgstr "Photoshop- (.abr) oder GIMP-Pinsel (.gbr, .gih) oder ein Bild (dunkel bz
 msgid "Pillow Emboss"
 msgstr "Kissen"
 
-msgid "Pixel layer – text, shape and adjustment layers show their settings here."
-msgstr "Pixelebene – Text-, Form- und Einstellungsebenen zeigen hier ihre Einstellungen."
+msgid "Pixel layer – text, shape, RAW and adjustment layers show their settings here."
+msgstr "Pixelebene – Text-, Form-, RAW- und Einstellungsebenen zeigen hier ihre Einstellungen."
 
 msgid "Pixels"
 msgstr "Pixel"
@@ -1454,8 +1454,8 @@ msgstr "Verlauf radial"
 msgid "Rasterize"
 msgstr "Rastern"
 
-msgid "Rasterize (Text/Shape to Pixels)"
-msgstr "Rastern (Text/Form zu Pixeln)"
+msgid "Rasterize (Text/Shape/RAW to Pixels)"
+msgstr "Rastern (Text/Form/RAW zu Pixeln)"
 
 msgid "Rec. 2020 at 8 bits may show banding in gradients."
 msgstr "Rec. 2020 mit 8 Bit kann Streifen in Verläufen zeigen."
@@ -2286,8 +2286,8 @@ msgstr "Unterbrechung löschen"
 msgid "Smoothness"
 msgstr "Glättung"
 
-msgid "developed {camera} RAW ({shot}) in {ms} ms"
-msgstr "{camera}-RAW ({shot}) in {ms} ms entwickelt"
+msgid "decoded {camera} RAW ({shot}) in {ms} ms"
+msgstr "{camera}-RAW ({shot}) in {ms} ms dekodiert"
 
 msgid "camera RAW"
 msgstr "Kamera-RAW"
@@ -2317,3 +2317,15 @@ msgstr "Automatisch"
 msgctxt "white balance"
 msgid "Custom"
 msgstr "Benutzerdefiniert"
+
+msgid "not a text, shape or RAW layer"
+msgstr "keine Text-, Form- oder RAW-Ebene"
+
+msgid "RAW decoded in {ms} ms"
+msgstr "RAW in {ms} ms dekodiert"
+
+msgid "RAW layer {id}: {error}"
+msgstr "RAW-Ebene {id}: {error}"
+
+msgid "not a RAW layer"
+msgstr "keine RAW-Ebene"

@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 imagine-vector.workspace = true
+imagine-raw.workspace = true
+rayon.workspace = true
 serde.workspace = true
 imagine-core.workspace = true
 wgpu.workspace = true

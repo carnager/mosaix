@@ -53,6 +53,14 @@ pub enum LoaderMsg {
         tiles: Vec<TileData>,
     },
     Mask(MaskLoad),
+    /// A RAW file the loader already decoded (saves the engine doing it again).
+    RawDecoded {
+        id: u64,
+        file: std::sync::Arc<imagine_io::raw::RawFile>,
+        cam: std::sync::Arc<imagine_io::raw::CameraImage>,
+    },
+    /// Where a native file stores its RAW layers' files (incremental saves).
+    RawBlobs(HashMap<u64, BlobRef>),
     Done {
         decode_ms: f64,
         total_ms: f64,
@@ -135,21 +143,33 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
     match source {
         Source::Raw(path, develop) => {
             let name = file_name(&path);
-            let (w, h, px, info) = imagine_io::raw::load(&path, &develop)?;
+            let bytes = anyhow::Context::with_context(std::fs::read(&path), || path.display().to_string())?;
+            let data = imagine_core::raw::RawData::new(bytes, name.clone());
+            let file = imagine_io::raw::RawFile::from_bytes(data.bytes.clone(), &name)?;
+            let cam = file.camera_image()?;
+            let (w, h) = file.output_size(&cam);
             let decode_ms = ms(t0);
             tracing::info!(
                 "{}",
                 tr!(
-                    "developed {camera} RAW ({shot}) in {ms} ms",
-                    camera = info.camera,
-                    shot = info.shot(),
+                    "decoded {camera} RAW ({shot}) in {ms} ms",
+                    camera = file.info.camera,
+                    shot = file.info.shot(),
                     ms = format!("{decode_ms:.0}")
                 )
             );
-            let (msg, layer) = single_layer(w, h, name, Some(path.clone()));
-            send(msg)?;
-            let px = Pixels::Linear32(&px);
-            stream_tiles(w, h, layer, tx, |x, y| extract_tile(&px, w, h, x, y))?;
+            let id = data.id;
+            let mut doc = Document::<()>::empty(w, h);
+            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(name.clone());
+            doc.add_raw(imagine_core::raw::RawLayer::new(data, develop), &stem);
+            send(LoaderMsg::Structure {
+                doc,
+                name,
+                source: Some(path.clone()),
+                native_len: None,
+                expected_tiles: 0,
+            })?;
+            send(LoaderMsg::RawDecoded { id, file: file.into(), cam: cam.into() })?;
             send(LoaderMsg::Done {
                 decode_ms,
                 total_ms: ms(t0),
@@ -201,6 +221,9 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                 native_len: Some(reader.len),
                 expected_tiles: jobs.len() as u64,
             })?;
+            if !reader.raw.is_empty() {
+                send(LoaderMsg::RawBlobs(reader.raw.clone()))?;
+            }
             jobs.sort_by_key(|j| j.0);
             for layer_jobs in jobs.chunk_by(|a, b| a.0 == b.0) {
                 let layer = layer_jobs[0].0;

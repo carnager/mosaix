@@ -57,8 +57,11 @@ impl Engine {
         let (w, h) = (doc.width.max(1), doc.height.max(1));
         // Content key: the tile map's identity plus the canvas size.
         let mut want: Vec<(LayerId, usize)> = Vec::new();
+        let vectors = &self.vectors;
         doc.for_each(&mut |l, _| {
-            if let Some(t) = l.tiles() {
+            // Text, shape and RAW layers: their rendered pixels.
+            let rendered = l.is_rendered().then(|| vectors.get(&l.id).map(|(_, t)| t)).flatten();
+            if let Some(t) = l.tiles().or(rendered) {
                 want.push((
                     l.id,
                     Arc::as_ptr(t) as usize ^ ((w as usize) << 20) ^ h as usize,

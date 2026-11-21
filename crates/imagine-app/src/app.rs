@@ -910,6 +910,12 @@ impl App {
                     .extend(tiles.into_iter().map(|t| (layer, t)));
                 self.needs_redraw = true;
             }
+            m @ (LoaderMsg::RawDecoded { .. } | LoaderMsg::RawBlobs(_)) => {
+                if let Some(s) = &mut self.session {
+                    s.add_raw(m);
+                }
+                self.needs_redraw = true;
+            }
             LoaderMsg::Mask(m) => {
                 if let Some(s) = &mut self.session
                     && let Err(e) = s.add_mask(m)
@@ -2284,7 +2290,7 @@ impl App {
         self.needs_redraw = true;
     }
 
-    /// Ebene › Rastern: a text or shape layer becomes pixels.
+    /// Layer › Rasterize: a text, shape or RAW layer becomes pixels.
     fn rasterize_active(&mut self) {
         self.engine_op(|e| {
             let id = e.doc().active;
@@ -3186,8 +3192,16 @@ impl App {
             recent: self.settings.recent.clone(),
             active_adjustment: active.and_then(|l| l.adjustment().cloned()),
             active_vector: active.and_then(|l| l.vector().cloned()),
+            active_raw: active.and_then(|l| {
+                let r = l.raw()?;
+                Some(ui::raw_ui::ActiveRaw {
+                    file: r.data.name.clone(),
+                    develop: r.develop,
+                    summary: self.session.as_ref().and_then(|s| s.engine.raw_summary(l.id)),
+                })
+            }),
             active_effects: active
-                .filter(|l| l.is_pixels() || l.vector().is_some())
+                .filter(|l| l.is_pixels() || l.is_rendered())
                 .map(|l| l.effects.clone()),
             fonts: self.fonts.clone(),
             paths: {
@@ -3365,6 +3379,16 @@ impl App {
                             tr("Edit Shape")
                         };
                         let _ = e.set_vector(id, v, label, Some(&format!("vector-{id}")));
+                        if done {
+                            e.end_merge();
+                        }
+                        self.touch();
+                    }
+                }
+                Action::SetRaw { d, done } => {
+                    if let Some(e) = self.engine() {
+                        let id = e.doc().active;
+                        let _ = e.set_raw(id, d, tr("Develop RAW"), Some(&format!("raw-{id}")));
                         if done {
                             e.end_merge();
                         }

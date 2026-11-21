@@ -428,7 +428,7 @@ impl Engine {
         base.for_each(&mut |l, _| {
             let src = match &l.content {
                 Content::Pixels(t) => Some(t.clone()),
-                Content::Vector(_) => vectors.get(&l.id).map(|(_, t)| t.clone()),
+                Content::Vector(_) | Content::Raw(_) => vectors.get(&l.id).map(|(_, t)| t.clone()),
                 _ => None,
             };
             if let Some(t) = src {
@@ -502,7 +502,7 @@ impl Engine {
             let src = match (self.smart.get(&l.id), &l.content) {
                 (Some(e), _) => Some(e.tiles.clone()),
                 (None, Content::Pixels(t)) => Some(t.clone()),
-                (None, Content::Vector(_)) => self.vectors.get(&l.id).map(|(_, t)| t.clone()),
+                (None, Content::Vector(_) | Content::Raw(_)) => self.vectors.get(&l.id).map(|(_, t)| t.clone()),
                 _ => None,
             };
             if let Some(t) = src {
@@ -540,12 +540,19 @@ impl Engine {
     /// Rasterises vector layers whose description changed. True if any did.
     fn refresh_vectors(&mut self) -> bool {
         let base = self.preview.as_ref().map_or(&self.doc, |p| &p.doc);
-        let mut want: Vec<(LayerId, u64, imagine_core::VectorLayer)> = Vec::new();
+        enum Want {
+            Vector(imagine_core::VectorLayer),
+            Raw(imagine_core::raw::RawLayer),
+        }
+        let mut want: Vec<(LayerId, u64, Want)> = Vec::new();
         base.for_each(&mut |l, _| {
+            let mut h = DefaultHasher::new();
             if let Some(v) = l.vector() {
-                let mut h = DefaultHasher::new();
                 format!("{v:?}").hash(&mut h);
-                want.push((l.id, h.finish(), v.clone()));
+                want.push((l.id, h.finish(), Want::Vector(v.clone())));
+            } else if let Some(r) = l.raw() {
+                format!("{r:?}").hash(&mut h);
+                want.push((l.id, h.finish(), Want::Raw(r.clone())));
             }
         });
         let before = self.vectors.len();
@@ -562,7 +569,10 @@ impl Engine {
                 continue;
             }
             let t0 = std::time::Instant::now();
-            let rendered = imagine_vector::render(&v);
+            let rendered = match &v {
+                Want::Vector(v) => imagine_vector::render(v),
+                Want::Raw(r) => self.render_raw(id, r),
+            };
             let mut map = TileSet::new();
             // Small results are kept on the CPU too (layer styles read them without a GPU round trip).
             let cpu: Option<HashMap<TileCoord, Vec<half::f16>>> =
@@ -617,7 +627,7 @@ fn substitute(
                     *t = f;
                 }
             }
-            Content::Vector(_) => {
+            Content::Vector(_) | Content::Raw(_) => {
                 let tiles = filtered
                     .or_else(|| vectors.get(&l.id).map(|(_, t)| t.clone()))
                     .unwrap_or_default();

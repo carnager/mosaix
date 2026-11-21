@@ -219,7 +219,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("Layer", "Ungroup Layers", K::G, true, true, false),
     c(
         "Layer",
-        "Rasterize (Text/Shape to Pixels)",
+        "Rasterize (Text/Shape/RAW to Pixels)",
         K::r,
         true,
         false,

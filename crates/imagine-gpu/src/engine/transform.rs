@@ -295,7 +295,7 @@ impl Engine {
             && self
                 .doc
                 .active_layer()
-                .is_some_and(|l| l.vector().is_some());
+                .is_some_and(|l| l.is_rendered());
         let layer = if vector {
             self.doc.active
         } else {
@@ -338,6 +338,15 @@ impl Engine {
             v.transform = imagine_core::vector::compose(f, v.transform);
             if let Some(o) = out.find_mut(layer) {
                 o.content = imagine_core::doc::Content::Vector(v);
+            }
+        }
+        if let Some(r) = l.raw() {
+            let mut r = r.clone();
+            let m = fwd.matrix2;
+            let f = [m.x_axis.x, m.x_axis.y, m.y_axis.x, m.y_axis.y, fwd.translation.x, fwd.translation.y];
+            r.transform = imagine_core::vector::compose(f, r.transform);
+            if let Some(o) = out.find_mut(layer) {
+                o.content = imagine_core::doc::Content::Raw(r);
             }
         }
         let has_pixels = l.tiles().is_some();
@@ -652,6 +661,9 @@ impl Engine {
                             v.transform,
                         )
                     }
+                    Content::Raw(r) => {
+                        r.transform = imagine_core::vector::compose([1.0, 0.0, 0.0, 1.0, t.x, t.y], r.transform)
+                    }
                     _ => {}
                 }
                 if let Some(m) = &mut l.mask {
@@ -698,7 +710,7 @@ impl Engine {
         if !self
             .doc
             .active_layer()
-            .is_some_and(|l| l.vector().is_some() || l.is_group())
+            .is_some_and(|l| l.is_rendered() || l.is_group())
         {
             self.check_target(StrokeTarget::Pixels)?;
         }
@@ -865,8 +877,12 @@ impl Engine {
         scale: f64,
         samples: u32,
     ) -> Option<Tile> {
-        let tiles: HashMap<TileCoord, Tile> =
-            self.doc.find(layer)?.tiles().map(|t| (**t).clone())?;
+        let l = self.doc.find(layer)?;
+        let tiles: HashMap<TileCoord, Tile> = match l.tiles() {
+            Some(t) => (**t).clone(),
+            None if l.is_rendered() => (*self.vectors.get(&layer)?.1).clone(),
+            None => return None,
+        };
         let mut grids = Grids::default();
         let src = grids.layer(&tiles);
         let inv = DAffine2::from_scale(DVec2::splat(1.0 / scale));
@@ -937,6 +953,19 @@ impl Engine {
                 b[1].floor() as i64,
                 b[2].ceil() as i64,
                 b[3].ceil() as i64,
+            ));
+        }
+        if let Some(r) = l.raw() {
+            let (w, h) = self.raw_summaries.get(&r.data.id)?.size;
+            let t = r.transform;
+            let pts = [(0.0, 0.0), (w as f64, 0.0), (0.0, h as f64), (w as f64, h as f64)]
+                .map(|(x, y)| (t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]));
+            let f = |g: fn(f64, f64) -> f64, k: usize| pts.iter().map(|p| if k == 0 { p.0 } else { p.1 }).reduce(g).unwrap();
+            return Some((
+                f(f64::min, 0).floor() as i64,
+                f(f64::min, 1).floor() as i64,
+                f(f64::max, 0).ceil() as i64,
+                f(f64::max, 1).ceil() as i64,
             ));
         }
         let tiles: Vec<(TileCoord, Tile)> =

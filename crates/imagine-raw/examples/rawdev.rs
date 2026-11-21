@@ -1,6 +1,6 @@
 //! Develops RAW files to 16-bit sRGB PNGs (for comparing with other converters).
 //! Usage: rawdev OUT_DIR FILE… (env WB=as_shot|auto|daylight|<kelvin>, EV=stops, MAX=px)
-use imagine_io::raw::{Develop, RawFile, WhiteBalance};
+use imagine_raw::{Develop, RawFile, WhiteBalance};
 use std::time::Instant;
 
 fn main() -> anyhow::Result<()> {
