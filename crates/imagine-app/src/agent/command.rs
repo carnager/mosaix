@@ -331,6 +331,7 @@ pub enum Command {
         exposure: Option<f32>,
         highlights: Option<imagine_core::raw::Highlights>,
         noise: Option<imagine_core::raw::NoiseReduction>,
+        lens: Option<bool>,
     },
     LayerEffectsSet {
         layer: Option<LayerId>,
@@ -761,7 +762,7 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
             let i = &f.info;
             Ok(Output::json(json!({
                 "camera": i.camera, "lens": i.lens, "iso": i.iso, "exposure_time": i.exposure_time,
-                "aperture": i.aperture, "focal_length": i.focal_length,
+                "aperture": i.aperture, "focal_length": i.focal_length, "lens_profile": i.lens_profile,
                 "as_shot": i.as_shot.map(|(t, tint)| json!({ "temperature": t.round(), "tint": tint.round() })),
             })))
         }
@@ -1580,7 +1581,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 .map_err(engine_err)?;
             vector_ok(s, id)
         }
-        Command::RawSet { layer, white_balance, exposure, highlights, noise } => {
+        Command::RawSet { layer, white_balance, exposure, highlights, noise, lens } => {
             let id = target_layer(s, layer)?;
             let mut d = s
                 .engine
@@ -1598,6 +1599,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             if let Some(h) = highlights {
                 d.highlights = h;
             }
+            if let Some(l) = lens {
+                d.lens = l;
+            }
             if let Some(n) = noise {
                 ensure!(
                     (0.0..=100.0).contains(&n.luminance) && (0.0..=100.0).contains(&n.color),
@@ -1613,6 +1617,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 "develop": d,
                 "temperature": sum.as_ref().map(|m| m.temperature(d.white_balance).0.round()),
                 "tint": sum.as_ref().map(|m| m.temperature(d.white_balance).1.round()),
+                "lens_profile": sum.as_ref().and_then(|m| m.info.lens_profile.clone()),
             })))
         }
         Command::LayerEffectsSet { layer, effects } => {

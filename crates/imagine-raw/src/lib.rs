@@ -16,6 +16,7 @@ use rayon::prelude::*;
 pub use imagine_core::raw::{Develop, Highlights, NoiseReduction, WhiteBalance};
 
 mod denoise;
+pub mod lens;
 
 /// File extensions treated as camera RAW.
 pub const EXTENSIONS: &[&str] = &[
@@ -40,6 +41,8 @@ pub struct Info {
     pub focal_length: Option<f32>,
     /// The as-shot white balance as temperature and tint, if the camera stored one.
     pub as_shot: Option<(f32, f32)>,
+    /// The lens profile found for the shot (lensfun).
+    pub lens_profile: Option<String>,
 }
 
 impl Info {
@@ -114,6 +117,7 @@ pub struct RawFile {
     rgb_to_cam: [[f32; 3]; 4],
     /// Camera → linear sRGB.
     cam_to_rgb: [[f32; 4]; 3],
+    lens: Option<lens::LensProfile>,
 }
 
 const SRGB_TO_XYZ: [[f32; 3]; 3] = [
@@ -255,7 +259,7 @@ impl RawFile {
             }
         }
         let cam_to_rgb = pseudo_inverse(&norm, channels);
-        let mut f = Self { raw, info: Info::default(), channels, rgb_to_cam, cam_to_rgb };
+        let mut f = Self { raw, info: Info::default(), channels, rgb_to_cam, cam_to_rgb, lens: None };
         let r = |v: &rawler::formats::tiff::Rational| if v.d == 0 { None } else { Some(v.n as f32 / v.d as f32) };
         f.info = Info {
             camera: format!("{} {}", f.raw.clean_make, f.raw.clean_model).trim().to_string(),
@@ -268,8 +272,13 @@ impl RawFile {
             aperture: md.as_ref().and_then(|m| m.exif.fnumber.as_ref().and_then(r)),
             focal_length: md.as_ref().and_then(|m| m.exif.focal_length.as_ref().and_then(r)),
             as_shot: None,
+            lens_profile: None,
         };
         f.info.as_shot = f.as_shot_wb().map(|wb| f.temperature_of(wb));
+        f.lens = f.info.lens.as_deref().and_then(|l| {
+            lens::find(&f.raw.clean_make, &f.raw.clean_model, l, f.info.focal_length, f.info.aperture)
+        });
+        f.info.lens_profile = f.lens.as_ref().map(|l| l.name.clone());
         Ok(f)
     }
 
@@ -449,6 +458,7 @@ impl RawFile {
     pub fn develop(&self, cam: &CameraImage, d: &Develop) -> (u32, u32, Vec<f32>) {
         let wb = self.multipliers(d.white_balance, cam);
         let reconstruct = d.highlights == Highlights::Reconstruct;
+        let corr = if d.lens { self.lens.clone().map(|p| lens::Corrector::new(p, cam.width, cam.height)) } else { None };
         let chroma = if reconstruct { self.highlight_chroma(cam, &wb) } else { [0.0; 4] };
         let gain = d.exposure.exp2();
         let n = self.channels;
@@ -471,12 +481,36 @@ impl RawFile {
                     Orientation::Rotate270 => (w - 1 - oy, ox),
                     _ => (ox, oy),
                 };
-                let p = cam.data[sy * w + sx];
+                // Camera values and which channels hit the sensor limit.
+                let (p, sat) = match &corr {
+                    None => {
+                        let p = cam.data[sy * w + sx];
+                        (p, p.map(|v| v >= CLIPPED))
+                    }
+                    Some(k) => {
+                        // Through the lens correction: each colour from its own place.
+                        let (x, y) = (sx as f32 + 0.5, sy as f32 + 0.5);
+                        let mut q = [0.0f32; 4];
+                        for (ch, v) in q.iter_mut().enumerate().take(n) {
+                            let c = if ch == 2 && n == 3 { 2 } else if ch == 0 { 0 } else { 1 };
+                            let (u, v2) = k.source(x, y, c, k.zoom);
+                            *v = sample(cam, u - 0.5, v2 - 0.5, ch);
+                        }
+                        let (gx, gy) = k.source(x, y, 1, k.zoom);
+                        let g = k.vignetting_gain(gx, gy);
+                        // Clipping is judged before the gain (it is a sensor limit).
+                        let sat = q.map(|v| v >= CLIPPED);
+                        for v in &mut q[..n] {
+                            *v *= g;
+                        }
+                        (q, sat)
+                    }
+                };
                 let mut c = [0.0f32; 4];
                 let mut clipped = 0;
                 for k in 0..n {
                     c[k] = p[k] * wb[k];
-                    clipped += (p[k] >= CLIPPED) as usize;
+                    clipped += sat[k] as usize;
                 }
                 if !reconstruct {
                     for v in &mut c[..n] {
@@ -490,7 +524,7 @@ impl RawFile {
                     // Blown channels from the others plus the colour around them.
                     let v = c;
                     for k in 0..n {
-                        if p[k] >= CLIPPED {
+                        if sat[k] {
                             let opp = (0..n).filter(|j| *j != k).map(|j| v[j]).sum::<f32>() / (n - 1) as f32;
                             c[k] = v[k].max(opp + chroma[k]);
                         }
@@ -505,6 +539,18 @@ impl RawFile {
         });
         (ow as u32, oh as u32, out)
     }
+}
+
+/// Bilinear sample of one channel (pixel centres at integers), edges clamped.
+fn sample(cam: &CameraImage, x: f32, y: f32, ch: usize) -> f32 {
+    let (w, h) = (cam.width as isize, cam.height as isize);
+    let (fx, fy) = (x.floor(), y.floor());
+    let (ax, ay) = (x - fx, y - fy);
+    let at = |xx: isize, yy: isize| cam.data[(yy.clamp(0, h - 1) * w + xx.clamp(0, w - 1)) as usize][ch];
+    let (ix, iy) = (fx as isize, fy as isize);
+    let top = at(ix, iy) + (at(ix + 1, iy) - at(ix, iy)) * ax;
+    let bot = at(ix, iy + 1) + (at(ix + 1, iy + 1) - at(ix, iy + 1)) * ax;
+    top + (bot - top) * ay
 }
 
 /// Opens and develops a RAW file in one go.

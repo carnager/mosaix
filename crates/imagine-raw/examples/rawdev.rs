@@ -1,6 +1,6 @@
 //! Develops RAW files to 16-bit sRGB PNGs (for comparing with other converters).
 //! Usage: rawdev OUT_DIR FILE… (env WB=as_shot|auto|daylight|<kelvin>, EV=stops, MAX=px,
-//! HL=clip|reconstruct, NR=luminance,color, CROP=x,y,w,h of the output)
+//! HL=clip|reconstruct, NR=luminance,color, LENS=0, CROP=x,y,w,h of the output)
 use imagine_raw::{Develop, Highlights, NoiseReduction, RawFile, WhiteBalance};
 use std::time::Instant;
 
@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
             Some(NoiseReduction { luminance: l.parse().ok()?, color: c.parse().ok()? })
         })
         .unwrap_or_default();
-    let d = Develop { white_balance: wb, exposure, highlights, noise };
+    let d = Develop { white_balance: wb, exposure, highlights, noise, lens: std::env::var("LENS").as_deref() != Ok("0") };
     let crop: Option<Vec<u32>> = std::env::var("CROP").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     let max: usize = std::env::var("MAX").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
     for f in args {
@@ -41,9 +41,10 @@ fn main() -> anyhow::Result<()> {
         let t3 = Instant::now();
         let mean: Vec<f64> = (0..3).map(|c| px.chunks(4).map(|p| p[c] as f64).sum::<f64>() / (w * h) as f64).collect();
         println!(
-            "{f}: {} | {} | as shot {:?} | {w}×{h} | decode {:.0} ms, demosaic {:.0} ms, denoise {:.0} ms, develop {:.0} ms | mean {:.4} {:.4} {:.4}",
+            "{f}: {} | {} | lens {:?} | as shot {:?} | {w}×{h} | decode {:.0} ms, demosaic {:.0} ms, denoise {:.0} ms, develop {:.0} ms | mean {:.4} {:.4} {:.4}",
             raw.info.camera,
             raw.info.shot(),
+            raw.info.lens_profile,
             raw.info.as_shot.map(|(t, ti)| (t.round(), ti.round())),
             (t1 - t0).as_secs_f64() * 1e3,
             (t2 - t1).as_secs_f64() * 1e3,

@@ -1525,6 +1525,7 @@ dependencies = [
  "imagine-core",
  "rawler",
  "rayon",
+ "roxmltree",
 ]
 
 [[package]]

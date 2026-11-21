@@ -40,7 +40,7 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 |---|---|
 | `document_new`, `document_open`, `document_info` | Dokument anlegen/öffnen; Struktur, Ebenenbaum, Verlauf abfragen. Kamera-RAW (CR2/CR3, NEF, ARW, RAF, ORF, RW2, DNG …) wird szenenlinear entwickelt; `raw: {"white_balance": {"mode": "as_shot"\|"auto"\|"daylight"} oder {"mode": "custom", "temperature": 5200, "tint": 10}, "exposure": 0.5}` |
 | `raw_info` | Kamera, Objektiv, Aufnahmedaten und Weißabgleich (Temperatur/Tönung) einer RAW-Datei, ohne sie zu öffnen |
-| `raw_set` | RAW-Ebene neu entwickeln (`white_balance`, `exposure`, `highlights`: `reconstruct`/`clip`, `noise`: `{luminance, color}` 0–100). Geöffnete und mit `place_image` platzierte RAW-Dateien bleiben RAW-Ebenen (Datei steckt im Dokument, Transformieren verlustfrei); `layer_rasterize` macht Pixel daraus |
+| `raw_set` | RAW-Ebene neu entwickeln (`white_balance`, `exposure`, `highlights`: `reconstruct`/`clip`, `noise`: `{luminance, color}` 0–100, `lens`: Objektivkorrektur an/aus). Geöffnete und mit `place_image` platzierte RAW-Dateien bleiben RAW-Ebenen (Datei steckt im Dokument, Transformieren verlustfrei); `layer_rasterize` macht Pixel daraus |
 | `layer_add`, `layer_duplicate`, `layer_delete`, `layer_select`, `layer_move`, `layer_group`, `layer_ungroup` | Ebenenverwaltung |
 | `layer_set` | Name, Deckkraft, Füllmethode (`multiply`, `screen`, `overlay`, … 19 Stück), Sichtbarkeit |
 | `set_blend_space` | `srgb` (Photoshop-artig) oder `linear` |

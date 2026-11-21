@@ -61,6 +61,8 @@ pub struct Develop {
     pub exposure: f32,
     pub highlights: Highlights,
     pub noise: NoiseReduction,
+    /// Lens correction from the lens profile (when one is found).
+    pub lens: bool,
 }
 
 impl Default for Develop {
@@ -70,6 +72,7 @@ impl Default for Develop {
             exposure: 0.0,
             highlights: Highlights::default(),
             noise: NoiseReduction::default(),
+            lens: true,
         }
     }
 }

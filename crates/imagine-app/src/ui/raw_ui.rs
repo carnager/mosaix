@@ -204,7 +204,7 @@ impl RawDialog {
         info_lines(ui, &l.file.info);
         ui.add_space(8.0);
         let (file, cam) = (&l.file, &l.cam);
-        let e = develop_controls(ui, &mut self.develop, "raw dialog", |wb| file.temperature_of(file.multipliers(wb, cam)));
+        let e = develop_controls(ui, &mut self.develop, "raw dialog", file.info.lens_profile.as_deref(), |wb| file.temperature_of(file.multipliers(wb, cam)));
         self.dirty |= e.changed;
     }
 }
@@ -224,6 +224,7 @@ pub fn develop_controls(
     ui: &mut egui::Ui,
     develop: &mut Develop,
     salt: &str,
+    lens_profile: Option<&str>,
     temperature_of: impl Fn(WhiteBalance) -> (f32, f32),
 ) -> super::gradient_ui::Out {
     let mut out = super::gradient_ui::Out::default();
@@ -311,6 +312,23 @@ pub fn develop_controls(
         slow(ui, &mut develop.noise.color, "color");
         ui.end_row();
     });
+    ui.add_space(4.0);
+    match lens_profile {
+        Some(name) => {
+            if ui
+                .checkbox(&mut develop.lens, tr("Lens Correction"))
+                .on_hover_text(tr("Distortion, color fringes and vignetting from the lensfun profile"))
+                .changed()
+            {
+                out.changed = true;
+                out.done = true;
+            }
+            ui.label(RichText::new(name).weak().small());
+        }
+        None => {
+            ui.label(RichText::new(tr("No lens profile found")).weak().small());
+        }
+    }
     if wb_changed {
         develop.white_balance = match mode {
             Mode::AsShot => WhiteBalance::AsShot,
@@ -347,7 +365,7 @@ pub fn layer_editor(ui: &mut egui::Ui, a: &ActiveRaw) -> Option<(Develop, bool)>
     ui.label(RichText::new(format!("{} × {} px", sum.size.0, sum.size.1)).weak());
     ui.add_space(8.0);
     let mut d = a.develop;
-    let e = develop_controls(ui, &mut d, "raw layer", |wb| sum.temperature(wb));
+    let e = develop_controls(ui, &mut d, "raw layer", sum.info.lens_profile.as_deref(), |wb| sum.temperature(wb));
     ui.add_space(6.0);
     ui.label(RichText::new(tr("Ctrl+T transforms losslessly, Layer › Rasterize turns it into pixels")).weak().small());
     (e.changed || e.done).then_some((d, e.done))

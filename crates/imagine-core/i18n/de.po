@@ -2343,3 +2343,12 @@ msgstr "Beschneiden"
 msgctxt "noise"
 msgid "Color"
 msgstr "Farbe"
+
+msgid "Lens Correction"
+msgstr "Objektivkorrektur"
+
+msgid "Distortion, color fringes and vignetting from the lensfun profile"
+msgstr "Verzeichnung, Farbsäume und Vignettierung aus dem lensfun-Profil"
+
+msgid "No lens profile found"
+msgstr "Kein Objektivprofil gefunden"
