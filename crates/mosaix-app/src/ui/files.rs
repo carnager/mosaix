@@ -22,7 +22,7 @@ pub enum FileMode {
 }
 
 impl FileMode {
-    fn title(self) -> &'static str {
+    pub fn title(self) -> &'static str {
         match self {
             FileMode::Open => tr("Open"),
             FileMode::SaveAs => tr("Save As"),
@@ -32,7 +32,7 @@ impl FileMode {
         }
     }
 
-    fn extensions(self) -> &'static [&'static str] {
+    pub fn extensions(self) -> &'static [&'static str] {
         match self {
             FileMode::Open => &[
                 "mosaix", "imagine", "psd", "psb", "png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "exr",
@@ -102,6 +102,30 @@ fn human(bytes: u64) -> String {
     }
 }
 
+/// What choosing `path` in a `mode` dialog does (adds a missing extension).
+pub fn action_for(mode: FileMode, mut path: PathBuf, export: ExportOptions) -> Action {
+    match mode {
+        FileMode::Open => Action::OpenFile(path),
+        FileMode::ImportBrushes => Action::ImportBrushes(path),
+        FileMode::ImportPatterns => Action::ImportPatterns(path),
+        FileMode::SaveAs => {
+            if path
+                .extension()
+                .is_none_or(|e| !e.eq_ignore_ascii_case("mosaix") && !e.eq_ignore_ascii_case("imagine"))
+            {
+                path.set_extension("mosaix");
+            }
+            Action::SaveAs(path)
+        }
+        FileMode::ExportAs => {
+            if path.extension().is_none() {
+                path.set_extension("png");
+            }
+            Action::ExportAs(path, export)
+        }
+    }
+}
+
 impl FileDialog {
     /// `start`: folder to show; `name`: suggested file name (save/export).
     pub fn new(mode: FileMode, start: PathBuf, name: String) -> Self {
@@ -140,31 +164,12 @@ impl FileDialog {
         if name.is_empty() {
             return false;
         }
-        let mut path = if Path::new(name).is_absolute() {
+        let path = if Path::new(name).is_absolute() {
             PathBuf::from(name)
         } else {
             self.dir.join(name)
         };
-        match self.mode {
-            FileMode::Open => out.push(Action::OpenFile(path)),
-            FileMode::ImportBrushes => out.push(Action::ImportBrushes(path)),
-            FileMode::ImportPatterns => out.push(Action::ImportPatterns(path)),
-            FileMode::SaveAs => {
-                if path
-                    .extension()
-                    .is_none_or(|e| !e.eq_ignore_ascii_case("mosaix") && !e.eq_ignore_ascii_case("imagine"))
-                {
-                    path.set_extension("mosaix");
-                }
-                out.push(Action::SaveAs(path));
-            }
-            FileMode::ExportAs => {
-                if path.extension().is_none() {
-                    path.set_extension("png");
-                }
-                out.push(Action::ExportAs(path, self.export));
-            }
-        }
+        out.push(action_for(self.mode, path, self.export));
         true
     }
 

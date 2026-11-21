@@ -5,6 +5,7 @@ mod ai;
 mod app;
 mod boxedit;
 mod loader;
+mod portal;
 mod session;
 mod settings;
 mod tablet;

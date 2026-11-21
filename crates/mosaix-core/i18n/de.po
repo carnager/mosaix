@@ -2590,3 +2590,24 @@ msgstr "Alle Ecken"
 
 msgid "Every node becomes a corner: straight lines between the nodes"
 msgstr "Jeder Knoten wird eine Ecke: gerade Linien zwischen den Knoten"
+
+msgid "No system file dialog ({e}), using the built-in one"
+msgstr "Kein System-Dateidialog ({e}), nutze den eingebauten"
+
+msgid "All supported images"
+msgstr "Alle unterstützten Bilder"
+
+msgid "Camera RAW"
+msgstr "Kamera-RAW"
+
+msgid "Brushes and images"
+msgstr "Pinsel und Bilder"
+
+msgid "Patterns and images"
+msgstr "Muster und Bilder"
+
+msgid "JPEG quality"
+msgstr "JPEG-Qualität"
+
+msgid "16-bit (PNG, TIFF, PSD)"
+msgstr "16 Bit (PNG, TIFF, PSD)"

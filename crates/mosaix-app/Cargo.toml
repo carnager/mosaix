@@ -31,6 +31,7 @@ base64.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 pollster.workspace = true
+ashpd = { version = "0.14", default-features = false, features = ["async-io", "file_chooser", "wayland"] }
 rayon.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

@@ -222,6 +222,11 @@ impl Tool {
 
 /// Result of a background job.
 enum BgDone {
+    /// The system file chooser was answered.
+    FilePicked {
+        req: crate::portal::Request,
+        picked: crate::portal::Picked,
+    },
     /// A new selection computed from the one identified by `base`.
     Selection {
         label: &'static str,
@@ -431,6 +436,8 @@ pub struct App {
     /// CPU-heavy work (feathering, wand fill, export encoding) off the UI thread.
     bg_tx: channel::Sender<BgDone>,
     bg_running: usize,
+    /// The system file chooser is open.
+    picking: bool,
     export_job: Option<ExportJob>,
     autosave_job: Option<(std::path::PathBuf, SaveJob)>,
     autosave_path: Option<std::path::PathBuf>,
@@ -670,6 +677,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         save_tx,
         bg_tx,
         bg_running: 0,
+        picking: false,
         export_job: None,
         autosave_job: None,
         autosave_path: None,
@@ -1920,10 +1928,48 @@ impl App {
         }
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_default();
-        let mut d = ui::files::FileDialog::new(mode, dir, name);
-        d.export = self.settings.export;
+        let req = crate::portal::Request { mode, folder: dir, name, export: self.settings.export };
+        if self.picking || self.ui_state.file.is_some() {
+            return;
+        }
+        if std::env::var_os("MOSAIX_BUILTIN_DIALOG").is_some() {
+            self.builtin_file_dialog(req);
+            return;
+        }
+        // The system dialog runs on its own thread; the window stays live meanwhile.
+        self.picking = true;
+        let tx = self.bg_tx.clone();
+        let surface = self.window.wl_surface().clone();
+        std::thread::Builder::new()
+            .name("file chooser".into())
+            .spawn(move || {
+                let picked = crate::portal::pick(&req, Some(surface));
+                let _ = tx.send(BgDone::FilePicked { req, picked });
+            })
+            .expect("spawn file chooser thread");
+    }
+
+    /// The dialog drawn in the window (when there is no desktop portal).
+    fn builtin_file_dialog(&mut self, req: crate::portal::Request) {
+        let mut d = ui::files::FileDialog::new(req.mode, req.folder, req.name);
+        d.export = req.export;
         self.ui_state.file = Some(d);
         self.ui_state.hidden = false;
+    }
+
+    fn file_picked(&mut self, req: crate::portal::Request, picked: crate::portal::Picked) {
+        self.picking = false;
+        match picked {
+            crate::portal::Picked::File(path, export) => {
+                self.apply_ui(vec![ui::files::action_for(req.mode, path, export)]);
+            }
+            crate::portal::Picked::Cancelled => {}
+            crate::portal::Picked::Unavailable(e) => {
+                tracing::info!("{}", tr!("No system file dialog ({e}), using the built-in one", e = e));
+                self.builtin_file_dialog(req);
+            }
+        }
+        self.needs_redraw = true;
     }
 
     fn apply_settings(&mut self) {
@@ -2241,8 +2287,12 @@ impl App {
     }
 
     fn on_background_done(&mut self, done: BgDone) {
-        self.bg_running = self.bg_running.saturating_sub(1);
+        // The file chooser is not counted as background work.
+        if !matches!(done, BgDone::FilePicked { .. }) {
+            self.bg_running = self.bg_running.saturating_sub(1);
+        }
         match done {
+            BgDone::FilePicked { req, picked } => self.file_picked(req, picked),
             BgDone::Autosaved { path, result } => match result {
                 Ok(()) => {
                     tracing::info!(
