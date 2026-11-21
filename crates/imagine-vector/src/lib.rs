@@ -522,6 +522,27 @@ impl Polyline {
         *self.len.last().unwrap()
     }
 
+    /// Arc length of the point on the curve nearest to (x, y), and the
+    /// signed distance from it along the normal (rotate(direction) · (0, 1)).
+    fn project(&self, x: f64, y: f64) -> (f64, f64) {
+        let mut best = (f64::MAX, 0.0, 0.0);
+        for (i, w) in self.pts.windows(2).enumerate() {
+            let (a, b) = (w[0], w[1]);
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let l2 = (dx * dx + dy * dy).max(1e-12);
+            let t = (((x - a.0) * dx + (y - a.1) * dy) / l2).clamp(0.0, 1.0);
+            let (px, py) = (a.0 + dx * t, a.1 + dy * t);
+            let d2 = (x - px).powi(2) + (y - py).powi(2);
+            if d2 < best.0 {
+                let l = l2.sqrt();
+                // Normal (−sin, cos) of the segment direction.
+                let side = ((x - px) * -dy + (y - py) * dx) / l;
+                best = (d2, self.len[i] + l * t, side);
+            }
+        }
+        (best.1, best.2)
+    }
+
     /// Point and direction (radians) at arc length `s`.
     fn at(&self, s: f64) -> (f64, f64, f64) {
         let i = self.len.partition_point(|&l| l <= s).clamp(1, self.pts.len() - 1);
@@ -530,6 +551,48 @@ impl Polyline {
         let t = ((s - self.len[i - 1]) / seg).clamp(0.0, 1.0);
         (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, (b.1 - a.1).atan2(b.0 - a.0))
     }
+}
+
+/// Text on a path: the curve, where the text starts on it and the baseline.
+fn path_frame(t: &TextSpec) -> Option<(Polyline, f64, f64, bool)> {
+    let p = t.path.as_ref()?;
+    let line = Polyline::new(&p.nodes, p.closed, p.flip)?;
+    let l = build_layout(t);
+    let baseline = l.lines().next().map_or(t.size as f64 * 0.8, |ln| ln.metrics().baseline as f64);
+    let start = p.offset.clamp(0.0, 1.0) as f64 * line.total();
+    Some((line, start, baseline, p.closed))
+}
+
+/// Text on a path: a point in the layer's coordinates → the flat line
+/// layout's coordinates (for clicks). `None` if the text has no path.
+pub fn path_to_text(t: &TextSpec, x: f64, y: f64) -> Option<(f32, f32)> {
+    let (line, start, baseline, closed) = path_frame(t)?;
+    let (s, d) = line.project(x, y);
+    let mut fx = s - start;
+    if closed {
+        fx = fx.rem_euclid(line.total());
+    }
+    Some((fx.max(0.0) as f32, (baseline + d) as f32))
+}
+
+/// Text on a path: flat layout coordinates → points in the layer's
+/// coordinates (for the caret and selection). Each input point is mapped.
+pub fn text_to_path(t: &TextSpec, pts: &[(f32, f32)]) -> Option<Vec<(f64, f64)>> {
+    let (line, start, baseline, closed) = path_frame(t)?;
+    let total = line.total();
+    Some(
+        pts.iter()
+            .map(|&(x, y)| {
+                let mut s = start + x as f64;
+                if closed {
+                    s = s.rem_euclid(total);
+                }
+                let (cx, cy, a) = line.at(s.min(total));
+                let d = y as f64 - baseline;
+                (cx - a.sin() * d, cy + a.cos() * d)
+            })
+            .collect(),
+    )
 }
 
 /// The parley layout of a text spec (positions relative to the text box).
@@ -1264,6 +1327,16 @@ mod tests {
         });
         assert!(ink(130, 230), "start of the arc, left side going up");
         assert!(!ink(300, 300), "nothing where straight text would sit");
+        // Clicks and carets map between the curve and the flat line: there and back.
+        let t = match &v.kind {
+            imagine_core::vector::VectorKind::Text(t) => t.clone(),
+            _ => unreachable!(),
+        };
+        for &(x, y) in &[(40.0f32, 20.0f32), (200.0, 35.0), (320.0, 10.0)] {
+            let p = text_to_path(&t, &[(x, y)]).unwrap()[0];
+            let (bx, by) = path_to_text(&t, p.0, p.1).unwrap();
+            assert!((bx - x).abs() < 0.5 && (by - y).abs() < 0.5, "({x},{y}) → {p:?} → ({bx},{by})");
+        }
     }
 
     #[test]

@@ -475,7 +475,7 @@ Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fert
 
 - **Glanz (Satin)** (2026-11-21): letzter fehlender Photoshop-Ebenenstil. Form weichgezeichnet, zwei um ±Abstand entlang des Winkels verschobene Kopien, Betrag der Differenz, Umkehren, auf die Form begrenzt (Standard Multiplizieren). An Photoshops eigener Darstellung vermessen (`fxcmp`: Effekte auf Photoshops gespeicherten Ebenenpixeln gegen das Composite): Weichzeichnen vor dem Vergleich, Stärke 0,8 × Größe – RMSE 0,0049 (vorher fehlend). Innere Effekte jetzt in Photoshops fester Stapelreihenfolge (Muster, Verlauf, Farbe, Glanz, Schein innen, Schatten innen). PSD lesen/schreiben (`ChFX`/`satinMulti`, lineare Kontur), Rundreise pixelgleich; Agent `satin` in `layer_effects_set`.
 
-**Noch offen in Phase 6:** Cursor direkt in Text auf Pfad.
+- **Text auf Pfad direkt bearbeiten** (2026-11-21): Klicks werden auf die Kurve projiziert (Bogenlänge + Abstand → Koordinaten der flachen Zeile), Cursor und Auswahl laufen gebogen entlang der Kurve; Tippen, Markieren, Doppel-/Dreifachklick wie bei normalem Text.
 
 ### Phase 7 – Interop (begonnen 2026-11-20)
 

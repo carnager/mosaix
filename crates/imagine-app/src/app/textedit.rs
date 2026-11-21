@@ -57,10 +57,11 @@ impl App {
         }
     }
 
-    /// Document point → text-box coordinates of `t`.
+    /// Document point → text-box coordinates of `t` (text on a path: the
+    /// point projected onto the curve, in the flat line's coordinates).
     fn to_box(t: &TextSpec, m: DAffine2, doc: DVec2) -> (f32, f32) {
         let p = m.inverse().transform_point2(doc);
-        ((p.x - t.x) as f32, (p.y - t.y) as f32)
+        imagine_vector::path_to_text(t, p.x, p.y).unwrap_or(((p.x - t.x) as f32, (p.y - t.y) as f32))
     }
 
     /// Starts editing a text layer; `at` places the caret (else all is selected).
@@ -75,12 +76,6 @@ impl App {
             return;
         };
         let VectorKind::Text(t) = &v.kind else { return };
-        // Text on a path is edited in the properties panel.
-        if t.path.is_some() {
-            self.ui_state.vec_editor.focus_text = true;
-            self.needs_redraw = true;
-            return;
-        }
         let sel = match at {
             Some(p) => {
                 let (x, y) = Self::to_box(t, affine(&v.transform), p);
@@ -131,7 +126,9 @@ impl App {
             .and_then(|s| s.engine.doc().find(self.text_edit.as_ref().unwrap().layer))
             .and_then(|l| l.vector())
             .and_then(imagine_vector::bounds);
-        if v_bounds.is_none_or(|b| doc.x < b[0] || doc.x > b[2] || doc.y < b[1] || doc.y > b[3]) {
+        // Text on a path: a little around the glyphs, so clicks near the curve count.
+        let pad = if t.path.is_some() { t.size as f64 * 0.5 } else { 0.0 };
+        if v_bounds.is_none_or(|b| doc.x < b[0] - pad || doc.x > b[2] + pad || doc.y < b[1] - pad || doc.y > b[3] + pad) {
             return false;
         }
         let (x, y) = Self::to_box(&t, m, doc);
@@ -356,6 +353,37 @@ pub fn overlay(
             [s.x as f32 * k, s.y as f32 * k]
         })
     };
+    if t.path.is_some() {
+        // Along the curve: the caret as one bent quad, selections in short pieces.
+        let screen = |p: (f64, f64)| {
+            let s = view.doc_to_screen(m.transform_point2(DVec2::new(p.0, p.1)));
+            [s.x as f32 * k, s.y as f32 * k]
+        };
+        let on_path = |r: [f32; 4]| -> Option<[[f32; 2]; 4]> {
+            let p = imagine_vector::text_to_path(t, &[(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])])?;
+            Some([screen(p[0]), screen(p[1]), screen(p[2]), screen(p[3])])
+        };
+        let mut selection = Vec::new();
+        for r in rects {
+            let n = ((r[2] - r[0]) / 3.0).ceil().max(1.0) as usize;
+            for i in 0..n {
+                let (a, b) = (r[0] + (r[2] - r[0]) * i as f32 / n as f32, r[0] + (r[2] - r[0]) * (i + 1) as f32 / n as f32);
+                selection.extend(on_path([a, r[1], b, r[3]]));
+            }
+        }
+        let b = imagine_vector::bounds(v).unwrap_or([0.0; 4]);
+        let doc_quad = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| {
+                let s = view.doc_to_screen(DVec2::new(x, y));
+                [s.x as f32 * k, s.y as f32 * k]
+            })
+        };
+        return Some(TextOverlay {
+            selection,
+            caret: on_path(caret)?,
+            frame: doc_quad(b[0] - 4.0, b[1] - 4.0, b[2] + 4.0, b[3] + 4.0),
+        });
+    }
     let (w, h) = imagine_vector::text_box_size(t);
     Some(TextOverlay {
         selection: rects.into_iter().map(quad).collect(),
