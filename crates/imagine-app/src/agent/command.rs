@@ -332,6 +332,8 @@ pub enum Command {
         highlights: Option<imagine_core::raw::Highlights>,
         noise: Option<imagine_core::raw::NoiseReduction>,
         lens: Option<bool>,
+        /// Fields given replace the current ones.
+        tone: Option<Value>,
     },
     LayerEffectsSet {
         layer: Option<LayerId>,
@@ -1581,7 +1583,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 .map_err(engine_err)?;
             vector_ok(s, id)
         }
-        Command::RawSet { layer, white_balance, exposure, highlights, noise, lens } => {
+        Command::RawSet { layer, white_balance, exposure, highlights, noise, lens, tone } => {
             let id = target_layer(s, layer)?;
             let mut d = s
                 .engine
@@ -1601,6 +1603,16 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             if let Some(l) = lens {
                 d.lens = l;
+            }
+            if let Some(t) = tone {
+                let mut v = serde_json::to_value(d.tone)?;
+                merge_json(&mut v, t)?;
+                let t: imagine_core::raw::Tone = serde_json::from_value(v).context("invalid tone")?;
+                ensure!(
+                    [t.contrast, t.highlights, t.shadows, t.vibrance, t.saturation].iter().all(|v| (-100.0..=100.0).contains(v)),
+                    "tone values must be −100…100"
+                );
+                d.tone = t;
             }
             if let Some(n) = noise {
                 ensure!(

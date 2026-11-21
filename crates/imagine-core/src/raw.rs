@@ -52,6 +52,24 @@ impl NoiseReduction {
     }
 }
 
+/// Basic tone and colour, each −100…100 (0 = unchanged).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Tone {
+    pub contrast: f32,
+    /// Negative rolls bright areas (also reconstructed ones above 1) off softly.
+    pub highlights: f32,
+    pub shadows: f32,
+    pub vibrance: f32,
+    pub saturation: f32,
+}
+
+impl Tone {
+    pub fn is_neutral(&self) -> bool {
+        *self == Tone::default()
+    }
+}
+
 /// How to develop a RAW file.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -63,6 +81,7 @@ pub struct Develop {
     pub noise: NoiseReduction,
     /// Lens correction from the lens profile (when one is found).
     pub lens: bool,
+    pub tone: Tone,
 }
 
 impl Default for Develop {
@@ -73,6 +92,7 @@ impl Default for Develop {
             highlights: Highlights::default(),
             noise: NoiseReduction::default(),
             lens: true,
+            tone: Tone::default(),
         }
     }
 }

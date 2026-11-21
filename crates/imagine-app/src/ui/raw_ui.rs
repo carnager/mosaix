@@ -272,7 +272,25 @@ pub fn develop_controls(
         out.changed |= r.changed();
         track(&mut out, &r);
         ui.end_row();
-        ui.label(tr("Highlights"));
+        // Tone and colour: fast, applied live.
+        let live = |ui: &mut egui::Ui, out: &mut super::gradient_ui::Out, name: &str, v: &mut f32| {
+            ui.label(name);
+            let r = ui.add(egui::Slider::new(v, -100.0..=100.0).max_decimals(0));
+            out.changed |= r.changed();
+            track(out, &r);
+            if r.double_clicked() {
+                *v = 0.0;
+                out.changed = true;
+                out.done = true;
+            }
+            ui.end_row();
+        };
+        live(ui, &mut out, tr("Contrast"), &mut develop.tone.contrast);
+        live(ui, &mut out, tr("Highlights"), &mut develop.tone.highlights);
+        live(ui, &mut out, tr("Shadows"), &mut develop.tone.shadows);
+        live(ui, &mut out, tr("Vibrance"), &mut develop.tone.vibrance);
+        live(ui, &mut out, tr("Saturation"), &mut develop.tone.saturation);
+        ui.label(tr("Clipped Highlights"));
         let label = |h: Highlights| match h {
             Highlights::Clip => tr_ctx("highlights", "Clip"),
             Highlights::Reconstruct => tr("Reconstruct"),

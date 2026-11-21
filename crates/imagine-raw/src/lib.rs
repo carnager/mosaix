@@ -13,10 +13,11 @@ use rawler::imgop::xyz::Illuminant;
 use rawler::rawsource::RawSource;
 use rawler::{Orientation, RawImage};
 use rayon::prelude::*;
-pub use imagine_core::raw::{Develop, Highlights, NoiseReduction, WhiteBalance};
+pub use imagine_core::raw::{Develop, Highlights, NoiseReduction, Tone, WhiteBalance};
 
 mod denoise;
 pub mod lens;
+mod tone;
 
 /// File extensions treated as camera RAW.
 pub const EXTENSIONS: &[&str] = &[
@@ -458,6 +459,7 @@ impl RawFile {
     pub fn develop(&self, cam: &CameraImage, d: &Develop) -> (u32, u32, Vec<f32>) {
         let wb = self.multipliers(d.white_balance, cam);
         let reconstruct = d.highlights == Highlights::Reconstruct;
+        let tone = tone::ToneOp::new(&d.tone);
         let corr = if d.lens { self.lens.clone().map(|p| lens::Corrector::new(p, cam.width, cam.height)) } else { None };
         let chroma = if reconstruct { self.highlight_chroma(cam, &wb) } else { [0.0; 4] };
         let gain = d.exposure.exp2();
@@ -533,6 +535,9 @@ impl RawFile {
                 let o = &mut row[ox * 4..ox * 4 + 4];
                 for r in 0..3 {
                     o[r] = (0..n).map(|k| m[r][k] * c[k]).sum::<f32>() * gain;
+                }
+                if let Some(t) = &tone {
+                    t.apply(&mut o[..3]);
                 }
                 o[3] = 1.0;
             }

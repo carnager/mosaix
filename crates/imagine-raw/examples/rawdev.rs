@@ -22,7 +22,15 @@ fn main() -> anyhow::Result<()> {
             Some(NoiseReduction { luminance: l.parse().ok()?, color: c.parse().ok()? })
         })
         .unwrap_or_default();
-    let d = Develop { white_balance: wb, exposure, highlights, noise, lens: std::env::var("LENS").as_deref() != Ok("0") };
+    let d = Develop { white_balance: wb, exposure, highlights, noise, lens: std::env::var("LENS").as_deref() != Ok("0"), tone: Default::default() };
+    let mut d = d;
+    // TONE=contrast,highlights,shadows,vibrance,saturation
+    if let Ok(t) = std::env::var("TONE") {
+        let v: Vec<f32> = t.split(',').filter_map(|x| x.parse().ok()).collect();
+        if v.len() == 5 {
+            d.tone = imagine_raw::Tone { contrast: v[0], highlights: v[1], shadows: v[2], vibrance: v[3], saturation: v[4] };
+        }
+    }
     let crop: Option<Vec<u32>> = std::env::var("CROP").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     let max: usize = std::env::var("MAX").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
     for f in args {

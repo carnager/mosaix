@@ -2352,3 +2352,6 @@ msgstr "Verzeichnung, Farbsäume und Vignettierung aus dem lensfun-Profil"
 
 msgid "No lens profile found"
 msgstr "Kein Objektivprofil gefunden"
+
+msgid "Clipped Highlights"
+msgstr "Ausgefressene Lichter"

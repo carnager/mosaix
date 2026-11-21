@@ -121,7 +121,7 @@ pub fn tools() -> Vec<Value> {
             "document_open",
             "Open an image (psd/psb with layers, png, jpg, webp, avif, jxl, tiff, exr, camera RAW such as cr2/cr3/nef/arw/raf/orf/rw2/dng) or .imagine file (replaces the open document). RAW files are developed to scene-linear sRGB; `raw` sets white balance and exposure (see raw_info for the as-shot values).",
             json!({ "path": { "type": "string" },
-                "raw": { "type": "object", "description": "RAW development: {white_balance: {mode: as_shot|auto|daylight} or {mode: custom, temperature: kelvin, tint: -150…150 (+ = magenta)}, exposure: stops, highlights: reconstruct|clip, noise: {luminance: 0–100, color: 0–100}, lens: true|false}",
+                "raw": { "type": "object", "description": "RAW development: {white_balance: {mode: as_shot|auto|daylight} or {mode: custom, temperature: kelvin, tint: -150…150 (+ = magenta)}, exposure: stops, highlights: reconstruct|clip, noise: {luminance: 0–100, color: 0–100}, lens: true|false, tone: {contrast, highlights, shadows, vibrance, saturation: −100…100}}",
                     "properties": {
                         "white_balance": { "type": "object", "properties": {
                             "mode": { "type": "string", "enum": ["as_shot", "auto", "daylight", "custom"] },
@@ -135,7 +135,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "raw_set",
-            "Re-develop a RAW layer (opened or placed camera RAW files stay RAW layers): white balance, exposure, highlights (reconstruct: blown channels estimated, values may exceed 1 so lower exposure recovers detail; clip: neutral white), wavelet noise reduction (luminance/color 0–100, default 0/25; slow: ~1 s per 24 MP), lens correction (distortion, colour fringes, vignetting from the system's lensfun database; on by default when a profile matches — see lens_profile). Returns the settings and the resulting temperature/tint. layer_rasterize turns it into plain pixels.",
+            "Re-develop a RAW layer (opened or placed camera RAW files stay RAW layers): white balance, exposure, highlights (reconstruct: blown channels estimated, values may exceed 1 so lower exposure recovers detail; clip: neutral white), wavelet noise reduction (luminance/color 0–100, default 0/25; slow: ~1 s per 24 MP), tone (contrast, highlights — negative rolls bright and reconstructed areas off softly, shadows, vibrance, saturation; each −100…100, given fields replace the current ones), lens correction (distortion, colour fringes, vignetting from the system's lensfun database; on by default when a profile matches — see lens_profile). Returns the settings and the resulting temperature/tint. layer_rasterize turns it into plain pixels.",
             json!({ "layer": layer_param(),
                 "white_balance": { "type": "object", "description": "{mode: as_shot|auto|daylight} or {mode: custom, temperature: kelvin, tint: -150…150}",
                     "properties": { "mode": { "type": "string", "enum": ["as_shot", "auto", "daylight", "custom"] },
@@ -143,7 +143,10 @@ pub fn tools() -> Vec<Value> {
                 "exposure": { "type": "number", "description": "stops" },
                 "highlights": { "type": "string", "enum": ["reconstruct", "clip"] },
                 "noise": { "type": "object", "properties": { "luminance": { "type": "number" }, "color": { "type": "number" } } },
-                "lens": { "type": "boolean", "description": "lens correction" } }),
+                "lens": { "type": "boolean", "description": "lens correction" },
+                "tone": { "type": "object", "properties": {
+                    "contrast": { "type": "number" }, "highlights": { "type": "number" }, "shadows": { "type": "number" },
+                    "vibrance": { "type": "number" }, "saturation": { "type": "number" } } } }),
             &[],
             false,
         ),
@@ -898,6 +901,7 @@ mod tests {
                         ("adjustment", _) => json!({"kind": "invert"}),
                         ("white_balance", _) => json!({"mode": "auto"}),
                         ("highlights", _) => json!("clip"),
+                        ("tone", _) => json!({"highlights": -50}),
                         ("noise", _) => json!({"luminance": 10, "color": 30}),
                         ("raw", _) => json!({"white_balance": {"mode": "custom", "temperature": 5000, "tint": 0}, "exposure": 1}),
                         ("filter", _) => json!({"kind": "high_pass", "radius": 3}),
