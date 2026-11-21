@@ -2358,3 +2358,6 @@ msgstr "Ausgefressene Lichter"
 
 msgid "embedded in the DNG"
 msgstr "in der DNG enthalten"
+
+msgid "Satin"
+msgstr "Glanz"

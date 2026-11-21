@@ -341,15 +341,38 @@ pub fn read(fx: &Desc, light: GlobalLight, patterns: &[(String, Pattern)]) -> (V
             false,
         );
     }
-    {
-        if master && all(fx, "ChFX", "satinMulti").iter().any(|d| d.bool("enab").unwrap_or(true)) {
-            lost.push("satin");
-        }
+    for d in all(fx, "ChFX", "satinMulti") {
+        push(
+            d,
+            EffectKind::Satin {
+                color: color(d.desc("Clr ")),
+                opacity: pct(d, "Opct"),
+                angle: d.num("lagl").unwrap_or(19.0) as f32,
+                distance: px(d, "Dstn"),
+                size: px(d, "blur"),
+                invert: d.bool("Invr").unwrap_or(true),
+            },
+            false,
+        );
     }
     (out, lost)
 }
 
 // --- Writing ----------------------------------------------------------------
+
+/// Photoshop's "Linear" contour (the only one imagine uses).
+fn linear_contour() -> Value {
+    let pt = |x: f64| {
+        Value::Desc(Desc {
+            class: "CrPt".into(),
+            items: vec![("Hrzn".into(), Value::Double(x)), ("Vrtc".into(), Value::Double(x))],
+        })
+    };
+    Value::Desc(Desc {
+        class: "ShpC".into(),
+        items: vec![("Nm  ".into(), Value::Text("Linear".into())), ("Crv ".into(), Value::List(vec![pt(0.0), pt(255.0)]))],
+    })
+}
 
 fn unit(u: &str, v: f32) -> Value {
     Value::Unit(u.into(), v as f64)
@@ -632,6 +655,17 @@ pub fn write_with(effects: &[Effect], light: GlobalLight, pattern_id: &dyn Fn(&P
                 put("Clr ", rgb(*color));
                 put("Opct", unit("#Prc", opacity * 100.0));
                 ("SoFi", "solidFillMulti")
+            }
+            EffectKind::Satin { color, opacity, angle, distance, size, invert } => {
+                put("Clr ", rgb(*color));
+                put("AntA", Value::Bool(true));
+                put("Invr", Value::Bool(*invert));
+                put("Opct", unit("#Prc", opacity * 100.0));
+                put("lagl", unit("#Ang", *angle));
+                put("Dstn", unit("#Pxl", *distance));
+                put("blur", unit("#Pxl", *size));
+                put("MpgS", linear_contour());
+                ("ChFX", "satinMulti")
             }
             EffectKind::GradientOverlay { start, end, opacity, angle, style, scale, reverse, gradient } => {
                 put("Opct", unit("#Prc", opacity * 100.0));

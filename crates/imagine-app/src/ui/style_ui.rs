@@ -297,6 +297,21 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track, patterns: &[Pa
             slider(ui, t, "Distance", distance, 0.0..=100.0, " px");
             slider(ui, t, "Size", size, 0.0..=100.0, " px");
         }
+        EffectKind::Satin { color, opacity, angle: a, distance, size, invert } => {
+            colour(ui, t, "Color", color);
+            percent(ui, t, "Opacity", opacity);
+            ui.label(tr("Angle"));
+            let r = ui.add(egui::DragValue::new(a).range(-180.0..=180.0).suffix("°").speed(1.0));
+            t.add(&r);
+            ui.end_row();
+            slider(ui, t, "Distance", distance, 1.0..=250.0, " px");
+            slider(ui, t, "Size", size, 0.0..=250.0, " px");
+            ui.label("");
+            if ui.checkbox(invert, tr("Invert")).changed() {
+                t.click();
+            }
+            ui.end_row();
+        }
         EffectKind::OuterGlow {
             color,
             opacity,
@@ -399,6 +414,7 @@ fn summary(k: &EffectKind) -> ([f32; 3], String) {
         EffectKind::OuterGlow { color, size, .. } | EffectKind::InnerGlow { color, size, .. } => {
             (*color, px(*size))
         }
+        EffectKind::Satin { color, distance, size, .. } => (*color, format!("{} · {}", px(*distance), px(*size))),
         EffectKind::ColorOverlay { color, opacity } => {
             (*color, format!("{:.0} %", opacity * 100.0))
         }
