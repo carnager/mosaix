@@ -1,0 +1,49 @@
+# Maintainer: Rasi <rasi@xssn.at>
+
+# Built from the git repository (set MOSAIX_SRC to build a local checkout), so the version follows the commits.
+pkgname=mosaix-git
+_name=mosaix
+pkgver=r0
+pkgrel=1
+pkgdesc='Layered image editor for Wayland that runs on the GPU (PSD, camera RAW, local AI tools)'
+arch=('x86_64')
+url='https://github.com/carnager/mosaix'
+license=('GPL-3.0-or-later')
+depends=('glibc' 'gcc-libs' 'wayland' 'libxkbcommon' 'vulkan-icd-loader' 'vulkan-driver'
+         'fontconfig' 'freetype2' 'dav1d' 'libjxl')
+makedepends=('cargo' 'git' 'pkgconf')
+optdepends=('onnxruntime-cpu: local AI tools (select subject, remove background and objects, upscale)'
+            'lensfun: lens profiles for camera RAW')
+provides=("$_name")
+conflicts=("$_name")
+source=("$_name::git+${MOSAIX_SRC:-https://github.com/carnager/mosaix.git}")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_name"
+  printf 'r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  cd "$_name"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc --print host-tuple)"
+}
+
+build() {
+  cd "$_name"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p mosaix-app
+}
+
+# The tests need a Vulkan GPU, which build machines often lack; run them with `cargo test --workspace`.
+
+package() {
+  cd "$_name"
+  install -Dm755 target/release/mosaix "$pkgdir/usr/bin/mosaix"
+  install -Dm644 packaging/io.github.mosaix.desktop "$pkgdir/usr/share/applications/io.github.mosaix.desktop"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$_name/README.md"
+  install -Dm644 docs/*.md -t "$pkgdir/usr/share/doc/$_name/"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

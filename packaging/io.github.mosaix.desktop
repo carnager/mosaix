@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Mosaix
+GenericName=Image Editor
+GenericName[de]=Bildbearbeitung
+Comment=Layered image editor that runs on the GPU
+Comment[de]=Bildbearbeitung mit Ebenen, die auf der GPU rechnet
+Exec=mosaix %f
+Icon=applications-graphics
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;Photography;
+Keywords=photo;image;editor;layers;psd;raw;paint;
+MimeType=image/png;image/jpeg;image/webp;image/avif;image/jxl;image/tiff;image/x-exr;image/vnd.adobe.photoshop;image/x-dcraw;image/x-adobe-dng;image/x-canon-cr2;image/x-canon-cr3;image/x-nikon-nef;image/x-sony-arw;image/x-fuji-raf;image/x-olympus-orf;image/x-panasonic-rw2;image/x-pentax-pef;
