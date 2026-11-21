@@ -2617,3 +2617,27 @@ msgstr "Filter"
 
 msgid "No plugins yet"
 msgstr "Noch keine Plugins"
+
+msgid "Nothing to undo"
+msgstr "Nichts zum Rückgängigmachen"
+
+msgid "Nothing to redo"
+msgstr "Nichts zum Wiederholen"
+
+msgid "Needs a selection"
+msgstr "Braucht eine Auswahl"
+
+msgid "The active layer is not a group"
+msgstr "Die aktive Ebene ist keine Gruppe"
+
+msgid "The layer already has a mask"
+msgstr "Die Ebene hat schon eine Maske"
+
+msgid "The layer has no mask"
+msgstr "Die Ebene hat keine Maske"
+
+msgid "Works on pixel layers"
+msgstr "Geht nur bei Pixelebenen"
+
+msgid "Only text, shape and RAW layers"
+msgstr "Nur für Text-, Form- und RAW-Ebenen"

@@ -824,13 +824,41 @@ pub(super) fn menu_contents(ui: &mut egui::Ui, menu: &str, m: &Model, st: &mut S
                 };
                 let b = egui::Button::new((atom(icon), c.label_text()))
                     .shortcut_text(palette::shortcut_text(c, &m.keymap));
-                if ui.add(b).clicked() {
+                let why = unavailable(label, m);
+                if ui.add_enabled(why.is_none(), b).on_disabled_hover_text(why.unwrap_or_default()).clicked() {
                     out.push(Action::Command(*c));
                     ui.close();
                 }
             }
             Item::Special(sp, icon) => special_entry(ui, sp, atom(icon), m, st, out),
         }
+    }
+}
+
+/// Why a menu command cannot run right now (`None`: it can). Only clear
+/// cases; anything that depends on more than the model stays enabled.
+fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
+    let active = m.layers.iter().find(|r| r.id == m.active);
+    let pixels = active.is_some_and(|r| !r.group && !r.adjustment && r.vector.is_none());
+    let need = |ok: bool, why: &'static str| (!ok).then_some(why);
+    match label {
+        "Undo" => need(m.history_done > 0, tr("Nothing to undo")),
+        "Redo" => need(m.history_done < m.history.len(), tr("Nothing to redo")),
+        "Delete Selection (Pixels)" | "Content-Aware Fill" | "Content-Aware Fill (All Layers)" | "Remove (AI)"
+        | "Deselect" | "Inverse" | "Feather (10 px)" => {
+            need(m.has_selection, tr("Needs a selection"))
+        }
+        "Ungroup Layers" => need(active.is_some_and(|r| r.group), tr("The active layer is not a group")),
+        "Add Layer Mask" => need(active.is_some_and(|r| !r.has_mask), tr("The layer already has a mask")),
+        "Toggle Layer Mask" | "Apply Layer Mask" | "Paint Mask / Pixels" => {
+            need(active.is_some_and(|r| r.has_mask), tr("The layer has no mask"))
+        }
+        "Remove Background (AI)" => need(pixels, tr("Works on pixel layers")),
+        "Rasterize (Text/Shape/RAW to Pixels)" => need(
+            active.is_some_and(|r| r.vector.is_some()) || m.active_raw.is_some(),
+            tr("Only text, shape and RAW layers"),
+        ),
+        _ => None,
     }
 }
 
