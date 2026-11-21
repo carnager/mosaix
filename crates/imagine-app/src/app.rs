@@ -8,6 +8,7 @@ pub(crate) mod clipboard;
 mod brushes;
 pub(crate) mod patterns;
 pub(crate) mod filters;
+pub(crate) mod actions;
 pub(crate) mod pen;
 pub(crate) mod textedit;
 
@@ -441,6 +442,10 @@ pub struct App {
     custom_tips: Vec<String>,
     /// Pattern library: built-ins and the user's patterns.
     patterns: std::sync::Arc<Vec<imagine_core::pattern::Pattern>>,
+    /// Steps of the action being recorded.
+    recording: Option<Vec<serde_json::Value>>,
+    /// Macros and scripts in the actions folder.
+    actions: std::sync::Arc<Vec<actions::Entry>>,
     /// Filter plugins (built-in examples and the user's folder).
     filter_plugins: std::sync::Arc<Vec<filters::Plugin>>,
     /// Status text, refreshed a few times per second (not every frame).
@@ -668,6 +673,8 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         custom_tips: Vec::new(),
         patterns: std::sync::Arc::new(patterns::load_library(&patterns::pattern_dir())),
         filter_plugins: std::sync::Arc::new(filters::load_library(&filters::filter_dir())),
+        recording: None,
+        actions: std::sync::Arc::new(actions::list(&actions::actions_dir())),
         ui_status: String::new(),
         socket: None,
         bench: None,
@@ -1508,6 +1515,7 @@ impl App {
             Drag::Move { start, end } => self.move_delta(*start, *end),
             _ => DVec2::ZERO,
         };
+        let step = if self.recording.is_some() { recorded_drag(&drag, zoom, move_delta) } else { None };
         let Some(s) = &mut self.session else { return };
         let e = &mut s.engine;
         let result: Result<bool, &str> = match drag {
@@ -1654,11 +1662,45 @@ impl App {
             _ => Ok(false),
         };
         match result {
-            Ok(true) => self.touch(),
+            Ok(true) => {
+                self.touch();
+                if let Some(step) = step {
+                    self.record(step);
+                }
+            }
             Ok(false) => {}
             Err(err) => tracing::warn!("{}", tr(err)),
         }
         self.needs_redraw = true;
+    }
+
+    /// The agent command a shortcut stands for (when recording an action).
+    fn recorded_hotkey(&self, sym: Keysym, ctrl: bool, shift: bool, alt: bool) -> Option<serde_json::Value> {
+        use serde_json::json;
+        let has_sel = self.session.as_ref().is_some_and(|s| s.engine.has_selection());
+        Some(match sym {
+            Keysym::z | Keysym::Z if ctrl && shift && self.boxed.is_none() => json!({ "cmd": "redo" }),
+            Keysym::z if ctrl && self.boxed.is_none() => json!({ "cmd": "undo" }),
+            Keysym::y if ctrl => json!({ "cmd": "redo" }),
+            Keysym::n | Keysym::N if ctrl && shift => json!({ "cmd": "layer_add" }),
+            Keysym::j if ctrl => json!({ "cmd": "layer_duplicate" }),
+            Keysym::g | Keysym::G if ctrl && shift && !alt => json!({ "cmd": "layer_ungroup" }),
+            Keysym::g if ctrl && !alt => json!({ "cmd": "layer_group" }),
+            Keysym::Delete | Keysym::BackSpace if !alt && !shift && has_sel => json!({ "cmd": "clear" }),
+            Keysym::Delete if !has_sel => json!({ "cmd": "layer_delete" }),
+            Keysym::BackSpace if alt => json!({
+                "cmd": "fill", "color": actions::hex(self.brush.color), "opacity": self.brush.opacity,
+                "target": if self.stroke_target() == StrokeTarget::Mask { "mask" } else { "pixels" },
+            }),
+            Keysym::a if ctrl => json!({ "cmd": "select_all" }),
+            Keysym::d if ctrl => json!({ "cmd": "select_none" }),
+            Keysym::i | Keysym::I if ctrl && shift => json!({ "cmd": "select_invert" }),
+            Keysym::F6 if shift && has_sel => json!({ "cmd": "select_feather", "radius": 10.0 }),
+            Keysym::m | Keysym::M if ctrl && shift && !alt => json!({ "cmd": "layer_mask_add" }),
+            Keysym::m | Keysym::M if ctrl && alt && shift => json!({ "cmd": "layer_mask_apply" }),
+            Keysym::r if ctrl && alt => json!({ "cmd": "layer_rasterize" }),
+            _ => return None,
+        })
     }
 
     /// Marks the document as changed.
@@ -2467,6 +2509,7 @@ impl App {
                 (ev.raw_code - KEY_1 + 1) as f32 / 10.0
             };
             if shift {
+                self.record(serde_json::json!({ "cmd": "layer_set", "opacity": pct }));
                 self.edit(tr("Opacity"), |d| {
                     let id = d.active;
                     let l = d.find_mut(id).unwrap();
@@ -2494,6 +2537,11 @@ impl App {
             return;
         }
 
+        if self.recording.is_some()
+            && let Some(step) = self.recorded_hotkey(sym, ctrl, shift, alt)
+        {
+            self.record(step);
+        }
         match sym {
             Keysym::q | Keysym::Q if ctrl => self.request_quit(),
             Keysym::p | Keysym::P if ctrl && shift => self.ui_state.palette = Some((String::new(), 0)),
@@ -3162,6 +3210,8 @@ impl App {
             custom_tips: self.custom_tips.clone(),
             patterns: self.patterns.clone(),
             filter_plugins: self.filter_plugins.clone(),
+            actions: self.actions.clone(),
+            recording: self.recording.as_ref().map(Vec::len),
             eyedrop_radius: self.eyedrop_radius,
             eyedrop_all: self.eyedrop_all,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
@@ -3256,8 +3306,22 @@ impl App {
             {
                 self.commit_box();
             }
+            let step = if self.recording.is_some() { recorded_action(&a) } else { None };
+            if let Some(step) = step {
+                self.record(step);
+            }
             match a {
                 Action::Command(c) => self.run_cmd(c),
+                Action::Run(e) => self.run_action(&e),
+                Action::StartRecording => self.start_recording(),
+                Action::StopRecording(name) => {
+                    self.stop_recording(name);
+                    self.actions = std::sync::Arc::new(actions::list(&actions::actions_dir()));
+                }
+                Action::ReloadActions => {
+                    self.actions = std::sync::Arc::new(actions::list(&actions::actions_dir()));
+                    self.needs_redraw = true;
+                }
                 Action::Tool(t) => {
                     let tool = match t {
                         ToolId::Brush => Tool::Brush,
@@ -4590,3 +4654,122 @@ impl ProvidesRegistryState for App {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(App);
+
+/// The agent command a UI action stands for (when recording an action).
+fn recorded_action(a: &Action) -> Option<serde_json::Value> {
+    use serde_json::json;
+    Some(match a {
+        Action::ApplyFilter(f) => json!({ "cmd": "filter_apply", "filter": f }),
+        Action::AddSmartFilter(f) => json!({ "cmd": "filter_apply", "filter": f, "smart": true }),
+        Action::AddAdjustment(adj) => json!({ "cmd": "adjustment_add", "adjustment": adj }),
+        Action::SetAdjustment { adj, done: true } => json!({ "cmd": "adjustment_set", "adjustment": adj }),
+        Action::SetEffects { effects, done: true } => json!({ "cmd": "layer_effects_set", "effects": effects }),
+        Action::SetRaw { d, done: true } => json!({
+            "cmd": "raw_set", "white_balance": d.white_balance, "exposure": d.exposure, "highlights": d.highlights,
+            "noise": d.noise, "lens": d.lens, "tone": d.tone,
+        }),
+        Action::LayerOpacity { value, done: true, fill } => {
+            json!({ "cmd": "layer_set", (if *fill { "fill_opacity" } else { "opacity" }): value })
+        }
+        Action::LayerBlend(b) => json!({ "cmd": "layer_set", "blend": b.key() }),
+        Action::PassThrough(on) => json!({ "cmd": "layer_set", "pass_through": on }),
+        Action::DeleteLayer => json!({ "cmd": "layer_delete" }),
+        Action::CanvasSize { w, h, anchor } => {
+            let x = if anchor.0 < 0.25 { "left" } else if anchor.0 > 0.75 { "right" } else { "" };
+            let y = if anchor.1 < 0.25 { "top" } else if anchor.1 > 0.75 { "bottom" } else { "" };
+            let name = match (y, x) {
+                ("", "") => "center".to_string(),
+                ("", x) => x.to_string(),
+                (y, "") => y.to_string(),
+                (y, x) => format!("{y}-{x}"),
+            };
+            json!({ "cmd": "canvas_size", "width": w, "height": h, "anchor": name })
+        }
+        Action::ImageSize { w, h } => json!({ "cmd": "image_resize", "width": w, "height": h }),
+        Action::HistoryJump(_) => {
+            tracing::warn!("{}", tr("Jumps in the history are not recorded"));
+            return None;
+        }
+        _ => return None,
+    })
+}
+
+/// The agent command a finished drag stands for (selections and moves).
+fn recorded_drag(drag: &Drag, zoom: f64, move_delta: DVec2) -> Option<serde_json::Value> {
+    use serde_json::json;
+    let mode = |op: &CombineOp| match op {
+        CombineOp::Replace => "replace",
+        CombineOp::Add => "add",
+        CombineOp::Subtract => "subtract",
+        CombineOp::Intersect => "intersect",
+    };
+    Some(match drag {
+        Drag::Marquee { start, end, op, ellipse } => {
+            let (min, max) = (start.min(*end), start.max(*end));
+            let size = max - min;
+            if size.min_element() * zoom < 2.0 {
+                return (*op == CombineOp::Replace).then(|| json!({ "cmd": "select_none" }));
+            }
+            json!({
+                "cmd": if *ellipse { "select_ellipse" } else { "select_rect" },
+                "x": min.x, "y": min.y, "width": size.x, "height": size.y, "mode": mode(op),
+            })
+        }
+        Drag::Lasso { points, op } if points.len() >= 3 => json!({
+            "cmd": "select_polygon",
+            "points": points.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>(),
+            "mode": mode(op),
+        }),
+        Drag::Move { .. } if move_delta != DVec2::ZERO => {
+            json!({ "cmd": "layer_translate", "dx": move_delta.x.round() as i64, "dy": move_delta.y.round() as i64 })
+        }
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod record_tests {
+    use super::*;
+
+    /// Every recorded step must be a valid agent command.
+    #[test]
+    fn recorded_steps_parse() {
+        let actions = vec![
+            Action::ApplyFilter(imagine_core::Filter::GaussianBlur { radius: 3.0 }),
+            Action::AddSmartFilter(imagine_core::Filter::HighPass { radius: 5.0 }),
+            Action::AddAdjustment(imagine_core::Adjustment::defaults().remove(0)),
+            Action::SetAdjustment { adj: imagine_core::Adjustment::defaults().remove(1), done: true },
+            Action::SetEffects { effects: vec![imagine_core::style::Effect::new(imagine_core::style::EffectKind::defaults().remove(0))], done: true },
+            Action::SetRaw { d: Default::default(), done: true },
+            Action::LayerOpacity { value: 0.5, done: true, fill: true },
+            Action::LayerBlend(imagine_core::BlendMode::Multiply),
+            Action::PassThrough(true),
+            Action::DeleteLayer,
+            Action::CanvasSize { w: 100, h: 80, anchor: (0.0, 1.0) },
+            Action::ImageSize { w: 50, h: 40 },
+        ];
+        for a in &actions {
+            let v = recorded_action(a).expect("recorded");
+            crate::agent::command::Command::parse(v.clone()).unwrap_or_else(|e| panic!("{v}: {e}"));
+        }
+        assert_eq!(recorded_action(&Action::CanvasSize { w: 1, h: 1, anchor: (0.0, 1.0) }).unwrap()["anchor"], "bottom-left");
+        let drags = [
+            Drag::Marquee { start: DVec2::new(1.0, 2.0), end: DVec2::new(50.0, 40.0), op: CombineOp::Add, ellipse: true },
+            Drag::Lasso { points: vec![DVec2::ZERO, DVec2::new(5.0, 0.0), DVec2::new(0.0, 5.0)], op: CombineOp::Subtract },
+            Drag::Move { start: DVec2::ZERO, end: DVec2::new(3.0, 4.0) },
+        ];
+        for d in &drags {
+            let v = recorded_drag(d, 1.0, DVec2::new(3.0, 4.0)).expect("recorded");
+            crate::agent::command::Command::parse(v.clone()).unwrap_or_else(|e| panic!("{v}: {e}"));
+        }
+        for v in [
+            serde_json::json!({ "cmd": "fill", "color": "#ff0080", "opacity": 1.0, "target": "pixels" }),
+            serde_json::json!({ "cmd": "select_feather", "radius": 10.0 }),
+            serde_json::json!({ "cmd": "layer_mask_apply" }),
+            serde_json::json!({ "cmd": "layer_rasterize" }),
+            serde_json::json!({ "cmd": "layer_ungroup" }),
+        ] {
+            crate::agent::command::Command::parse(v.clone()).unwrap_or_else(|e| panic!("{v}: {e}"));
+        }
+    }
+}

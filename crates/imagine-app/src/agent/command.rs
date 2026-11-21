@@ -84,6 +84,12 @@ pub enum Command {
         #[serde(default)]
         raw: Option<imagine_io::raw::Develop>,
     },
+    /// Actions (macros) and scripts in the actions folder.
+    ActionList,
+    /// Plays a macro on the open document (each step one undo step).
+    ActionRun {
+        name: String,
+    },
     /// Filter plugins: names, parameters, errors.
     FilterPluginList,
     /// Checks a WGSL filter plugin and (unless `check_only`) saves it to the plugin folder.
@@ -451,6 +457,8 @@ impl Command {
             Self::DocumentOpen { .. } => "document_open",
             Self::RawInfo { .. } => "raw_info",
             Self::FilterPluginList => "filter_plugin_list",
+            Self::ActionList => "action_list",
+            Self::ActionRun { .. } => "action_run",
             Self::FilterPluginInstall { .. } => "filter_plugin_install",
             Self::DocumentInfo => "document_info",
             Self::LayerAdd { .. } => "layer_add",
@@ -787,6 +795,33 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
             *ctx.session = Some(session::load(ctx.gpu, ctx.format, source)?);
             let mut out = Output::json(info(session(ctx.session)?));
             out.replaced_document = true;
+            Ok(out)
+        }
+        Command::ActionList => {
+            use crate::app::actions;
+            let dir = actions::actions_dir();
+            Ok(Output::json(json!({
+                "folder": dir,
+                "actions": actions::list(&dir).iter().map(|e| json!({
+                    "name": e.name,
+                    "kind": match e.kind { actions::Kind::Macro => "macro", actions::Kind::Script => "script" },
+                    "steps": (e.kind == actions::Kind::Macro).then(|| actions::read_macro(&e.path).map(|s| s.len()).ok()).flatten(),
+                })).collect::<Vec<_>>(),
+                "format": "macro = NAME.jsonl in the folder, one agent command per line (no layer ids: steps act on the active layer); script = executable file, started by the window with IMAGINE_SOCKET set",
+            })))
+        }
+        Command::ActionRun { name } => {
+            use crate::app::actions;
+            let e = actions::find(&actions::actions_dir(), &name).with_context(|| format!("no action named {name} (see action_list)"))?;
+            ensure!(e.kind == actions::Kind::Macro, "{name} is a script; scripts run from the window (File › Actions)");
+            let steps = actions::read_macro(&e.path)?;
+            for (i, step) in steps.iter().enumerate() {
+                let c = Command::parse(step.clone()).with_context(|| format!("step {}", i + 1))?;
+                ensure!(!matches!(c, Command::ActionRun { .. }), "step {}: actions cannot run actions", i + 1);
+                execute(ctx, c).with_context(|| format!("{name}, step {} ({})", i + 1, step["cmd"].as_str().unwrap_or("?")))?;
+            }
+            let mut out = Output::json(json!({ "ok": true, "steps": steps.len() }));
+            out.replaced_document = steps.iter().any(|s| matches!(s["cmd"].as_str(), Some("document_open" | "document_new")));
             Ok(out)
         }
         Command::FilterPluginList => {
@@ -1715,7 +1750,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
         | Command::PatternImport { .. }
         | Command::RawInfo { .. }
         | Command::FilterPluginList
-        | Command::FilterPluginInstall { .. } => unreachable!(),
+        | Command::FilterPluginInstall { .. }
+        | Command::ActionList
+        | Command::ActionRun { .. } => unreachable!(),
         Command::PatternDefine { name } => {
             let c = s.engine.copy_pixels(true).map_err(engine_err)?;
             let img = crate::app::clipboard::to_rgba8(c.w, c.h, &c.px);

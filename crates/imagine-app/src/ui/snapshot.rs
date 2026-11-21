@@ -100,6 +100,8 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         custom_tips: Vec::new(),
         patterns: std::sync::Arc::new(imagine_core::pattern::Pattern::builtin()),
         filter_plugins: std::sync::Arc::new(crate::app::filters::load_library(&crate::app::filters::filter_dir())),
+        actions: std::sync::Arc::new(crate::app::actions::list(&crate::app::actions::actions_dir())),
+        recording: std::env::var("IMAGINE_SNAPSHOT_RECORDING").ok().and_then(|v| v.parse().ok()),
         eyedrop_radius: 0,
         eyedrop_all: true,
         boxed: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| "Free Transform"),
@@ -150,6 +152,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             ));
         }
         Ok("new") => state.new_doc = Some(Default::default()),
+        Ok("record") => state.record_name = Some("Web Look".into()),
         Ok(d) if d.starts_with("raw:") => {
             let mut r = super::raw_ui::RawDialog::new(d[4..].into());
             r.wait();

@@ -167,6 +167,9 @@ pub struct Model {
     /// Pattern library (built-ins first).
     pub patterns: std::sync::Arc<Vec<imagine_core::pattern::Pattern>>,
     pub filter_plugins: std::sync::Arc<Vec<crate::app::filters::Plugin>>,
+    pub actions: std::sync::Arc<Vec<crate::app::actions::Entry>>,
+    /// Steps recorded so far, while an action is being recorded.
+    pub recording: Option<usize>,
     pub eyedrop_radius: i64,
     pub eyedrop_all: bool,
     pub boxed: Option<&'static str>,
@@ -225,6 +228,12 @@ pub enum Action {
     ImportPatterns(std::path::PathBuf),
     /// Read the filter plugin folder again.
     ReloadFilterPlugins,
+    /// Play a macro or start a script.
+    Run(crate::app::actions::Entry),
+    StartRecording,
+    /// Stop recording; save under this name (`None`: discard).
+    StopRecording(Option<String>),
+    ReloadActions,
     /// Keyboard shortcut of a command: `None` removes it, `reset` restores the default.
     Shortcut { id: String, combo: Option<palette::Combo>, reset: bool },
     ResetShortcuts,
@@ -356,6 +365,8 @@ pub struct State {
     hex: Option<String>,
     pub file: Option<super::files::FileDialog>,
     pub new_doc: Option<super::files::NewDialog>,
+    /// Naming the recorded action.
+    pub record_name: Option<String>,
     /// Developing a camera RAW file before it opens.
     pub raw: Option<super::raw_ui::RawDialog>,
     /// Unsaved-changes question: what happens if the user discards.
@@ -412,6 +423,7 @@ impl State {
             || self.file.is_some()
             || self.new_doc.is_some()
             || self.raw.is_some()
+            || self.record_name.is_some()
             || self.dialog.is_some()
             || self.filter.is_some()
             || self.vec_editor.fonts.open
@@ -570,6 +582,7 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
         st.raw = None;
     }
     filter_dialog(ctx, st, &mut out);
+    record_name_dialog(ctx, st, &mut out);
     shortcuts_dialog(ctx, m, st, &mut out);
     if let Some((query, sel)) = &mut st.palette {
         let mut close = false;
@@ -636,6 +649,86 @@ fn level_color(l: tracing::Level) -> Color32 {
     }
 }
 
+/// File › Actions: macros and scripts, recording.
+fn actions_menu(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    let label = match m.recording {
+        Some(n) => tr!("Actions (recording, {n} steps)", n = n),
+        None => tr("Actions").to_string(),
+    };
+    ui.menu_button(label, |ui| {
+        for e in m.actions.iter() {
+            let (text, hint) = match e.kind {
+                crate::app::actions::Kind::Macro => (e.name.clone(), tr("Play on the open image")),
+                crate::app::actions::Kind::Script => (format!("{}  ({})", e.name, tr("script")), tr("Script: runs with this window")),
+            };
+            if ui.button(text).on_hover_text(hint).clicked() {
+                out.push(Action::Run(e.clone()));
+                ui.close();
+            }
+        }
+        if m.actions.is_empty() {
+            ui.label(RichText::new(tr("No actions yet")).weak());
+        }
+        ui.separator();
+        if m.recording.is_some() {
+            if ui.button(tr("Stop Recording …")).clicked() {
+                st.record_name = Some(String::new());
+                ui.close();
+            }
+        } else if ui
+            .button(tr("Start Recording"))
+            .on_hover_text(tr("Filters, adjustments, layer styles, layer and selection commands become an action"))
+            .clicked()
+        {
+            out.push(Action::StartRecording);
+            ui.close();
+        }
+        if ui
+            .button(tr("Reload Actions"))
+            .on_hover_text(crate::app::actions::actions_dir().display().to_string())
+            .clicked()
+        {
+            out.push(Action::ReloadActions);
+            ui.close();
+        }
+    });
+}
+
+/// Name for the recorded action.
+fn record_name_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
+    let Some(name) = &mut st.record_name else { return };
+    let mut close = false;
+    egui::Window::new(tr("Save Action"))
+        .id(egui::Id::unique("save action"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(tr("Name"));
+                let r = ui.text_edit_singleline(name);
+                r.request_focus();
+            });
+            ui.horizontal(|ui| {
+                let ok = !name.trim().is_empty();
+                if ui.add_enabled(ok, egui::Button::new(tr("Save"))).clicked() || (ok && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    out.push(Action::StopRecording(Some(name.trim().to_string())));
+                    close = true;
+                }
+                if ui.button(tr("Discard")).clicked() {
+                    out.push(Action::StopRecording(None));
+                    close = true;
+                }
+                if ui.button(tr("Continue Recording")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    close = true;
+                }
+            });
+        });
+    if close {
+        st.record_name = None;
+    }
+}
+
 fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     egui::MenuBar::new().ui(ui, |ui| {
         for menu in MENUS {
@@ -648,6 +741,10 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                         out.push(Action::Command(*c));
                         ui.close();
                     }
+                }
+                if menu == "File" {
+                    ui.separator();
+                    actions_menu(ui, m, st, out);
                 }
                 if menu == "File" && !m.recent.is_empty() {
                     ui.separator();

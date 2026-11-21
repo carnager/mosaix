@@ -32,6 +32,9 @@ For agents (see docs/agenten.md):
   imagine mcp --attach          MCP server that controls the running window live
   imagine run SCRIPT.jsonl      run JSON commands line by line (`-` = stdin)
   imagine run --attach SCRIPT   … in the running window
+  imagine batch ACTION FILE… [--out DIR] [--format png|jpg|webp|avif|jxl|tiff|psd]
+                                play an action (File › Actions) on each file and export it
+                                (default: next to the input in imagine-batch/, same format)
 
 View:
   Pan             mouse wheel (Shift: sideways), Space + drag, middle mouse button, pen button 1
@@ -104,6 +107,7 @@ fn main() -> anyhow::Result<()> {
     match argv.first().map(String::as_str) {
         Some("mcp") => return agent_cmd(true, &argv[1..]),
         Some("run") => return agent_cmd(false, &argv[1..]),
+        Some("batch") => return batch(&argv[1..]),
         _ => {}
     }
 
@@ -152,6 +156,80 @@ fn main() -> anyhow::Result<()> {
         return headless(source, save, export, offscreen);
     }
     app::run(source, bench)
+}
+
+/// `imagine batch ACTION FILE… [--out DIR] [--format EXT]`: plays an action
+/// (name in the actions folder or a .jsonl path) on each file and exports it.
+fn batch(args: &[String]) -> anyhow::Result<()> {
+    use agent::Backend;
+    use serde_json::json;
+    let mut out_dir: Option<PathBuf> = None;
+    let mut format: Option<String> = None;
+    let mut positional = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--out" => out_dir = Some(it.next().context(tr("--out needs a folder"))?.into()),
+            "--format" => format = Some(it.next().context(tr("--format needs an extension"))?.trim_start_matches('.').to_lowercase()),
+            "-h" | "--help" => {
+                print!("{}", tr(HELP));
+                return Ok(());
+            }
+            s if s.starts_with("--") => bail!("{}", tr!("unknown option {option}", option = s)),
+            p => positional.push(p.to_string()),
+        }
+    }
+    let (action, files) = positional.split_first().context(tr("imagine batch needs an action and files"))?;
+    anyhow::ensure!(!files.is_empty(), "{}", tr("imagine batch needs an action and files"));
+    let path = if action.ends_with(".jsonl") && std::path::Path::new(action).exists() {
+        PathBuf::from(action)
+    } else {
+        app::actions::find(&app::actions::actions_dir(), action)
+            .filter(|e| e.kind == app::actions::Kind::Macro)
+            .with_context(|| tr!("no action named {name}", name = action))?
+            .path
+    };
+    let steps = app::actions::read_macro(&path)?;
+    let mut backend = agent::Local::new(None)?;
+    let exportable = ["png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "psd", "psb"];
+    let (mut done, mut failed) = (0, 0);
+    for f in files {
+        let input = PathBuf::from(f);
+        let ext = format.clone().unwrap_or_else(|| {
+            input
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .filter(|e| exportable.contains(&e.as_str()))
+                .unwrap_or_else(|| "png".into())
+        });
+        let dir = out_dir.clone().unwrap_or_else(|| input.parent().unwrap_or(std::path::Path::new(".")).join("imagine-batch"));
+        let target = dir.join(format!("{}.{ext}", input.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default()));
+        let t0 = std::time::Instant::now();
+        let r = (|| -> anyhow::Result<()> {
+            std::fs::create_dir_all(&dir)?;
+            backend.call(json!({ "cmd": "document_open", "path": input }))?;
+            for (i, s) in steps.iter().enumerate() {
+                backend.call(s.clone()).with_context(|| format!("step {} ({})", i + 1, s["cmd"].as_str().unwrap_or("?")))?;
+            }
+            backend.call(json!({ "cmd": "export", "path": target }))?;
+            Ok(())
+        })();
+        match r {
+            Ok(()) => {
+                done += 1;
+                println!("{} → {} ({:.0} ms)", input.display(), target.display(), t0.elapsed().as_secs_f64() * 1e3);
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!("{}: {e:#}", input.display());
+            }
+        }
+    }
+    println!("{}", tr!("{done} done, {failed} failed", done = done, failed = failed));
+    if failed > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 /// `imagine mcp …` / `imagine run …`
