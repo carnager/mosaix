@@ -246,6 +246,60 @@ impl PathNode {
     }
 }
 
+/// Makes node `i` smooth: handles along the direction from its previous to
+/// its next node, a sixth of that distance long (the curve then runs through
+/// the nodes like a Catmull-Rom spline). The ends of an open path get one
+/// handle towards their neighbour.
+pub fn smooth_node(nodes: &mut [PathNode], closed: bool, i: usize) {
+    let n = nodes.len();
+    if n < 2 || i >= n {
+        return;
+    }
+    let v = |p: [f64; 2]| glam::DVec2::new(p[0], p[1]);
+    let a = |p: glam::DVec2| [p.x, p.y];
+    let p = v(nodes[i].p);
+    let prev = if i > 0 { Some(v(nodes[i - 1].p)) } else if closed { Some(v(nodes[n - 1].p)) } else { None };
+    let next = if i + 1 < n { Some(v(nodes[i + 1].p)) } else if closed { Some(v(nodes[0].p)) } else { None };
+    let (h_in, h_out) = match (prev, next) {
+        (Some(pp), Some(nn)) => {
+            let d = (nn - pp) / 6.0;
+            (p - d, p + d)
+        }
+        (None, Some(nn)) => (p, p + (nn - p) / 3.0),
+        (Some(pp), None) => (p + (pp - p) / 3.0, p),
+        (None, None) => (p, p),
+    };
+    nodes[i].h_in = a(h_in);
+    nodes[i].h_out = a(h_out);
+}
+
+/// Makes a pen path or a polygon smooth (`true`) or all corners (`false`);
+/// a polygon becomes a pen path. False if the geometry has no nodes.
+pub fn smooth_geometry(g: &mut Geometry, smooth: bool) -> bool {
+    if let Geometry::Polygon { points, closed } = g {
+        let nodes = points.iter().map(|p| PathNode::corner(*p)).collect();
+        *g = Geometry::Bezier { nodes, closed: *closed };
+    }
+    match g {
+        Geometry::Bezier { nodes, closed } => {
+            smooth_all(nodes, *closed, smooth);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Makes every node smooth (`true`) or a corner (`false`).
+pub fn smooth_all(nodes: &mut [PathNode], closed: bool, smooth: bool) {
+    for i in 0..nodes.len() {
+        if smooth {
+            smooth_node(nodes, closed, i);
+        } else {
+            nodes[i] = PathNode::corner(nodes[i].p);
+        }
+    }
+}
+
 fn yes() -> bool {
     true
 }
@@ -412,6 +466,26 @@ impl VectorLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smoothing_nodes() {
+        let pts = [[0.0, 0.0], [60.0, 30.0], [120.0, 0.0]];
+        let mut g = Geometry::Polygon { points: pts.to_vec(), closed: false };
+        assert!(smooth_geometry(&mut g, true));
+        let Geometry::Bezier { nodes, closed: false } = &g else { panic!("{g:?}") };
+        // Middle: handles parallel to next − prev, a sixth of it.
+        assert_eq!(nodes[1].h_in, [40.0, 30.0]);
+        assert_eq!(nodes[1].h_out, [80.0, 30.0]);
+        // Open ends: one handle towards the neighbour.
+        assert_eq!(nodes[0].h_in, [0.0, 0.0]);
+        assert_eq!(nodes[0].h_out, [20.0, 10.0]);
+        assert_eq!(nodes[2].h_out, [120.0, 0.0]);
+        let mut g2 = g.clone();
+        assert!(smooth_geometry(&mut g2, false));
+        let Geometry::Bezier { nodes, .. } = &g2 else { unreachable!() };
+        assert!(nodes.iter().all(|n| !n.is_smooth()));
+        assert!(!smooth_geometry(&mut Geometry::Ellipse { cx: 0.0, cy: 0.0, rx: 1.0, ry: 1.0 }, true));
+    }
 
     #[test]
     fn serde_roundtrip_and_defaults() {

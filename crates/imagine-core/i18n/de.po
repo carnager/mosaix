@@ -2575,3 +2575,18 @@ msgstr "Hochskalieren: {pct} %"
 
 msgid "Enlarges every pixel layer with local AI (Real-ESRGAN) – adds plausible detail instead of blur. About {s} s here."
 msgstr "Vergrößert jede Pixelebene mit lokaler KI (Real-ESRGAN) – ergänzt glaubwürdige Details statt Unschärfe. Hier etwa {s} s."
+
+msgid "Nodes"
+msgstr "Knoten"
+
+msgid "Smooth All"
+msgstr "Alle glätten"
+
+msgid "Every node becomes a smooth curve point (Alt+click with the pen: a single node)"
+msgstr "Jeder Knoten wird ein glatter Kurvenpunkt (Alt+Klick mit dem Zeichenstift: ein einzelner Knoten)"
+
+msgid "All Corners"
+msgstr "Alle Ecken"
+
+msgid "Every node becomes a corner: straight lines between the nodes"
+msgstr "Jeder Knoten wird eine Ecke: gerade Linien zwischen den Knoten"

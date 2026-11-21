@@ -368,6 +368,12 @@ pub enum Command {
         layer: Option<LayerId>,
         changes: Value,
     },
+    /// Makes every node of a pen path smooth (or a corner).
+    PathSmooth {
+        layer: Option<LayerId>,
+        #[serde(default = "yes")]
+        smooth: bool,
+    },
     LayerRasterize {
         layer: Option<LayerId>,
     },
@@ -538,6 +544,7 @@ impl Command {
             Self::TextAdd { .. } => "text_add",
             Self::ShapeAdd { .. } => "shape_add",
             Self::VectorSet { .. } => "vector_set",
+            Self::PathSmooth { .. } => "path_smooth",
             Self::LayerRasterize { .. } => "layer_rasterize",
             Self::RawSet { .. } => "raw_set",
             Self::PatternList => "pattern_list",
@@ -714,6 +721,10 @@ fn selection_info(s: &Session) -> Value {
             json!({ "selection": { "default": m.default, "tiles": m.tiles.len(), "edge_tiles": partial } })
         }
     }
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_upscale() -> u32 {
@@ -1735,6 +1746,24 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             if let Some(n) = name {
                 s.engine.select(|d| d.find_mut(id).unwrap().name = n);
             }
+            vector_ok(s, id)
+        }
+        Command::PathSmooth { layer, smooth } => {
+            let id = target_layer(s, layer)?;
+            let mut vl = s
+                .engine
+                .doc()
+                .find(id)
+                .and_then(|l| l.vector().cloned())
+                .with_context(|| format!("layer {id} is not a shape layer"))?;
+            let imagine_core::vector::VectorKind::Shape(spec) = &mut vl.kind else {
+                bail!("layer {id} is not a shape layer");
+            };
+            ensure!(
+                imagine_core::vector::smooth_geometry(&mut spec.geometry, smooth),
+                "layer {id} is not a pen path or polygon"
+            );
+            s.engine.set_vector(id, vl, tr("Edit Path"), None).map_err(engine_err)?;
             vector_ok(s, id)
         }
         Command::VectorSet { layer, changes } => {

@@ -557,6 +557,13 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "path_smooth",
+            "Make every node of a pen path or polygon shape a smooth curve point (a polygon becomes a pen path) – handles along the neighbours' direction, the curve runs through the nodes – or, with smooth: false, a corner (straight segments).",
+            json!({ "layer": layer_param(), "smooth": { "type": "boolean" } }),
+            &[],
+            false,
+        ),
+        tool(
             "vector_set",
             "Change a text or shape layer: `changes` is merged into its description as shown by document_info \
              (e.g. {\"text\": \"New\", \"size\": 64, \"color\": \"#ff0000\"} or {\"fill\": \"#00ff00\", \"radius\": 12}; \
@@ -932,7 +939,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "filter_plugin_list": {}, "action_list": {}, "select_subject": {}, "select_object": {"points": [[1, 2]]}, "remove_background": {}, "remove_area": {}, "image_upscale": {}, "ai_model_download": {"model": "subject"}, "action_run": {"name": "x"}, "filter_plugin_install": {"source": "x", "check_only": true}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "filter_plugin_list": {}, "action_list": {}, "select_subject": {}, "select_object": {"points": [[1, 2]]}, "remove_background": {}, "ai_model_download": {"model": "subject"}, "action_run": {"name": "x"}, "filter_plugin_install": {"source": "x", "check_only": true}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples
             .as_object_mut()
@@ -940,17 +947,16 @@ mod tests {
             .extend(more.as_object().unwrap().clone());
         for t in tools() {
             let name = t["name"].as_str().unwrap();
-            let mut args = samples[name]
-                .as_object()
-                .unwrap_or_else(|| panic!("no sample for {name}"))
-                .clone();
+            // Tools without required parameters need no sample.
+            let sample = samples[name].as_object().cloned().unwrap_or_default();
+            let mut args = sample.clone();
             args.insert("cmd".into(), name.into());
             let cmd = Command::parse(Value::Object(args)).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(cmd.name(), name);
             // Every schema property must be accepted by the command (deny_unknown_fields
             // would reject it otherwise): try each one with a plausible value.
             for (prop, schema) in t["inputSchema"]["properties"].as_object().unwrap() {
-                let mut a = samples[name].as_object().unwrap().clone();
+                let mut a = sample.clone();
                 a.insert("cmd".into(), name.into());
                 if !a.contains_key(prop) {
                     let v = match (prop.as_str(), schema["type"].as_str()) {

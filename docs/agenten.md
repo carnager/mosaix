@@ -61,6 +61,7 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 | `paint_stroke` mit `clone_offset` | Kopierstempel: kopiert pixelgenau von Punkt + Versatz; `clone_all_layers` nimmt das ganze Bild als Quelle; mit `heal: true` Reparaturpinsel (Farbe/Helligkeit an die Umgebung angeglichen); `spot_heal: true` Bereichsreparatur ohne Quelle |
 | `content_aware_fill` | füllt die Auswahl inhaltsbasiert (Objekte entfernen); `all_layers` lernt aus dem ganzen Bild |
 | `text_add`, `shape_add`, `vector_set`, `layer_rasterize` | Text- und Formebenen anlegen, über ihre Beschreibung ändern (JSON-Merge, Farben auch als `#rrggbb`) und in Pixel umwandeln |
+| `path_smooth` | Alle Knoten eines Zeichenstift-Pfads oder Polygons glätten (die Kurve läuft durch die Knoten; ein Polygon wird zum Pfad) oder mit `smooth: false` zu Ecken machen |
 | `layer_effects_set` | Ebenenstile setzen: Kontur, Schlagschatten, Schatten/Schein innen und außen, Farbüberlagerung, Kante & Relief |
 | `histogram` | Histogramm je Kanal mit Mittelwert, Median, 1./99. Perzentil und Clipping, wahlweise von dem, was unter einer Ebene liegt |
 | `crop`, `canvas_size`, `image_resize` | Zuschneiden (darf über den Rand hinausgehen), Arbeitsfläche mit Anker, Bildgröße; Pixel außerhalb bleiben erhalten |

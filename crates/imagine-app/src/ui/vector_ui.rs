@@ -496,6 +496,22 @@ pub fn editor(
                             &mut t,
                         );
                     }
+                    if matches!(s.geometry, Geometry::Bezier { .. } | Geometry::Polygon { .. }) {
+                        ui.label(tr("Nodes"));
+                        ui.horizontal(|ui| {
+                            for (label, tip, smooth) in [
+                                (tr("Smooth All"), tr("Every node becomes a smooth curve point (Alt+click with the pen: a single node)"), true),
+                                (tr("All Corners"), tr("Every node becomes a corner: straight lines between the nodes"), false),
+                            ] {
+                                if ui.button(label).on_hover_text(tip).clicked() {
+                                    imagine_core::vector::smooth_geometry(&mut s.geometry, smooth);
+                                    t.changed = true;
+                                    t.done = true;
+                                }
+                            }
+                        });
+                        ui.end_row();
+                    }
                     fill_rows(ui, s, brush, patterns, &mut t);
                     ui.label(tr("Stroke"));
                     ui.horizontal(|ui| {

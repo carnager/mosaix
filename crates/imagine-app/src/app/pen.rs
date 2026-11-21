@@ -96,7 +96,7 @@ impl App {
             return Drag::Pen(PenDrag::NewNode(self.pen.drawing.len() - 1));
         }
         // Editing the active path layer: handles of the selected node, then nodes.
-        if let Some((id, mut nodes, _, m)) = self.edited_path() {
+        if let Some((id, mut nodes, closed, m)) = self.edited_path() {
             let local = m.inverse().transform_point2(doc);
             let to_doc = |p: [f64; 2]| m.transform_point2(v(p));
             if let Some(i) = self.pen.selected.filter(|i| *i < nodes.len()) {
@@ -123,17 +123,7 @@ impl App {
                         *n = PathNode::corner(n.p);
                     } else {
                         // Handles along the neighbours' direction.
-                        let prev = nodes
-                            .get(i.wrapping_sub(1))
-                            .or(nodes.last())
-                            .map(|x| v(x.p));
-                        let next = nodes.get(i + 1).or(nodes.first()).map(|x| v(x.p));
-                        if let (Some(pp), Some(nn)) = (prev, next) {
-                            let d = (nn - pp) * 0.25;
-                            let p = v(nodes[i].p);
-                            nodes[i].h_in = a(p - d);
-                            nodes[i].h_out = a(p + d);
-                        }
+                        imagine_core::vector::smooth_node(&mut nodes, closed, i);
                     }
                     self.set_path_nodes(id, nodes);
                     if let Some(e) = self.engine() {
