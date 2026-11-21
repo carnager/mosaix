@@ -151,6 +151,20 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "filter_plugin_list",
+            "The GPU filter plugins (WGSL files): names, descriptions, parameters, load errors, the plugin folder and the file format with all helper functions.",
+            json!({}),
+            &[],
+            true,
+        ),
+        tool(
+            "filter_plugin_install",
+            "Write your own GPU filter: checks a WGSL filter plugin (header + fn process(p: vec2<i32>) -> vec4<f32>, format in filter_plugin_list) and saves it to the plugin folder; compile errors name the line. check_only=true only checks. Then use it with filter_apply {filter: {kind: plugin, name}}.",
+            json!({ "source": { "type": "string" }, "check_only": { "type": "boolean" } }),
+            &["source"],
+            false,
+        ),
+        tool(
             "raw_info",
             "Camera, lens, shot data (ISO, shutter, aperture, focal length) and the as-shot white balance (temperature/tint) of a camera RAW file, without opening it.",
             json!({ "path": { "type": "string" } }),
@@ -442,7 +456,8 @@ pub fn tools() -> Vec<Value> {
             "filter_apply",
             "Apply a pixel filter to a layer (within the selection, if any). filter is an object with \"kind\": \
              gaussian_blur {radius px}; unsharp_mask {amount % 1…500, radius px, threshold 0…255}; \
-             high_pass {radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}. \
+             high_pass {radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}; \
+             plugin {name, values: {param: number | bool | \"#rrggbb\"}} for a filter plugin (see filter_plugin_list). \
              With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
              listed under smart_filters in document_info and editable with smart_filter_set.",
             json!({ "layer": layer_param(), "filter": { "type": "object" }, "smart": { "type": "boolean" } }),
@@ -859,7 +874,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "filter_plugin_list": {}, "filter_plugin_install": {"source": "x", "check_only": true}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples
             .as_object_mut()

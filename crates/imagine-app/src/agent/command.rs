@@ -84,6 +84,14 @@ pub enum Command {
         #[serde(default)]
         raw: Option<imagine_io::raw::Develop>,
     },
+    /// Filter plugins: names, parameters, errors.
+    FilterPluginList,
+    /// Checks a WGSL filter plugin and (unless `check_only`) saves it to the plugin folder.
+    FilterPluginInstall {
+        source: String,
+        #[serde(default)]
+        check_only: bool,
+    },
     /// Camera, shot data and as-shot white balance of a RAW file.
     RawInfo {
         path: PathBuf,
@@ -442,6 +450,8 @@ impl Command {
             Self::DocumentNew { .. } => "document_new",
             Self::DocumentOpen { .. } => "document_open",
             Self::RawInfo { .. } => "raw_info",
+            Self::FilterPluginList => "filter_plugin_list",
+            Self::FilterPluginInstall { .. } => "filter_plugin_install",
             Self::DocumentInfo => "document_info",
             Self::LayerAdd { .. } => "layer_add",
             Self::LayerDuplicate { .. } => "layer_duplicate",
@@ -597,6 +607,27 @@ fn session(s: &mut Option<Session>) -> anyhow::Result<&mut Session> {
 }
 
 /// Resolves `layer` (default: active), checks it exists and makes it active.
+/// A plugin filter named without its source gets it from the library (and
+/// default values for parameters not given).
+fn resolve_plugin(f: imagine_core::Filter) -> anyhow::Result<imagine_core::Filter> {
+    use imagine_core::Filter;
+    let Filter::Plugin { name, source, values } = f else { return Ok(f) };
+    if !source.is_empty() {
+        return Ok(Filter::Plugin { name, source, values });
+    }
+    let lib = crate::app::filters::load_library(&crate::app::filters::filter_dir());
+    let Some(Filter::Plugin { name, source, values: defaults }) = crate::app::filters::find(&lib, &name) else {
+        bail!("no filter plugin named {name} (see filter_plugin_list)");
+    };
+    let spec = imagine_core::plugin::parse(&source).map_err(|e| anyhow::anyhow!(e))?;
+    for k in values.keys() {
+        ensure!(spec.params.iter().any(|p| p.id == *k), "{name} has no parameter {k}");
+    }
+    let mut v = defaults;
+    v.extend(values);
+    Ok(Filter::Plugin { name, source, values: v })
+}
+
 fn target_layer(s: &mut Session, layer: Option<LayerId>) -> anyhow::Result<LayerId> {
     let id = layer.unwrap_or(s.engine.doc().active);
     ensure!(
@@ -757,6 +788,37 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
             let mut out = Output::json(info(session(ctx.session)?));
             out.replaced_document = true;
             Ok(out)
+        }
+        Command::FilterPluginList => {
+            let lib = crate::app::filters::load_library(&crate::app::filters::filter_dir());
+            Ok(Output::json(json!({
+                "folder": crate::app::filters::filter_dir(),
+                "plugins": lib.iter().map(|p| match &p.result {
+                    Ok(imagine_core::Filter::Plugin { name, source, .. }) => {
+                        let spec = imagine_core::plugin::parse(source).ok();
+                        json!({
+                            "name": name, "file": p.file, "builtin": p.builtin,
+                            "description": spec.as_ref().map(|s| s.description.clone()),
+                            "params": spec.map(|s| s.params).unwrap_or_default(),
+                        })
+                    }
+                    Ok(_) => json!({ "file": p.file }),
+                    Err(e) => json!({ "file": p.file, "builtin": p.builtin, "error": e }),
+                }).collect::<Vec<_>>(),
+                "format": format!("WGSL with a header: // @name …, // @description …, // @param id \"Label\" min max default [unit] [log] | bool [true] | color [#rrggbb], // @reach px|param, // @canvas; and fn process(p: vec2<i32>) -> vec4<f32> returning premultiplied linear RGBA. Parameters are functions of their id. Helpers:\n{}", imagine_core::plugin::PRELUDE_DOC),
+            })))
+        }
+        Command::FilterPluginInstall { source, check_only } => {
+            let spec = imagine_gpu::engine::validate_plugin(&source).map_err(|e| anyhow::anyhow!(e))?;
+            if check_only {
+                return Ok(Output::json(json!({ "ok": true, "name": spec.name, "params": spec.params })));
+            }
+            let dir = crate::app::filters::filter_dir();
+            std::fs::create_dir_all(&dir)?;
+            let stem: String = spec.name.chars().map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
+            let path = dir.join(format!("{stem}.wgsl"));
+            std::fs::write(&path, &source).with_context(|| path.display().to_string())?;
+            Ok(Output::json(json!({ "ok": true, "name": spec.name, "path": path })))
         }
         Command::RawInfo { path } => {
             ensure!(imagine_io::raw::is_raw(&path), "{} is not a camera RAW file", path.display());
@@ -1388,13 +1450,17 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             smart,
         } => {
             pixel_layer(s, layer)?;
+            let filter = resolve_plugin(filter)?;
+            if let imagine_core::Filter::Plugin { source, .. } = &filter {
+                s.engine.check_plugin(source).map_err(|e| anyhow::anyhow!("filter plugin: {e}"))?;
+            }
             let label = filter.name();
             if smart {
                 s.engine
-                    .add_smart_filter(&filter, label)
+                    .add_smart_filter(&filter, &label)
                     .map_err(engine_err)?;
             } else {
-                s.engine.apply_filter(&filter, label).map_err(engine_err)?;
+                s.engine.apply_filter(&filter, &label).map_err(engine_err)?;
             }
             ok(s)
         }
@@ -1645,7 +1711,11 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             });
             ok(s)
         }
-        Command::PatternList | Command::PatternImport { .. } | Command::RawInfo { .. } => unreachable!(),
+        Command::PatternList
+        | Command::PatternImport { .. }
+        | Command::RawInfo { .. }
+        | Command::FilterPluginList
+        | Command::FilterPluginInstall { .. } => unreachable!(),
         Command::PatternDefine { name } => {
             let c = s.engine.copy_pixels(true).map_err(engine_err)?;
             let img = crate::app::clipboard::to_rgba8(c.w, c.h, &c.px);

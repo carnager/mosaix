@@ -20,6 +20,7 @@ use crate::pool::{Tile, texel_copy};
 #[derive(Clone, Copy)]
 enum Kernel {
     Apply,
+    Plugin,
     Warp,
     Similar,
     Filter,
@@ -153,6 +154,18 @@ impl Engine {
         )
     }
 
+    pub(super) fn run_plugin(&mut self, pipeline: std::sync::Arc<wgpu::RenderPipeline>, jobs: &[super::plugin::PluginJob]) -> Option<Vec<Tile>> {
+        self.plugin_current = Some(pipeline);
+        let r = self.run_tiles(
+            StrokeTarget::Pixels,
+            Kernel::Plugin,
+            bytemuck::cast_slice(jobs),
+            size_of::<super::plugin::PluginJob>(),
+        );
+        self.plugin_current = None;
+        r
+    }
+
     /// Job mixing `src_slot` over the layer's tile at `c` through the selection.
     pub(super) fn replace_job(&self, layer: LayerId, c: TileCoord, src_slot: u32) -> ApplyJob {
         let mut j = self.with_old(self.job(c), layer, StrokeTarget::Pixels, c);
@@ -207,7 +220,7 @@ impl Engine {
                         ],
                     })
                 }
-                Kernel::Warp | Kernel::Filter | Kernel::Liquify => {
+                Kernel::Warp | Kernel::Filter | Kernel::Liquify | Kernel::Plugin => {
                     self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("warp"),
                         layout: &self.warp_bgl,
@@ -257,6 +270,7 @@ impl Engine {
                 (Kernel::Warp, StrokeTarget::Mask) => &self.warp_mask_pipeline,
                 (Kernel::Similar, _) => &self.similar_pipeline,
                 (Kernel::Filter, _) => &self.filter_pipeline,
+                (Kernel::Plugin, _) => self.plugin_current.as_deref()?,
                 (Kernel::Liquify, _) => &self.liquify_pipeline,
             };
             let (views, scratch) = match target {

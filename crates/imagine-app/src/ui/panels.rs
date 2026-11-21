@@ -166,6 +166,7 @@ pub struct Model {
     pub custom_tips: Vec<String>,
     /// Pattern library (built-ins first).
     pub patterns: std::sync::Arc<Vec<imagine_core::pattern::Pattern>>,
+    pub filter_plugins: std::sync::Arc<Vec<crate::app::filters::Plugin>>,
     pub eyedrop_radius: i64,
     pub eyedrop_all: bool,
     pub boxed: Option<&'static str>,
@@ -222,6 +223,8 @@ pub enum Action {
     /// Add the tips of an .abr file or an image to the brush library.
     ImportBrushes(std::path::PathBuf),
     ImportPatterns(std::path::PathBuf),
+    /// Read the filter plugin folder again.
+    ReloadFilterPlugins,
     /// Keyboard shortcut of a command: `None` removes it, `reset` restores the default.
     Shortcut { id: String, combo: Option<palette::Combo>, reset: bool },
     ResetShortcuts,
@@ -674,6 +677,35 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                                 ui.close();
                             }
                         }
+                        ui.separator();
+                        ui.menu_button(tr("Plugins"), |ui| {
+                            for p in m.filter_plugins.iter() {
+                                match &p.result {
+                                    Ok(f) => {
+                                        let r = ui.button(format!("{} …", f.name()));
+                                        let d = p.description();
+                                        let r = if d.is_empty() { r } else { r.on_hover_text(d) };
+                                        if r.clicked() {
+                                            st.open_filter(f.clone());
+                                            ui.close();
+                                        }
+                                    }
+                                    Err(e) => {
+                                        ui.add_enabled(false, egui::Button::new(&p.file))
+                                            .on_disabled_hover_text(e);
+                                    }
+                                }
+                            }
+                            ui.separator();
+                            if ui
+                                .button(tr("Reload Plugins"))
+                                .on_hover_text(crate::app::filters::filter_dir().display().to_string())
+                                .clicked()
+                            {
+                                out.push(Action::ReloadFilterPlugins);
+                                ui.close();
+                            }
+                        });
                     });
                 }
                 if menu == "Layer" {
@@ -2273,6 +2305,44 @@ fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
                     s(ui, tr("Seed"), &mut sd, 0.0..=100.0, false, "");
                     *seed = sd as u32;
                 }
+                Filter::Plugin { source, values, .. } => match imagine_core::plugin::parse(source) {
+                    Err(e) => {
+                        ui.colored_label(ui.visuals().error_fg_color, e);
+                    }
+                    Ok(spec) => {
+                        if !spec.description.is_empty() {
+                            ui.label(RichText::new(&spec.description).weak());
+                        }
+                        use imagine_core::plugin::ParamKind;
+                        for p in &spec.params {
+                            let v = values.entry(p.id.clone()).or_insert_with(|| p.default.clone());
+                            if v.len() != p.width() {
+                                *v = p.default.clone();
+                            }
+                            match &p.kind {
+                                ParamKind::Number { min, max, unit, log } => {
+                                    let suffix = if unit.is_empty() { String::new() } else { format!(" {unit}") };
+                                    s(ui, &p.label, &mut v[0], *min..=*max, *log, &suffix);
+                                }
+                                ParamKind::Bool => {
+                                    let mut b = v[0] > 0.5;
+                                    if ui.checkbox(&mut b, &p.label).changed() {
+                                        v[0] = b as u8 as f32;
+                                    }
+                                }
+                                ParamKind::Color => {
+                                    ui.horizontal(|ui| {
+                                        ui.add_sized([90.0, 18.0], egui::Label::new(&p.label));
+                                        let mut rgb = egui::Rgba::from_rgb(v[0], v[1], v[2]);
+                                        if egui::color_picker::color_edit_button_rgba(ui, &mut rgb, egui::color_picker::Alpha::Opaque).changed() {
+                                            *v = vec![rgb.r(), rgb.g(), rgb.b()];
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                },
             }
             ui.checkbox(&mut d.preview, tr("Preview"));
             if d.edit.is_none() {

@@ -142,7 +142,23 @@ impl Engine {
     }
 
     /// Destination tiles of a filter on `src` (blur spreads beyond the source).
-    fn filter_dest(src: &TileSet, f: &Filter) -> BTreeSet<TileCoord> {
+    fn filter_dest(&mut self, src: &TileSet, f: &Filter) -> BTreeSet<TileCoord> {
+        if let Filter::Plugin { source, values, .. } = f
+            && let Ok((spec, _)) = self.plugin_pipeline(source)
+        {
+            let reach = (spec.reach(values).ceil() as i32 + TILE_SIZE as i32 - 1) / TILE_SIZE as i32;
+            let mut out = dilate(src.keys().copied(), reach);
+            if spec.canvas {
+                let (w, h) = (self.doc.width as i32, self.doc.height as i32);
+                let ts = TILE_SIZE as i32;
+                for ty in 0..(h + ts - 1) / ts {
+                    for tx in 0..(w + ts - 1) / ts {
+                        out.insert(TileCoord::new(tx, ty));
+                    }
+                }
+            }
+            return out;
+        }
         let spread = (3.0 * f.radius()).ceil() as i32;
         let reach = if matches!(f, Filter::GaussianBlur { .. }) {
             (spread + TILE_SIZE as i32 - 1) / TILE_SIZE as i32
@@ -211,6 +227,24 @@ impl Engine {
                 let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
                 dest.into_iter().zip(tiles).collect()
             }
+            Filter::Plugin { source, values, .. } => {
+                let (spec, pipeline) =
+                    self.plugin_pipeline(source).map_err(|_| imagine_core::tr("the filter plugin does not compile"))?;
+                let p = spec.floats(values);
+                let canvas = [self.doc.width as f32, self.doc.height as f32];
+                let mut grids = Grids::default();
+                let g = grids.layer(src);
+                self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+                let jobs: Vec<super::plugin::PluginJob> = dest
+                    .iter()
+                    .map(|c| {
+                        let (x, y) = c.origin();
+                        super::plugin::PluginJob { origin: [x as i32, y as i32], canvas, src: g, p }
+                    })
+                    .collect();
+                let tiles = self.run_plugin(pipeline, &jobs).ok_or(full)?;
+                dest.into_iter().zip(tiles).collect()
+            }
             _ => TileSet::new(),
         })
     }
@@ -221,7 +255,7 @@ impl Engine {
         src: &TileSet,
         f: &Filter,
     ) -> Result<TileSet, &'static str> {
-        let dest = Self::filter_dest(src, f).into_iter().collect();
+        let dest = self.filter_dest(src, f).into_iter().collect();
         let out = self.run_filter_tiles(src, f, dest)?;
         let mut map = src.clone();
         map.extend(out);
@@ -243,7 +277,8 @@ impl Engine {
             .map(|t| (**t).clone())
             .unwrap_or_default();
         let sel = self.doc.selection.clone();
-        let dest: Vec<TileCoord> = Self::filter_dest(&src, f)
+        let dest: Vec<TileCoord> = self
+            .filter_dest(&src, f)
             .into_iter()
             .filter(|c| in_rect(c, rect))
             .filter(|c| {

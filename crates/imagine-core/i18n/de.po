@@ -2361,3 +2361,18 @@ msgstr "in der DNG enthalten"
 
 msgid "Satin"
 msgstr "Glanz"
+
+msgid "the filter plugin does not compile"
+msgstr "das Filter-Plugin lässt sich nicht übersetzen"
+
+msgid "Filter plugin: {error}"
+msgstr "Filter-Plugin: {error}"
+
+msgid "{n} filter plugins loaded, {bad} with errors"
+msgstr "{n} Filter-Plugins geladen, {bad} mit Fehlern"
+
+msgid "Plugins"
+msgstr "Plugins"
+
+msgid "Reload Plugins"
+msgstr "Plugins neu laden"

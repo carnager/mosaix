@@ -99,6 +99,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         bg_color: [1.0; 3],
         custom_tips: Vec::new(),
         patterns: std::sync::Arc::new(imagine_core::pattern::Pattern::builtin()),
+        filter_plugins: std::sync::Arc::new(crate::app::filters::load_library(&crate::app::filters::filter_dir())),
         eyedrop_radius: 0,
         eyedrop_all: true,
         boxed: std::env::var_os("IMAGINE_SNAPSHOT_BOX").map(|_| "Free Transform"),
@@ -165,6 +166,12 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         }
         Ok("confirm") => state.confirm = Some(tr("They will be lost when quitting.").into()),
         Ok("filter") => state.open_filter(imagine_core::Filter::GaussianBlur { radius: 25.0 }),
+        Ok(d) if d.starts_with("filter:") => {
+            let lib = crate::app::filters::load_library(&crate::app::filters::filter_dir());
+            if let Some(f) = crate::app::filters::find(&lib, &d[7..]) {
+                state.open_filter(f);
+            }
+        }
         _ => {}
     }
     let mut model = model;

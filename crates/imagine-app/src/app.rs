@@ -7,6 +7,7 @@
 pub(crate) mod clipboard;
 mod brushes;
 pub(crate) mod patterns;
+pub(crate) mod filters;
 pub(crate) mod pen;
 pub(crate) mod textedit;
 
@@ -440,6 +441,8 @@ pub struct App {
     custom_tips: Vec<String>,
     /// Pattern library: built-ins and the user's patterns.
     patterns: std::sync::Arc<Vec<imagine_core::pattern::Pattern>>,
+    /// Filter plugins (built-in examples and the user's folder).
+    filter_plugins: std::sync::Arc<Vec<filters::Plugin>>,
     /// Status text, refreshed a few times per second (not every frame).
     ui_status: String,
 
@@ -664,6 +667,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         mask_thumbs: HashMap::new(),
         custom_tips: Vec::new(),
         patterns: std::sync::Arc::new(patterns::load_library(&patterns::pattern_dir())),
+        filter_plugins: std::sync::Arc::new(filters::load_library(&filters::filter_dir())),
         ui_status: String::new(),
         socket: None,
         bench: None,
@@ -3157,6 +3161,7 @@ impl App {
             bg_color: self.bg_color,
             custom_tips: self.custom_tips.clone(),
             patterns: self.patterns.clone(),
+            filter_plugins: self.filter_plugins.clone(),
             eyedrop_radius: self.eyedrop_radius,
             eyedrop_all: self.eyedrop_all,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
@@ -3280,6 +3285,18 @@ impl App {
                 Action::BgColor(c) => self.bg_color = c,
                 Action::ImportBrushes(p) => self.import_brushes(&p),
                 Action::ImportPatterns(p) => self.import_patterns(&p),
+                Action::ReloadFilterPlugins => {
+                    let lib = filters::load_library(&filters::filter_dir());
+                    let (ok, bad): (Vec<_>, Vec<_>) = lib.iter().partition(|p| p.result.is_ok());
+                    for b in &bad {
+                        if let Err(e) = &b.result {
+                            tracing::warn!("{}: {e}", b.file);
+                        }
+                    }
+                    tracing::info!("{}", tr!("{n} filter plugins loaded, {bad} with errors", n = ok.len(), bad = bad.len()));
+                    self.filter_plugins = std::sync::Arc::new(lib);
+                    self.needs_redraw = true;
+                }
                 Action::Shortcut { id, combo, reset } => {
                     ui::palette::rebind(&mut self.settings.keymap, &id, combo, reset);
                     self.store_settings();
@@ -3570,12 +3587,12 @@ impl App {
                 Action::ApplyFilter(f) => {
                     let t0 = Instant::now();
                     let label = f.name();
-                    self.engine_op(|e| e.apply_filter(&f, label));
+                    self.engine_op(|e| e.apply_filter(&f, &label));
                     tracing::info!("{label}: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
                 }
                 Action::AddSmartFilter(f) => {
                     let label = f.name();
-                    self.engine_op(|e| e.add_smart_filter(&f, label));
+                    self.engine_op(|e| e.add_smart_filter(&f, &label));
                 }
                 Action::SetSmartFilter {
                     layer,

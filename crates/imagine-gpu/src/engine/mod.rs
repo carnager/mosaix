@@ -31,7 +31,9 @@ mod heal;
 mod histogram;
 mod liquify;
 mod magic;
+mod plugin;
 pub mod raw;
+pub use plugin::validate as validate_plugin;
 mod readback;
 mod selection;
 mod smudge;
@@ -307,6 +309,11 @@ pub struct Engine {
     bounds_pipeline: wgpu::ComputePipeline,
     similar_pipeline: wgpu::RenderPipeline,
     filter_pipeline: wgpu::RenderPipeline,
+    /// Layout of filter-like pipelines (plugins are compiled against it).
+    warp_layout: wgpu::PipelineLayout,
+    /// Compiled filter plugins by source hash, and the one to run next.
+    plugin_pipelines: HashMap<u64, Result<(imagine_core::plugin::PluginSpec, Arc<wgpu::RenderPipeline>), String>>,
+    plugin_current: Option<Arc<wgpu::RenderPipeline>>,
     flatten_pipeline: wgpu::ComputePipeline,
     mip_pipeline: wgpu::ComputePipeline,
 }
@@ -1051,6 +1058,9 @@ impl Engine {
             bounds_pipeline,
             similar_pipeline,
             filter_pipeline,
+            warp_layout,
+            plugin_pipelines: HashMap::new(),
+            plugin_current: None,
             flatten_pipeline,
             mip_pipeline,
         };
