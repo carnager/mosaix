@@ -6,6 +6,7 @@
 //! - [`Sam`]: SAM 2.1 (Meta, Apache-2.0) – select an object by clicking.
 //! - [`Subject`]: BiRefNet lite (MIT) – the main subject of a picture.
 //! - [`Inpaint`]: LaMa (Apache-2.0) – fills a hole plausibly (Remove).
+//! - [`Upscale`]: Real-ESRGAN (BSD-3-Clause) – enlarges with detail.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -18,7 +19,7 @@ use rayon::prelude::*;
 
 pub mod models;
 
-pub use models::{INPAINT, Model, SAM, SUBJECT};
+pub use models::{INPAINT, Model, SAM, SUBJECT, UPSCALE};
 
 /// Where ONNX Runtime is looked for (`ORT_DYLIB_PATH` first).
 fn dylib_candidates() -> Vec<PathBuf> {
@@ -343,5 +344,99 @@ impl Inpaint {
             }
         }
         Ok(())
+    }
+}
+
+// ---- upscaling (Real-ESRGAN) -------------------------------------------------
+
+/// Enlarges pictures with detail (Real-ESRGAN, BSD-3-Clause). The model has a
+/// fixed tile size; the image is processed in overlapping tiles.
+pub struct Upscale {
+    s: Session,
+    tile: usize,
+    scale: usize,
+    input: String,
+    output: String,
+}
+
+/// Context around each tile (input pixels) so tile seams do not show.
+const UPSCALE_OVERLAP: usize = 12;
+
+impl Upscale {
+    pub fn load() -> Result<Self> {
+        let dir = models::path(&UPSCALE).ok_or_else(|| anyhow!("model {} is not installed", UPSCALE.id))?;
+        Self::load_file(&dir.join("model.onnx"))
+    }
+
+    pub fn load_file(path: &Path) -> Result<Self> {
+        let s = session(path)?;
+        let input = s.inputs().first().ok_or_else(|| anyhow!("model without input"))?;
+        let output = s.outputs().first().ok_or_else(|| anyhow!("model without output"))?;
+        let dims = |t: &ort::value::ValueType| -> Vec<i64> {
+            match t {
+                ort::value::ValueType::Tensor { shape, .. } => shape.iter().copied().collect(),
+                _ => Vec::new(),
+            }
+        };
+        let (i, o) = (dims(input.dtype()), dims(output.dtype()));
+        let tile = i.get(2).copied().filter(|v| *v > 0).unwrap_or(128) as usize;
+        let scale = o.get(2).copied().filter(|v| *v > 0).map_or(4, |v| v as usize / tile);
+        Ok(Upscale { tile, scale, input: input.name().to_string(), output: output.name().to_string(), s })
+    }
+
+    pub fn scale(&self) -> usize {
+        self.scale
+    }
+
+    /// The image (`w × h`, straight sRGB 0…1) enlarged by [`Upscale::scale`];
+    /// with `alpha`, fully transparent parts are skipped (left black).
+    /// `progress(done, total)` per tile.
+    pub fn run(&mut self, w: usize, h: usize, img: &[Rgb], alpha: Option<&[f32]>, progress: &mut dyn FnMut(usize, usize)) -> Result<Vec<Rgb>> {
+        let (t, k) = (self.tile, self.scale);
+        let step = t - 2 * UPSCALE_OVERLAP;
+        let (nx, ny) = (w.div_ceil(step), h.div_ceil(step));
+        let (ow, oh) = (w * k, h * k);
+        let mut out = vec![[0.0f32; 3]; ow * oh];
+        let mut buf = vec![0.0f32; 3 * t * t];
+        for ty in 0..ny {
+            for tx in 0..nx {
+                // The tile's source window: the step area plus the overlap,
+                // clamped at the edges (repeating the border).
+                let (sx, sy) = ((tx * step) as i64 - UPSCALE_OVERLAP as i64, (ty * step) as i64 - UPSCALE_OVERLAP as i64);
+                if let Some(a) = alpha {
+                    let (x0, y0) = (sx.max(0) as usize, sy.max(0) as usize);
+                    let (x1, y1) = (((sx + t as i64) as usize).min(w), ((sy + t as i64) as usize).min(h));
+                    if (y0..y1).all(|y| a[y * w + x0..y * w + x1].iter().all(|&v| v <= 0.0)) {
+                        progress(ty * nx + tx + 1, nx * ny);
+                        continue;
+                    }
+                }
+                for y in 0..t {
+                    let yy = (sy + y as i64).clamp(0, h as i64 - 1) as usize;
+                    for x in 0..t {
+                        let xx = (sx + x as i64).clamp(0, w as i64 - 1) as usize;
+                        let p = img[yy * w + xx];
+                        for c in 0..3 {
+                            buf[c * t * t + y * t + x] = p[c];
+                        }
+                    }
+                }
+                let input = Tensor::from_array(Array4::from_shape_vec((1, 3, t, t), buf.clone())?)?;
+                let res = self.s.run(ort::inputs![self.input.as_str() => input])?;
+                let (_, data) = res[self.output.as_str()].try_extract_tensor::<f32>()?;
+                let tk = t * k;
+                // Keep only the step area of the tile.
+                let (x0, y0) = (tx * step, ty * step);
+                for y in 0..(step.min(h - y0)) * k {
+                    for x in 0..(step.min(w - x0)) * k {
+                        let (ix, iy) = (x + UPSCALE_OVERLAP * k, y + UPSCALE_OVERLAP * k);
+                        out[(y0 * k + y) * ow + x0 * k + x] =
+                            [0, 1, 2].map(|c| data[c * tk * tk + iy * tk + ix].clamp(0.0, 1.0));
+                    }
+                }
+                progress(ty * nx + tx + 1, nx * ny);
+            }
+        }
+        Ok(out)
     }
 }

@@ -41,6 +41,7 @@ mod style;
 mod thumbs;
 mod tips;
 mod transform;
+mod upscale;
 mod util;
 mod vector;
 
@@ -58,6 +59,7 @@ use imagine_core::{
 
 pub use apply::GradientKind;
 pub use cafill::{FillJob, FillResult};
+pub use upscale::{UpscaleJob, UpscaleResult};
 pub use clipboard::CopiedPixels;
 pub use histogram::Histogram;
 pub use liquify::LiquifyTool;

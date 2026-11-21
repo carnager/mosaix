@@ -630,6 +630,23 @@ impl Engine {
         interp: Interp,
         label: &str,
     ) -> Result<(), &'static str> {
+        let out = self.canvas_doc(w, h, fwd, interp)?;
+        self.edit(label, |d| {
+            *d = out;
+            true
+        });
+        Ok(())
+    }
+
+    /// The document after a canvas operation (every layer moved by `fwd`,
+    /// new size), without changing anything yet.
+    pub(super) fn canvas_doc(
+        &mut self,
+        w: u32,
+        h: u32,
+        fwd: DAffine2,
+        interp: Interp,
+    ) -> Result<Document<Tile>, &'static str> {
         if self.stroke.is_some() {
             return Err(imagine_core::tr("not possible during a brush stroke"));
         }
@@ -677,11 +694,7 @@ impl Engine {
         out.width = w;
         out.height = h;
         out.selection = None;
-        self.edit(label, |d| {
-            *d = out;
-            true
-        });
-        Ok(())
+        Ok(out)
     }
 
     /// Transforms the active layer (or the selected part of it) by `fwd`

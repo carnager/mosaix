@@ -255,6 +255,10 @@ enum BgDone {
         name: &'static str,
         result: anyhow::Result<()>,
     },
+    Upscaled {
+        result: anyhow::Result<imagine_gpu::UpscaleResult>,
+        started: Instant,
+    },
 }
 
 /// The rectangle of a shape drag: Shift = square, Alt = from the centre.
@@ -2294,6 +2298,18 @@ impl App {
                 Ok(_) => tracing::warn!("{}", tr("No subject found")),
                 Err(e) => tracing::warn!("{}", tr!("Remove Background: {error}", error = format!("{e:#}"))),
             },
+            BgDone::Upscaled { result, started } => match result {
+                Ok(r) => match self.engine().map(|e| e.apply_upscale(r, tr("Upscale (AI)"))) {
+                    Some(Ok(())) => {
+                        self.touch();
+                        self.view_fitted = false;
+                        tracing::info!("{}", tr!("Upscaled in {s} s", s = format!("{:.1}", started.elapsed().as_secs_f64())));
+                    }
+                    Some(Err(e)) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Upscale (AI)"), error = tr(e))),
+                    None => {}
+                },
+                Err(e) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Upscale (AI)"), error = format!("{e:#}"))),
+            },
             BgDone::ModelDownloaded { name, result } => match result {
                 Ok(()) => tracing::info!("{}", tr!("{name} is ready – try again", name = name)),
                 Err(e) => tracing::error!("{}", tr!("Download of {name} failed: {error}", name = name, error = format!("{e:#}"))),
@@ -2500,6 +2516,24 @@ impl App {
                 });
             }
             Err(err) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Remove"), error = tr(err))),
+        }
+    }
+
+    /// Image › Upscale (AI): every pixel layer enlarged on a worker, then the
+    /// document scaled (one undo step).
+    fn ai_upscale(&mut self, factor: u32) {
+        if !self.ai_ready(&imagine_ai::UPSCALE) {
+            return;
+        }
+        let Some(e) = self.engine() else { return };
+        match e.upscale_job(factor) {
+            Ok(job) => {
+                let secs = crate::ai::upscale_estimate(job.pixels());
+                tracing::info!("{}", tr!("Upscaling {k}× – about {s} s …", k = factor, s = format!("{:.0}", secs.max(1.0))));
+                let started = Instant::now();
+                self.spawn_bg("upscale", move || BgDone::Upscaled { result: crate::ai::upscale(job), started });
+            }
+            Err(err) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Upscale (AI)"), error = tr(err))),
         }
     }
 
@@ -3868,6 +3902,7 @@ impl App {
                     self.engine_op(|e| e.resize_image(w, h, Interp::Bicubic, tr("Image Size")));
                     self.view_fitted = false;
                 }
+                Action::Upscale(k) => self.ai_upscale(k),
             }
         }
     }
@@ -4856,6 +4891,7 @@ fn recorded_action(a: &Action) -> Option<serde_json::Value> {
             json!({ "cmd": "canvas_size", "width": w, "height": h, "anchor": name })
         }
         Action::ImageSize { w, h } => json!({ "cmd": "image_resize", "width": w, "height": h }),
+        Action::Upscale(k) => json!({ "cmd": "image_upscale", "factor": k }),
         Action::HistoryJump(_) => {
             tracing::warn!("{}", tr("Jumps in the history are not recorded"));
             return None;

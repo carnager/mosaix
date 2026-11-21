@@ -2931,3 +2931,53 @@ fn painted_area_fill_job() {
     let away = at(&e, 300, 260);
     assert!(away[2] > 0.99 && away[1] < 0.01, "{away:?}");
 }
+
+/// Upscale: pixel layers are replaced by the computed pixels (here a 4×
+/// nearest "model", reduced to 2×), alpha stays, off-canvas content too,
+/// one undo step.
+#[test]
+fn upscale_job_scales_layers() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(300, 200));
+    e.select_shape(&Shape::Rect { x: 10.0, y: 10.0, w: 50.0, h: 40.0 }, CombineOp::Replace, "r").unwrap();
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "red").unwrap();
+    e.deselect("d").unwrap();
+    // Something left of the canvas (kept, like everything off-canvas).
+    let layer = e.doc().active;
+    let mut px = vec![f16::ZERO; TS * TS * 4];
+    for i in 0..TS * TS {
+        px[i * 4 + 2] = f16::ONE;
+        px[i * 4 + 3] = f16::ONE;
+    }
+    assert!(e.replace_tiles(layer, vec![(TileCoord::new(-1, 0), Some(px))], "off"));
+    let before = e.history_len().0;
+    let job = e.upscale_job(2).unwrap();
+    let r = job
+        .run_with(
+            |w, h, rgb, _alpha| {
+                let mut out = vec![[0.0f32; 3]; w * h * 16];
+                for y in 0..h * 4 {
+                    for x in 0..w * 4 {
+                        out[y * w * 4 + x] = rgb[(y / 4) * w + x / 4];
+                    }
+                }
+                Ok::<_, ()>((4, out))
+            },
+            || (),
+        )
+        .unwrap();
+    e.apply_upscale(r, "Upscale").unwrap();
+    assert_eq!(e.size(), (600, 400));
+    assert_eq!(e.history_len().0, before + 1);
+    e.flush();
+    let at = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new((x / TS) as i32, (y / TS) as i32), x % TS, y % TS);
+    let inside = at(&e, 70, 50);
+    assert!(inside[0] > 0.99 && inside[3] > 0.99, "{inside:?}");
+    let outside = at(&e, 200, 150);
+    assert!(outside[3] < 0.01, "{outside:?}");
+    // The off-canvas tile became two tiles further left.
+    let tiles = e.doc().find(layer).unwrap().tiles().unwrap().clone();
+    assert!(tiles.contains_key(&TileCoord::new(-2, 0)) && tiles.contains_key(&TileCoord::new(-1, 1)));
+    e.undo();
+    assert_eq!(e.size(), (300, 200));
+}

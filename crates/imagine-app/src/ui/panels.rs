@@ -313,6 +313,8 @@ pub enum Action {
         w: u32,
         h: u32,
     },
+    /// Image › Upscale (AI): the factor.
+    Upscale(u32),
     OpenFile(std::path::PathBuf),
     SaveAs(std::path::PathBuf),
     ExportAs(std::path::PathBuf, imagine_io::export::ExportOptions),
@@ -878,6 +880,20 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
                         });
                         ui.close();
                     }
+                    ui.menu_button(tr("Upscale (AI)"), |ui| {
+                        let (w, h) = m.doc_size;
+                        for k in [2u32, 4] {
+                            let secs = crate::ai::upscale_estimate(w as usize * h as usize);
+                            let b = ui.button(format!("{k}×  ({} × {} px)", w * k, h * k)).on_hover_text(tr!(
+                                "Enlarges every pixel layer with local AI (Real-ESRGAN) – adds plausible detail instead of blur. About {s} s here.",
+                                s = format!("{:.0}", secs.max(1.0))
+                            ));
+                            if b.clicked() {
+                                out.push(Action::Upscale(k));
+                                ui.close();
+                            }
+                        }
+                    });
                 }
                 if menu == "View" {
                     ui.separator();

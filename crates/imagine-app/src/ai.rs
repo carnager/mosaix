@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
 use anyhow::{Result, anyhow, bail};
-use imagine_ai::{Embedding, Image, Inpaint, Mask, Model, Point, Sam, Subject};
+use imagine_ai::{Embedding, Image, Inpaint, Mask, Model, Point, Sam, Subject, Upscale};
 use imagine_core::mask::{CpuMask, MaskData};
 use imagine_core::{TILE_SIZE, TileCoord, tr};
 use rayon::prelude::*;
@@ -58,6 +58,7 @@ struct Loaded {
     embedding: Option<(u64, Embedding)>,
     subject: Option<Subject>,
     inpaint: Option<Inpaint>,
+    upscale: Option<Upscale>,
 }
 
 fn loaded() -> &'static Mutex<Loaded> {
@@ -132,6 +133,36 @@ pub fn inpaint(job: imagine_gpu::FillJob) -> Result<imagine_gpu::FillResult> {
     }
     let m = l.inpaint.as_mut().unwrap();
     job.run_with(|w, h, img, hole| m.fill(w, h, img, hole))
+}
+
+/// Upscale (AI): every pixel layer of the job enlarged with Real-ESRGAN
+/// (worker thread; progress in the log every 10 %).
+pub fn upscale(job: imagine_gpu::UpscaleJob) -> Result<imagine_gpu::UpscaleResult> {
+    ready(&imagine_ai::UPSCALE)?;
+    let mut l = loaded().lock().map_err(|_| anyhow!("model lock poisoned"))?;
+    if l.upscale.is_none() {
+        l.upscale = Some(Upscale::load()?);
+    }
+    let m = l.upscale.as_mut().unwrap();
+    let mut last = 0;
+    job.run_with(
+        |w, h, rgb, alpha| {
+            let out = m.run(w, h, rgb, Some(alpha), &mut |done, total| {
+                let pct = done * 10 / total.max(1);
+                if pct != last {
+                    last = pct;
+                    tracing::info!("{}", tr!("Upscaling: {pct} %", pct = pct * 10));
+                }
+            })?;
+            Ok((m.scale(), out))
+        },
+        || anyhow!("the model enlarges less than asked"),
+    )
+}
+
+/// Seconds the upscale of `pixels` source pixels takes here, roughly.
+pub fn upscale_estimate(pixels: usize) -> f64 {
+    pixels as f64 / 100_000.0
 }
 
 /// A model mask scaled (bilinear) to a document-size mask.

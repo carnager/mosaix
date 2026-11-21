@@ -2551,3 +2551,27 @@ msgstr "Entfernen (KI)"
 
 msgid "Spot Healing / Remove (AI) / Healing Brush"
 msgstr "Bereichsreparatur / Entfernen (KI) / Reparaturpinsel"
+
+msgid "the factor must be 2 to 8"
+msgstr "der Faktor muss 2 bis 8 sein"
+
+msgid "the image has changed in the meantime"
+msgstr "das Bild hat sich inzwischen geändert"
+
+msgid "out of GPU memory"
+msgstr "kein Grafikspeicher mehr frei"
+
+msgid "Upscale (AI)"
+msgstr "Hochskalieren (KI)"
+
+msgid "Upscaled in {s} s"
+msgstr "Hochskaliert in {s} s"
+
+msgid "Upscaling {k}× – about {s} s …"
+msgstr "Skaliere {k}× hoch – etwa {s} s …"
+
+msgid "Upscaling: {pct} %"
+msgstr "Hochskalieren: {pct} %"
+
+msgid "Enlarges every pixel layer with local AI (Real-ESRGAN) – adds plausible detail instead of blur. About {s} s here."
+msgstr "Vergrößert jede Pixelebene mit lokaler KI (Real-ESRGAN) – ergänzt glaubwürdige Details statt Unschärfe. Hier etwa {s} s."

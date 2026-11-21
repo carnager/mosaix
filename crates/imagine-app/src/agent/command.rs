@@ -100,6 +100,11 @@ pub enum Command {
     RemoveBackground {
         layer: Option<LayerId>,
     },
+    /// Enlarges the image with local AI (every pixel layer; the rest as image_resize).
+    ImageUpscale {
+        #[serde(default = "default_upscale")]
+        factor: u32,
+    },
     /// Removes the selected area: generated from its surroundings (local AI).
     RemoveArea {
         layer: Option<LayerId>,
@@ -490,6 +495,7 @@ impl Command {
             Self::SelectObject { .. } => "select_object",
             Self::RemoveBackground { .. } => "remove_background",
             Self::RemoveArea { .. } => "remove_area",
+            Self::ImageUpscale { .. } => "image_upscale",
             Self::AiModelDownload { .. } => "ai_model_download",
             Self::ActionRun { .. } => "action_run",
             Self::FilterPluginInstall { .. } => "filter_plugin_install",
@@ -710,6 +716,10 @@ fn selection_info(s: &Session) -> Value {
     }
 }
 
+fn default_upscale() -> u32 {
+    2
+}
+
 fn pixel_layer(s: &mut Session, layer: Option<LayerId>) -> anyhow::Result<LayerId> {
     let id = target_layer(s, layer)?;
     ensure!(
@@ -847,7 +857,8 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
                 "subject" | "birefnet-lite" => &imagine_ai::SUBJECT,
                 "object" | "sam" | "sam2.1-small" => &imagine_ai::SAM,
                 "remove" | "lama" => &imagine_ai::INPAINT,
-                other => bail!("unknown model {other} (subject, object or remove)"),
+                "upscale" | "realesrgan" | "realesrgan-x4v3" => &imagine_ai::UPSCALE,
+                other => bail!("unknown model {other} (subject, object, remove or upscale)"),
             };
             let t0 = std::time::Instant::now();
             let mut last = 0;
@@ -1823,6 +1834,15 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             ensure!(!mask.is_empty(), "no subject found");
             s.engine.set_layer_mask(id, Some(mask), tr("Remove Background")).map_err(engine_err)?;
             ok(s)
+        }
+        Command::ImageUpscale { factor } => {
+            ensure!(factor == 2 || factor == 4, "factor is 2 or 4");
+            let job = s.engine.upscale_job(factor).map_err(engine_err)?;
+            let r = crate::ai::upscale(job)?;
+            let ms = r.ms;
+            s.engine.apply_upscale(r, tr("Upscale (AI)")).map_err(engine_err)?;
+            let (w, h) = s.engine.size();
+            Ok(Output::json(json!({ "ok": true, "width": w, "height": h, "ms": ms.round() })))
         }
         Command::RemoveArea { layer, all_layers, expand } => {
             pixel_layer(s, layer)?;

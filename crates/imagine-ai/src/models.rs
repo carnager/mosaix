@@ -62,8 +62,20 @@ pub const INPAINT: Model = Model {
     files: &[File { name: "lama_fp32.onnx", url: "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx", size: 208_044_816 }],
 };
 
+/// Real-ESRGAN General x4v3 (Qualcomm AI Hub export; the weights are
+/// byte-identical to their release, mirrored on Hugging Face).
+pub const UPSCALE: Model = Model {
+    id: "realesrgan-x4v3",
+    name: "Real-ESRGAN General x4v3",
+    license: "BSD-3-Clause",
+    files: &[
+        File { name: "model.onnx", url: "https://huggingface.co/TheGuy444/Real-ESRGAN-ONNX/resolve/main/onnx/model.onnx", size: 42_443 },
+        File { name: "model.data", url: "https://huggingface.co/TheGuy444/Real-ESRGAN-ONNX/resolve/main/onnx/model.data", size: 4_836_096 },
+    ],
+};
+
 /// All models, for lookups by id.
-pub const ALL: [&Model; 3] = [&SAM, &SUBJECT, &INPAINT];
+pub const ALL: [&Model; 4] = [&SAM, &SUBJECT, &INPAINT, &UPSCALE];
 
 pub fn by_id(id: &str) -> Option<&'static Model> {
     ALL.into_iter().find(|m| m.id == id)
