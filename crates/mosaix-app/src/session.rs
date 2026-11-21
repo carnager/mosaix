@@ -112,6 +112,16 @@ impl SaveJob {
     }
 }
 
+impl Session {
+    /// The files this document stands for: where it came from and where it
+    /// was saved (for thumbnails of recent files).
+    pub fn files(&self) -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = self.source.iter().chain(self.save_path.iter()).cloned().collect();
+        v.dedup();
+        v
+    }
+}
+
 pub struct Session {
     pub engine: Engine,
     pub name: String,

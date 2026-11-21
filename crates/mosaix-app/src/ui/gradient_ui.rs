@@ -42,7 +42,7 @@ enum Sel {
 const BAR_H: f32 = 18.0;
 const MARK: f32 = 9.0;
 
-fn checker(p: &egui::Painter, r: Rect) {
+pub(super) fn checker(p: &egui::Painter, r: Rect) {
     p.rect_filled(r, 0.0, Color32::from_gray(200));
     let s = 6.0;
     let (nx, ny) = ((r.width() / s).ceil() as i32, (r.height() / s).ceil() as i32);

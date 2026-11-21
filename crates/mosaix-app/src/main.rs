@@ -114,6 +114,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut source = Source::Blank(4000, 3000);
+    let mut explicit = false;
     let mut bench = false;
     let mut offscreen = false;
     let mut save: Option<PathBuf> = None;
@@ -129,10 +130,12 @@ fn main() -> anyhow::Result<()> {
             "--new" => {
                 let (w, h) = parse_size(&args.next().context(tr("--new needs a size"))?)?;
                 source = Source::Blank(w, h);
+                explicit = true;
             }
             "--demo" => {
                 let (w, h) = parse_size(&args.next().context(tr("--demo needs a size"))?)?;
                 source = Source::Demo(w, h);
+                explicit = true;
             }
             "--bench" => bench = true,
             "--bench-offscreen" => offscreen = true,
@@ -148,7 +151,10 @@ fn main() -> anyhow::Result<()> {
                 tr!("unknown option {option}", option = s),
                 tr(HELP)
             ),
-            path => source = Source::File(PathBuf::from(path)),
+            path => {
+                source = Source::File(PathBuf::from(path));
+                explicit = true;
+            }
         }
     }
     if let Some(out) = snapshot {
@@ -157,7 +163,9 @@ fn main() -> anyhow::Result<()> {
     if save.is_some() || export.is_some() || offscreen {
         return headless(source, save, export, offscreen);
     }
-    app::run(source, bench)
+    // Without a file (or --new/--demo) the start screen shows.
+    let home = !explicit && !bench;
+    app::run(source, bench, home)
 }
 
 /// `mosaix batch ACTION FILE… [--out DIR] [--format EXT]`: plays an action

@@ -2644,3 +2644,21 @@ msgstr "Nur für Text-, Form- und RAW-Ebenen"
 
 msgid "Right-click or hold: more tools"
 msgstr "Rechtsklick oder gedrückt halten: weitere Werkzeuge"
+
+msgid "New Image …"
+msgstr "Neues Bild …"
+
+msgid "Empty Canvas"
+msgstr "Leere Arbeitsfläche"
+
+msgid "{w} × {h} px, transparent"
+msgstr "{w} × {h} px, transparent"
+
+msgid "Quick start"
+msgstr "Schnellstart"
+
+msgid "Files you open show up here."
+msgstr "Hier erscheinen die Dateien, die du öffnest."
+
+msgid "not found"
+msgstr "nicht gefunden"

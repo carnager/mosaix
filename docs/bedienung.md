@@ -32,6 +32,12 @@ Details: [docs/agenten.md](agenten.md)
 
 ## Bedienung
 
+Ohne Datei startet Mosaix mit einem Startbildschirm: Neues Bild, Öffnen, Schnellstart-Größen und die zuletzt geöffneten Dateien mit Vorschaubildern (zwischengespeichert in `~/.cache/mosaix/thumbs`, geschrieben beim Speichern, beim Öffnen einer anderen Datei und beim Beenden). Esc oder „Leere Arbeitsfläche“ schließt ihn.
+
+Öffnen, Speichern, Exportieren und Importieren nutzen den Dateidialog des Systems (XDG-Desktop-Portal, z. B. GTK/GNOME); Farbraum, 16 Bit und JPEG-Qualität stehen beim Exportieren direkt im Dialog. Ohne Portal, oder mit `MOSAIX_BUILTIN_DIALOG=1`, kommt der eingebaute Dialog.
+
+Verwandte Werkzeuge teilen sich einen Platz in der Werkzeugleiste (kleines Dreieck in der Ecke): Rechtsklick oder gedrückt halten zeigt alle, der Platz merkt sich das zuletzt benutzte. Menüeinträge, die gerade nicht gehen, sind ausgegraut; der Tooltip sagt, warum.
+
 Die Oberfläche hat eine Menüleiste, links die Werkzeugleiste und rechts Panels für Farbe, Werkzeug-Einstellungen, Ebenen (Drag & Drop, Doppelklick zum Umbenennen, Klick auf das Masken-Symbol zum Bemalen) und Verlauf (Klick springt zurück). Unten ist eine Statusleiste mit Meldungen, ein Klick darauf öffnet alle Meldungen. Strg+`K` oder Strg+Umschalt+`P` öffnet die Befehlspalette, `Tab` blendet die Oberfläche aus. Strg+`N` neues Bild, Strg+`O` öffnen (mit „Zuletzt geöffnet“), Strg+Umschalt+`S` speichern unter. Alt+Rechtsziehen ändert Pinselgröße (waagrecht) und Härte (senkrecht). Pinsel, Farbe, Werkzeug und zuletzt geöffnete Dateien merkt sich mosaix in `~/.config/mosaix/settings.json`. Alle drei Minuten wird bei ungespeicherten Änderungen eine Wiederherstellungskopie nach `~/.local/state/mosaix/autosave/` gesichert. Deine Datei bleibt dabei unberührt.
 
 Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) im Terminal, die aktive Ebene im Fenstertitel.

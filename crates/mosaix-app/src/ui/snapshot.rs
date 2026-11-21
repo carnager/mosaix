@@ -123,7 +123,9 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         has_selection: doc.selection.is_some(),
         status: "0.14 ms".into(),
         busy: false,
-        recent: Vec::new(),
+        recent: std::env::var("MOSAIX_SNAPSHOT_HOME")
+            .map(|v| v.split(':').filter(|s| !s.is_empty()).map(Into::into).collect())
+            .unwrap_or_default(),
         active_adjustment: None,
         active_raw: None,
         active_vector: None,
@@ -136,6 +138,14 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         histogram: None,
     };
     tracing::info!("{}", tr!("UI snapshot {w}×{h}", w = w, h = h));
+    // The start screen, with these files (":"-separated) as recently opened.
+    let home_files: Option<Vec<std::path::PathBuf>> =
+        std::env::var("MOSAIX_SNAPSHOT_HOME").ok().map(|v| v.split(':').filter(|s| !s.is_empty()).map(Into::into).collect());
+    if let Some(files) = &home_files {
+        let mut h = super::home::Home::default();
+        h.load_now(files);
+        state.home = Some(h);
+    }
     state.snapshot_flyout = std::env::var("MOSAIX_SNAPSHOT_FLYOUT").ok().and_then(|v| v.parse().ok());
     if let Ok(menu) = std::env::var("MOSAIX_SNAPSHOT_MENU")
         && let Some(i) = super::palette::MENUS.iter().position(|m| m.eq_ignore_ascii_case(&menu))

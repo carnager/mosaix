@@ -359,6 +359,8 @@ pub enum Action {
 #[derive(Default)]
 pub struct State {
     pub hidden: bool,
+    /// The start screen (shown over the canvas).
+    pub home: Option<super::home::Home>,
     /// The tool each tool-bar group shows (index into [`TOOL_GROUPS`]).
     pub group_tool: std::collections::HashMap<usize, ToolId>,
     /// UI snapshots: a menu drawn open (English menu name, horizontal offset).
@@ -635,6 +637,11 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
         st.had_props = has_props;
         super::dock::show(ui, m, st, &mut out);
     });
+    if let (Some(h), Some(rect)) = (&mut st.home, st.canvas)
+        && !super::home::show(h, ctx, rect, m, &mut st.new_doc, &mut out)
+    {
+        st.home = None;
+    }
     dialogs(ctx, m, st, &mut out);
     if st.show_log {
         let mut open = true;

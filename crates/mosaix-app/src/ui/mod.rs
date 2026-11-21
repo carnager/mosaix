@@ -11,6 +11,7 @@ pub mod files;
 pub mod font_ui;
 pub mod glyphs;
 pub mod gradient_ui;
+pub mod home;
 pub mod icons;
 pub mod log;
 pub mod menus;

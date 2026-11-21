@@ -438,6 +438,8 @@ pub struct App {
     bg_running: usize,
     /// The system file chooser is open.
     picking: bool,
+    /// Show the start screen once the first document is there.
+    home_pending: bool,
     export_job: Option<ExportJob>,
     autosave_job: Option<(std::path::PathBuf, SaveJob)>,
     autosave_path: Option<std::path::PathBuf>,
@@ -490,7 +492,7 @@ pub struct App {
     frame_cpu_ms: f64,
 }
 
-pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
+pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
     let conn =
         Connection::connect_to_env().context(tr("no Wayland connection (WAYLAND_DISPLAY?)"))?;
     let (globals, event_queue) = registry_queue_init(&conn)?;
@@ -678,6 +680,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
         bg_tx,
         bg_running: 0,
         picking: false,
+        home_pending: home,
         export_job: None,
         autosave_job: None,
         autosave_path: None,
@@ -796,6 +799,7 @@ pub fn run(source: Source, bench: bool) -> anyhow::Result<()> {
             app.draw();
         }
     }
+    app.remember_thumbnail();
     // A deliberate quit: the recovery copy is no longer needed.
     app.drop_autosave();
     app.store_settings();
@@ -939,6 +943,9 @@ impl App {
                     self.store_settings();
                 }
                 self.session = Some(Session::new(engine, name, source, native_len));
+                // The start screen comes with the first (blank) document and
+                // goes when another one is opened.
+                self.ui_state.home = std::mem::take(&mut self.home_pending).then(Default::default);
                 self.load_custom_tips();
                 self.ever_loaded = true;
                 self.view_fitted = false;
@@ -1896,6 +1903,7 @@ impl App {
             tracing::warn!("{}", tr("Still saving – please wait a moment."));
             return;
         }
+        self.remember_thumbnail();
         self.drop_autosave();
         self.pending_uploads.clear();
         self.loading = true;
@@ -1909,6 +1917,22 @@ impl App {
         self.save_mark = 0;
         self.autosave_mark = 0;
         loader::spawn(source, self.loader_tx.clone());
+    }
+
+    /// Keeps a small picture of the document for the start screen.
+    fn remember_thumbnail(&mut self) {
+        if self.loading {
+            return;
+        }
+        let Some(s) = &mut self.session else { return };
+        let files = s.files();
+        if files.is_empty() {
+            return;
+        }
+        let img = crate::agent::command::read_composite(s, 320);
+        for f in files {
+            ui::home::store_thumbnail(&f, img.clone());
+        }
     }
 
     fn file_dialog(&mut self, mode: ui::files::FileMode) {
@@ -2101,6 +2125,7 @@ impl App {
                     self.drop_autosave();
                 }
                 self.settings.add_recent(&r.path);
+                self.remember_thumbnail();
                 tracing::info!(
                     "{}",
                     tr!(
