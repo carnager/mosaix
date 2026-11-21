@@ -907,6 +907,7 @@ pub(super) fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: 
             &m.favourite_fonts,
             &m.recent_fonts,
             m.color,
+            &m.patterns,
             &mut st.vec_editor,
         );
         if let Some((v, done)) = e.change {

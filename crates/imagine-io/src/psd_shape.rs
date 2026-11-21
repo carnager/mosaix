@@ -110,6 +110,11 @@ fn geometry_and_stroke(m: &VectorMask) -> Option<(Geometry, bool)> {
     use i_overlay::core::fill_rule::FillRule;
     use i_overlay::core::overlay_rule::OverlayRule;
     use i_overlay::float::single::SingleFloatOverlay;
+    if m.initial_fill && m.subpaths.is_empty() && !m.invert && !m.disabled {
+        // An empty vector mask showing everything: a fill of the whole canvas.
+        let (w, h) = (m.size.0 as f64, m.size.1 as f64);
+        return Some((Geometry::Rect { x: 0.0, y: 0.0, w, h, radius: 0.0 }, false));
+    }
     if m.invert || m.disabled || m.initial_fill || m.subpaths.is_empty() {
         return None;
     }
@@ -234,7 +239,7 @@ pub fn shape(
     };
     let (stroke, fill_on) = stroke.unwrap_or((None, true));
     let stroke = stroke.filter(|_| stroked);
-    Some(ShapeSpec { geometry, fill: fill_on.then_some(fill), stroke })
+    Some(ShapeSpec { geometry, fill: fill_on.then_some(fill), stroke, paint: None })
 }
 
 // --- Writing ----------------------------------------------------------------
@@ -247,6 +252,8 @@ pub struct PsdShape {
     /// Linear RGB(A); `None`: no fill.
     pub fill: Option<[f32; 4]>,
     pub stroke: Option<StrokeStyle>,
+    /// A gradient or pattern instead of `fill`'s colour (in document px).
+    pub paint: Option<imagine_core::vector::Paint>,
 }
 
 /// The vector mask block ("vsms"). The subpaths form one component (holes

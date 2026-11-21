@@ -67,13 +67,7 @@ impl Effect {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GradientStyle {
-    #[default]
-    Linear,
-    Radial,
-}
+pub use crate::gradient::{Gradient, GradientStyle};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -162,6 +156,9 @@ pub enum EffectKind {
         scale: f32,
         #[serde(default)]
         reverse: bool,
+        /// More than two stops or transparency; replaces `start` / `end`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gradient: Option<Gradient>,
     },
     /// A repeating pattern over the layer's content (anchored to the document).
     PatternOverlay {
@@ -312,6 +309,7 @@ impl EffectKind {
                 style: GradientStyle::Linear,
                 scale: 1.0,
                 reverse: false,
+                gradient: None,
             },
             Self::PatternOverlay {
                 pattern: crate::pattern::Pattern::builtin().swap_remove(1),
@@ -757,26 +755,16 @@ fn gradient_positions(w: usize, h: usize, alpha: &[f32], angle: f32, style: Grad
     if x1 <= x0 {
         return vec![0.0; w * h];
     }
-    let (cx, cy) = ((x0 + x1) as f32 * 0.5, (y0 + y1) as f32 * 0.5);
-    let (bw, bh) = ((x1 - x0) as f32, (y1 - y0) as f32);
-    let scale = scale.max(0.01);
-    let a = angle.to_radians();
-    // Screen y points down: 90° runs from the bottom up.
-    let dir = (a.cos(), -a.sin());
-    let half = 0.5 * (bw * dir.0.abs() + bh * dir.1.abs()) * scale;
-    let radius = 0.5 * bw.hypot(bh) * scale;
-    (0..w * h)
-        .into_par_iter()
-        .map(|i| {
-            let (x, y) = ((i % w) as f32 + 0.5 - cx, (i / w) as f32 + 0.5 - cy);
-            let t = match style {
-                GradientStyle::Linear => 0.5 + (x * dir.0 + y * dir.1) / (2.0 * half.max(1e-3)),
-                GradientStyle::Radial => x.hypot(y) / radius.max(1e-3),
-            }
-            .clamp(0.0, 1.0);
-            if reverse { 1.0 - t } else { t }
-        })
-        .collect()
+    let pos = crate::gradient::GradientGeometry {
+        style,
+        angle,
+        scale,
+        reverse,
+        bounds: [x0 as f32, y0 as f32, x1 as f32, y1 as f32],
+        offset: [0.0; 2],
+    }
+    .positions();
+    (0..w * h).into_par_iter().map(|i| pos.at((i % w) as f32 + 0.5, (i / w) as f32 + 0.5)).collect()
 }
 
 // ---- the effects ----------------------------------------------------------------
@@ -873,17 +861,13 @@ pub fn apply_at(effects: &[Effect], content: &Region, fill: f32, origin: (i64, i
                 style,
                 scale,
                 reverse,
+                ref gradient,
             } => {
                 let t = gradient_positions(w, h, &alpha, angle, style, scale, reverse);
-                // Interpolated like Photoshop: in sRGB-encoded values.
-                let enc = |c: [f32; 3]| c.map(crate::color::linear_to_srgb);
-                let (s, e) = (enc(start), enc(end));
+                let lut = gradient.clone().unwrap_or_else(|| Gradient::two(start, end)).lut();
                 blend_atop(
                     &mut out.px,
-                    &|i| {
-                        let c: [f32; 3] = std::array::from_fn(|c| crate::color::srgb_to_linear(s[c] + (e[c] - s[c]) * t[i]));
-                        [c[0], c[1], c[2], 1.0]
-                    },
+                    &|i| lut.at(t[i]),
                     &alpha,
                     opacity,
                     mode,
@@ -1253,7 +1237,7 @@ mod tests {
         }
         let g = |angle: f32, reverse: bool| {
             apply(
-                &fx(EffectKind::GradientOverlay { start: [0.0; 3], end: [1.0; 3], opacity: 1.0, angle, style: GradientStyle::Linear, scale: 1.0, reverse }),
+                &fx(EffectKind::GradientOverlay { start: [0.0; 3], end: [1.0; 3], opacity: 1.0, angle, style: GradientStyle::Linear, scale: 1.0, reverse, gradient: None }),
                 &reg,
             )
         };
@@ -1315,6 +1299,7 @@ mod gradient_angle_tests {
             style: GradientStyle::Linear,
             scale: 1.0,
             reverse: false,
+            gradient: None,
         })];
         let s = apply(&fx, &r);
         let at = |x: usize, y: usize| s.content.px[y * w + x][0];

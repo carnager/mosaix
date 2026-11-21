@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 use half::f16;
 use imagine_core::color::{linear_to_srgb, srgb_to_linear};
 use imagine_core::vector::{
-    Affine as Mat, Geometry, ShapeSpec, TextAlign, TextSpec, VectorKind, VectorLayer,
+    Affine as Mat, Geometry, Paint, ShapeSpec, TextAlign, TextSpec, VectorKind, VectorLayer,
 };
 use imagine_core::{TILE_SIZE, TileCoord};
 use parley::{
@@ -900,7 +900,20 @@ pub fn bounds(v: &VectorLayer) -> Option<[f64; 4]> {
     Some([r.x0, r.y0, r.x1, r.y1])
 }
 
+/// Which parts of a shape `draw` paints.
+#[derive(Clone, Copy, PartialEq)]
+enum Part {
+    All,
+    /// The fill in white (its coverage, for a paint).
+    FillMask,
+    Stroke,
+}
+
 fn draw(ctx: &mut RenderContext, res: &mut Resources, p: &Prepared) {
+    draw_part(ctx, res, p, Part::All)
+}
+
+fn draw_part(ctx: &mut RenderContext, res: &mut Resources, p: &Prepared, part: Part) {
     match p {
         Prepared::Text(t, l) => {
             ctx.set_paint(color(t.color));
@@ -931,9 +944,12 @@ fn draw(ctx: &mut RenderContext, res: &mut Resources, p: &Prepared) {
             ctx.set_transform(base);
         }
         Prepared::Shape(s, Some(path)) => {
-            if let Some(f) = s.fill {
-                ctx.set_paint(color(f));
+            if let Some(f) = s.fill.filter(|_| part != Part::Stroke) {
+                ctx.set_paint(color(if part == Part::FillMask { [1.0; 4] } else { f }));
                 ctx.fill_path(path);
+            }
+            if part == Part::FillMask {
+                return;
             }
             if let Some(st) = &s.stroke {
                 use imagine_core::vector::{StrokeAlign, StrokeCap, StrokeJoin};
@@ -986,6 +1002,57 @@ fn lut() -> &'static [f32; 256] {
     L.get_or_init(|| std::array::from_fn(|i| srgb_to_linear(i as f32 / 255.0)))
 }
 
+/// A shape's gradient or pattern, ready to evaluate per document pixel.
+enum Painter {
+    Gradient { lut: imagine_core::gradient::GradientLut, pos: imagine_core::gradient::Positions, inv: Affine },
+    Pattern { pattern: imagine_core::pattern::Pattern, k: f32, offset: [f32; 2] },
+}
+
+impl Painter {
+    fn new(p: &Prepared, m: Affine) -> Option<Self> {
+        let Prepared::Shape(s, Some(path)) = p else {
+            return None;
+        };
+        s.fill?;
+        Some(match s.paint.as_ref()? {
+            Paint::Gradient { gradient, style, angle, scale, reverse, offset, bounds } => {
+                let bounds = bounds.unwrap_or_else(|| {
+                    let b = path.bounding_box();
+                    [b.x0 as f32, b.y0 as f32, b.x1 as f32, b.y1 as f32]
+                });
+                let size = [bounds[2] - bounds[0], bounds[3] - bounds[1]];
+                let geo = imagine_core::gradient::GradientGeometry {
+                    style: *style,
+                    angle: *angle,
+                    scale: *scale,
+                    reverse: *reverse,
+                    bounds,
+                    offset: [offset[0] * size[0], offset[1] * size[1]],
+                };
+                Self::Gradient { lut: gradient.lut(), pos: geo.positions(), inv: m.inverse() }
+            }
+            Paint::Pattern { pattern, scale, offset } => {
+                Self::Pattern { pattern: pattern.clone(), k: 1.0 / scale.max(0.01), offset: *offset }
+            }
+        })
+    }
+
+    /// Straight linear RGB + alpha at the document point `(x, y)`.
+    fn at(&self, x: f64, y: f64) -> [f32; 4] {
+        match self {
+            Self::Gradient { lut, pos, inv } => {
+                // Photoshop samples gradients at the pixel corner.
+                let p = *inv * vello_cpu::kurbo::Point::new(x - 0.5, y - 0.5);
+                lut.at(pos.at(p.x as f32, p.y as f32))
+            }
+            Self::Pattern { pattern, k, offset } => {
+                let p = pattern.sample((x as f32 - offset[0]) * k, (y as f32 - offset[1]) * k);
+                [srgb_to_linear(p[0]), srgb_to_linear(p[1]), srgb_to_linear(p[2]), p[3]]
+            }
+        }
+    }
+}
+
 /// Renders the layer into tiles (premultiplied linear f16); empty tiles are left out.
 pub fn render(v: &VectorLayer) -> Vec<(TileCoord, TilePixels)> {
     let p = prepare(v);
@@ -1012,6 +1079,7 @@ pub fn render(v: &VectorLayer) -> Vec<(TileCoord, TilePixels)> {
         .flat_map(|cy| (tx0..=tx1).step_by(ct as usize).map(move |cx| (cx, cy)))
         .collect();
     let size = (TILE_SIZE * CHUNK_TILES) as u16;
+    let painter = Painter::new(&p, m);
     chunks
         .par_iter()
         .map_init(
@@ -1020,17 +1088,28 @@ pub fn render(v: &VectorLayer) -> Vec<(TileCoord, TilePixels)> {
                     RenderContext::new(size, size),
                     Resources::new(),
                     Pixmap::new(size, size),
+                    Pixmap::new(if painter.is_some() { size } else { 1 }, if painter.is_some() { size } else { 1 }),
                 )
             },
-            |(ctx, res, pix), &(cx, cy)| {
-                ctx.reset();
+            |(ctx, res, pix, cover), &(cx, cy)| {
                 let origin = (cx * ts, cy * ts);
-                ctx.set_transform(Affine::translate((-origin.0 as f64, -origin.1 as f64)) * m);
-                draw(ctx, res, &p);
-                ctx.flush();
-                pix.data_as_u8_slice_mut().fill(0);
-                ctx.render(&mut *pix, res);
+                let place = Affine::translate((-origin.0 as f64, -origin.1 as f64)) * m;
+                let mut pass = |part: Part, into: &mut Pixmap| {
+                    ctx.reset();
+                    ctx.set_transform(place);
+                    draw_part(ctx, res, &p, part);
+                    ctx.flush();
+                    into.data_as_u8_slice_mut().fill(0);
+                    ctx.render(&mut *into, res);
+                };
+                if painter.is_some() {
+                    pass(Part::FillMask, cover);
+                    pass(Part::Stroke, pix);
+                } else {
+                    pass(Part::All, pix);
+                }
                 let data = pix.data();
+                let cov = painter.as_ref().map(|_| cover.data());
                 let lut = lut();
                 let mut out = Vec::new();
                 for ty in 0..ct.min(ty1 - cy + 1) {
@@ -1042,6 +1121,39 @@ pub fn render(v: &VectorLayer) -> Vec<(TileCoord, TilePixels)> {
                                 + tx as usize * TILE_SIZE as usize;
                             for x in 0..TILE_SIZE as usize {
                                 let s = data[row + x];
+                                if let (Some(pt), Some(cov)) = (&painter, cov) {
+                                    // The paint under the stroke.
+                                    let c = cov[row + x].a as f32 / 255.0;
+                                    if c == 0.0 && s.a == 0 {
+                                        continue;
+                                    }
+                                    let doc = (
+                                        (origin.0 + tx * ts) as f64 + x as f64 + 0.5,
+                                        (origin.1 + ty * ts) as f64 + y as f64 + 0.5,
+                                    );
+                                    let f = if c > 0.0 { pt.at(doc.0, doc.1) } else { [0.0; 4] };
+                                    let fa = f[3] * c;
+                                    let sa = s.a as f32 / 255.0;
+                                    let sl = |v: u8| {
+                                        if s.a == 0 {
+                                            0.0
+                                        } else {
+                                            lut[((v as u32 * 255 + s.a as u32 / 2) / s.a as u32).min(255) as usize] * sa
+                                        }
+                                    };
+                                    let st = [sl(s.r), sl(s.g), sl(s.b)];
+                                    let a = sa + fa * (1.0 - sa);
+                                    if a <= 0.0 {
+                                        continue;
+                                    }
+                                    any = true;
+                                    let o = (y * TILE_SIZE as usize + x) * 4;
+                                    for k in 0..3 {
+                                        px[o + k] = f16::from_f32(st[k] + f[k] * fa * (1.0 - sa));
+                                    }
+                                    px[o + 3] = f16::from_f32(a);
+                                    continue;
+                                }
                                 if s.a == 0 {
                                     continue;
                                 }
@@ -1108,6 +1220,7 @@ mod tests {
             },
             fill: Some(red),
             stroke: None,
+            paint: None,
         });
         let t = render(&v);
         assert_eq!(px(&t, 300, 120), red);
@@ -1206,6 +1319,7 @@ mod tests {
             },
             fill: Some(red),
             stroke: None,
+            paint: None,
         });
         let t = render(&v);
         assert_eq!(px(&t, 200, 200), red);
@@ -1225,6 +1339,7 @@ mod tests {
             },
             fill: None,
             stroke: Some(StrokeStyle::new(blue, 8.0)),
+            paint: None,
         });
         v.transform = [1.0, 0.0, 0.0, 1.0, 1000.0, 1000.0];
         let t = render(&v);
@@ -1295,6 +1410,41 @@ mod tests {
         let b = bounds(&v).unwrap();
         assert!(b[2] - b[0] > 300.0, "text width {b:?}");
     }
+
+    #[test]
+    fn gradient_and_pattern_paint() {
+        use imagine_core::gradient::Gradient;
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let mut spec = ShapeSpec {
+            geometry: Geometry::Rect { x: 0.0, y: 0.0, w: 100.0, h: 20.0, radius: 0.0 },
+            fill: Some(red),
+            stroke: None,
+            paint: Some(Paint::Gradient {
+                gradient: Gradient::two([0.0; 3], [1.0; 3]),
+                style: Default::default(),
+                angle: 0.0,
+                scale: 1.0,
+                reverse: false,
+                offset: [0.0; 2],
+                bounds: None,
+            }),
+        };
+        let tiles = render(&VectorLayer::shape(spec.clone()));
+        // Left → right, black → white, the fill colour not used.
+        let (l, m, r) = (px(&tiles, 0, 10), px(&tiles, 50, 10), px(&tiles, 99, 10));
+        assert!(l[0] < 0.01 && r[0] > 0.95 && (l[3] - 1.0).abs() < 0.01, "{l:?} {r:?}");
+        assert!((linear_to_srgb(m[0]) - 0.5).abs() < 0.03 && (m[0] - m[1]).abs() < 1e-3, "{m:?}");
+        // Moved with the layer.
+        let mut v = VectorLayer::shape(spec.clone());
+        v.transform = [1.0, 0.0, 0.0, 1.0, 50.0, 0.0];
+        let t = render(&v);
+        assert!(px(&t, 50, 10)[0] < 0.01 && px(&t, 149, 10)[0] > 0.95);
+        // A pattern, tiled in document coordinates.
+        let pattern = imagine_core::pattern::Pattern::new("2", 2, 1, vec![255, 255, 255, 255, 0, 0, 0, 255]).unwrap();
+        spec.paint = Some(Paint::Pattern { pattern, scale: 1.0, offset: [0.0; 2] });
+        let t = render(&VectorLayer::shape(spec));
+        assert!(px(&t, 10, 5)[0] > 0.95 && px(&t, 11, 5)[0] < 0.05, "{:?} {:?}", px(&t, 10, 5), px(&t, 11, 5));
+    }
 }
 
 #[cfg(test)]
@@ -1308,10 +1458,12 @@ mod outline_tests {
             geometry: Geometry::Ellipse { cx: 50.0, cy: 50.0, rx: 40.0, ry: 30.0 },
             fill: Some([1.0; 4]),
             stroke: None,
+            paint: None,
         });
         let o = shape_outline(&v).unwrap();
         assert_eq!(o.len(), 1);
         assert!(o[0].1, "closed");
         assert_eq!(o[0].0.len(), 4, "{:?}", o[0].0);
     }
+
 }

@@ -144,10 +144,10 @@ fn pattern_swatch(ui: &mut egui::Ui, p: &Pattern, size: f32, selected: bool) -> 
     r.on_hover_text(&p.name)
 }
 
-fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track, patterns: &[Pattern]) {
-    match k {
-        EffectKind::PatternOverlay { pattern, opacity, scale, offset } => {
-            ui.label(tr("Pattern"));
+/// Swatches of the library's patterns (plus `pattern` if it is not one of
+/// them); true if another was chosen.
+pub(super) fn pattern_picker(ui: &mut egui::Ui, pattern: &mut Pattern, patterns: &[Pattern]) -> bool {
+    let mut changed = false;
             // Rows of swatches (explicit rows: a wrapped layout inside the
             // grid reports its height a frame late).
             let mut all: Vec<Option<&Pattern>> = patterns.iter().map(Some).collect();
@@ -168,7 +168,7 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track, patterns: &[Pa
                                     let sel = !foreign && *p == &current;
                                     if pattern_swatch(ui, p, 30.0, sel).clicked() && !sel {
                                         *pattern = (*p).clone();
-                                        t.click();
+                                        changed = true;
                                     }
                                 }
                                 None => {
@@ -179,6 +179,16 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track, patterns: &[Pa
                     });
                 }
             });
+    changed
+}
+
+fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track, patterns: &[Pattern]) {
+    match k {
+        EffectKind::PatternOverlay { pattern, opacity, scale, offset } => {
+            ui.label(tr("Pattern"));
+            if pattern_picker(ui, pattern, patterns) {
+                t.click();
+            }
             ui.end_row();
             percent(ui, t, "Opacity", opacity);
             let mut pct = *scale * 100.0;
@@ -201,17 +211,26 @@ fn settings(ui: &mut egui::Ui, k: &mut EffectKind, t: &mut Track, patterns: &[Pa
             style,
             scale,
             reverse,
+            gradient,
         } => {
-            colour(ui, t, "Start", start);
-            colour(ui, t, "End", end);
+            ui.label(tr("Gradient"));
+            ui.vertical(|ui| {
+                let mut g = gradient.clone().unwrap_or_else(|| imagine_core::gradient::Gradient::two(*start, *end));
+                let o = super::gradient_ui::editor(ui, &mut g, "overlay");
+                if o.changed {
+                    t.changed = true;
+                    (*start, *end) = g.ends();
+                    let simple = g.colors.len() <= 2 && g.alphas.is_empty() && g.smoothness == 0.0 && g.colors.iter().all(|c| c.mid == 0.5);
+                    *gradient = (!simple).then_some(g);
+                }
+                t.done |= o.done;
+            });
+            ui.end_row();
             percent(ui, t, "Opacity", opacity);
             ui.label(tr("Style"));
             ui.horizontal(|ui| {
-                for (s, n) in [(GradientStyle::Linear, tr("Linear")), (GradientStyle::Radial, tr("Radial"))] {
-                    if ui.selectable_label(*style == s, n).clicked() && *style != s {
-                        *style = s;
-                        t.click();
-                    }
+                if super::gradient_ui::style_combo(ui, style, "overlay") {
+                    t.click();
                 }
                 if ui.checkbox(reverse, tr("Reverse")).changed() {
                     t.click();
@@ -386,8 +405,8 @@ fn summary(k: &EffectKind) -> ([f32; 3], String) {
         EffectKind::GradientOverlay { start, style, angle, .. } => (
             *start,
             match style {
-                GradientStyle::Linear => format!("{} · {angle:.0}°", tr("Linear")),
-                GradientStyle::Radial => tr("Radial").to_string(),
+                GradientStyle::Radial => style.label().to_string(),
+                s => format!("{} · {angle:.0}°", s.label()),
             },
         ),
         EffectKind::Bevel {

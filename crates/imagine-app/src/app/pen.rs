@@ -234,6 +234,7 @@ impl App {
                 },
                 fill: Some(colour),
                 stroke: None,
+                paint: None,
             }
         } else {
             let width = (2.0 / self.view.zoom as f32).clamp(1.0, 50.0).max(2.0);
@@ -244,6 +245,7 @@ impl App {
                 },
                 fill: None,
                 stroke: Some(StrokeStyle::new(colour, width)),
+                paint: None,
             }
         };
         if let Some(e) = self.engine()

@@ -7,7 +7,9 @@
 use imagine_core::BlendMode;
 use imagine_core::pattern::Pattern;
 use imagine_core::color::{linear_to_srgb, srgb_to_linear};
-use imagine_core::style::{BevelStyle, Effect, EffectKind, GradientStyle, StrokePosition};
+use imagine_core::gradient::{AlphaStop, ColorStop, Gradient, GradientStyle};
+use imagine_core::vector::Paint;
+use imagine_core::style::{BevelStyle, Effect, EffectKind, StrokePosition};
 
 use crate::psd_data::{Desc, Value};
 
@@ -269,34 +271,24 @@ pub fn read(fx: &Desc, light: GlobalLight, patterns: &[(String, Pattern)]) -> (V
         );
     }
     for d in all(fx, "GrFl", "gradientFillMulti") {
-        let grad = d.desc("Grad");
-        let stops: Vec<&Desc> = match grad.and_then(|g| g.get("Clrs")) {
-            Some(Value::List(l)) => l.iter().filter_map(|x| if let Value::Desc(d) = x { Some(d) } else { None }).collect(),
-            _ => Vec::new(),
-        };
-        let by_loc = |first: bool| {
-            stops
-                .iter()
-                .copied()
-                .reduce(|a, b| {
-                    let (la, lb) = (a.num("Lctn").unwrap_or(0.0), b.num("Lctn").unwrap_or(0.0));
-                    if (lb < la) == first { b } else { a }
-                })
-                .map(|s| color(s.desc("Clr ")))
-        };
-        if stops.len() > 2 && d.bool("enab").unwrap_or(true) {
-            lost.push("gradient stops");
+        let grad = d.desc("Grad").and_then(read_gradient);
+        if grad.is_none() && d.bool("enab").unwrap_or(true) {
+            lost.push("noise gradients");
         }
+        let grad = grad.unwrap_or_default();
+        let (start, end) = grad.ends();
+        let simple = grad.colors.len() <= 2 && grad.alphas.is_empty() && grad.colors.iter().all(|c| c.mid == 0.5) && grad.smoothness == 0.0;
         push(
             d,
             EffectKind::GradientOverlay {
-                start: by_loc(true).unwrap_or([0.0; 3]),
-                end: by_loc(false).unwrap_or([1.0; 3]),
+                start,
+                end,
                 opacity: pct(d, "Opct"),
                 angle: d.num("Angl").unwrap_or(90.0) as f32,
-                style: if enum_of(d, "Type") == Some("Rdl ") { GradientStyle::Radial } else { GradientStyle::Linear },
+                style: gradient_style(d),
                 scale: pct(d, "Scl "),
                 reverse: d.bool("Rvrs").unwrap_or(false),
+                gradient: (!simple).then_some(grad),
             },
             false,
         );
@@ -371,34 +363,184 @@ fn rgb(c: [f32; 3]) -> Value {
     })
 }
 
-fn gradient(start: [f32; 3], end: [f32; 3]) -> Value {
-    let stop = |c: [f32; 3], at: i32| {
-        Value::Desc(Desc {
-            class: "Clrt".into(),
-            items: vec![
-                ("Clr ".into(), rgb(c)),
-                ("Type".into(), Value::Enum("Clry".into(), "UsrS".into())),
-                ("Lctn".into(), Value::Long(at)),
-                ("Mdpn".into(), Value::Long(50)),
-            ],
-        })
+/// A gradient's style ("Type").
+pub fn gradient_style(d: &Desc) -> GradientStyle {
+    match enum_of(d, "Type") {
+        Some("Rdl ") => GradientStyle::Radial,
+        Some("Angl") => GradientStyle::Angle,
+        Some("Rflc") => GradientStyle::Reflected,
+        Some("Dmnd") => GradientStyle::Diamond,
+        _ => GradientStyle::Linear,
+    }
+}
+
+pub fn gradient_style_enum(s: GradientStyle) -> Value {
+    let id = match s {
+        GradientStyle::Linear => "Lnr ",
+        GradientStyle::Radial => "Rdl ",
+        GradientStyle::Angle => "Angl",
+        GradientStyle::Reflected => "Rflc",
+        GradientStyle::Diamond => "Dmnd",
     };
-    let trans = |at: i32| {
-        Value::Desc(Desc {
-            class: "TrnS".into(),
-            items: vec![("Opct".into(), unit("#Prc", 100.0)), ("Lctn".into(), Value::Long(at)), ("Mdpn".into(), Value::Long(50))],
-        })
+    Value::Enum("GrdT".into(), id.into())
+}
+
+/// A gradient descriptor ("Grdn"); `None` for noise gradients.
+pub fn read_gradient(g: &Desc) -> Option<Gradient> {
+    if enum_of(g, "GrdF").is_some_and(|f| f != "CstS") {
+        return None;
+    }
+    let list = |k: &str| match g.get(k) {
+        Some(Value::List(l)) => l.iter().filter_map(|x| if let Value::Desc(d) = x { Some(d) } else { None }).collect(),
+        _ => Vec::new(),
     };
+    let at = |d: &Desc| (d.num("Lctn").unwrap_or(0.0) / 4096.0).clamp(0.0, 1.0) as f32;
+    let mid = |d: &Desc| (d.num("Mdpn").unwrap_or(50.0) / 100.0).clamp(0.0, 1.0) as f32;
+    let colors: Vec<ColorStop> =
+        list("Clrs").into_iter().map(|d| ColorStop { at: at(d), color: color(d.desc("Clr ")), mid: mid(d) }).collect();
+    if colors.is_empty() {
+        return None;
+    }
+    let alphas: Vec<AlphaStop> = list("Trns")
+        .into_iter()
+        .map(|d| AlphaStop { at: at(d), opacity: pct_or(d, "Opct", 100.0), mid: mid(d) })
+        .collect();
+    let opaque = alphas.iter().all(|a| a.opacity >= 0.999);
+    let smoothness = (g.num("Intr").unwrap_or(4096.0) / 4096.0).clamp(0.0, 1.0) as f32;
+    Some(Gradient { colors, alphas: if opaque { Vec::new() } else { alphas }, smoothness }.sorted())
+}
+
+/// The gradient descriptor ("Grdn") for `g`.
+pub fn write_gradient(g: &Gradient) -> Value {
+    let loc = |t: f32| Value::Long((t.clamp(0.0, 1.0) * 4096.0).round() as i32);
+    let mid = |m: f32| Value::Long((m.clamp(0.0, 1.0) * 100.0).round() as i32);
+    let stops = g
+        .colors
+        .iter()
+        .map(|s| {
+            Value::Desc(Desc {
+                class: "Clrt".into(),
+                items: vec![
+                    ("Clr ".into(), rgb(s.color)),
+                    ("Type".into(), Value::Enum("Clry".into(), "UsrS".into())),
+                    ("Lctn".into(), loc(s.at)),
+                    ("Mdpn".into(), mid(s.mid)),
+                ],
+            })
+        })
+        .collect();
+    let alphas: Vec<AlphaStop> = if g.alphas.is_empty() {
+        vec![AlphaStop { at: 0.0, opacity: 1.0, mid: 0.5 }, AlphaStop { at: 1.0, opacity: 1.0, mid: 0.5 }]
+    } else {
+        g.alphas.clone()
+    };
+    let trans = alphas
+        .iter()
+        .map(|a| {
+            Value::Desc(Desc {
+                class: "TrnS".into(),
+                items: vec![
+                    ("Opct".into(), unit("#Prc", a.opacity * 100.0)),
+                    ("Lctn".into(), loc(a.at)),
+                    ("Mdpn".into(), mid(a.mid)),
+                ],
+            })
+        })
+        .collect();
     Value::Desc(Desc {
         class: "Grdn".into(),
         items: vec![
             ("Nm  ".into(), Value::Text("Custom".into())),
             ("GrdF".into(), Value::Enum("GrdF".into(), "CstS".into())),
-            ("Intr".into(), Value::Double(4096.0)),
-            ("Clrs".into(), Value::List(vec![stop(start, 0), stop(end, 4096)])),
-            ("Trns".into(), Value::List(vec![trans(0), trans(4096)])),
+            ("Intr".into(), Value::Double((g.smoothness.clamp(0.0, 1.0) * 4096.0).round() as f64)),
+            ("Clrs".into(), Value::List(stops)),
+            ("Trns".into(), Value::List(trans)),
         ],
     })
+}
+
+/// The paint of a gradient ("GdFl") or pattern ("PtFl") fill layer; `None`
+/// for what imagine cannot represent (noise gradients, missing patterns).
+/// `canvas`: the document size, the reference box of gradients not aligned
+/// with the layer.
+pub fn read_paint(key: &[u8], d: &Desc, patterns: &[(String, Pattern)], (w, h): (u32, u32)) -> Option<Paint> {
+    let point = |k: &str| {
+        let p = d.desc(k);
+        [p.and_then(|p| p.num("Hrzn")).unwrap_or(0.0) as f32, p.and_then(|p| p.num("Vrtc")).unwrap_or(0.0) as f32]
+    };
+    match key {
+        b"GdFl" => Some(Paint::Gradient {
+            gradient: read_gradient(d.desc("Grad")?)?,
+            style: gradient_style(d),
+            angle: d.num("Angl").unwrap_or(90.0) as f32,
+            scale: pct_or(d, "Scl ", 100.0),
+            reverse: d.bool("Rvrs").unwrap_or(false),
+            offset: point("Ofst").map(|v| v / 100.0),
+            bounds: (!d.bool("Algn").unwrap_or(true)).then_some([0.0, 0.0, w as f32, h as f32]),
+        }),
+        b"PtFl" => {
+            let r = d.desc("Ptrn");
+            let (id, name) = (r.and_then(|r| r.text("Idnt")).unwrap_or(""), r.and_then(|r| r.text("Nm  ")).unwrap_or(""));
+            let (_, p) = patterns.iter().find(|(i, _)| i == id).or_else(|| patterns.iter().find(|(_, p)| p.name == name))?;
+            Some(Paint::Pattern { pattern: p.clone(), scale: pct_or(d, "Scl ", 100.0), offset: point("phase") })
+        }
+        _ => None,
+    }
+}
+
+/// The fill layer block (key and descriptor) for `p`.
+pub fn write_paint(p: &Paint, pattern_id: &dyn Fn(&Pattern) -> String) -> ([u8; 4], Desc) {
+    let point = |v: [f32; 2]| {
+        Value::Desc(Desc {
+            class: "Pnt ".into(),
+            items: vec![("Hrzn".into(), unit("#Prc", v[0])), ("Vrtc".into(), unit("#Prc", v[1]))],
+        })
+    };
+    match p {
+        Paint::Gradient { gradient, style, angle, scale, reverse, offset, bounds } => {
+            let items = vec![
+                ("Dthr".into(), Value::Bool(true)),
+                ("Rvrs".into(), Value::Bool(*reverse)),
+                ("Angl".into(), unit("#Ang", *angle)),
+                ("Type".into(), gradient_style_enum(*style)),
+                ("Algn".into(), Value::Bool(bounds.is_none())),
+                ("Scl ".into(), unit("#Prc", scale * 100.0)),
+                ("Ofst".into(), point(offset.map(|v| v * 100.0))),
+                ("Grad".into(), write_gradient(gradient)),
+            ];
+            (*b"GdFl", Desc { class: "null".into(), items })
+        }
+        Paint::Pattern { pattern, scale, offset } => (
+            *b"PtFl",
+            Desc {
+                class: "null".into(),
+                items: vec![
+                    (
+                        "Ptrn".into(),
+                        Value::Desc(Desc {
+                            class: "Ptrn".into(),
+                            items: vec![
+                                ("Nm  ".into(), Value::Text(pattern.name.clone())),
+                                ("Idnt".into(), Value::Text(pattern_id(pattern))),
+                            ],
+                        }),
+                    ),
+                    ("Scl ".into(), unit("#Prc", scale * 100.0)),
+                    ("Algn".into(), Value::Bool(true)),
+                    (
+                        "phase".into(),
+                        Value::Desc(Desc {
+                            class: "Pnt ".into(),
+                            items: vec![
+                                ("Hrzn".into(), Value::Double(offset[0] as f64)),
+                                ("Vrtc".into(), Value::Double(offset[1] as f64)),
+                            ],
+                        }),
+                    ),
+                ],
+            },
+        ),
+    }
 }
 
 /// The layer style descriptor for `effects` ("lfx2"); `None` if there are none.
@@ -491,14 +633,11 @@ pub fn write_with(effects: &[Effect], light: GlobalLight, pattern_id: &dyn Fn(&P
                 put("Opct", unit("#Prc", opacity * 100.0));
                 ("SoFi", "solidFillMulti")
             }
-            EffectKind::GradientOverlay { start, end, opacity, angle, style, scale, reverse } => {
+            EffectKind::GradientOverlay { start, end, opacity, angle, style, scale, reverse, gradient } => {
                 put("Opct", unit("#Prc", opacity * 100.0));
-                put("Grad", gradient(*start, *end));
+                put("Grad", write_gradient(&gradient.clone().unwrap_or_else(|| Gradient::two(*start, *end))));
                 put("Angl", unit("#Ang", *angle));
-                put(
-                    "Type",
-                    Value::Enum("GrdT".into(), if *style == GradientStyle::Radial { "Rdl " } else { "Lnr " }.into()),
-                );
+                put("Type", gradient_style_enum(*style));
                 put("Rvrs", Value::Bool(*reverse));
                 put("Algn", Value::Bool(true));
                 put("Scl ", unit("#Prc", scale * 100.0));
@@ -629,6 +768,69 @@ mod tests {
         };
         let (x, y) = (nums(a), nums(b));
         x.len() == y.len() && x.iter().zip(&y).all(|(p, q)| (p - q).abs() < 0.01)
+    }
+
+    #[test]
+    fn gradients_and_fill_paints_roundtrip() {
+        let g = Gradient {
+            colors: vec![
+                ColorStop { at: 0.0, color: [1.0, 0.0, 0.0], mid: 0.5 },
+                ColorStop { at: 0.25, color: [0.0, 1.0, 0.0], mid: 0.3 },
+                ColorStop { at: 1.0, color: [0.0, 0.0, 1.0], mid: 0.5 },
+            ],
+            alphas: vec![AlphaStop { at: 0.0, opacity: 1.0, mid: 0.5 }, AlphaStop { at: 1.0, opacity: 0.25, mid: 0.7 }],
+            smoothness: 1.0,
+        };
+        let pattern = imagine_core::pattern::Pattern::builtin().swap_remove(1);
+        let pats = vec![(crate::psd_patterns::pattern_id(&pattern), pattern.clone())];
+        let paints = [
+            Paint::Gradient {
+                gradient: g.clone(),
+                style: GradientStyle::Diamond,
+                angle: -30.0,
+                scale: 0.5,
+                reverse: true,
+                offset: [0.1, -0.2],
+                bounds: None,
+            },
+            Paint::Gradient {
+                gradient: Gradient::two([0.2; 3], [0.9; 3]),
+                style: GradientStyle::Angle,
+                angle: 45.0,
+                scale: 1.0,
+                reverse: false,
+                offset: [0.0; 2],
+                bounds: Some([0.0, 0.0, 300.0, 200.0]),
+            },
+            Paint::Pattern { pattern, scale: 2.0, offset: [3.0, 4.0] },
+        ];
+        for p in &paints {
+            let (key, d) = write_paint(p, &|p| crate::psd_patterns::pattern_id(p));
+            let mut bytes = Vec::new();
+            crate::psd_data::w_desc(&mut bytes, &d);
+            let d = crate::psd_data::read_desc(&bytes).unwrap();
+            let back = read_paint(&key, &d, &pats, (300, 200)).unwrap();
+            assert_eq!(format!("{:.3?}", back), format!("{:.3?}", p));
+        }
+        // Gradient overlays keep their stops.
+        let fx = vec![Effect::new(EffectKind::GradientOverlay {
+            start: [1.0, 0.0, 0.0],
+            end: [0.0, 0.0, 1.0],
+            opacity: 1.0,
+            angle: 90.0,
+            style: GradientStyle::Reflected,
+            scale: 1.0,
+            reverse: false,
+            gradient: Some(g.clone()),
+        })];
+        let (back, lost) = read(&write(&fx, GlobalLight::default()).unwrap(), GlobalLight::default(), &[]);
+        assert!(lost.is_empty());
+        match &back[0].kind {
+            EffectKind::GradientOverlay { gradient: Some(b), style: GradientStyle::Reflected, .. } => {
+                assert_eq!(format!("{b:.3?}"), format!("{g:.3?}"))
+            }
+            k => panic!("{k:?}"),
+        }
     }
 
     #[test]

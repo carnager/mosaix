@@ -9,6 +9,7 @@ pub mod adjust_ui;
 pub mod dock;
 pub mod files;
 pub mod font_ui;
+pub mod gradient_ui;
 pub mod icons;
 pub mod log;
 pub mod palette;

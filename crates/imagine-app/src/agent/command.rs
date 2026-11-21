@@ -300,6 +300,14 @@ pub enum Command {
         stroke_width: Option<f32>,
         /// Closed paths: inside, center (default) or outside.
         stroke_align: Option<imagine_core::vector::StrokeAlign>,
+        /// Fill with a gradient through these colours (evenly spaced).
+        gradient: Option<Vec<ColorSpec>>,
+        gradient_style: Option<imagine_core::gradient::GradientStyle>,
+        /// Degrees, 90 (default) = from bottom to top.
+        gradient_angle: Option<f32>,
+        /// Fill with a pattern from the library (by name).
+        pattern: Option<String>,
+        pattern_scale: Option<f32>,
         name: Option<String>,
     },
     VectorSet {
@@ -520,6 +528,20 @@ pub struct Ctx<'a> {
 /// Pattern overlays may name their pattern ("pattern": "Dots"): replaced
 /// by the pattern from the library.
 fn resolve_patterns(v: &mut Value) -> anyhow::Result<()> {
+    if v["cmd"] == "vector_set" {
+        let p = &mut v["changes"]["paint"];
+        if p["type"] == "pattern"
+            && let Value::String(name) = &p["pattern"]
+        {
+            let lib = crate::app::patterns::load_library(&crate::app::patterns::pattern_dir());
+            let found = crate::app::patterns::find(&lib, name).with_context(|| {
+                let names: Vec<&str> = lib.iter().map(|p| p.name.as_str()).collect();
+                format!("unknown pattern {name:?}; available: {}", names.join(", "))
+            })?;
+            p["pattern"] = serde_json::to_value(found)?;
+        }
+        return Ok(());
+    }
     if v["cmd"] != "layer_effects_set" {
         return Ok(());
     }
@@ -1393,9 +1415,14 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             stroke_color,
             stroke_width,
             stroke_align,
+            gradient,
+            gradient_style,
+            gradient_angle,
+            pattern,
+            pattern_scale,
             name,
         } => {
-            use imagine_core::vector::{Geometry, ShapeSpec, StrokeStyle};
+            use imagine_core::vector::{Geometry, Paint, ShapeSpec, StrokeStyle};
             let need = |v: Option<f64>, n: &str| v.with_context(|| format!("{shape} needs {n}"));
             let geometry = match shape.as_str() {
                 "rect" => Geometry::Rect {
@@ -1446,10 +1473,44 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 fill.is_some() || stroke.is_some(),
                 "a shape needs a fill or a stroke"
             );
+            ensure!(gradient.is_none() || pattern.is_none(), "either a gradient or a pattern");
+            ensure!(!(no_fill && (gradient.is_some() || pattern.is_some())), "no_fill and a gradient or pattern exclude each other");
+            let paint = match (gradient, pattern) {
+                (Some(colors), _) => {
+                    ensure!(colors.len() >= 2, "a gradient needs at least two colours");
+                    let n = (colors.len() - 1) as f32;
+                    let mut g = imagine_core::gradient::Gradient { colors: Vec::new(), alphas: Vec::new(), smoothness: 0.0 };
+                    for (i, c) in colors.iter().enumerate() {
+                        let (rgb, a) = c.linear()?;
+                        let at = i as f32 / n;
+                        g.colors.push(imagine_core::gradient::ColorStop { at, color: rgb, mid: 0.5 });
+                        g.alphas.push(imagine_core::gradient::AlphaStop { at, opacity: a, mid: 0.5 });
+                    }
+                    if g.alphas.iter().all(|a| a.opacity >= 1.0) {
+                        g.alphas.clear();
+                    }
+                    let mut p = Paint::gradient(g);
+                    if let Paint::Gradient { style, angle, .. } = &mut p {
+                        *style = gradient_style.unwrap_or_default();
+                        *angle = gradient_angle.unwrap_or(90.0);
+                    }
+                    Some(p)
+                }
+                (None, Some(name)) => {
+                    let lib = crate::app::patterns::load_library(&crate::app::patterns::pattern_dir());
+                    let p = crate::app::patterns::find(&lib, &name).with_context(|| {
+                        let names: Vec<&str> = lib.iter().map(|p| p.name.as_str()).collect();
+                        format!("unknown pattern {name:?}; available: {}", names.join(", "))
+                    })?;
+                    Some(Paint::Pattern { pattern: p, scale: pattern_scale.unwrap_or(1.0).max(0.01), offset: [0.0; 2] })
+                }
+                (None, None) => None,
+            };
             let v = imagine_core::VectorLayer::shape(ShapeSpec {
                 geometry,
                 fill,
                 stroke,
+                paint,
             });
             ensure!(
                 imagine_vector::bounds(&v).is_some(),

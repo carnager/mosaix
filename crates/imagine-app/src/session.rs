@@ -465,7 +465,14 @@ fn psd_shapes<T: Clone>(doc: &Document<T>) -> HashMap<LayerId, imagine_io::psd_s
             st.width *= scale;
             st
         });
-        out.insert(l.id, imagine_io::psd_shape::PsdShape { subpaths, fill: s.fill, stroke });
+        // Photoshop has no layer transform: turn the gradient with the layer.
+        let paint = s.paint.clone().map(|mut p| {
+            if let imagine_core::vector::Paint::Gradient { angle, .. } = &mut p {
+                *angle -= (t[1].atan2(t[0]) as f32).to_degrees();
+            }
+            p
+        });
+        out.insert(l.id, imagine_io::psd_shape::PsdShape { subpaths, fill: s.fill, stroke, paint });
     });
     out
 }

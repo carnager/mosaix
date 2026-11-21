@@ -7,6 +7,7 @@ pub mod brush;
 pub mod color;
 pub mod doc;
 pub mod fill;
+pub mod gradient;
 pub mod filter;
 pub mod heal;
 pub mod history;

@@ -73,6 +73,121 @@ fn color_button(ui: &mut egui::Ui, c: &mut [f32; 4]) -> egui::Response {
     r
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum FillKind {
+    None,
+    Color,
+    Gradient,
+    Pattern,
+}
+
+impl FillKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::None => tr("None"),
+            Self::Color => tr("Color"),
+            Self::Gradient => tr("Gradient"),
+            Self::Pattern => tr("Pattern"),
+        }
+    }
+}
+
+/// The fill of a shape: none, a colour, a gradient or a pattern.
+fn fill_rows(
+    ui: &mut egui::Ui,
+    s: &mut imagine_core::vector::ShapeSpec,
+    brush: [f32; 3],
+    patterns: &[imagine_core::pattern::Pattern],
+    t: &mut Track,
+) {
+    use imagine_core::gradient::Gradient;
+    use imagine_core::vector::Paint;
+    let kind = match (&s.fill, &s.paint) {
+        (None, _) => FillKind::None,
+        (Some(_), None) => FillKind::Color,
+        (Some(_), Some(Paint::Gradient { .. })) => FillKind::Gradient,
+        (Some(_), Some(Paint::Pattern { .. })) => FillKind::Pattern,
+    };
+    ui.label(imagine_core::i18n::tr_ctx("shape", "Fill"));
+    ui.horizontal(|ui| {
+        let mut new = kind;
+        egui::ComboBox::from_id_salt("shape fill").selected_text(kind.label()).show_ui(ui, |ui| {
+            for k in [FillKind::None, FillKind::Color, FillKind::Gradient, FillKind::Pattern] {
+                ui.selectable_value(&mut new, k, k.label());
+            }
+        });
+        if new != kind {
+            let colour = s.fill.unwrap_or([brush[0], brush[1], brush[2], 1.0]);
+            s.fill = (new != FillKind::None).then_some(colour);
+            s.paint = match new {
+                FillKind::None | FillKind::Color => None,
+                FillKind::Gradient => Some(Paint::gradient(Gradient::two([colour[0], colour[1], colour[2]], [1.0; 3]))),
+                FillKind::Pattern => Some(Paint::Pattern {
+                    pattern: patterns.first().cloned().unwrap_or_else(|| imagine_core::pattern::Pattern::builtin().swap_remove(0)),
+                    scale: 1.0,
+                    offset: [0.0; 2],
+                }),
+            };
+            t.changed = true;
+            t.done = true;
+        }
+        if new == FillKind::Color
+            && let Some(f) = &mut s.fill
+        {
+            let r = color_button(ui, f);
+            t.add(&r);
+        }
+    });
+    ui.end_row();
+    match &mut s.paint {
+        Some(Paint::Gradient { gradient, style, angle, scale, reverse, .. }) if s.fill.is_some() => {
+            ui.label("");
+            ui.vertical(|ui| {
+                let o = super::gradient_ui::editor(ui, gradient, "shape");
+                t.changed |= o.changed;
+                t.done |= o.done;
+            });
+            ui.end_row();
+            ui.label(tr("Style"));
+            ui.horizontal(|ui| {
+                if super::gradient_ui::style_combo(ui, style, "shape") {
+                    t.changed = true;
+                    t.done = true;
+                }
+                if ui.checkbox(reverse, tr("Reverse")).changed() {
+                    t.changed = true;
+                    t.done = true;
+                }
+            });
+            ui.end_row();
+            row(ui, tr("Angle"), |ui| ui.add(egui::DragValue::new(angle).range(-180.0..=180.0).suffix("°").speed(1.0)), t);
+            let mut pct = *scale * 100.0;
+            row(ui, tr("Scale"), |ui| ui.add(egui::Slider::new(&mut pct, 10.0..=150.0).suffix(" %").max_decimals(0)), t);
+            *scale = (pct / 100.0).max(0.01);
+        }
+        Some(Paint::Pattern { pattern, scale, offset }) if s.fill.is_some() => {
+            ui.label("");
+            if super::style_ui::pattern_picker(ui, pattern, patterns) {
+                t.changed = true;
+                t.done = true;
+            }
+            ui.end_row();
+            let mut pct = *scale * 100.0;
+            row(ui, tr("Scale"), |ui| ui.add(egui::Slider::new(&mut pct, 10.0..=400.0).suffix(" %").max_decimals(0)), t);
+            *scale = (pct / 100.0).max(0.01);
+            ui.label(tr("Offset"));
+            ui.horizontal(|ui| {
+                for v in offset.iter_mut() {
+                    let r = ui.add(egui::DragValue::new(v).speed(0.5).suffix(" px"));
+                    t.add(&r);
+                }
+            });
+            ui.end_row();
+        }
+        _ => {}
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn editor(
     ui: &mut egui::Ui,
@@ -82,6 +197,7 @@ pub fn editor(
     favourites: &[String],
     recent: &[String],
     brush: [f32; 3],
+    patterns: &[imagine_core::pattern::Pattern],
     st: &mut EditorState,
 ) -> VectorEdit {
     let mut edit = VectorEdit::default();
@@ -380,20 +496,7 @@ pub fn editor(
                             &mut t,
                         );
                     }
-                    ui.label(tr("Fill Color"));
-                    ui.horizontal(|ui| {
-                        let mut on = s.fill.is_some();
-                        if ui.checkbox(&mut on, "").changed() {
-                            s.fill = on.then_some([brush[0], brush[1], brush[2], 1.0]);
-                            t.changed = true;
-                            t.done = true;
-                        }
-                        if let Some(f) = &mut s.fill {
-                            let r = color_button(ui, f);
-                            t.add(&r);
-                        }
-                    });
-                    ui.end_row();
+                    fill_rows(ui, s, brush, patterns, &mut t);
                     ui.label(tr("Stroke"));
                     ui.horizontal(|ui| {
                         let mut on = s.stroke.is_some();

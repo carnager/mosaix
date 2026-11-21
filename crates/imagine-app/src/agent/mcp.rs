@@ -432,13 +432,20 @@ pub fn tools() -> Vec<Value> {
         tool(
             "shape_add",
             "Add a shape layer (stays sharp and editable): rect / ellipse (x, y, width, height; rect radius), polygon (points), \
-             path (SVG path data d). Fill defaults to black; no_fill for outlines; stroke_color / stroke_width for a contour.",
+             path (SVG path data d). Fill defaults to black; no_fill for outlines; stroke_color / stroke_width for a contour; \
+             gradient (colours, evenly spaced; gradient_style, gradient_angle) or pattern (a name from pattern_list; pattern_scale) \
+             fill it like Photoshop's gradient / pattern fill layers.",
             json!({ "shape": { "type": "string", "enum": ["rect", "ellipse", "polygon", "path"] },
                     "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" },
                     "radius": { "type": "number" }, "points": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
                     "d": { "type": "string" }, "fill": color_param("Fill colour"), "no_fill": { "type": "boolean" },
                     "stroke_color": color_param("Contour colour"), "stroke_width": { "type": "number" },
                     "stroke_align": { "type": "string", "enum": ["inside", "center", "outside"], "description": "Where the contour lies on closed shapes (default center)" },
+                    "gradient": { "type": "array", "items": color_param("Gradient colour"), "description": "Gradient fill through these colours" },
+                    "gradient_style": { "type": "string", "enum": ["linear", "radial", "angle", "reflected", "diamond"] },
+                    "gradient_angle": { "type": "number", "description": "Degrees, 90 (default) = from bottom to top" },
+                    "pattern": { "type": "string", "description": "Pattern fill: a name from pattern_list" },
+                    "pattern_scale": { "type": "number" },
                     "name": { "type": "string" } }),
             &["shape"],
             false,
@@ -448,7 +455,10 @@ pub fn tools() -> Vec<Value> {
             "Change a text or shape layer: `changes` is merged into its description as shown by document_info \
              (e.g. {\"text\": \"New\", \"size\": 64, \"color\": \"#ff0000\"} or {\"fill\": \"#00ff00\", \"radius\": 12}; \
              \"transform\": [a, b, c, d, e, f] places it). Text on a path: {\"path\": {\"nodes\": [{\"p\": [x, y], \"h_in\": [x, y], \"h_out\": [x, y]}, …], \
-             \"closed\": false, \"offset\": 0.0–1.0, \"flip\": false}} (null removes it). OpenType: {\"features\": {\"smcp\": 1, \"liga\": 0}}.",
+             \"closed\": false, \"offset\": 0.0–1.0, \"flip\": false}} (null removes it). OpenType: {\"features\": {\"smcp\": 1, \"liga\": 0}}. \
+             Shape paint: {\"paint\": {\"type\": \"gradient\", \"gradient\": {\"colors\": [{\"at\": 0, \"color\": [r, g, b]}, …], \"alphas\": [{\"at\": 0, \"opacity\": 1}, …], \
+             \"smoothness\": 0–1}, \"style\": \"linear|radial|angle|reflected|diamond\", \"angle\": 90, \"scale\": 1, \"reverse\": false}} or \
+             {\"paint\": {\"type\": \"pattern\", \"pattern\": \"Dots\", \"scale\": 1, \"offset\": [x, y]}}; null: the plain fill colour.",
             json!({ "layer": layer_param(), "changes": { "type": "object" } }),
             &["changes"],
             false,
@@ -459,8 +469,8 @@ pub fn tools() -> Vec<Value> {
              Kinds and fields (colours linear [r, g, b] 0…1, opacity 0…1, angle = light direction in degrees, 90 = from the top): \
              stroke {size, position: outside|inside|center, color, opacity}; drop_shadow {color, opacity, angle, distance, size, spread}; \
              inner_shadow {color, opacity, angle, distance, size}; outer_glow {color, opacity, size, spread, range}; inner_glow {color, opacity, size, range} (range 0…1, default 0.5); \
-             color_overlay {color, opacity}; gradient_overlay {start, end, opacity, angle (90 = bottom to top), style: linear|radial, \
-             scale, reverse}; pattern_overlay {pattern: a name from pattern_list, opacity, scale (1 = pattern pixels), offset: [x, y]}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
+             color_overlay {color, opacity}; gradient_overlay {start, end, opacity, angle (90 = bottom to top), style: linear|radial|angle|reflected|diamond, \
+             scale, reverse, gradient (optional, more stops: {colors: [{at, color}], alphas: [{at, opacity}], smoothness})}; pattern_overlay {pattern: a name from pattern_list, opacity, scale (1 = pattern pixels), offset: [x, y]}; bevel {style: inner|emboss|pillow, size, depth, soften, angle, altitude, highlight, \
              highlight_opacity, shadow, shadow_opacity}. Optional on every effect: \"blend\" (a blend mode key; default: \
              multiply for shadows, screen for glows, normal otherwise) and \"global_light\": true (shadows/bevel share one light angle).",
             json!({ "layer": layer_param(), "effects": { "type": "array", "items": { "type": "object" } } }),
@@ -850,6 +860,7 @@ mod tests {
                         ("blend", _) => json!("screen"),
                         ("space", _) => json!("linear"),
                         ("points", _) => json!([[0, 0], [1, 1], [2, 0]]),
+                        ("gradient", _) => json!(["#000000", "#ffffff"]),
                         ("interp", _) => json!("nearest"),
                         ("anchor", _) => json!("top-left"),
                         ("sample", _) => json!("image"),

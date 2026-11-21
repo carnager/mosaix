@@ -30,8 +30,9 @@ compile_error!("the .imagine tile encoding assumes a little-endian host");
 pub const MAGIC: &[u8; 8] = b"IMAGINE\x01";
 const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
-/// 1: layers. 2: + layer masks and selection.
-const FORMAT_VERSION: u32 = 7;
+/// 1: layers. 2: + layer masks and selection. … 7: fill opacity. 8: gradient /
+/// pattern fills and multi-stop gradient overlays.
+const FORMAT_VERSION: u32 = 8;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
 const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
 

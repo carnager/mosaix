@@ -2201,8 +2201,8 @@ msgstr "Abgeflachte Kante außen / Konturrelief"
 msgid "stroke fill"
 msgstr "Kontur mit Verlauf oder Muster"
 
-msgid "gradient stops"
-msgstr "Verläufe mit mehr als zwei Farben"
+msgid "noise gradients"
+msgstr "Rauschverläufe"
 
 msgid "Fill: opacity of the layer's own pixels; its layer style keeps full strength"
 msgstr "Fläche: Deckkraft der Ebenenpixel selbst; der Ebenenstil bleibt voll sichtbar"
@@ -2262,3 +2262,26 @@ msgstr "Fläche"
 msgctxt "pattern"
 msgid "Canvas"
 msgstr "Leinen"
+
+msgid "Reflected"
+msgstr "Reflektiert"
+
+msgid "Diamond"
+msgstr "Raute"
+
+msgctxt "gradient"
+msgid "Angle"
+msgstr "Winkel"
+
+msgctxt "shape"
+msgid "Fill"
+msgstr "Füllung"
+
+msgid "Location"
+msgstr "Position"
+
+msgid "Delete Stop"
+msgstr "Unterbrechung löschen"
+
+msgid "Smoothness"
+msgstr "Glättung"

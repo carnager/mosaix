@@ -311,6 +311,66 @@ pub struct ShapeSpec {
     pub fill: Option<[f32; 4]>,
     #[serde(default)]
     pub stroke: Option<StrokeStyle>,
+    /// Fills with a gradient or pattern instead of `fill`'s colour
+    /// (Photoshop's gradient / pattern fill layers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<Paint>,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn ninety() -> f32 {
+    90.0
+}
+
+/// What a shape is filled with, other than a solid colour.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Paint {
+    Gradient {
+        #[serde(default)]
+        gradient: crate::gradient::Gradient,
+        #[serde(default)]
+        style: crate::gradient::GradientStyle,
+        /// Degrees, 90 = from bottom to top.
+        #[serde(default = "ninety")]
+        angle: f32,
+        /// Length relative to the reference box (1 = edge to edge).
+        #[serde(default = "one")]
+        scale: f32,
+        #[serde(default)]
+        reverse: bool,
+        /// Shift of the centre, as a share of the reference box's size.
+        #[serde(default)]
+        offset: [f32; 2],
+        /// Reference box in layer coordinates; none = the shape's bounds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bounds: Option<[f32; 4]>,
+    },
+    /// Tiled in document coordinates.
+    Pattern {
+        pattern: crate::pattern::Pattern,
+        #[serde(default = "one")]
+        scale: f32,
+        #[serde(default)]
+        offset: [f32; 2],
+    },
+}
+
+impl Paint {
+    pub fn gradient(gradient: crate::gradient::Gradient) -> Self {
+        Self::Gradient {
+            gradient,
+            style: Default::default(),
+            angle: 90.0,
+            scale: 1.0,
+            reverse: false,
+            offset: [0.0; 2],
+            bounds: None,
+        }
+    }
 }
 
 impl VectorLayer {

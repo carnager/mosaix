@@ -1544,6 +1544,7 @@ impl App {
                         geometry,
                         fill: Some([color[0], color[1], color[2], 1.0]),
                         stroke: None,
+                        paint: None,
                     });
                     Ok(e.add_vector(
                         v,

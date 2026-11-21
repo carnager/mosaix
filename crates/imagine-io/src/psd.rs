@@ -6,8 +6,11 @@
 //! prediction channel data, the embedded ICC profile, and the merged image
 //! as a fallback for files without layers.
 //!
-//! Not (yet) carried over: layer styles, adjustment and fill layers,
-//! smart objects and editable text (their pixels are kept).
+//! Also: layer styles, most adjustment layers, shape and fill layers
+//! (solid, gradient, pattern; as imagine shape layers) and text.
+//!
+//! Not (yet) carried over: smart objects, noise gradients and some
+//! adjustments (their pixels are kept).
 
 use anyhow::{Context, Result, bail, ensure};
 use imagine_core::{BlendMode, tr};
@@ -329,6 +332,8 @@ struct Record {
     vmask: Option<Vec<u8>>,
     /// Solid fill content ("SoCo" / "vscg" with SoCo).
     solid: Option<crate::psd_data::Desc>,
+    /// Gradient or pattern fill content ("GdFl" / "PtFl", or in "vscg").
+    paint: Option<([u8; 4], crate::psd_data::Desc)>,
     /// Shape stroke ("vstk").
     vstroke: Option<crate::psd_data::Desc>,
 }
@@ -441,6 +446,7 @@ fn record(c: &mut Cur) -> Result<Record> {
     let mut fx: Option<crate::psd_data::Desc> = None;
     let mut vmask = None;
     let mut solid = None;
+    let mut paint = None;
     let mut vstroke = None;
     while e.left() >= 12 {
         let sig = e.bytes(4)?;
@@ -485,17 +491,29 @@ fn record(c: &mut Cur) -> Result<Record> {
             }
             b"vscg" if d.left() > 8 => {
                 // Content key, then version and descriptor.
-                if d.bytes(4)? == b"SoCo" {
-                    d.skip(4)?;
-                    solid = crate::psd_data::read_desc(d.bytes(d.left())?).ok();
-                } else {
-                    special = special.or(Some("fill layer"));
+                let content: [u8; 4] = d.bytes(4)?.try_into()?;
+                d.skip(4)?;
+                let desc = crate::psd_data::read_desc(d.bytes(d.left())?).ok();
+                match &content {
+                    b"SoCo" => solid = desc,
+                    b"GdFl" | b"PtFl" => {
+                        special = special.or(Some("fill layer"));
+                        paint = desc.map(|d| (content, d));
+                    }
+                    _ => special = special.or(Some("fill layer")),
                 }
             }
             b"SoCo" if d.left() > 4 => {
                 special = special.or(Some("fill layer"));
                 d.skip(4)?;
                 solid = solid.or(crate::psd_data::read_desc(d.bytes(d.left())?).ok());
+            }
+            b"GdFl" | b"PtFl" if d.left() > 4 => {
+                special = special.or(Some("fill layer"));
+                d.skip(4)?;
+                if paint.is_none() {
+                    paint = crate::psd_data::read_desc(d.bytes(d.left())?).ok().map(|x| (key, x));
+                }
             }
             b"TySh" => {
                 special = special.or(Some("text"));
@@ -541,6 +559,7 @@ fn record(c: &mut Cur) -> Result<Record> {
         mask_from_vector,
         vmask,
         solid,
+        paint,
         vstroke,
     })
 }
@@ -907,13 +926,26 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         // With a vector mask too, −2 is the rasterised vector mask and −3
         // the user's pixel mask; prefer the pixel mask.
         // Shape and solid fill layers become imagine shape layers.
-        let shape = r.solid.as_ref().and_then(crate::psd_shape::solid_fill).and_then(|fill| {
+        // Gradient and pattern fill layers too (shapes painted with them).
+        let paint = r.paint.as_ref().and_then(|(k, d)| crate::psd_fx::read_paint(k, d, &patterns, (width, height)));
+        let fill = match &paint {
+            Some(imagine_core::vector::Paint::Gradient { gradient, .. }) => {
+                let c = gradient.ends().0;
+                Some([c[0], c[1], c[2], 1.0])
+            }
+            Some(imagine_core::vector::Paint::Pattern { .. }) => Some([0.5, 0.5, 0.5, 1.0]),
+            None => r.solid.as_ref().and_then(crate::psd_shape::solid_fill),
+        };
+        let shape = fill.and_then(|fill| {
             let vm = match &r.vmask {
                 Some(b) => Some(crate::psd_shape::read_vector_mask(b, (width, height))?),
                 None => None,
             };
             let st = r.vstroke.as_ref().map(|d| crate::psd_shape::stroke(d, dpi.max(1.0)));
-            crate::psd_shape::shape(vm.as_ref(), fill, st, (width, height))
+            crate::psd_shape::shape(vm.as_ref(), fill, st, (width, height)).map(|mut s| {
+                s.paint = paint;
+                s
+            })
         });
         let (which, m) = match (get_mask(-3).is_some(), r.real_mask) {
             (true, Some(rm)) => (-3, Some(rm)),
@@ -1066,7 +1098,7 @@ pub struct WLayer {
     pub effects: Vec<imagine_core::style::Effect>,
     /// Fill opacity (written as "iOpa").
     pub fill_opacity: f32,
-    /// A shape layer (written as a solid fill with vector mask and stroke;
+    /// A shape layer (written as a fill layer with vector mask and stroke;
     /// the pixels stay as Photoshop's rendering of it).
     pub shape: Option<crate::psd_shape::PsdShape>,
     /// A text layer (written as Photoshop's editable text, "TySh") and its
@@ -1439,7 +1471,13 @@ fn write_record(
             v
         };
         let fill = sh.fill.unwrap_or([0.0, 0.0, 0.0, 1.0]);
-        block(o, b"SoCo", &desc(&crate::psd_shape::write_solid(fill)));
+        match &sh.paint {
+            Some(p) => {
+                let (key, d) = crate::psd_fx::write_paint(p, &|p| crate::psd_patterns::pattern_id(p));
+                block(o, &key, &desc(&d));
+            }
+            None => block(o, b"SoCo", &desc(&crate::psd_shape::write_solid(fill))),
+        }
         block(o, b"vsms", &crate::psd_shape::write_vector_mask(&sh.subpaths, size));
         block(o, b"vstk", &desc(&crate::psd_shape::write_stroke(sh.stroke.as_ref(), sh.fill.is_some())));
     }
@@ -1635,12 +1673,18 @@ pub fn write(
     let mut pats: Vec<(String, &imagine_core::pattern::Pattern)> = Vec::new();
     for r in &recs {
         if let Rec::Layer(w) | Rec::Folder(w) = r {
-            for e in &w.effects {
-                if let imagine_core::style::EffectKind::PatternOverlay { pattern, .. } = &e.kind {
-                    let id = crate::psd_patterns::pattern_id(pattern);
-                    if !pats.iter().any(|(i, _)| *i == id) {
-                        pats.push((id, pattern));
-                    }
+            let fill = match w.shape.as_ref().and_then(|s| s.paint.as_ref()) {
+                Some(imagine_core::vector::Paint::Pattern { pattern, .. }) => Some(pattern),
+                _ => None,
+            };
+            let overlays = w.effects.iter().filter_map(|e| match &e.kind {
+                imagine_core::style::EffectKind::PatternOverlay { pattern, .. } => Some(pattern),
+                _ => None,
+            });
+            for pattern in fill.into_iter().chain(overlays) {
+                let id = crate::psd_patterns::pattern_id(pattern);
+                if !pats.iter().any(|(i, _)| *i == id) {
+                    pats.push((id, pattern));
                 }
             }
         }
