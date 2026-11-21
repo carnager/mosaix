@@ -1,0 +1,21 @@
+[package]
+name = "mosaix-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mosaix-vector.workspace = true
+mosaix-raw.workspace = true
+rayon.workspace = true
+serde.workspace = true
+mosaix-core.workspace = true
+wgpu.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+half.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true

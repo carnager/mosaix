@@ -1,0 +1,2592 @@
+# German translations for mosaix.
+# The source language is English; msgid is the English text as written in the code.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: de\n"
+
+msgid "\n=== Benchmark ({frames} frames, {w}×{h} px, {tiles} tiles) ===\nCPU per frame:    Ø {c0} ms   p50 {c1}   p99 {c2}   max {c3}\nFrame interval:   Ø {i0} ms   p50 {i1}   p99 {i2}   max {i3}   (≈ {fps} fps)\n"
+msgstr "\n=== Benchmark ({frames} Frames, {w}×{h} px, {tiles} Kacheln) ===\nCPU pro Frame:    Ø {c0} ms   p50 {c1}   p99 {c2}   max {c3}\nFrame-Abstand:    Ø {i0} ms   p50 {i1}   p99 {i2}   max {i3}   (≈ {fps} fps)\n"
+
+msgid "\n=== Offscreen benchmark ({frames} frames, {w}×{h}, {dw}×{dh} px document, {tiles} tiles) ===\nFrame incl. GPU:  Ø {avg} ms   p50 {p50}   p99 {p99}   max {max}   (≈ {fps} fps possible)\n"
+msgstr "\n=== Offscreen-Benchmark ({frames} Frames, {w}×{h}, {dw}×{dh} px Dokument, {tiles} Kacheln) ===\nFrame inkl. GPU:  Ø {avg} ms   p50 {p50}   p99 {p99}   max {max}   (≈ {fps} fps möglich)\n"
+
+msgid " · recent"
+msgstr " · zuletzt"
+
+msgid " · {n} styles"
+msgstr " · {n} Schnitte"
+
+msgid "(no glyphs for this text)"
+msgstr "(keine Zeichen für diesen Text)"
+
+msgid "(no matching files)"
+msgstr "(keine passenden Dateien)"
+
+msgid "--demo needs a size"
+msgstr "--demo braucht eine Größe"
+
+msgid "--export needs a path"
+msgstr "--export braucht einen Pfad"
+
+msgid "--new needs a size"
+msgstr "--new braucht eine Größe"
+
+msgid "--save needs a path"
+msgstr "--save braucht einen Pfad"
+
+msgid "--socket needs a path"
+msgstr "--socket braucht einen Pfad"
+
+msgid "--ui-snapshot needs a path"
+msgstr "--ui-snapshot braucht einen Pfad"
+
+msgid "16-bit"
+msgstr "16 Bit"
+
+msgid "90° = from above"
+msgstr "90° = von oben"
+
+msgid "90° clockwise"
+msgstr "90° im Uhrzeigersinn"
+
+msgid "90° counterclockwise"
+msgstr "90° gegen den Uhrzeigersinn"
+
+msgid "90° left"
+msgstr "90° links"
+
+msgid "90° right"
+msgstr "90° rechts"
+
+msgid "a stroke is in progress"
+msgstr "gerade wird gemalt"
+
+msgid "Add effect …"
+msgstr "Effekt hinzufügen …"
+
+msgid "Add Layer Mask"
+msgstr "Ebenenmaske hinzufügen"
+
+msgid "Add Noise"
+msgstr "Rauschen hinzufügen"
+
+msgid "Adjustment"
+msgstr "Einstellung"
+
+msgid "adjustment layer"
+msgstr "Einstellungsebene"
+
+msgid "Adjustment Layer {name}"
+msgstr "Einstellungsebene {name}"
+
+msgid "adjustment layers have no pixels – add a mask and paint into it"
+msgstr "Einstellungsebenen haben keine Pixel – Maske anlegen und hineinmalen"
+
+msgid "adjustment layers have no pixels – paint into the mask (\\)"
+msgstr "Einstellungsebenen haben keine Pixel – in die Maske malen (\\)"
+
+msgid "Agent socket not available: {error}"
+msgstr "Agenten-Socket nicht verfügbar: {error}"
+
+msgid "Agent socket: {path} (mosaix mcp --attach)"
+msgstr "Agenten-Socket: {path} (mosaix mcp --attach)"
+
+msgid "Align"
+msgstr "Ausrichtung"
+
+msgid "Aligned"
+msgstr "Ausgerichtet"
+
+msgid "All"
+msgstr "Alle"
+
+msgid "Alt+click sets the source"
+msgstr "Alt+Klick setzt die Quelle"
+
+msgid "Altitude"
+msgstr "Lichthöhe"
+
+msgid "Amount"
+msgstr "Stärke"
+
+msgid "An image cannot be pasted into text"
+msgstr "Ein Bild lässt sich nicht in Text einfügen"
+
+msgid "Anchor"
+msgstr "Anker"
+
+msgid "Angle"
+msgstr "Winkel"
+
+msgid "Angle ±"
+msgstr "Winkel ±"
+
+msgid "anywhere in the image"
+msgstr "überall im Bild"
+
+msgid "Apply"
+msgstr "Übernehmen"
+
+msgid "Apply (Enter) or cancel (Esc) Liquify first"
+msgstr "Erst Verflüssigen übernehmen (Enter) oder abbrechen (Esc)"
+
+msgid "Apply All"
+msgstr "Anwenden"
+
+msgid "Apply Filter"
+msgstr "Anwenden"
+
+msgid "Apply Layer Mask"
+msgstr "Ebenenmaske anwenden"
+
+msgid "Apply Smart Filters"
+msgstr "Smart-Filter anwenden"
+
+msgid "Apply the filters to the layer's pixels and remove them"
+msgstr "Filter in die Pixel der Ebene übernehmen und entfernen"
+
+msgid "Arrow keys: browse with preview in the image · Enter: apply · Esc: revert"
+msgstr "Pfeiltasten: blättern mit Vorschau im Bild · Enter: übernehmen · Esc: zurück"
+
+msgid "As Smart Filter"
+msgstr "Als Smart-Filter"
+
+msgid "Autosave failed: {error}"
+msgstr "Automatisches Sichern fehlgeschlagen: {error}"
+
+msgid "Autosave: {error}"
+msgstr "Automatisches Sichern: {error}"
+
+msgid "Autosave: {path}: {error}"
+msgstr "Automatisches Sichern: {path}: {error}"
+
+msgid "Average"
+msgstr "Durchschnitt"
+
+msgid "AVIF export is sRGB only for now"
+msgstr "AVIF-Export ist vorerst nur in sRGB möglich"
+
+msgid "B"
+msgstr "F"
+
+msgid "Background"
+msgstr "Hintergrund"
+
+msgid "Background color – click to edit"
+msgstr "Hintergrundfarbe – klicken zum Bearbeiten"
+
+msgid "Backspace"
+msgstr "Rücktaste"
+
+msgid "Benchmark: {n} frames zoom/rotation/pan …"
+msgstr "Benchmark: {n} Frames Zoom/Rotation/Pan …"
+
+msgid "Bevel & Emboss"
+msgstr "Abgeflachte Kante & Relief"
+
+msgid "Black & White"
+msgstr "Schwarzweiß"
+
+msgid "Black / White"
+msgstr "Schwarz / Weiß"
+
+msgid "Blend Color Space"
+msgstr "Blend-Farbraum"
+
+msgid "Blend Mode"
+msgstr "Füllmethode"
+
+msgid "Blend mode → {label}: {tiles} tiles (2 layers) fully recomposited in {ms} ms"
+msgstr "Füllmethode → {label}: {tiles} Kacheln (2 Ebenen) komplett neu zusammengesetzt in {ms} ms"
+
+msgid "Blend Space sRGB / Linear"
+msgstr "Blend-Raum sRGB / linear"
+
+msgid "Bloat"
+msgstr "Aufblähen"
+
+msgid "Blue"
+msgstr "Blau"
+
+msgid "Blues"
+msgstr "Blautöne"
+
+msgid "bold (synthetic if the font has no bold style)"
+msgstr "fett (künstlich, wenn die Schrift keinen fetten Schnitt hat)"
+
+msgid "Brightness"
+msgstr "Helligkeit"
+
+msgid "Brightness/Contrast"
+msgstr "Helligkeit/Kontrast"
+
+msgid "Bring Layer Forward"
+msgstr "Ebene nach oben"
+
+msgid "bristles"
+msgstr "borsten"
+
+msgid "Brush"
+msgstr "Pinsel"
+
+msgid "Brush Color"
+msgstr "Pinselfarbe"
+
+msgid "Brush color (X: black/white)"
+msgstr "Pinselfarbe (X: Schwarz/Weiß)"
+
+msgid "Brush color – click to edit"
+msgstr "Pinselfarbe – klicken zum Bearbeiten"
+
+msgid "Brush dynamics (random size, angle, scatter, flow) off"
+msgstr "Pinsel-Dynamik (Größe, Winkel, Streuung, Fluss zufällig) aus"
+
+msgid "Brush dynamics (random size, angle, scatter, flow) on"
+msgstr "Pinsel-Dynamik (Größe, Winkel, Streuung, Fluss zufällig) an"
+
+msgid "Brush opacity {pct} %"
+msgstr "Pinsel-Deckkraft {pct} %"
+
+msgid "Brush Settings …"
+msgstr "Pinseleinstellungen …"
+
+msgid "Brush Stroke"
+msgstr "Pinselstrich"
+
+msgid "Brush tip: {tip}"
+msgstr "Pinselspitze: {tip}"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Cancelled"
+msgstr "Abgebrochen"
+
+msgid "Cannot liquify: {error}"
+msgstr "Verflüssigen nicht möglich: {error}"
+
+msgid "cannot paint on groups"
+msgstr "auf Gruppen kann nicht gemalt werden"
+
+msgid "Cannot paint: {error}"
+msgstr "Malen nicht möglich: {error}"
+
+msgid "cannot save during a brush stroke"
+msgstr "während eines Pinselstrichs kann nicht gespeichert werden"
+
+msgid "Canvas"
+msgstr "Leinwand"
+
+msgid "Canvas Size"
+msgstr "Arbeitsfläche"
+
+msgid "Canvas Size …"
+msgstr "Arbeitsfläche …"
+
+msgid "Capitals to Small Caps"
+msgstr "Großbuchstaben als Kapitälchen"
+
+msgid "Center"
+msgstr "zentriert"
+
+msgid "Centered"
+msgstr "mittig"
+
+msgid "chalk"
+msgstr "kreide"
+
+msgid "charcoal"
+msgstr "kohle"
+
+msgid "Choose font"
+msgstr "Schrift wählen"
+
+msgid "Clear"
+msgstr "Löschen"
+
+msgid "Clear Area"
+msgstr "Fläche löschen"
+
+msgid "Click a shortcut, then press the new keys. Backspace removes it, Esc cancels. Keys taken from another command are removed there."
+msgstr "Kürzel anklicken, dann die neuen Tasten drücken. Rücktaste entfernt es, Esc bricht ab. Tasten, die ein anderer Befehl hatte, werden dort entfernt."
+
+msgid "Click adds a point, drag moves it, drag it out of the graph to remove it."
+msgstr "Klick setzt einen Punkt, Ziehen verschiebt ihn, aus dem Feld ziehen entfernt ihn."
+
+msgid "Click in the image: new text. Click on a text: edit it."
+msgstr "Klick ins Bild: neuer Text. Klick auf einen Text: bearbeiten."
+
+msgid "Click in the image: new text. Click on a text: edit it. Font, size and color are under Properties; new text uses the brush color."
+msgstr "Klick ins Bild: neuer Text. Klick auf einen Text: bearbeiten. Schrift, Größe und Farbe unter Eigenschaften; neuer Text nimmt die Pinselfarbe."
+
+msgid "Click or drag: picks the brush color. Alt+click does the same with the brush, eraser, gradient, shape and text tools."
+msgstr "Klicken oder ziehen: nimmt die Pinselfarbe auf. Alt+Klick macht das auch mit Pinsel, Radierer, Verlauf, Form und Text."
+
+msgid "Click to edit"
+msgstr "Klicken zum Bearbeiten"
+
+msgid "Click: corner · Drag: curve · Start point: close (filled) · Enter/Esc: finish open (line)"
+msgstr "Klicken: Ecke · Ziehen: Kurve · Startpunkt: schließen (gefüllt) · Enter/Esc: offen beenden (Linie)"
+
+msgid "Click: corner · Drag: curve · Start point: close (filled) · Enter/Esc: finish open (line). On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag moves one handle, Del deletes the point."
+msgstr "Klicken: Ecke · Ziehen: Kurve · Startpunkt: schließen (gefüllt) · Enter/Esc: offen beenden (Linie). Auf einem Pfad: Punkte und Griffe ziehen, Alt+Klick Ecke ↔ Kurve, Alt+Ziehen Griff einzeln, Entf löscht den Punkt."
+
+msgid "Clipboard not available"
+msgstr "Zwischenablage nicht verfügbar"
+
+msgid "Clipping Mask"
+msgstr "Schnittmaske"
+
+msgid "Clone source: {x}, {y}"
+msgstr "Stempelquelle: {x}, {y}"
+
+msgid "Clone Stamp"
+msgstr "Kopierstempel"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Close all"
+msgstr "Alle schließen"
+
+msgid "CMYK converted to RGB without a color profile (colors are approximate)"
+msgstr "CMYK ohne Farbprofil nach RGB umgerechnet (Farben sind ungefähr)"
+
+msgid "Color"
+msgstr "Farbe"
+
+msgid "Color Burn"
+msgstr "Farbig nachbelichten"
+
+msgid "Color Dodge"
+msgstr "Farbig abwedeln"
+
+msgid "Color Overlay"
+msgstr "Farbüberlagerung"
+
+msgid "Color profile “{name}” cannot be converted ({error}), assuming sRGB"
+msgstr "Farbprofil „{name}“ nicht umrechenbar ({error}), nehme sRGB an"
+
+msgid "Color Range"
+msgstr "Farbbereich"
+
+msgid "Color space"
+msgstr "Farbraum"
+
+msgid "Color: Black"
+msgstr "Farbe: Schwarz"
+
+msgid "Color: White"
+msgstr "Farbe: Weiß"
+
+msgid "Colorize"
+msgstr "Färben"
+
+msgid "Command"
+msgstr "Befehl"
+
+msgid "Command Palette"
+msgstr "Befehlspalette"
+
+msgid "Composite memory full"
+msgstr "Composite-Speicher voll"
+
+msgid "Composite memory full – histogram incomplete"
+msgstr "Composite-Speicher voll – Histogramm unvollständig"
+
+msgid "Compositor does not support tablet-v2 – the pen only works as a mouse"
+msgstr "Compositor unterstützt kein tablet-v2 – Stift funktioniert nur als Maus"
+
+msgid "computing …"
+msgstr "rechnet …"
+
+msgid "Constrain Proportions"
+msgstr "Seitenverhältnis beibehalten"
+
+msgid "Content-Aware Fill"
+msgstr "Inhaltsbasiert füllen"
+
+msgid "Content-Aware Fill (All Layers)"
+msgstr "Inhaltsbasiert füllen (alle Ebenen)"
+
+msgid "Content-Aware Fill (all layers) …"
+msgstr "Inhaltsbasiert füllen (alle Ebenen) …"
+
+msgid "Content-Aware Fill …"
+msgstr "Inhaltsbasiert füllen …"
+
+msgid "Content-Aware Fill: {error}"
+msgstr "Inhaltsbasiert füllen: {error}"
+
+msgid "Contextual Alternates"
+msgstr "Kontextbedingte Varianten"
+
+msgid "Contiguous"
+msgstr "Benachbart"
+
+msgid "contiguous only"
+msgstr "nur zusammenhängend"
+
+msgid "Contrast"
+msgstr "Kontrast"
+
+msgid "Conversion to {name}: {err}"
+msgstr "Umrechnung nach {name}: {err}"
+
+msgid "Converting color profile “{name}” to sRGB (linear, extended range)"
+msgstr "Farbprofil „{name}“ wird nach sRGB (linear, erweiterter Farbraum) umgerechnet"
+
+msgid "Copied: {w}×{h} px"
+msgstr "Kopiert: {w}×{h} px"
+
+msgid "Copy"
+msgstr "Kopieren"
+
+msgid "Copy Merged"
+msgstr "Kopieren (alle Ebenen)"
+
+msgid "Copy: {error}"
+msgstr "Kopieren: {error}"
+
+msgid "Corners"
+msgstr "Ecken"
+
+msgid "Create"
+msgstr "Erstellen"
+
+msgid "Create/Release Clipping Mask"
+msgstr "Schnittmaske erstellen/zurückwandeln"
+
+msgid "creating {path}"
+msgstr "{path} anlegen"
+
+msgid "Crop"
+msgstr "Zuschneiden"
+
+msgid "Crop Image"
+msgstr "Zuschneiden"
+
+msgid "Crop Tool"
+msgstr "Zuschneiden"
+
+msgid "Crop: drag a frame or move the handles (beyond the edge enlarges the canvas), Enter applies, Esc cancels."
+msgstr "Zuschneiden: Rahmen ziehen oder Anfasser verschieben (über den Rand hinaus vergrößert die Arbeitsfläche), Enter übernimmt, Esc bricht ab."
+
+msgid "Crop: the frame is empty"
+msgstr "Zuschneiden: Rahmen ist leer"
+
+msgid "Ctrl"
+msgstr "Strg"
+
+msgid "Ctrl+T transforms losslessly, Layer › Rasterize turns it into pixels"
+msgstr "Strg+T transformiert verlustfrei, Ebene › Rastern macht Pixel daraus"
+
+msgid "Ctrl+Z undoes the last stroke"
+msgstr "Strg+Z nimmt den letzten Strich zurück"
+
+msgid "Curves"
+msgstr "Gradationskurven"
+
+msgid "Cut"
+msgstr "Ausschneiden"
+
+msgid "Cut: {w}×{h} px"
+msgstr "Ausgeschnitten: {w}×{h} px"
+
+msgid "Cyans"
+msgstr "Cyantöne"
+
+msgid "damaged layer record"
+msgstr "beschädigter Ebeneneintrag"
+
+msgid "damaged RLE data"
+msgstr "beschädigte RLE-Daten"
+
+msgid "damaged ZIP data"
+msgstr "beschädigte ZIP-Daten"
+
+msgid "Darken"
+msgstr "Abdunkeln"
+
+msgid "decoded {w}×{h} {color} in {ms} ms"
+msgstr "dekodiert {w}×{h} {color} in {ms} ms"
+
+msgid "Default"
+msgstr "Standard"
+
+msgid "Default colors: black/white (D)"
+msgstr "Standardfarben: Schwarz/Weiß (D)"
+
+msgid "Default:"
+msgstr "Standard:"
+
+msgid "Del"
+msgstr "Entf"
+
+msgid "Delete"
+msgstr "Löschen"
+
+msgid "Delete Empty Text"
+msgstr "Leeren Text löschen"
+
+msgid "Delete Layer"
+msgstr "Ebene löschen"
+
+msgid "Delete Layer Mask"
+msgstr "Ebenenmaske löschen"
+
+msgid "Delete Selection (Pixels)"
+msgstr "Auswahl löschen (Pixel)"
+
+msgid "Depth"
+msgstr "Tiefe"
+
+msgid "Deselect"
+msgstr "Auswahl aufheben"
+
+msgid "Detach"
+msgstr "Abtrennen"
+
+msgid "Difference"
+msgstr "Differenz"
+
+msgid "Discard"
+msgstr "Verwerfen"
+
+msgid "Discretionary Ligatures"
+msgstr "Bedingte Ligaturen"
+
+msgid "Distance"
+msgstr "Abstand"
+
+msgid "Divide"
+msgstr "Dividieren"
+
+msgid "Document needs {expected} tiles, the layer store holds {max} – the rest is missing"
+msgstr "Dokument braucht {expected} Kacheln, der Ebenen-Speicher fasst {max} – Rest fehlt"
+
+msgid "document without layers"
+msgstr "Dokument ohne Ebenen"
+
+msgid "Document {name}: {w}×{h}"
+msgstr "Dokument {name}: {w}×{h}"
+
+msgid "Down Arrow"
+msgstr "Pfeil runter"
+
+msgid "Drag a frame, adjust the handles. Dragging past the edge enlarges the canvas."
+msgstr "Rahmen ziehen, Anfasser anpassen. Über den Rand hinaus vergrößert die Arbeitsfläche."
+
+msgid "Drag corners: scale (Shift: free) · drag outside: rotate (Shift: 15°) · Alt: around the center"
+msgstr "Ecken ziehen: skalieren (Umschalt frei) · außerhalb ziehen: drehen (Umschalt 15°) · Alt: um die Mitte"
+
+msgid "Drag or arrow keys (Shift: 10 px). With a selection, only the selected pixels."
+msgstr "Ziehen oder Pfeiltasten (Umschalt: 10 px). Mit Auswahl nur die ausgewählten Pixel."
+
+msgid "Drag out (Shift: square/circle, Alt: from the center). Fill in the brush color; stroke and corners under Properties."
+msgstr "Aufziehen (Umschalt: Quadrat/Kreis, Alt: von der Mitte). Fläche in Pinselfarbe; Kontur und Ecken unter Eigenschaften."
+
+msgid "Drag tabs to move panels; drag a tab out to float it."
+msgstr "Reiter ziehen verschiebt Bedienfelder; herausziehen macht sie schwebend."
+
+msgid "Drag: from the brush color to transparent"
+msgstr "Ziehen: von der Pinselfarbe zu transparent"
+
+msgid "Draw a path with the pen (P) first."
+msgstr "Zuerst mit dem Zeichenstift (P) einen Pfad zeichnen."
+
+msgid "Drop Shadow"
+msgstr "Schlagschatten"
+
+msgid "Duplicate"
+msgstr "Duplizieren"
+
+msgid "Duplicate Layer"
+msgstr "Ebene duplizieren"
+
+msgid "Edit"
+msgstr "Bearbeiten"
+
+msgid "Edit Adjustment"
+msgstr "Einstellung ändern"
+
+msgid "Edit all colors, or only one color range"
+msgstr "Alle Farben bearbeiten oder nur einen Farbbereich"
+
+msgid "Edit Path"
+msgstr "Pfad bearbeiten"
+
+msgid "Edit Shape"
+msgstr "Form ändern"
+
+msgid "Edit Smart Filter"
+msgstr "Smart-Filter ändern"
+
+msgid "Edit Text"
+msgstr "Text ändern"
+
+msgid "Edit Vector"
+msgstr "Vektor ändern"
+
+msgid "Effect"
+msgstr "Effekt"
+
+msgid "Ellipse"
+msgstr "Ellipse"
+
+msgid "Elliptical Marquee"
+msgstr "Auswahlellipse"
+
+msgid "Embedded color profile unreadable ({error}), assuming sRGB"
+msgstr "Eingebettetes Farbprofil unlesbar ({error}), nehme sRGB an"
+
+msgid "embedding color profile: {err}"
+msgstr "Farbprofil einbetten: {err}"
+
+msgid "Emboss"
+msgstr "Relief"
+
+msgid "End"
+msgstr "Ende"
+
+msgid "Enter applies, Esc cancels"
+msgstr "Enter übernimmt, Esc bricht ab"
+
+msgid "Enter applies, Esc cancels, Ctrl+Z undoes the last stroke"
+msgstr "Enter übernimmt, Esc bricht ab, Strg+Z nimmt den letzten Strich zurück"
+
+msgid "Erase"
+msgstr "Radieren"
+
+msgid "Eraser"
+msgstr "Radierer"
+
+msgid "Exclusion"
+msgstr "Ausschluss"
+
+msgid "Export As"
+msgstr "Exportieren unter"
+
+msgid "Export as PNG"
+msgstr "Als PNG exportieren"
+
+msgid "Export As …"
+msgstr "Exportieren unter …"
+
+msgid "Export failed: {error}"
+msgstr "Export fehlgeschlagen: {error}"
+
+msgid "Export still running."
+msgstr "Export läuft noch."
+
+msgid "Export to “{ext}” is not supported (png, jpg, webp, tiff)"
+msgstr "Export nach „{ext}“ wird nicht unterstützt (png, jpg, webp, tiff)"
+
+msgid "Export to “{ext}” is not supported (png, jpg, webp, tiff, avif, jxl)"
+msgstr "Export nach „{ext}“ wird nicht unterstützt (png, jpg, webp, tiff, avif, jxl)"
+
+msgid "Exported: {path} ({ms} ms)"
+msgstr "Exportiert: {path} ({ms} ms)"
+
+msgid "exported: {path} ({ms} ms)"
+msgstr "exportiert: {path} ({ms} ms)"
+
+msgid "exporting {path}"
+msgstr "{path} exportieren"
+
+msgid "Exporting {path} ({space}) in the background …"
+msgstr "Exportiere {path} ({space}) im Hintergrund …"
+
+msgid "Exposure"
+msgstr "Belichtung"
+
+msgid "Eyedropper"
+msgstr "Pipette"
+
+msgid "Eyedropper (I) – or Alt+click while painting"
+msgstr "Pipette (I) – oder Alt+Klick beim Malen"
+
+msgid "Favorite"
+msgstr "Favorit"
+
+msgid "Favorites"
+msgstr "Favoriten"
+
+msgid "Feather (10 px)"
+msgstr "Weiche Kante (10 px)"
+
+msgid "Feather Selection"
+msgstr "Weiche Auswahlkante"
+
+msgid "Feather Selection (10 px)"
+msgstr "Weiche Auswahlkante (10 px)"
+
+msgid "File"
+msgstr "Datei"
+
+msgid "file too short"
+msgstr "Datei zu kurz"
+
+msgid "file version {version} is newer than this program"
+msgstr "Dateiversion {version} ist neuer als dieses Programm"
+
+msgid "file was changed in the meantime"
+msgstr "Datei wurde zwischenzeitlich verändert"
+
+msgid "Fill"
+msgstr "Füllen"
+
+msgid "Fill Area"
+msgstr "Fläche füllen"
+
+msgid "Fill Color"
+msgstr "Fläche"
+
+msgid "fill layer"
+msgstr "Füllebene"
+
+msgid "first select the area to fill"
+msgstr "erst den Bereich auswählen, der gefüllt werden soll"
+
+msgid "Fit on Screen"
+msgstr "Einpassen"
+
+msgid "Flip"
+msgstr "Spiegeln"
+
+msgid "Flip Image Horizontal"
+msgstr "Bild horizontal spiegeln"
+
+msgid "Flip Image Vertical"
+msgstr "Bild vertikal spiegeln"
+
+msgid "Flip Layer Horizontal"
+msgstr "Ebene horizontal spiegeln"
+
+msgid "Flip Layer Vertical"
+msgstr "Ebene vertikal spiegeln"
+
+msgid "Flow"
+msgstr "Fluss"
+
+msgid "Flow ±"
+msgstr "Fluss ±"
+
+msgid "Follow direction"
+msgstr "Richtung folgen"
+
+msgid "Font"
+msgstr "Schrift"
+
+msgid "Font, size and color are under Properties; new text uses the brush color."
+msgstr "Schrift, Größe und Farbe stehen unter Eigenschaften; neue Texte nehmen die Pinselfarbe."
+
+msgid "Fonts not installed, those text layers stay pixels: {fonts}"
+msgstr "Schriften nicht installiert, diese Textebenen bleiben Pixel: {fonts}"
+
+msgid "Fractions"
+msgstr "Brüche"
+
+msgid "Free Transform"
+msgstr "Frei transformieren"
+
+msgid "Free Transform (Ctrl+T)"
+msgstr "Frei transformieren (Strg+T)"
+
+msgid "Free Transform / Rotate"
+msgstr "Frei transformieren / drehen"
+
+msgid "Free Transform: corners scale (Shift = free), edges stretch, outside rotates, Alt = around the center. Enter applies, Esc cancels."
+msgstr "Frei transformieren: Ecken skalieren (Umschalt = frei), Kanten strecken, außerhalb drehen, Alt = um die Mitte. Enter übernimmt, Esc bricht ab."
+
+msgid "full"
+msgstr "komplett"
+
+msgid "Gaussian"
+msgstr "Gaußverteilt"
+
+msgid "Gaussian Blur"
+msgstr "Gaußscher Weichzeichner"
+
+msgid "give the size as WIDTHxHEIGHT"
+msgstr "Größe als BREITExHÖHE angeben"
+
+msgid "GPU memory full"
+msgstr "GPU-Speicher voll"
+
+msgid "GPU memory full – stroke discarded"
+msgstr "GPU-Speicher voll – Strich verworfen"
+
+msgid "GPU/driver does not support required features: {missing}"
+msgstr "GPU/Treiber unterstützt benötigte Features nicht: {missing}"
+
+msgid "Gradient"
+msgstr "Verlauf"
+
+msgid "Gradient Overlay"
+msgstr "Verlaufsüberlagerung"
+
+msgid "Green"
+msgstr "Grün"
+
+msgid "Greens"
+msgstr "Grüntöne"
+
+msgid "Group Layers"
+msgstr "Gruppieren"
+
+msgid "Group {n}"
+msgstr "Gruppe {n}"
+
+msgid "Groups cannot be transformed yet."
+msgstr "Gruppen lassen sich noch nicht transformieren."
+
+msgid "groups have no pixels"
+msgstr "Gruppen haben keine Pixel"
+
+msgid "groups have no pixels – choose a layer or sample all layers"
+msgstr "Gruppen haben keine Pixel – Ebene wählen oder alle Ebenen aufnehmen"
+
+msgid "Groups nested deeper than {depth} levels are displayed incorrectly"
+msgstr "Gruppen tiefer als {depth} Ebenen werden falsch dargestellt"
+
+msgid "half turn"
+msgstr "halbe Drehung"
+
+msgid "Hard Light"
+msgstr "Hartes Licht"
+
+msgid "Hardness"
+msgstr "Härte"
+
+msgid "Hardness {pct} %"
+msgstr "Härte {pct} %"
+
+msgid "Heal on an empty layer"
+msgstr "Auf einer leeren Ebene reparieren"
+
+msgid "Healing Brush"
+msgstr "Reparaturpinsel"
+
+msgid "Healing {w}×{h}: {ms} ms"
+msgstr "Reparieren {w}×{h}: {ms} ms"
+
+msgid "Height"
+msgstr "Höhe"
+
+msgid "Hide"
+msgstr "Ausblenden"
+
+msgid "Hide tab bar"
+msgstr "Reiterleiste ausblenden"
+
+msgid "High Pass"
+msgstr "Hochpass"
+
+msgid "Highlight"
+msgstr "Licht"
+
+msgid "Highlight Opacity"
+msgstr "Licht-Deckkr."
+
+msgid "Highlights"
+msgstr "Lichter"
+
+msgid "History"
+msgstr "Verlauf"
+
+msgid "Home folder"
+msgstr "persönlicher Ordner"
+
+msgid "horizontal"
+msgstr "horizontal"
+
+msgid "Hue"
+msgstr "Farbton"
+
+msgid "Hue/Saturation"
+msgstr "Farbton/Sättigung"
+
+msgid "Huge 20000²"
+msgstr "Riesig 20000²"
+
+msgid "I"
+msgstr "K"
+
+msgid "ICC profile {name}: {err}"
+msgstr "ICC-Profil {name}: {err}"
+
+msgid "Image"
+msgstr "Bild"
+
+msgid "Image Size"
+msgstr "Bildgröße"
+
+msgid "Image Size …"
+msgstr "Bildgröße …"
+
+msgid "image.jpg"
+msgstr "bild.jpg"
+
+msgid "mosaix run needs a script (or - for stdin)"
+msgstr "mosaix run braucht ein Skript (oder - für stdin)"
+
+msgid "mosaix – GPU image editor (Phase 2: selections, masks, transform)\n\nUsage:\n  mosaix [FILE]                open an image (PSD/PSB, PNG, JPEG, WebP, AVIF, JPEG XL, TIFF, EXR, camera RAW, .mosaix)\n  mosaix --new WxH             empty document, e.g. --new 30000x30000\n  mosaix --demo WxH            procedural test image, e.g. --demo 10000x10000\n  mosaix ... --bench           run a pan/zoom/rotate benchmark after loading, then quit\n  mosaix ... --bench-offscreen the same benchmark without a window, measures real GPU time per frame\n  mosaix FILE --save A.mosaix --export B.png\n                                convert without a window (both optional, can be combined)\n\nFor agents (see docs/agenten.md):\n  mosaix mcp [FILE]            MCP server over stdio with its own engine\n  mosaix mcp --attach          MCP server that controls the running window live\n  mosaix run SCRIPT.jsonl      run JSON commands line by line (`-` = stdin)\n  mosaix run --attach SCRIPT   … in the running window\n  mosaix batch ACTION FILE… [--out DIR] [--format png|jpg|webp|avif|jxl|tiff|psd]\n                                play an action (File › Actions) on each file and export it\n                                (default: next to the input in mosaix-batch/, same format)\n\nView:\n  Pan             mouse wheel (Shift: sideways), Space + drag, middle mouse button, pen button 1\n  Zoom            Alt + mouse wheel (towards the cursor), Ctrl + Space + drag\n  Rotate          hold R + drag, Alt + Shift + mouse wheel, pen button 2; Shift+R resets\n  Fit/100 %       Ctrl+0 / Ctrl+1\n\nTools:\n  B Brush (Shift+B: tip round/chalk/bristle/spray/rough/charcoal; Shift+J: dynamics)   U Smudge\n  P Pen   I Eyedropper   S Clone Stamp (Alt+click: source)   J Spot Healing (again: Healing Brush, Alt+click: source)\n  E Eraser   M Rectangular Marquee (again: ellipse)   L Lasso\n  G Gradient (again: radial)   V Move (arrow keys: 1 px, with Shift 10 px)\n  W Magic Wand (click; Shift/Alt combine; [ / ] tolerance; W again: contiguous ↔ anywhere)\n  C Crop (drag a frame, beyond the edge = enlarge the canvas; Enter / Esc)\n  With a selection, V and Ctrl+T move/transform only the selected pixels.\n\nFree Transform (Ctrl+T):\n  corners scale (proportional, Shift = free), edges stretch, Alt = around the center,\n  drag outside = rotate (Shift = 15° steps), inside = move.\n  Enter applies, Esc or Ctrl+Z cancels. Content outside the image is kept.\n\nPainting:\n  Paint           left mouse button / pen (pressure = size & flow), eraser end of the pen\n  Size            [ / ], Ctrl + mouse wheel\n  Opacity         digits 1…9, 0 (10 … 100 %; with Smudge: strength)\n  Hardness/Smoothing  H / Shift+S   Color  Shift+P (palette), X swap, D black/white, I / Alt+click eyedropper\n  Fill            Alt+Backspace (selection or whole layer)\n\nSelection (while dragging: Shift = add, Alt = subtract, both = intersect):\n  All / none      Ctrl+A / Ctrl+D        Inverse    Ctrl+Shift+I\n  Feather         Shift+F6 (10 px)       Delete     Del or Backspace (pixels in the selection)\n  Quick Mask view  Q (red = not selected)\n\nLayer masks:\n  New mask        Ctrl+Shift+M (from the selection, otherwise reveal all)\n  Paint mask      \\ (toggle pixels ↔ mask; white reveals, black hides)\n  On/Off          Ctrl+Alt+M             Apply      Ctrl+Alt+Shift+M\n\nLayers (Photoshop shortcuts):\n  New layer       Ctrl+Shift+N         Duplicate     Ctrl+J      Delete  Del (without selection)\n  Select          Alt+[ / Alt+]        Move          Ctrl+[ / Ctrl+]\n  Group           Ctrl+G               Ungroup       Ctrl+Shift+G\n  Clipping mask   Ctrl+Alt+G (clip to the layer below)\n  Opacity         Shift + digit        Blend mode    Shift + Plus/Minus\n  On/Off          Ctrl+,               Blend space   F7 (sRGB ↔ linear)\n\nFile & History:\n  Undo            Ctrl+Z               Redo          Ctrl+Shift+Z / Ctrl+Y\n  Save            Ctrl+S (.mosaix, incremental, in the background)\n  Export          Ctrl+Shift+E (PNG next to the file)\n  Other           Ctrl+Shift+P command palette, F12 benchmark, F1 help, Ctrl+Q quit\n"
+msgstr "mosaix – GPU-Bildeditor (Phase 2: Auswahl, Masken, Transformieren)\n\nAufruf:\n  mosaix [DATEI]               Bild öffnen (PSD/PSB, PNG, JPEG, WebP, AVIF, JPEG XL, TIFF, EXR, Kamera-RAW, .mosaix)\n  mosaix --new BxH             leeres Dokument, z. B. --new 30000x30000\n  mosaix --demo BxH            prozedurales Testbild, z. B. --demo 10000x10000\n  mosaix ... --bench           nach dem Laden Pan/Zoom/Rotate-Benchmark fahren und beenden\n  mosaix ... --bench-offscreen derselbe Benchmark ohne Fenster, misst echte GPU-Zeit pro Frame\n  mosaix DATEI --save A.mosaix --export B.png\n                                ohne Fenster konvertieren (beides optional kombinierbar)\n\nFür Agenten (siehe docs/agenten.md):\n  mosaix mcp [DATEI]           MCP-Server über stdio mit eigener Engine\n  mosaix mcp --attach          MCP-Server, der das laufende Fenster live steuert\n  mosaix run SKRIPT.jsonl      JSON-Befehle zeilenweise ausführen (`-` = stdin)\n  mosaix run --attach SKRIPT   … im laufenden Fenster\n  mosaix batch AKTION DATEI… [--out ORDNER] [--format png|jpg|webp|avif|jxl|tiff|psd]\n                                eine Aktion (Datei › Aktionen) auf jede Datei anwenden und exportieren\n                                (Standard: neben der Eingabe in mosaix-batch/, gleiches Format)\n\nAnsicht:\n  Schwenken       Mausrad (Umschalt: seitlich), Leertaste + Ziehen, mittlere Maustaste, Stifttaste 1\n  Zoomen          Alt + Mausrad (zum Cursor), Strg + Leertaste + Ziehen\n  Drehen          R halten + Ziehen, Alt + Umschalt + Mausrad, Stifttaste 2; Umschalt+R zurücksetzen\n  Einpassen/100 % Strg+0 / Strg+1\n\nWerkzeuge:\n  B Pinsel (Umschalt+B: Spitze rund/Kreide/Borsten/Spray/rau/Kohle; Umschalt+J: Dynamik)   U Wischfinger\n  P Zeichenstift   I Pipette   S Kopierstempel (Alt+Klick: Quelle)   J Bereichsreparatur (nochmal: Reparaturpinsel, Alt+Klick: Quelle)\n  E Radierer   M Auswahlrechteck (nochmal: Ellipse)   L Lasso\n  G Verlauf (nochmal: radial)   V Verschieben (Pfeiltasten: 1 px, mit Umschalt 10 px)\n  W Zauberstab (Klick; Umschalt/Alt kombinieren; [ / ] Toleranz; W nochmal: zusammenhängend ↔ überall)\n  C Zuschneiden (Rahmen ziehen, über den Rand hinaus = Arbeitsfläche vergrößern; Enter / Esc)\n  Mit Auswahl verschieben/transformieren V und Strg+T nur die ausgewählten Pixel.\n\nFrei transformieren (Strg+T):\n  Ecken skalieren (proportional, Umschalt = frei), Kanten strecken, Alt = um die Mitte,\n  außerhalb ziehen = drehen (Umschalt = 15°-Schritte), innen = verschieben.\n  Enter übernimmt, Esc oder Strg+Z bricht ab. Inhalt außerhalb des Bildes bleibt erhalten.\n\nMalen:\n  Malen           linke Maustaste / Stift (Druck = Größe & Fluss), Radierer-Ende des Stifts\n  Größe           [ / ], Strg + Mausrad\n  Deckkraft       Ziffern 1…9, 0 (10 … 100 %; beim Wischfinger: Stärke)\n  Härte/Glättung  H / Umschalt+S   Farbe  Umschalt+P (Palette), X tauschen, D Schwarz/Weiß, I / Alt+Klick Pipette\n  Füllen          Alt+Rücktaste (Auswahl bzw. ganze Ebene)\n\nAuswahl (beim Aufziehen: Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge):\n  Alles / nichts  Strg+A / Strg+D        Umkehren   Strg+Umschalt+I\n  Weiche Kante    Umschalt+F6 (10 px)    Löschen    Entf oder Rücktaste (Pixel in der Auswahl)\n  Maskierungsmodus-Ansicht  Q (rot = nicht ausgewählt)\n\nEbenenmasken:\n  Neue Maske      Strg+Umschalt+M (aus der Auswahl, sonst alles sichtbar)\n  Maske bemalen   \\ (umschalten Pixel ↔ Maske; Weiß zeigt, Schwarz verbirgt)\n  Ein/Aus         Strg+Alt+M             Anwenden   Strg+Alt+Umschalt+M\n\nEbenen (Photoshop-Tastenkürzel):\n  Neue Ebene      Strg+Umschalt+N      Duplizieren   Strg+J      Löschen  Entf (ohne Auswahl)\n  Auswählen       Alt+[ / Alt+]        Verschieben   Strg+[ / Strg+]\n  Gruppieren      Strg+G               Aufheben      Strg+Umschalt+G\n  Schnittmaske    Strg+Alt+G (an die Ebene darunter)\n  Deckkraft       Umschalt + Ziffer    Füllmethode   Umschalt + Plus/Minus\n  Ein/Aus         Strg+,               Blend-Raum    F7 (sRGB ↔ linear)\n\nDatei & Verlauf:\n  Rückgängig      Strg+Z               Wiederholen   Strg+Umschalt+Z / Strg+Y\n  Speichern       Strg+S (.mosaix, inkrementell, im Hintergrund)\n  Exportieren     Strg+Umschalt+E (PNG neben der Datei)\n  Sonstiges       Strg+Umschalt+P Befehlspalette, F12 Benchmark, F1 Hilfe, Strg+Q beenden\n"
+
+msgid "Import Brushes"
+msgstr "Pinsel importieren"
+
+msgid "Import Brushes …"
+msgstr "Pinsel importieren …"
+
+msgid "Import brushes: {error}"
+msgstr "Pinsel importieren: {error}"
+
+msgid "in {input}  out {output}"
+msgstr "ein {input}  aus {output}"
+
+msgid "incremental"
+msgstr "inkrementell"
+
+msgid "Initial State"
+msgstr "Ausgangszustand"
+
+msgid "Inner Bevel"
+msgstr "Kante innen"
+
+msgid "Inner Glow"
+msgstr "Schein nach innen"
+
+msgid "Inner Shadow"
+msgstr "Schatten nach innen"
+
+msgid "Inside"
+msgstr "innen"
+
+msgid "invalid image size"
+msgstr "ungültige Bildgröße"
+
+msgid "Inverse"
+msgstr "Auswahl umkehren"
+
+msgid "Invert"
+msgstr "Umkehren"
+
+msgid "JPEG XL export is sRGB only for now"
+msgstr "JPEG-XL-Export ist vorerst nur in sRGB möglich"
+
+msgid "Justified"
+msgstr "Block"
+
+msgid "Justify"
+msgstr "Blocksatz"
+
+msgid "Kerning"
+msgstr "Kerning"
+
+msgid "Keyboard Shortcuts"
+msgstr "Tastaturbefehle"
+
+msgid "Keyboard Shortcuts …"
+msgstr "Tastaturbefehle …"
+
+msgid "Lasso"
+msgstr "Lasso"
+
+msgid "Lasso Selection"
+msgstr "Lasso-Auswahl"
+
+msgid "Layer"
+msgstr "Ebene"
+
+msgid "layer does not exist"
+msgstr "Ebene existiert nicht"
+
+msgid "Layer Mask"
+msgstr "Ebenenmaske"
+
+msgid "Layer memory full"
+msgstr "Ebenen-Speicher voll"
+
+msgid "layer not found"
+msgstr "Ebene nicht gefunden"
+
+msgid "Layer Properties"
+msgstr "Ebeneneigenschaften"
+
+msgid "Layer Style"
+msgstr "Ebenenstil"
+
+msgid "Layer style skipped: layer too large ({mp} MP)"
+msgstr "Ebenenstil übersprungen: Ebene zu groß ({mp} MP)"
+
+msgid "Layer style {id}: {ms} ms"
+msgstr "Ebenenstil {id}: {ms} ms"
+
+msgid "Layer Styles"
+msgstr "Ebenenstile"
+
+msgid "Layer Styles ({n})"
+msgstr "Ebenenstile ({n})"
+
+msgid "Layer {n}"
+msgstr "Ebene {n}"
+
+msgid "Layers"
+msgstr "Ebenen"
+
+msgid "Layers (top → bottom), blend space: {space}\n{layers}"
+msgstr "Ebenen (oben → unten), Blend-Raum: {space}\n{layers}"
+
+msgid "Left"
+msgstr "links"
+
+msgid "Left Arrow"
+msgstr "Pfeil links"
+
+msgid "Levels"
+msgstr "Tonwertkorrektur"
+
+msgid "Light"
+msgstr "Licht"
+
+msgid "Light Angle"
+msgstr "Lichtwinkel"
+
+msgid "Lighten"
+msgstr "Aufhellen"
+
+msgid "Lightness"
+msgstr "Helligkeit"
+
+msgid "Line height"
+msgstr "Zeilenabstand"
+
+msgid "Linear"
+msgstr "Linear"
+
+msgid "Linear Dodge (Add)"
+msgstr "Linear abwedeln (Addieren)"
+
+msgid "Linear Gradient"
+msgstr "Verlauf linear"
+
+msgid "Liquify"
+msgstr "Verflüssigen"
+
+msgid "Liquify cancelled"
+msgstr "Verflüssigen abgebrochen"
+
+msgid "Liquify is not active"
+msgstr "Verflüssigen ist nicht aktiv"
+
+msgid "Liquify …"
+msgstr "Verflüssigen …"
+
+msgid "Liquify: nothing left to undo"
+msgstr "Verflüssigen: nichts mehr zurückzunehmen"
+
+msgid "Liquify: W forward warp, R reconstruct, C twirl (Alt: counterclockwise), S pucker, B bloat (Alt swaps), [ ] size. Enter applies, Esc cancels, Ctrl+Z undoes the last stroke."
+msgstr "Verflüssigen: W schieben, R rekonstruieren, C Strudel (Alt: links), S zusammenziehen, B aufblähen (Alt tauscht), [ ] Größe. Enter übernimmt, Esc bricht ab, Strg+Z nimmt den letzten Strich zurück."
+
+msgid "Liquify: {tool}"
+msgstr "Verflüssigen: {tool}"
+
+msgid "Loading done: decode {decode} ms, total {total} ms"
+msgstr "Laden fertig: Dekodieren {decode} ms, gesamt {total} ms"
+
+msgid "Loading failed: {error}"
+msgstr "Laden fehlgeschlagen: {error}"
+
+msgid "loading …"
+msgstr "lädt …"
+
+msgid "Luminosity"
+msgstr "Luminanz"
+
+msgid "Magentas"
+msgstr "Magentatöne"
+
+msgid "Magic Wand"
+msgstr "Zauberstab"
+
+msgid "Magic Wand: Tolerance {tol} ([ / ]), {mode} (W toggles), samples all layers"
+msgstr "Zauberstab: Toleranz {tol} ([ / ]), {mode} (W wechselt), nimmt alle Ebenen auf"
+
+msgid "Magic Wand: {error}"
+msgstr "Zauberstab: {error}"
+
+msgid "Mask"
+msgstr "Maske"
+
+msgid "mask before document structure"
+msgstr "Maske vor Dokumentstruktur"
+
+msgid "Mask not loaded: {error}"
+msgstr "Maske nicht geladen: {error}"
+
+msgid "Mask off"
+msgstr "Maske aus"
+
+msgid "mask tile has the wrong size"
+msgstr "Maskenkachel hat falsche Größe"
+
+msgid "mask tile outside the file"
+msgstr "Maskenkachel außerhalb der Datei"
+
+msgid "Mask: click to switch between painting the mask and the pixels"
+msgstr "Maske: klicken wechselt zwischen Maske bemalen und Pixel"
+
+msgid "Master"
+msgstr "Standard"
+
+msgid "Messages"
+msgstr "Meldungen"
+
+msgid "Middle"
+msgstr "Mitte"
+
+msgid "Monochromatic"
+msgstr "Monochrom"
+
+msgid "Move"
+msgstr "Verschieben"
+
+msgid "Move Layer"
+msgstr "Ebene verschieben"
+
+msgid "Move Layer Down"
+msgstr "Ebene nach unten"
+
+msgid "Move Layer Up"
+msgstr "Ebene nach oben"
+
+msgid "Multiply"
+msgstr "Multiplizieren"
+
+msgid "New Adjustment Layer"
+msgstr "Neue Einstellungsebene"
+
+msgid "New Image"
+msgstr "Neues Bild"
+
+msgid "New image size: {w}×{h}"
+msgstr "Neue Bildgröße: {w}×{h}"
+
+msgid "New Layer"
+msgstr "Neue Ebene"
+
+msgid "New …"
+msgstr "Neu …"
+
+msgid "Next Blend Mode"
+msgstr "Nächste Füllmethode"
+
+msgid "Next Palette Color"
+msgstr "Nächste Palettenfarbe"
+
+msgid "no active layer"
+msgstr "keine aktive Ebene"
+
+msgid "no brush tips in the file"
+msgstr "keine Pinselspitzen in der Datei"
+
+msgid "no document loaded"
+msgstr "kein Dokument geladen"
+
+msgid "No effects yet – stroke, shadows, glow, bevel …"
+msgstr "Noch keine Effekte – Kontur, Schatten, Schein, Relief …"
+
+msgid "no histogram"
+msgstr "kein Histogramm"
+
+msgid "no layer"
+msgstr "keine Ebene"
+
+msgid "No matching command"
+msgstr "Kein passender Befehl"
+
+msgid "no matching font"
+msgstr "keine passende Schrift"
+
+msgid "no selection"
+msgstr "keine Auswahl"
+
+msgid "No settings"
+msgstr "Keine Einstellungen"
+
+msgid "no valid table of contents found"
+msgstr "kein gültiges Inhaltsverzeichnis gefunden"
+
+msgid "no Wayland connection (WAYLAND_DISPLAY?)"
+msgstr "keine Wayland-Verbindung (WAYLAND_DISPLAY?)"
+
+msgid "Non-destructive: stays on the layer, can be changed or switched off at any time (affects the whole layer)"
+msgstr "Nicht-destruktiv: bleibt an der Ebene, jederzeit änderbar oder abschaltbar (wirkt auf die ganze Ebene)"
+
+msgid "None"
+msgstr "Keiner"
+
+msgid "not a GIMP brush"
+msgstr "kein GIMP-Pinsel"
+
+msgid "not a Photoshop file"
+msgstr "keine Photoshop-Datei"
+
+msgid "not a text or shape layer"
+msgstr "keine Text- oder Formebene"
+
+msgid "not an mosaix file"
+msgstr "keine mosaix-Datei"
+
+msgid "not possible during a brush stroke"
+msgstr "während eines Pinselstrichs nicht möglich"
+
+msgid "Nothing deleted: the selection contains no pixels on layer “{name}”. Is another layer active?"
+msgstr "Nichts gelöscht: die Auswahl enthält auf Ebene „{name}“ keine Pixel. Andere Ebene aktiv?"
+
+msgid "Nothing is deleted: shrinking only hides."
+msgstr "Nichts wird gelöscht: verkleinern verbirgt nur."
+
+msgid "Nothing pasteable in the clipboard"
+msgstr "Nichts Einfügbares in der Zwischenablage"
+
+msgid "nothing to copy"
+msgstr "nichts zu kopieren"
+
+msgid "Nothing to transform: the layer (or selection) is empty."
+msgstr "Nichts zu transformieren: die Ebene (bzw. Auswahl) ist leer."
+
+msgid "Off"
+msgstr "Aus"
+
+msgid "Offset"
+msgstr "Versatz"
+
+msgid "Old-Style Figures"
+msgstr "Mediävalziffern"
+
+msgid "On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag moves one handle, Del deletes the point. Color: brush color."
+msgstr "Auf einem Pfad: Punkte und Griffe ziehen, Alt+Klick Ecke ↔ Kurve, Alt+Ziehen Griff einzeln, Entf löscht den Punkt. Farbe: Pinselfarbe."
+
+msgid "On path"
+msgstr "Auf Pfad"
+
+msgid "On/Off"
+msgstr "ein/aus"
+
+msgid "only connected pixels (W)"
+msgstr "nur zusammenhängende Pixel (W)"
+
+msgid "Only the first {n} custom tips are used"
+msgstr "Nur die ersten {n} eigenen Spitzen werden verwendet"
+
+msgid "Opacity"
+msgstr "Deckkraft"
+
+msgid "Opacity (drag or type)"
+msgstr "Deckkraft (ziehen oder tippen)"
+
+msgid "Open"
+msgstr "Öffnen"
+
+msgid "Open Recent"
+msgstr "Zuletzt geöffnet"
+
+msgid "Open …"
+msgstr "Öffnen …"
+
+msgid "opening {path}"
+msgstr "{path} öffnen"
+
+msgid "Ordinals"
+msgstr "Ordinalzeichen"
+
+msgid "other writing systems"
+msgstr "andere Schriftsysteme"
+
+msgid "Outer Glow"
+msgstr "Schein nach außen"
+
+msgid "Output Highlights"
+msgstr "Ausgabe Lichter"
+
+msgid "Output Shadows"
+msgstr "Ausgabe Tiefen"
+
+msgid "Outside"
+msgstr "außen"
+
+msgid "Overlay"
+msgstr "Ineinanderkopieren"
+
+msgid "Paint Mask / Pixels"
+msgstr "Maske bemalen / Pixel"
+
+msgid "Paint over the spot – the source is found automatically"
+msgstr "Über den Fleck malen – die Quelle wird automatisch gesucht"
+
+msgid "Paragraph"
+msgstr "Absatz"
+
+msgid "Parent folder"
+msgstr "übergeordneter Ordner"
+
+msgid "Pass Through"
+msgstr "Hindurchwirken"
+
+msgid "Paste"
+msgstr "Einfügen"
+
+msgid "Paste Text"
+msgstr "Text einfügen"
+
+msgid "Paste: image unreadable ({error})"
+msgstr "Einfügen: Bild unlesbar ({error})"
+
+msgid "Paste: {error}"
+msgstr "Einfügen: {error}"
+
+msgid "Pasted"
+msgstr "Eingefügt"
+
+msgid "Pasted as a new layer ({w}×{h} px)"
+msgstr "Eingefügt als neue Ebene ({w}×{h} px)"
+
+msgid "Path"
+msgstr "Pfad"
+
+msgid "Path Start"
+msgstr "Pfadanfang"
+
+msgid "Pen"
+msgstr "Zeichenstift"
+
+msgid "Pen: click = corner, drag = curve, on the start point = close, Enter/Esc = finish open, Backspace = remove last point"
+msgstr "Zeichenstift: klicken = Ecke, ziehen = Kurve, auf den Startpunkt = schließen, Enter/Esc = offen beenden, Rücktaste = letzten Punkt entfernen"
+
+msgid "Photo 6000×4000"
+msgstr "Foto 6000×4000"
+
+msgid "Photoshop (.abr) or GIMP brushes (.gbr, .gih), or an image (dark or opaque = paint)"
+msgstr "Photoshop- (.abr) oder GIMP-Pinsel (.gbr, .gih) oder ein Bild (dunkel bzw. deckend = Farbe)"
+
+msgid "Pillow Emboss"
+msgstr "Kissen"
+
+msgid "Pixel layer – text, shape, RAW and adjustment layers show their settings here."
+msgstr "Pixelebene – Text-, Form-, RAW- und Einstellungsebenen zeigen hier ihre Einstellungen."
+
+msgid "Pixels"
+msgstr "Pixel"
+
+msgid "Place Image"
+msgstr "Bild platzieren"
+
+msgid "PNG and TIFF only"
+msgstr "nur PNG und TIFF"
+
+msgid "point lies outside the image"
+msgstr "Punkt liegt außerhalb des Bildes"
+
+msgid "Point Sample"
+msgstr "1 Pixel"
+
+msgid "Position"
+msgstr "Position"
+
+msgid "Posterize"
+msgstr "Tontrennung"
+
+msgid "PRESS Ctrl+Q AGAIN TO DISCARD"
+msgstr "NOCHMAL Strg+Q ZUM VERWERFEN"
+
+msgid "Press keys …"
+msgstr "Tasten drücken …"
+
+msgid "Preview"
+msgstr "Vorschau"
+
+msgid "Preview: {error}"
+msgstr "Vorschau: {error}"
+
+msgid "Preview: {err}"
+msgstr "Vorschau: {err}"
+
+msgid "Properties"
+msgstr "Eigenschaften"
+
+msgid "PSD: {n} layers were left out (the merged image includes them)"
+msgstr "PSD: {n} Ebenen wurden ausgelassen (das zusammengefügte Bild enthält sie)"
+
+msgid "Pucker"
+msgstr "Zusammenziehen"
+
+msgid "Push"
+msgstr "Schieben"
+
+msgid "Quality"
+msgstr "Qualität"
+
+msgid "Quick Mask View"
+msgstr "Maskierungsmodus-Ansicht"
+
+msgid "Quick Mask view off"
+msgstr "Maskierungsmodus-Ansicht aus"
+
+msgid "Quick Mask view on"
+msgstr "Maskierungsmodus-Ansicht an"
+
+msgid "Quit"
+msgstr "Beenden"
+
+msgid "Radial"
+msgstr "Radial"
+
+msgid "Radial Gradient"
+msgstr "Verlauf radial"
+
+msgid "Rasterize"
+msgstr "Rastern"
+
+msgid "Rasterize (Text/Shape/RAW to Pixels)"
+msgstr "Rastern (Text/Form/RAW zu Pixeln)"
+
+msgid "Rec. 2020 at 8 bits may show banding in gradients."
+msgstr "Rec. 2020 mit 8 Bit kann Streifen in Verläufen zeigen."
+
+msgid "Recently opened"
+msgstr "Zuletzt geöffnet"
+
+msgid "Reconstruct"
+msgstr "Rekonstruieren"
+
+msgid "Recovery copy found: mosaix {path}"
+msgstr "Wiederherstellungskopie gefunden: mosaix {path}"
+
+msgid "Recovery copy saved: {path}"
+msgstr "Wiederherstellungskopie gesichert: {path}"
+
+msgid "Rectangle"
+msgstr "Rechteck"
+
+msgid "Rectangular / Elliptical Marquee"
+msgstr "Auswahlrechteck / -ellipse"
+
+msgid "Rectangular Marquee"
+msgstr "Auswahlrechteck"
+
+msgid "Red"
+msgstr "Rot"
+
+msgid "Redo"
+msgstr "Wiederholen"
+
+msgid "Redo: {label}"
+msgstr "Wiederholen: {label}"
+
+msgid "Reds"
+msgstr "Rottöne"
+
+msgid "Remove"
+msgstr "Entfernen"
+
+msgid "Remove Smart Filter"
+msgstr "Smart-Filter entfernen"
+
+msgid "Remove smart filter"
+msgstr "Smart-Filter entfernen"
+
+msgid "Rename"
+msgstr "Umbenennen"
+
+msgid "replacing {path}"
+msgstr "{path} ersetzen"
+
+msgid "Reset"
+msgstr "Zurücksetzen"
+
+msgid "Reset All"
+msgstr "Alle zurücksetzen"
+
+msgid "Reset Panel Layout"
+msgstr "Bedienfelder zurücksetzen"
+
+msgid "Reset Rotation"
+msgstr "Drehung zurücksetzen"
+
+msgid "Reverse"
+msgstr "Umkehren"
+
+msgid "Right"
+msgstr "rechts"
+
+msgid "Right Arrow"
+msgstr "Pfeil rechts"
+
+msgid "Rotate Image 180°"
+msgstr "Bild um 180° drehen"
+
+msgid "Rotate Image 90° Clockwise"
+msgstr "Bild 90° im Uhrzeigersinn drehen"
+
+msgid "Rotate Image 90° Counter-Clockwise"
+msgstr "Bild 90° gegen den Uhrzeigersinn drehen"
+
+msgid "Rotate Image 90° Counterclockwise"
+msgstr "Bild 90° gegen den Uhrzeigersinn drehen"
+
+msgid "Rotate Layer 180°"
+msgstr "Ebene um 180° drehen"
+
+msgid "Rotate Layer 90° Clockwise"
+msgstr "Ebene 90° im Uhrzeigersinn drehen"
+
+msgid "Rotate Layer 90° Counter-Clockwise"
+msgstr "Ebene 90° gegen den Uhrzeigersinn drehen"
+
+msgid "Rotate Layer 90° Counterclockwise"
+msgstr "Ebene 90° gegen den Uhrzeigersinn drehen"
+
+msgid "rough"
+msgstr "rau"
+
+msgid "round"
+msgstr "rund"
+
+msgid "Roundness"
+msgstr "Rundheit"
+
+msgid "Run along the other side of the path"
+msgstr "Auf der anderen Seite des Pfads laufen"
+
+msgid "Sample All Layers"
+msgstr "Alle Ebenen aufnehmen"
+
+msgid "Sample Size"
+msgstr "Aufnahmebereich"
+
+msgid "Samples all layers. Shift = add, Alt = subtract."
+msgstr "Nimmt alle Ebenen auf. Umschalt = hinzufügen, Alt = abziehen."
+
+msgid "Saturation"
+msgstr "Sättigung"
+
+msgid "Save"
+msgstr "Speichern"
+
+msgid "Save As"
+msgstr "Speichern unter"
+
+msgid "Save As …"
+msgstr "Speichern unter …"
+
+msgid "Save failed: {error}"
+msgstr "Speichern fehlgeschlagen: {error}"
+
+msgid "Saved: {path} ({tiles} tiles written, {kind}, {mb} MB, {ms} ms in the background)"
+msgstr "Gespeichert: {path} ({tiles} Kacheln geschrieben, {kind}, {mb} MB, {ms} ms im Hintergrund)"
+
+msgid "saved: {path} ({tiles} tiles, {mb} MB, {ms} ms)"
+msgstr "gespeichert: {path} ({tiles} Kacheln, {mb} MB, {ms} ms)"
+
+msgid "saving {path}"
+msgstr "{path} speichern"
+
+msgid "Saving …"
+msgstr "Speichern …"
+
+msgid "saving …"
+msgstr "speichert …"
+
+msgid "Scale"
+msgstr "Skalieren"
+
+msgid "Scatter"
+msgstr "Streuung"
+
+msgid "Screen"
+msgstr "Negativ multiplizieren"
+
+msgid "Script"
+msgstr "Schreibschrift"
+
+msgid "Search commands …"
+msgstr "Befehl suchen …"
+
+msgid "Search fonts …"
+msgstr "Schrift suchen …"
+
+msgid "Seed"
+msgstr "Variante"
+
+msgid "Select"
+msgstr "Auswahl"
+
+msgid "Select a layer to add effects."
+msgstr "Wähle eine Ebene, um Effekte hinzuzufügen."
+
+msgid "Select All"
+msgstr "Alles auswählen"
+
+msgid "Selection"
+msgstr "Auswahl"
+
+msgid "Selection active"
+msgstr "Auswahl aktiv"
+
+msgid "Selection deleted on layer “{name}” ({n} tiles)"
+msgstr "Auswahl auf Ebene „{name}“ gelöscht ({n} Kacheln)"
+
+msgid "Send Layer Backward"
+msgstr "Ebene nach unten"
+
+msgid "Settings not saved: {error}"
+msgstr "Einstellungen nicht gespeichert: {error}"
+
+msgid "Shadow"
+msgstr "Schatten"
+
+msgid "Shadow Opacity"
+msgstr "Schatten-Deckkr."
+
+msgid "Shadows"
+msgstr "Tiefen"
+
+msgid "Shape"
+msgstr "Form"
+
+msgid "Shape & Dynamics"
+msgstr "Form & Dynamik"
+
+msgid "Shape (Rectangle / Ellipse)"
+msgstr "Form (Rechteck / Ellipse)"
+
+msgid "Share the light angle with all other effects that use the global light"
+msgstr "Den Lichtwinkel mit allen anderen Effekten teilen, die den globalen Lichteinfall nutzen"
+
+msgid "Shift"
+msgstr "Umschalt"
+
+msgid "Shift = add, Alt = subtract, both = intersect"
+msgstr "Umschalt = hinzufügen, Alt = abziehen, beides = Schnittmenge"
+
+msgid "Show all messages"
+msgstr "Alle Meldungen anzeigen"
+
+msgid "Show settings"
+msgstr "Einstellungen zeigen"
+
+msgid "Show tab bar"
+msgstr "Reiterleiste einblenden"
+
+msgid "Show/hide"
+msgstr "ein-/ausblenden"
+
+msgid "Size"
+msgstr "Größe"
+
+msgid "size must be > 0"
+msgstr "Größe muss > 0 sein"
+
+msgid "Size ±"
+msgstr "Größe ±"
+
+msgid "Small Caps"
+msgstr "Kapitälchen"
+
+msgid "smart filter not found"
+msgstr "Smart-Filter nicht gefunden"
+
+msgid "Smart filter {name}: {err}"
+msgstr "Smart-Filter {name}: {err}"
+
+msgid "Smart Filters"
+msgstr "Smart-Filter"
+
+msgid "Smart filters for layer {id}: {ms} ms"
+msgstr "Smart-Filter für Ebene {id}: {ms} ms"
+
+msgid "smart object"
+msgstr "Smartobjekt"
+
+msgid "Smoothing"
+msgstr "Glättung"
+
+msgid "Smoothing {pct} %"
+msgstr "Glättung {pct} %"
+
+msgid "Smudge"
+msgstr "Wischfinger"
+
+msgid "smudge and clone only work on pixels"
+msgstr "Verwischen und Stempeln gehen nur auf Pixeln"
+
+msgid "Smudge strength {pct} %"
+msgstr "Wischfinger-Stärke {pct} %"
+
+msgid "Soft Light"
+msgstr "Weiches Licht"
+
+msgid "Soften"
+msgstr "Weichheit"
+
+msgid "Something is still running in the background (e.g. an export). Press Ctrl+Q again to abort it."
+msgstr "Im Hintergrund läuft noch etwas (z. B. ein Export). Nochmal Strg+Q bricht es ab."
+
+msgid "Spacing"
+msgstr "Abstand"
+
+msgid "Spot Healing"
+msgstr "Bereichsreparatur"
+
+
+msgid "Spot Healing Brush"
+msgstr "Bereichsreparatur"
+
+msgid "Spot healing: no matching source found in the image"
+msgstr "Bereichsreparatur: keine passende Quelle im Bild gefunden"
+
+msgid "Spot healing: source at {offset}"
+msgstr "Bereichsreparatur: Quelle bei {offset}"
+
+msgid "spray"
+msgstr "Spray"
+
+msgid "Spread"
+msgstr "Überfüllen"
+
+msgid "Square 2048"
+msgstr "Quadrat 2048"
+
+msgid "sRGB (Photoshop-compatible)"
+msgstr "sRGB (Photoshop-kompatibel)"
+
+msgid "Standard Ligatures"
+msgstr "Standardligaturen"
+
+msgid "Start"
+msgstr "Anfang"
+
+msgid "Step Back"
+msgstr "Zurück"
+
+msgid "Steps"
+msgstr "Stufen"
+
+msgid "Still loading."
+msgstr "Es wird noch geladen."
+
+msgid "Still saving – please wait a moment."
+msgstr "Speichern läuft noch – bitte einen Moment warten."
+
+msgid "Still saving."
+msgstr "Speichern läuft noch."
+
+msgid "Strength"
+msgstr "Stärke"
+
+msgid "Stroke"
+msgstr "Kontur"
+
+msgid "Style"
+msgstr "Schnitt"
+
+msgid "Styles"
+msgstr "Stile"
+
+msgid "Styles ({n})"
+msgstr "Stile ({n})"
+
+msgid "Stylistic Alternates"
+msgstr "Stilvarianten"
+
+msgid "Subscript"
+msgstr "Tiefgestellt"
+
+msgid "Subtract"
+msgstr "Subtrahieren"
+
+msgid "Superscript"
+msgstr "Hochgestellt"
+
+msgid "Swap"
+msgstr "Tauschen"
+
+msgid "Swap colors (X)"
+msgstr "Farben tauschen (X)"
+
+msgid "Swash"
+msgstr "Schwungschrift"
+
+msgid "Switch Brush Tip"
+msgstr "Pinselspitze wechseln"
+
+msgid "Symbols"
+msgstr "Symbole"
+
+msgid "table of contents invalid"
+msgstr "Inhaltsverzeichnis ungültig"
+
+msgid "table of contents unreadable"
+msgstr "Inhaltsverzeichnis unlesbar"
+
+msgid "Tabular Figures"
+msgstr "Tabellenziffern"
+
+msgid "Target: {target}"
+msgstr "Ziel: {target}"
+
+msgid "Text"
+msgstr "Text"
+
+msgid "text"
+msgstr "Text"
+
+msgid "text and shape layers have no pixels – rasterize first (Layer › Rasterize)"
+msgstr "Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Rastern)"
+
+msgid "text and shape layers have no pixels – rasterize first (Layer › Rasterize) or paint into the mask"
+msgstr "Text- und Formebenen haben keine Pixel – erst rastern (Ebene › Rastern) oder in die Maske malen"
+
+msgid "the active layer is not a text or shape layer"
+msgstr "die aktive Ebene ist keine Text- oder Formebene"
+
+msgid "The canvas cannot be closed"
+msgstr "Die Leinwand kann nicht geschlossen werden"
+
+msgid "The clipboard is empty"
+msgstr "Die Zwischenablage ist leer"
+
+msgid "the file contains no image data"
+msgstr "die Datei enthält keine Bilddaten"
+
+msgid "the file is truncated"
+msgstr "die Datei ist abgeschnitten"
+
+msgid "The group's layers blend directly with what is below the group"
+msgstr "Die Ebenen der Gruppe wirken direkt auf alles unter der Gruppe"
+
+msgid "the layer already has a mask"
+msgstr "die Ebene hat bereits eine Maske"
+
+msgid "the layer has changed in the meantime"
+msgstr "die Ebene wurde inzwischen verändert"
+
+msgid "the layer has no mask"
+msgstr "die Ebene hat keine Maske"
+
+msgid "The layer has no mask (Ctrl+Shift+M adds one)."
+msgstr "Die Ebene hat keine Maske (Strg+Umschalt+M legt eine an)."
+
+msgid "the layer has no smart filters"
+msgstr "die Ebene hat keine Smart-Filter"
+
+msgid "the layer is empty"
+msgstr "die Ebene ist leer"
+
+msgid "the layer is hidden"
+msgstr "die Ebene ist ausgeblendet"
+
+msgid "the Liquify preview is not computed here"
+msgstr "Verflüssigen-Vorschau wird nicht hier berechnet"
+
+msgid "The new image replaces it."
+msgstr "Das neue Bild ersetzt es."
+
+msgid "The offset to the source stays the same across all strokes"
+msgstr "Der Abstand zur Quelle bleibt über alle Striche gleich"
+
+msgid "the selection contains no pixels"
+msgstr "die Auswahl enthält keine Pixel"
+
+msgid "the selection extends to infinity – please select an area"
+msgstr "die Auswahl reicht bis ins Unendliche – bitte einen Bereich auswählen"
+
+msgid "the selection is empty"
+msgstr "die Auswahl ist leer"
+
+msgid "The source is the whole image – for stamping onto an empty layer"
+msgstr "Quelle ist das ganze Bild – zum Stempeln auf eine leere Ebene"
+
+msgid "there is too little image around the selection to fill from"
+msgstr "um die Auswahl ist zu wenig Bild, aus dem gefüllt werden kann"
+
+msgid "They will be lost when quitting."
+msgstr "Beim Beenden gehen sie verloren."
+
+msgid "They will be lost when you quit."
+msgstr "Beim Beenden gehen sie verloren."
+
+msgid "This font does not have it"
+msgstr "Diese Schrift hat das nicht"
+
+msgid "Threshold"
+msgstr "Schwellenwert"
+
+msgid "tile has the wrong size"
+msgstr "Kachel hat falsche Größe"
+
+msgid "tile outside the file"
+msgstr "Kachel außerhalb der Datei"
+
+msgid "tiles before document structure"
+msgstr "Kacheln vor Dokumentstruktur"
+
+msgid "Tip"
+msgstr "Spitze"
+
+msgid "Toggle Brush Dynamics"
+msgstr "Pinsel-Dynamik an/aus"
+
+msgid "Toggle Interface"
+msgstr "Oberfläche ein/aus"
+
+msgid "Toggle Layer Mask"
+msgstr "Ebenenmaske ein/aus"
+
+msgid "Toggle Layer Visibility"
+msgstr "Ebene sichtbar/unsichtbar"
+
+msgid "Toggle Smart Filter"
+msgstr "Smart-Filter ein/aus"
+
+msgid "Tolerance"
+msgstr "Toleranz"
+
+msgid "Tolerance {tol}"
+msgstr "Toleranz {tol}"
+
+msgid "Tool"
+msgstr "Werkzeug"
+
+msgid "Tool: {tool}"
+msgstr "Werkzeug: {tool}"
+
+msgid "Tracking"
+msgstr "Laufweite"
+
+msgid "Transform"
+msgstr "Transformieren"
+
+msgid "transformation is too flat (size 0)"
+msgstr "Transformation ist zu flach (Größe 0)"
+
+msgid "Transparent"
+msgstr "Transparent"
+
+msgid "Turn filter on/off"
+msgstr "Filter ein-/ausschalten"
+
+msgid "Twirl Clockwise"
+msgstr "Strudel rechts"
+
+msgid "Twirl Counterclockwise"
+msgstr "Strudel links"
+
+msgid "Type"
+msgstr "Art"
+
+msgid "Typing"
+msgstr "Text eingeben"
+
+msgid "UI closed"
+msgstr "UI beendet"
+
+msgid "UI per frame (incl. GPU): avg {avg} ms, max {max} ms"
+msgstr "Oberfläche pro Frame (inkl. GPU): Ø {avg} ms, max {max} ms"
+
+msgid "UI snapshot {w}×{h}"
+msgstr "UI-Schnappschuss {w}×{h}"
+
+msgid "Undo"
+msgstr "Rückgängig"
+
+msgid "Undo: {label}"
+msgstr "Rückgängig: {label}"
+
+msgid "Ungroup Layers"
+msgstr "Gruppierung aufheben"
+
+msgid "unknown ABR version {v}"
+msgstr "unbekannte ABR-Version {v}"
+
+msgid "unknown compression {x}"
+msgstr "unbekannte Kompression {x}"
+
+msgid "unknown format “{ext}”"
+msgstr "unbekanntes Format „{ext}“"
+
+msgid "unknown option {option}"
+msgstr "unbekannte Option {option}"
+
+msgid "unknown PSD version {v}"
+msgstr "unbekannte PSD-Version {v}"
+
+msgid "Unsaved Changes"
+msgstr "Ungespeicherte Änderungen"
+
+msgid "Unsharp Mask"
+msgstr "Unscharf maskieren"
+
+msgid "unsupported bit depth {d}"
+msgstr "Farbtiefe {d} wird nicht unterstützt"
+
+msgid "unsupported PSD color mode {m} (only RGB, grayscale and CMYK)"
+msgstr "PSD-Farbmodus {m} wird nicht unterstützt (nur RGB, Graustufen und CMYK)"
+
+msgid "Untitled"
+msgstr "Unbenannt"
+
+msgid "untitled"
+msgstr "unbenannt"
+
+msgid "Up Arrow"
+msgstr "Pfeil hoch"
+
+msgid "Use Global Light"
+msgstr "Globalen Lichteinfall verwenden"
+
+msgid "Use Legacy"
+msgstr "Früheren Wert verwenden"
+
+msgid "Vector"
+msgstr "Vektor"
+
+msgid "Vector layer {id}: {n} tiles, {ms} ms"
+msgstr "Vektorebene {id}: {n} Kacheln, {ms} ms"
+
+msgid "vertical"
+msgstr "vertikal"
+
+msgid "Vibrance"
+msgstr "Dynamik"
+
+msgid "View"
+msgstr "Ansicht"
+
+msgid "Visibility"
+msgstr "Sichtbarkeit"
+
+msgid "Warning: end of file damaged, older version restored"
+msgstr "Warnung: Dateiende beschädigt, ältere Version wiederhergestellt"
+
+msgid "Where the text starts on the path"
+msgstr "Wo der Text auf dem Pfad beginnt"
+
+msgid "White"
+msgstr "Weiß"
+
+msgid "Width"
+msgstr "Breite"
+
+msgid "Window"
+msgstr "Fenster"
+
+msgid "wl_compositor missing"
+msgstr "wl_compositor fehlt"
+
+msgid "wl_shm missing"
+msgstr "wl_shm fehlt"
+
+msgid "working …"
+msgstr "rechnet …"
+
+msgid "Wrap lines at a width"
+msgstr "Zeilen bei einer Breite umbrechen"
+
+msgid "writing {path}"
+msgstr "{path} schreiben"
+
+msgid "xdg_shell missing"
+msgstr "xdg_shell fehlt"
+
+msgid "Yellows"
+msgstr "Gelbtöne"
+
+msgid "{label}: discarded, the layer has changed in the meantime"
+msgstr "{label}: verworfen, die Ebene wurde inzwischen verändert"
+
+msgid "{label}: discarded, the selection has changed in the meantime"
+msgstr "{label}: verworfen, die Auswahl hat sich inzwischen geändert"
+
+msgid "{layer} – Effect"
+msgstr "{layer} – Effekt"
+
+msgid "{modified}{name} – {w}×{h} – {zoom} % – {angle}° – {layer} – {tool} {size} px {opacity} % – {layer_tiles}+{composite_tiles} tiles ({mb} MB) – {ms} ms{status}"
+msgstr "{modified}{name} – {w}×{h} – {zoom} % – {angle}° – {layer} – {tool} {size} px {opacity} % – {layer_tiles}+{composite_tiles} Kacheln ({mb} MB) – {ms} ms{status}"
+
+msgid "{mp} megapixels"
+msgstr "{mp} Megapixel"
+
+msgid "{name} (Smart Filter)"
+msgstr "{name} (Smart-Filter)"
+
+msgid "{name} copy"
+msgstr "{name} Kopie"
+
+msgid "{n} brush tips imported"
+msgstr "{n} Pinselspitzen importiert"
+
+msgid "{n} clipping masks are not supported yet: those layers are shown unclipped"
+msgstr "{n} Schnittmasken werden noch nicht unterstützt: diese Ebenen erscheinen ungeschnitten"
+
+msgid "{n} font families in {ms} ms"
+msgstr "{n} Schriftfamilien in {ms} ms"
+
+msgid "{n} Hue/Saturation layers change single color ranges (Reds, Blues …): mosaix applies only the master values so far"
+msgstr "{n} Farbton/Sättigung-Ebenen ändern einzelne Farbbereiche (Rottöne, Blautöne …): mosaix wendet bisher nur die Gesamtwerte an"
+
+msgid "{n} layers use a blend mode mosaix does not have yet (shown as Normal)"
+msgstr "{n} Ebenen nutzen eine Füllmethode, die mosaix noch nicht hat (als Normal gezeigt)"
+
+msgid "{n} tiles did not fit into GPU memory"
+msgstr "{n} Kacheln passten nicht in den GPU-Speicher"
+
+msgid "{n} tiles do not fit into GPU memory"
+msgstr "{n} Kacheln passen nicht in den GPU-Speicher"
+
+msgid "{n} × {what}: only the pixels were taken over"
+msgstr "{n} × {what}: nur die Pixel wurden übernommen"
+
+msgid "{n} “Pass Through” groups are composited as isolated groups (their blend modes act inside the group only)"
+msgstr "{n} Gruppen mit „Hindurchwirken“ werden isoliert berechnet (ihre Füllmethoden wirken nur innerhalb der Gruppe)"
+
+msgid "{pct} % of the current size"
+msgstr "{pct} % der jetzigen Größe"
+
+msgid "{tiles} tiles · {mb} MB GPU · {ms} ms"
+msgstr "{tiles} Kacheln · {mb} MB GPU · {ms} ms"
+
+msgid "{tool} → Mask"
+msgstr "{tool} → Maske"
+
+msgid "{tool}: Alt+click to set the source first"
+msgstr "{tool}: erst mit Alt+Klick die Quelle setzen"
+
+msgid "“{name}” has unsaved changes. {what}"
+msgstr "„{name}“ hat Änderungen, die nicht gespeichert sind. {what}"
+
+msgid "“{name}” {blend} {opacity} %"
+msgstr "„{name}“ {blend} {opacity} %"
+
+msgid "“{name}” {blend} {opacity} % (hidden)"
+msgstr "„{name}“ {blend} {opacity} % (aus)"
+
+msgid "↑↓ choose · Enter run · Esc close"
+msgstr "↑↓ wählen · Enter ausführen · Esc schließen"
+
+msgid "Layer style: {n} × {what} not carried over"
+msgstr "Ebenenstil: {n} × {what} nicht übernommen"
+
+msgid "Range"
+msgstr "Bereich"
+
+msgid "satin"
+msgstr "Glanz"
+
+msgid "pattern overlay"
+msgstr "Musterüberlagerung"
+
+msgid "bevel style"
+msgstr "Abgeflachte Kante außen / Konturrelief"
+
+msgid "stroke fill"
+msgstr "Kontur mit Verlauf oder Muster"
+
+msgid "noise gradients"
+msgstr "Rauschverläufe"
+
+msgid "Fill: opacity of the layer's own pixels; its layer style keeps full strength"
+msgstr "Fläche: Deckkraft der Ebenenpixel selbst; der Ebenenstil bleibt voll sichtbar"
+
+msgid "AVIF cannot be saved in {space} (sRGB, Display P3 and Rec. 2020 can)"
+msgstr "AVIF kann nicht in {space} gespeichert werden (sRGB, Display P3 und Rec. 2020 schon)"
+
+msgid "Pattern Overlay"
+msgstr "Musterüberlagerung"
+
+msgid "Pattern"
+msgstr "Muster"
+
+msgid "Checkerboard"
+msgstr "Schachbrett"
+
+msgid "Dots"
+msgstr "Punkte"
+
+msgid "Diagonal Lines"
+msgstr "Diagonale Linien"
+
+msgid "Grid"
+msgstr "Raster"
+
+msgid "Noise"
+msgstr "Rauschen"
+
+msgid "Define Pattern"
+msgstr "Muster festlegen"
+
+msgid "Import Patterns …"
+msgstr "Muster importieren …"
+
+msgid "Import Patterns"
+msgstr "Muster importieren"
+
+msgid "{n} patterns imported"
+msgstr "{n} Muster importiert"
+
+msgid "Import patterns: {error}"
+msgstr "Muster importieren: {error}"
+
+msgid "Define pattern: {error}"
+msgstr "Muster festlegen: {error}"
+
+msgid "Pattern {n}"
+msgstr "Muster {n}"
+
+msgid "Pattern “{name}” defined"
+msgstr "Muster „{name}“ festgelegt"
+
+msgctxt "layer"
+msgid "Fill"
+msgstr "Fläche"
+
+msgctxt "pattern"
+msgid "Canvas"
+msgstr "Leinen"
+
+msgid "Reflected"
+msgstr "Reflektiert"
+
+msgid "Diamond"
+msgstr "Raute"
+
+msgctxt "gradient"
+msgid "Angle"
+msgstr "Winkel"
+
+msgctxt "shape"
+msgid "Fill"
+msgstr "Füllung"
+
+msgid "Location"
+msgstr "Position"
+
+msgid "Delete Stop"
+msgstr "Unterbrechung löschen"
+
+msgid "Smoothness"
+msgstr "Glättung"
+
+msgid "decoded {camera} RAW ({shot}) in {ms} ms"
+msgstr "{camera}-RAW ({shot}) in {ms} ms dekodiert"
+
+msgid "camera RAW"
+msgstr "Kamera-RAW"
+
+msgid "As Shot"
+msgstr "Wie Aufnahme"
+
+msgid "Daylight"
+msgstr "Tageslicht"
+
+msgid "Develop RAW"
+msgstr "RAW entwickeln"
+
+msgid "White Balance"
+msgstr "Weißabgleich"
+
+msgid "Temperature"
+msgstr "Temperatur"
+
+msgid "Tint"
+msgstr "Tönung"
+
+msgctxt "white balance"
+msgid "Auto"
+msgstr "Automatisch"
+
+msgctxt "white balance"
+msgid "Custom"
+msgstr "Benutzerdefiniert"
+
+msgid "not a text, shape or RAW layer"
+msgstr "keine Text-, Form- oder RAW-Ebene"
+
+msgid "RAW decoded in {ms} ms"
+msgstr "RAW in {ms} ms dekodiert"
+
+msgid "RAW layer {id}: {error}"
+msgstr "RAW-Ebene {id}: {error}"
+
+msgid "not a RAW layer"
+msgstr "keine RAW-Ebene"
+
+msgid "Noise Reduction"
+msgstr "Rauschreduzierung"
+
+msgid "Luminance"
+msgstr "Luminanz"
+
+msgctxt "highlights"
+msgid "Clip"
+msgstr "Beschneiden"
+
+msgctxt "noise"
+msgid "Color"
+msgstr "Farbe"
+
+msgid "Lens Correction"
+msgstr "Objektivkorrektur"
+
+msgid "Distortion, color fringes and vignetting from the lensfun profile"
+msgstr "Verzeichnung, Farbsäume und Vignettierung aus dem lensfun-Profil"
+
+msgid "No lens profile found"
+msgstr "Kein Objektivprofil gefunden"
+
+msgid "Clipped Highlights"
+msgstr "Ausgefressene Lichter"
+
+msgid "embedded in the DNG"
+msgstr "in der DNG enthalten"
+
+msgid "Satin"
+msgstr "Glanz"
+
+msgid "the filter plugin does not compile"
+msgstr "das Filter-Plugin lässt sich nicht übersetzen"
+
+msgid "Filter plugin: {error}"
+msgstr "Filter-Plugin: {error}"
+
+msgid "{n} filter plugins loaded, {bad} with errors"
+msgstr "{n} Filter-Plugins geladen, {bad} mit Fehlern"
+
+msgid "Plugins"
+msgstr "Plugins"
+
+msgid "Reload Plugins"
+msgstr "Plugins neu laden"
+
+msgid "Jumps in the history are not recorded"
+msgstr "Sprünge im Protokoll werden nicht aufgezeichnet"
+
+msgid "--out needs a folder"
+msgstr "--out braucht einen Ordner"
+
+msgid "--format needs an extension"
+msgstr "--format braucht eine Dateiendung"
+
+msgid "mosaix batch needs an action and files"
+msgstr "mosaix batch braucht eine Aktion und Dateien"
+
+msgid "no action named {name}"
+msgstr "keine Aktion namens {name}"
+
+msgid "{done} done, {failed} failed"
+msgstr "{done} erledigt, {failed} fehlgeschlagen"
+
+msgid "Actions (recording, {n} steps)"
+msgstr "Aktionen (Aufnahme, {n} Schritte)"
+
+msgid "Actions"
+msgstr "Aktionen"
+
+msgid "Play on the open image"
+msgstr "Auf das offene Bild anwenden"
+
+msgid "script"
+msgstr "Skript"
+
+msgid "Script: runs with this window"
+msgstr "Skript: läuft mit diesem Fenster"
+
+msgid "No actions yet"
+msgstr "Noch keine Aktionen"
+
+msgid "Stop Recording …"
+msgstr "Aufnahme beenden …"
+
+msgid "Start Recording"
+msgstr "Aufnahme starten"
+
+msgid "Filters, adjustments, layer styles, layer and selection commands become an action"
+msgstr "Filter, Korrekturen, Ebenenstile, Ebenen- und Auswahlbefehle werden zu einer Aktion"
+
+msgid "Reload Actions"
+msgstr "Aktionen neu laden"
+
+msgid "Save Action"
+msgstr "Aktion speichern"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "Continue Recording"
+msgstr "Weiter aufnehmen"
+
+msgid "Recording an action – filters, adjustments, layer and selection commands are recorded"
+msgstr "Aktion wird aufgezeichnet – Filter, Korrekturen, Ebenen- und Auswahlbefehle werden aufgenommen"
+
+msgid "Recording discarded"
+msgstr "Aufnahme verworfen"
+
+msgid "Nothing was recorded"
+msgstr "Es wurde nichts aufgezeichnet"
+
+msgid "Recorded: {step}"
+msgstr "Aufgezeichnet: {step}"
+
+msgid "Action saved: {path} ({n} steps)"
+msgstr "Aktion gespeichert: {path} ({n} Schritte)"
+
+msgid "Action not saved: {error}"
+msgstr "Aktion nicht gespeichert: {error}"
+
+msgid "Action “{name}” stopped at step {n} ({cmd}): {error}"
+msgstr "Aktion „{name}“ bei Schritt {n} ({cmd}) abgebrochen: {error}"
+
+msgid "Action “{name}”: {n} steps in {ms} ms"
+msgstr "Aktion „{name}“: {n} Schritte in {ms} ms"
+
+msgid "Script “{name}” started"
+msgstr "Skript „{name}“ gestartet"
+
+msgid "Script “{name}” finished"
+msgstr "Skript „{name}“ beendet"
+
+msgid "Script “{name}” failed ({status})"
+msgstr "Skript „{name}“ fehlgeschlagen ({status})"
+
+msgid "Script “{name}” could not start: {error}"
+msgstr "Skript „{name}“ ließ sich nicht starten: {error}"
+
+msgid "Object Selection"
+msgstr "Objektauswahl"
+
+msgid "Remove Background"
+msgstr "Hintergrund entfernen"
+
+msgid "Background removed ({ms} ms)"
+msgstr "Hintergrund entfernt ({ms} ms)"
+
+msgid "No subject found"
+msgstr "Kein Motiv gefunden"
+
+msgid "Remove Background: {error}"
+msgstr "Hintergrund entfernen: {error}"
+
+msgid "{name} is ready – try again"
+msgstr "{name} ist bereit – bitte noch einmal versuchen"
+
+msgid "Download of {name} failed: {error}"
+msgstr "Download von {name} fehlgeschlagen: {error}"
+
+msgid "Finding the object …"
+msgstr "Objekt wird gesucht …"
+
+msgid "Finding the subject …"
+msgstr "Motiv wird gesucht …"
+
+msgid "Select Object"
+msgstr "Objekt auswählen"
+
+msgid "Select Subject"
+msgstr "Motiv auswählen"
+
+msgid "Downloading {name} ({mb} MB) …"
+msgstr "{name} wird heruntergeladen ({mb} MB) …"
+
+msgid "Object Selection: click an object (Shift adds, Alt subtracts) – local AI"
+msgstr "Objektauswahl: auf ein Objekt klicken (Umschalt fügt hinzu, Alt zieht ab) – lokale KI"
+
+msgid "The model {name} ({mb} MB) is not downloaded yet"
+msgstr "Das Modell {name} ({mb} MB) ist noch nicht heruntergeladen"
+
+msgid "Image analysed in {ms} ms"
+msgstr "Bild in {ms} ms analysiert"
+
+msgid "Download AI Model"
+msgstr "KI-Modell herunterladen"
+
+msgid "This feature needs the model {name} ({mb} MB, license {license}). It is downloaded once from huggingface.co and then runs on this computer – your images are not sent anywhere."
+msgstr "Diese Funktion braucht das Modell {name} ({mb} MB, Lizenz {license}). Es wird einmalig von huggingface.co geladen und läuft dann auf diesem Rechner – deine Bilder werden nirgendwohin geschickt."
+
+msgid "Download"
+msgstr "Herunterladen"
+
+msgid "Click an object to select it (Shift adds, Alt subtracts). Local AI (SAM 2.1): the first click on an image takes a moment, further ones are quick. Select › Subject (Ctrl+Alt+S) finds the main subject."
+msgstr "Auf ein Objekt klicken, um es auszuwählen (Umschalt fügt hinzu, Alt zieht ab). Lokale KI (SAM 2.1): Der erste Klick auf ein Bild dauert einen Moment, weitere gehen schnell. Auswahl › Motiv (Strg+Alt+S) findet das Hauptmotiv."
+
+msgid "Subject (AI)"
+msgstr "Motiv (KI)"
+
+msgid "Remove Background (AI)"
+msgstr "Hintergrund entfernen (KI)"
+
+msgid "Object Selection (AI)"
+msgstr "Objektauswahl (KI)"
+
+msgid "the active layer has no pixels to edit"
+msgstr "die aktive Ebene hat keine Pixel zum Bearbeiten"
+
+msgid "{label} done: {total} ms (computation {ms} ms)"
+msgstr "{label} fertig: {total} ms (Rechnung {ms} ms)"
+
+msgid "{label}: {error}"
+msgstr "{label}: {error}"
+
+msgid "Removing …"
+msgstr "Entferne …"
+
+msgid "Paint over what should go – local AI (LaMa) fills it in. A selection: Shift+Alt+Backspace."
+msgstr "Über das malen, was weg soll – lokale KI (LaMa) füllt es auf. Eine Auswahl: Umschalt+Alt+Rücktaste."
+
+msgid "Remove (AI)"
+msgstr "Entfernen (KI)"
+
+msgid "Spot Healing / Remove (AI) / Healing Brush"
+msgstr "Bereichsreparatur / Entfernen (KI) / Reparaturpinsel"
+
+msgid "the factor must be 2 to 8"
+msgstr "der Faktor muss 2 bis 8 sein"
+
+msgid "the image has changed in the meantime"
+msgstr "das Bild hat sich inzwischen geändert"
+
+msgid "out of GPU memory"
+msgstr "kein Grafikspeicher mehr frei"
+
+msgid "Upscale (AI)"
+msgstr "Hochskalieren (KI)"
+
+msgid "Upscaled in {s} s"
+msgstr "Hochskaliert in {s} s"
+
+msgid "Upscaling {k}× – about {s} s …"
+msgstr "Skaliere {k}× hoch – etwa {s} s …"
+
+msgid "Upscaling: {pct} %"
+msgstr "Hochskalieren: {pct} %"
+
+msgid "Enlarges every pixel layer with local AI (Real-ESRGAN) – adds plausible detail instead of blur. About {s} s here."
+msgstr "Vergrößert jede Pixelebene mit lokaler KI (Real-ESRGAN) – ergänzt glaubwürdige Details statt Unschärfe. Hier etwa {s} s."
+
+msgid "Nodes"
+msgstr "Knoten"
+
+msgid "Smooth All"
+msgstr "Alle glätten"
+
+msgid "Every node becomes a smooth curve point (Alt+click with the pen: a single node)"
+msgstr "Jeder Knoten wird ein glatter Kurvenpunkt (Alt+Klick mit dem Zeichenstift: ein einzelner Knoten)"
+
+msgid "All Corners"
+msgstr "Alle Ecken"
+
+msgid "Every node becomes a corner: straight lines between the nodes"
+msgstr "Jeder Knoten wird eine Ecke: gerade Linien zwischen den Knoten"

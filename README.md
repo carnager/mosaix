@@ -1,4 +1,4 @@
-# imagine
+# Mosaix
 
 GPU-first Bildeditor für Linux/Wayland – siehe [PLAN.md](PLAN.md).
 
@@ -7,10 +7,10 @@ Aktueller Stand: **Phase 2a – Auswahl & Masken** (dazu Ebenen, Undo, Füllmeth
 ## Bauen & Starten
 
 ```sh
-cargo run --release -- bild.jpg              # Bild öffnen (PSD/PSB mit Ebenen, PNG, JPEG, WebP, TIFF, EXR, .imagine)
+cargo run --release -- bild.jpg              # Bild öffnen (PSD/PSB mit Ebenen, PNG, JPEG, WebP, TIFF, EXR, .mosaix)
 cargo run --release -- --new 30000x30000     # leeres Dokument
 cargo run --release -- --demo 10000x10000    # 100-MP-Testbild
-cargo run --release -- in.jpg --save out.imagine --export out.png   # ohne Fenster konvertieren
+cargo run --release -- in.jpg --save out.mosaix --export out.png   # ohne Fenster konvertieren
 cargo run --release -- --demo 10000x10000 --bench-offscreen         # Benchmark ohne Fenster
 cargo run --release --features profile -- …  # mit Tracy-Profiling
 cargo test --workspace                       # inkl. Headless-GPU-Tests (Vulkan)
@@ -20,21 +20,21 @@ Voraussetzungen: Wayland-Compositor, Vulkan-Treiber mit Descriptor Indexing (RAD
 
 ## Sprache / Language
 
-The interface is English; other languages come from gettext catalogs (`crates/imagine-core/i18n/<lang>.po`, currently German). The language follows `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` (C/POSIX → English); `"language": "de"` in the settings file overrides it. `scripts/i18n-check.py check` lists untranslated or stale texts.
+The interface is English; other languages come from gettext catalogs (`crates/mosaix-core/i18n/<lang>.po`, currently German). The language follows `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` (C/POSIX → English); `"language": "de"` in the settings file overrides it. `scripts/i18n-check.py check` lists untranslated or stale texts.
 
 ## Für Agenten
 
-imagine ist per **MCP** und JSON-Skript steuerbar, auch live im offenen Fenster:
+mosaix ist per **MCP** und JSON-Skript steuerbar, auch live im offenen Fenster:
 
 ```sh
-claude mcp add imagine -- /pfad/zu/imagine mcp --attach
+claude mcp add mosaix -- /pfad/zu/mosaix mcp --attach
 ```
 
 Details: [docs/agenten.md](docs/agenten.md)
 
 ## Bedienung
 
-Die Oberfläche hat eine Menüleiste, links die Werkzeugleiste und rechts Panels für Farbe, Werkzeug-Einstellungen, Ebenen (Drag & Drop, Doppelklick zum Umbenennen, Klick auf das Masken-Symbol zum Bemalen) und Verlauf (Klick springt zurück). Unten ist eine Statusleiste mit Meldungen, ein Klick darauf öffnet alle Meldungen. Strg+`K` oder Strg+Umschalt+`P` öffnet die Befehlspalette, `Tab` blendet die Oberfläche aus. Strg+`N` neues Bild, Strg+`O` öffnen (mit „Zuletzt geöffnet“), Strg+Umschalt+`S` speichern unter. Alt+Rechtsziehen ändert Pinselgröße (waagrecht) und Härte (senkrecht). Pinsel, Farbe, Werkzeug und zuletzt geöffnete Dateien merkt sich imagine in `~/.config/imagine/settings.json`. Alle drei Minuten wird bei ungespeicherten Änderungen eine Wiederherstellungskopie nach `~/.local/state/imagine/autosave/` gesichert. Deine Datei bleibt dabei unberührt.
+Die Oberfläche hat eine Menüleiste, links die Werkzeugleiste und rechts Panels für Farbe, Werkzeug-Einstellungen, Ebenen (Drag & Drop, Doppelklick zum Umbenennen, Klick auf das Masken-Symbol zum Bemalen) und Verlauf (Klick springt zurück). Unten ist eine Statusleiste mit Meldungen, ein Klick darauf öffnet alle Meldungen. Strg+`K` oder Strg+Umschalt+`P` öffnet die Befehlspalette, `Tab` blendet die Oberfläche aus. Strg+`N` neues Bild, Strg+`O` öffnen (mit „Zuletzt geöffnet“), Strg+Umschalt+`S` speichern unter. Alt+Rechtsziehen ändert Pinselgröße (waagrecht) und Härte (senkrecht). Pinsel, Farbe, Werkzeug und zuletzt geöffnete Dateien merkt sich mosaix in `~/.config/mosaix/settings.json`. Alle drei Minuten wird bei ungespeicherten Änderungen eine Wiederherstellungskopie nach `~/.local/state/mosaix/autosave/` gesichert. Deine Datei bleibt dabei unberührt.
 
 Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) im Terminal, die aktive Ebene im Fenstertitel.
 
@@ -59,14 +59,14 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 | Ebenen-Eigenschaften | Umschalt+Ziffer Deckkraft, Umschalt+`+`/`-` Füllmethode, Strg+`,` ein/aus, Strg+`G` gruppieren, Strg+Umschalt+`G` aufheben, `F7` Blend-Raum |
 | Ebenenmasken | Strg+Umschalt+`M` neu (aus Auswahl), `\` Maske bemalen ↔ Pixel, Strg+Alt+`M` ein/aus, Strg+Alt+Umschalt+`M` anwenden |
 | Verlauf & Datei | Strg+`Z` / Strg+Umschalt+`Z` / Strg+`Y`, Strg+`S` speichern (im Hintergrund), Strg+Umschalt+`E` exportieren (im Hintergrund), Strg+Alt+Umschalt+`E` exportieren unter (Farbraum, 16 Bit, JPEG-Qualität) |
-| Zwischenablage | Strg+`C` kopiert (Text beim Bearbeiten, sonst die Pixel der Ebene in der Auswahl), Strg+Umschalt+`C` aus allen Ebenen, Strg+`X` ausschneiden, Strg+`V` einfügen (Bild → neue Ebene, an der alten Stelle wenn aus imagine; Text → in den bearbeiteten Text bzw. als neue Textebene). Auch in Textfeldern der Oberfläche |
+| Zwischenablage | Strg+`C` kopiert (Text beim Bearbeiten, sonst die Pixel der Ebene in der Auswahl), Strg+Umschalt+`C` aus allen Ebenen, Strg+`X` ausschneiden, Strg+`V` einfügen (Bild → neue Ebene, an der alten Stelle wenn aus mosaix; Text → in den bearbeiteten Text bzw. als neue Textebene). Auch in Textfeldern der Oberfläche |
 | Tastaturbefehle | Bearbeiten › Tastaturbefehle … (Strg+Alt+Umschalt+`K`): jeden Menübefehl neu belegen (Kürzel anklicken, Tasten drücken; Rücktaste entfernt, Esc bricht ab); ein Kürzel, das ein anderer Befehl hatte, wird dort entfernt; „Standard“ bzw. „Alle zurücksetzen“ |
-| Pinselspitzen | Bearbeiten › Pinsel importieren … (Strg+Alt+Umschalt+`B`): Photoshop-Pinsel (.abr) , GIMP-Pinsel (.gbr/.gih) oder ein Bild werden zu eigenen Spitzen (Ordner `~/.local/share/imagine/brushes`); Auswahl im Spitzen-Menü der Optionsleiste, Umschalt+`B` schaltet durch alle |
+| Pinselspitzen | Bearbeiten › Pinsel importieren … (Strg+Alt+Umschalt+`B`): Photoshop-Pinsel (.abr) , GIMP-Pinsel (.gbr/.gih) oder ein Bild werden zu eigenen Spitzen (Ordner `~/.local/share/mosaix/brushes`); Auswahl im Spitzen-Menü der Optionsleiste, Umschalt+`B` schaltet durch alle |
 | Sonstiges | `F12` Benchmark, `F1` Hilfe, Strg+`Q` beenden |
 
 ## Aufbau
 
-- `crates/imagine-core` – Dokumentmodell, Füllmethoden (CPU-Referenz), Verlauf, Kachel-Mathematik, View, Pinselstrich → Dabs (ohne GPU)
-- `crates/imagine-gpu` – wgpu-Engine: Kachel-Pools, Strich-Puffer, Composite-Cache, WGSL-Shader
-- `crates/imagine-io` – natives `.imagine`-Format (append-only), Export
-- `crates/imagine-app` – Wayland (smithay-client-toolkit), Tablet-Protokoll, Eingabe, Loader, Headless-CLI, Agenten-Schnittstelle (`src/agent/`: Befehle, MCP, Socket)
+- `crates/mosaix-core` – Dokumentmodell, Füllmethoden (CPU-Referenz), Verlauf, Kachel-Mathematik, View, Pinselstrich → Dabs (ohne GPU)
+- `crates/mosaix-gpu` – wgpu-Engine: Kachel-Pools, Strich-Puffer, Composite-Cache, WGSL-Shader
+- `crates/mosaix-io` – natives `.mosaix`-Format (append-only), Export
+- `crates/mosaix-app` – Wayland (smithay-client-toolkit), Tablet-Protokoll, Eingabe, Loader, Headless-CLI, Agenten-Schnittstelle (`src/agent/`: Befehle, MCP, Socket)

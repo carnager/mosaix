@@ -1,0 +1,16 @@
+[package]
+name = "mosaix-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+glam.workspace = true
+half.workspace = true
+bytemuck.workspace = true
+rayon.workspace = true
+serde.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

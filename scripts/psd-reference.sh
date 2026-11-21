@@ -1,5 +1,5 @@
 #!/bin/sh
-# Compares imagine's rendering of Photoshop files with Photoshop's own
+# Compares mosaix's rendering of Photoshop files with Photoshop's own
 # renders (test files of psd-tools, MIT). Downloads them on first use.
 #   scripts/psd-reference.sh [DIR]      (default: target/psd-reference)
 # Prints the RMSE per file (0 = identical; < 0.01 is visually the same).
@@ -14,6 +14,6 @@ cargo build -q --release
 for f in $FILES; do
   [ -s "$D/$f.psd" ] || curl -sf -o "$D/$f.psd" "$B/$f.psd"
   [ -s "$D/$f.png" ] || curl -sf -o "$D/$f.png" "$B/$f.png"
-  target/release/imagine "$D/$f.psd" --export "$D/$f-imagine.png" >/dev/null 2>&1
-  printf '%-34s %s\n' "$f" "$(magick compare -metric RMSE "$D/$f-imagine.png" "$D/$f.png" null: 2>&1 | grep -o '(.*)')"
+  target/release/mosaix "$D/$f.psd" --export "$D/$f-mosaix.png" >/dev/null 2>&1
+  printf '%-34s %s\n' "$f" "$(magick compare -metric RMSE "$D/$f-mosaix.png" "$D/$f.png" null: 2>&1 | grep -o '(.*)')"
 done

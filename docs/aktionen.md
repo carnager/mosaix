@@ -1,7 +1,7 @@
 # Aktionen, Skripte und Stapelverarbeitung
 
 Alles läuft über dieselben Befehle wie die Agenten-Schnittstelle (`docs/agenten.md`).
-Ordner: `~/.local/share/imagine/actions/` (bzw. `$XDG_DATA_HOME/imagine/actions/`).
+Ordner: `~/.local/share/mosaix/actions/` (bzw. `$XDG_DATA_HOME/mosaix/actions/`).
 
 ## Aktionen (Makros)
 
@@ -33,25 +33,25 @@ Fehler mit Meldung), Agenten: `action_list`, `action_run`.
 ## Skripte
 
 Jede **ausführbare** Datei im Ordner erscheint ebenfalls unter *Datei › Aktionen* und
-wird mit `IMAGINE_SOCKET` (dieses Fenster) und `IMAGINE` (Programmpfad) gestartet;
+wird mit `MOSAIX_SOCKET` (dieses Fenster) und `MOSAIX` (Programmpfad) gestartet;
 ihre Ausgabe landet im Protokoll. Beliebige Sprache, z. B.:
 
 ```sh
 #!/bin/sh
 # Aktive Ebene halb durchsichtig
-echo '{"cmd": "layer_set", "opacity": 0.5}' | "$IMAGINE" run --attach -
+echo '{"cmd": "layer_set", "opacity": 0.5}' | "$MOSAIX" run --attach -
 ```
 
 Für Logik (Schleifen über Ebenen usw.): `document_info` liefert den Ebenenbaum als JSON;
-mit Python etwa `subprocess.run([imagine, "run", "--attach", "-"], input=…)` oder direkt
+mit Python etwa `subprocess.run([mosaix, "run", "--attach", "-"], input=…)` oder direkt
 über den Unix-Socket (JSON-Zeilen, eine Antwort pro Zeile).
 
 ## Stapelverarbeitung
 
 ```sh
-imagine batch "Web Look" ~/Bilder/*.jpg --out ~/web --format webp
+mosaix batch "Web Look" ~/Bilder/*.jpg --out ~/web --format webp
 ```
 
 Öffnet jede Datei (auch RAW, PSD), spielt die Aktion ab und exportiert. Ohne `--out`
-landet alles in `imagine-batch/` neben den Eingaben, ohne `--format` im selben Format
+landet alles in `mosaix-batch/` neben den Eingaben, ohne `--format` im selben Format
 (PNG, wenn das Eingabeformat nicht exportierbar ist, z. B. RAW).

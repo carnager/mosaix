@@ -1454,135 +1454,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "imagine-ai"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "image",
- "ndarray",
- "ort",
- "rayon",
- "ureq",
-]
-
-[[package]]
-name = "imagine-app"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytemuck",
- "egui",
- "egui-wgpu",
- "egui_dock",
- "glam",
- "half",
- "image",
- "imagine-ai",
- "imagine-core",
- "imagine-gpu",
- "imagine-io",
- "imagine-vector",
- "jxl-oxide",
- "moxcms",
- "pollster",
- "raw-window-handle",
- "rayon",
- "serde",
- "serde_json",
- "smithay-client-toolkit",
- "tempfile",
- "tracing",
- "tracing-subscriber",
- "tracing-tracy",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols",
- "wgpu",
-]
-
-[[package]]
-name = "imagine-core"
-version = "0.1.0"
-dependencies = [
- "base64",
- "bytemuck",
- "glam",
- "half",
- "rayon",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "imagine-gpu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "glam",
- "half",
- "imagine-core",
- "imagine-raw",
- "imagine-vector",
- "pollster",
- "rayon",
- "serde",
- "tracing",
- "wgpu",
-]
-
-[[package]]
-name = "imagine-io"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "avif-serialize",
- "bytemuck",
- "half",
- "i_overlay",
- "image",
- "imagine-core",
- "imagine-raw",
- "jpegxl-rs",
- "jpegxl-sys",
- "miniz_oxide 0.8.9",
- "moxcms",
- "ravif",
- "rayon",
- "serde",
- "serde_json",
- "tempfile",
- "zstd",
-]
-
-[[package]]
-name = "imagine-raw"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "image",
- "imagine-core",
- "rawler",
- "rayon",
- "roxmltree",
-]
-
-[[package]]
-name = "imagine-vector"
-version = "0.1.0"
-dependencies = [
- "half",
- "image",
- "imagine-core",
- "imagine-io",
- "parley",
- "rayon",
- "read-fonts 0.46.0",
- "vello_cpu 0.4.0",
-]
-
-[[package]]
 name = "imgref"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2121,6 +1992,135 @@ checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
  "simd-adler32",
+]
+
+[[package]]
+name = "mosaix-ai"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "ndarray",
+ "ort",
+ "rayon",
+ "ureq",
+]
+
+[[package]]
+name = "mosaix-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytemuck",
+ "egui",
+ "egui-wgpu",
+ "egui_dock",
+ "glam",
+ "half",
+ "image",
+ "jxl-oxide",
+ "mosaix-ai",
+ "mosaix-core",
+ "mosaix-gpu",
+ "mosaix-io",
+ "mosaix-vector",
+ "moxcms",
+ "pollster",
+ "raw-window-handle",
+ "rayon",
+ "serde",
+ "serde_json",
+ "smithay-client-toolkit",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-tracy",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wgpu",
+]
+
+[[package]]
+name = "mosaix-core"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytemuck",
+ "glam",
+ "half",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mosaix-gpu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "glam",
+ "half",
+ "mosaix-core",
+ "mosaix-raw",
+ "mosaix-vector",
+ "pollster",
+ "rayon",
+ "serde",
+ "tracing",
+ "wgpu",
+]
+
+[[package]]
+name = "mosaix-io"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "avif-serialize",
+ "bytemuck",
+ "half",
+ "i_overlay",
+ "image",
+ "jpegxl-rs",
+ "jpegxl-sys",
+ "miniz_oxide 0.8.9",
+ "mosaix-core",
+ "mosaix-raw",
+ "moxcms",
+ "ravif",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "zstd",
+]
+
+[[package]]
+name = "mosaix-raw"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "mosaix-core",
+ "rawler",
+ "rayon",
+ "roxmltree",
+]
+
+[[package]]
+name = "mosaix-vector"
+version = "0.1.0"
+dependencies = [
+ "half",
+ "image",
+ "mosaix-core",
+ "mosaix-io",
+ "parley",
+ "rayon",
+ "read-fonts 0.46.0",
+ "vello_cpu 0.4.0",
 ]
 
 [[package]]

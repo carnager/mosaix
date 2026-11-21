@@ -1,7 +1,7 @@
 # Filter-Plugins (WGSL)
 
 Eigene Filter laufen auf der GPU, genauso schnell wie die eingebauten: eine
-`.wgsl`-Datei in `~/.local/share/imagine/filters/` (bzw. `$XDG_DATA_HOME/imagine/filters/`).
+`.wgsl`-Datei in `~/.local/share/mosaix/filters/` (bzw. `$XDG_DATA_HOME/mosaix/filters/`).
 Sie erscheinen unter *Bild › Filter › Plugins* (*Plugins neu laden* liest den Ordner
 erneut), mit Vorschau, als Smart-Filter, rückgängig machbar und für Agenten
 (`filter_apply {"filter": {"kind": "plugin", "name": …}}`). Ein Smart-Filter speichert
@@ -48,7 +48,7 @@ lineares RGBA** zurück. Hilfsfunktionen:
 | `rand(p: vec2<i32>, seed: u32) -> f32` | 0…1, pro Pixel stabil |
 
 Fehler (Kopfzeilen oder WGSL) nennen die Zeile der Plugin-Datei; kaputte Plugins
-stehen ausgegraut im Menü (Fehler im Tooltip). Beispiele: `crates/imagine-app/plugins/`
+stehen ausgegraut im Menü (Fehler im Tooltip). Beispiele: `crates/mosaix-app/plugins/`
 (Vignette, Pixelate, Chromatic Aberration, Clouds) – eine Datei gleichen Namens im
 Ordner ersetzt das eingebaute Beispiel.
 

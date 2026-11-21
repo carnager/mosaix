@@ -1,30 +1,30 @@
-# imagine für Agenten
+# mosaix für Agenten
 
-imagine lässt sich von KI-Agenten genauso bedienen wie von Menschen. Alle Zugänge teilen dieselbe Befehlsschicht (`crates/imagine-app/src/agent/command.rs`). Jede Änderung ist **ein Undo-Schritt**, egal ob sie vom Agenten oder von dir kommt.
+mosaix lässt sich von KI-Agenten genauso bedienen wie von Menschen. Alle Zugänge teilen dieselbe Befehlsschicht (`crates/mosaix-app/src/agent/command.rs`). Jede Änderung ist **ein Undo-Schritt**, egal ob sie vom Agenten oder von dir kommt.
 
 | Zugang | Wofür | Aufruf |
 |---|---|---|
-| **MCP-Server, eigene Engine** | Agent arbeitet allein, ohne Fenster | `imagine mcp [DATEI]` |
-| **MCP-Server, live** | Agent steuert dein offenes Fenster, du siehst zu und kannst eingreifen | `imagine mcp --attach` |
-| **JSON-Lines-Skript** | Agenten mit Shell-Zugriff, Batch, Tests | `imagine run SKRIPT.jsonl` / `… --attach -` |
+| **MCP-Server, eigene Engine** | Agent arbeitet allein, ohne Fenster | `mosaix mcp [DATEI]` |
+| **MCP-Server, live** | Agent steuert dein offenes Fenster, du siehst zu und kannst eingreifen | `mosaix mcp --attach` |
+| **JSON-Lines-Skript** | Agenten mit Shell-Zugriff, Batch, Tests | `mosaix run SKRIPT.jsonl` / `… --attach -` |
 
 ## Einrichten (Claude Code)
 
 ```sh
-# live: der Agent arbeitet in deinem laufenden imagine-Fenster
-claude mcp add imagine -- /pfad/zu/imagine mcp --attach
+# live: der Agent arbeitet in deinem laufenden mosaix-Fenster
+claude mcp add mosaix -- /pfad/zu/mosaix mcp --attach
 
 # oder headless mit eigener Engine
-claude mcp add imagine-headless -- /pfad/zu/imagine mcp
+claude mcp add mosaix-headless -- /pfad/zu/mosaix mcp
 ```
 
 Alternativ als `.mcp.json` im Projekt:
 
 ```json
-{ "mcpServers": { "imagine": { "command": "/pfad/zu/imagine", "args": ["mcp", "--attach"] } } }
+{ "mcpServers": { "mosaix": { "command": "/pfad/zu/mosaix", "args": ["mcp", "--attach"] } } }
 ```
 
-Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur für deinen Benutzer zugänglich). `--attach` verbindet sich mit dem zuletzt gestarteten Fenster; `--socket PFAD` oder `IMAGINE_SOCKET` wählen ein bestimmtes.
+Jedes mosaix-Fenster lauscht auf `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (nur für deinen Benutzer zugänglich). `--attach` verbindet sich mit dem zuletzt gestarteten Fenster; `--socket PFAD` oder `MOSAIX_SOCKET` wählen ein bestimmtes.
 
 ## Konventionen
 
@@ -32,7 +32,7 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 - Farben in **sRGB**: `"#rrggbb"`, `"#rrggbbaa"` oder `[r, g, b(, a)]` mit 0–255
 - `layer` ist optional und meint sonst die aktive Ebene. Ebenen-IDs bleiben stabil, auch über Speichern und Laden hinweg.
 - Fehler kommen als lesbare Meldung zurück (MCP: `isError`, Skript: `"ok": false`). Tippfehler in Parametern werden abgelehnt, nicht ignoriert.
-- Malst du gerade selbst, lehnt imagine verändernde Agentenbefehle kurz ab („the user is painting right now“).
+- Malst du gerade selbst, lehnt mosaix verändernde Agentenbefehle kurz ab („the user is painting right now“).
 
 ## Werkzeuge
 
@@ -73,7 +73,7 @@ Jedes imagine-Fenster lauscht auf `$XDG_RUNTIME_DIR/imagine/<pid>.sock` (nur fü
 | `adjustment_add`, `adjustment_set` | Einstellungsebenen (Kurven, Tonwerte, Farbton/Sättigung, Belichtung, …) hinzufügen und ändern; mit Auswahl wird sie zur Maske |
 | `filter_apply` | Filter: Gaußscher Weichzeichner, Unscharf maskieren, Hochpass, Rauschen (durch die Auswahl) |
 | `undo`, `redo` | Verlauf |
-| `save`, `export` | `.imagine` (mit Ebenen, inkrementell) bzw. PNG/JPEG/WebP/TIFF; `export` optional in Display P3, Adobe RGB oder Rec. 2020 (Profil eingebettet), mit 16 Bit (PNG/TIFF) und JPEG-Qualität |
+| `save`, `export` | `.mosaix` (mit Ebenen, inkrementell) bzw. PNG/JPEG/WebP/TIFF; `export` optional in Display P3, Adobe RGB oder Rec. 2020 (Profil eingebettet), mit 16 Bit (PNG/TIFF) und JPEG-Qualität |
 
 Die vollständigen JSON-Schemata liefert der Server per `tools/list`.
 
@@ -87,12 +87,12 @@ Die vollständigen JSON-Schemata liefert der Server per `tools/list`.
 {"cmd": "paint_stroke", "points": [[600, 120]], "size": 140, "hardness": 0.4, "color": "#ffcc33"}
 {"cmd": "layer_set", "blend": "screen", "opacity": 0.8}
 {"cmd": "render_preview", "max_size": 512, "output": "vorschau.png"}
-{"cmd": "save", "path": "nacht.imagine"}
+{"cmd": "save", "path": "nacht.mosaix"}
 ```
 
 ```sh
-imagine run nacht.jsonl            # eigene Engine
-imagine run --attach nacht.jsonl   # im offenen Fenster
+mosaix run nacht.jsonl            # eigene Engine
+mosaix run --attach nacht.jsonl   # im offenen Fenster
 ```
 
 Jede Zeile erzeugt eine JSON-Ergebniszeile auf stdout. Beim ersten Fehler bricht das Skript mit Exit-Code 1 ab. Logs gehen nach stderr.

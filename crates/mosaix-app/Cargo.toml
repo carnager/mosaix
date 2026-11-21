@@ -1,0 +1,46 @@
+[package]
+name = "mosaix-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mosaix"
+path = "src/main.rs"
+
+[features]
+profile = ["dep:tracing-tracy"]
+
+[dependencies]
+mosaix-core.workspace = true
+mosaix-gpu.workspace = true
+mosaix-io.workspace = true
+mosaix-vector.workspace = true
+mosaix-ai = { path = "../mosaix-ai" }
+wgpu.workspace = true
+smithay-client-toolkit.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+wayland-backend.workspace = true
+raw-window-handle.workspace = true
+image.workspace = true
+glam.workspace = true
+half.workspace = true
+bytemuck.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+pollster.workspace = true
+rayon.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+moxcms.workspace = true
+tracing-tracy = { workspace = true, optional = true }
+egui_dock = { version = "0.22", features = ["serde"] }
+jxl-oxide = { version = "0.12.6", features = ["image"] }
+
+[dev-dependencies]
+tempfile.workspace = true

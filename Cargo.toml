@@ -8,11 +8,11 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
-imagine-core = { path = "crates/imagine-core" }
-imagine-gpu = { path = "crates/imagine-gpu" }
-imagine-io = { path = "crates/imagine-io" }
-imagine-raw = { path = "crates/imagine-raw" }
-imagine-vector = { path = "crates/imagine-vector" }
+mosaix-core = { path = "crates/mosaix-core" }
+mosaix-gpu = { path = "crates/mosaix-gpu" }
+mosaix-io = { path = "crates/mosaix-io" }
+mosaix-raw = { path = "crates/mosaix-raw" }
+mosaix-vector = { path = "crates/mosaix-vector" }
 wgpu = "30"
 smithay-client-toolkit = "0.21"
 wayland-client = "0.31"
@@ -42,13 +42,13 @@ egui-wgpu = { version = "0.37", default-features = false }
 opt-level = 3
 
 # Pixel loops (fill, heal) are unusably slow unoptimised, also in tests.
-[profile.dev.package.imagine-core]
+[profile.dev.package.mosaix-core]
 opt-level = 2
 
-[profile.dev.package.imagine-gpu]
+[profile.dev.package.mosaix-gpu]
 opt-level = 2
 
-[profile.dev.package.imagine-vector]
+[profile.dev.package.mosaix-vector]
 opt-level = 2
 
 [profile.release]

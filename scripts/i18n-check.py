@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""i18n helper for imagine.
+"""i18n helper for mosaix.
 
-  scripts/i18n-check.py merge   – merge crates/imagine-core/i18n/parts/*.po into de.po
+  scripts/i18n-check.py merge   – merge crates/mosaix-core/i18n/parts/*.po into de.po
   scripts/i18n-check.py check   – list tr("…") / tr!("…") texts without a German entry,
                                   catalog entries no longer used, and string literals
                                   that still look German.
@@ -12,8 +12,8 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CAT = os.path.join(ROOT, "crates/imagine-core/i18n/de.po")
-HEADER = '''# German translations for imagine.
+CAT = os.path.join(ROOT, "crates/mosaix-core/i18n/de.po")
+HEADER = '''# German translations for mosaix.
 # The source language is English; msgid is the English text as written in the code.
 msgid ""
 msgstr ""
