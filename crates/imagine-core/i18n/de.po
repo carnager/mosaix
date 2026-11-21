@@ -2329,3 +2329,17 @@ msgstr "RAW-Ebene {id}: {error}"
 
 msgid "not a RAW layer"
 msgstr "keine RAW-Ebene"
+
+msgid "Noise Reduction"
+msgstr "Rauschreduzierung"
+
+msgid "Luminance"
+msgstr "Luminanz"
+
+msgctxt "highlights"
+msgid "Clip"
+msgstr "Beschneiden"
+
+msgctxt "noise"
+msgid "Color"
+msgstr "Farbe"

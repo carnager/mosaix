@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use half::f16;
-use imagine_core::raw::{Develop, RawLayer, WhiteBalance};
+use imagine_core::raw::{Develop, NoiseReduction, RawLayer, WhiteBalance};
 use imagine_core::vector::Affine;
 use imagine_core::{LayerId, TILE_SIZE, TileCoord};
 use imagine_raw::{CameraImage, Info, RawFile};
@@ -14,6 +14,8 @@ use super::Engine;
 
 pub(super) struct RawCache {
     id: u64,
+    /// The noise reduction applied to `cam`.
+    noise: NoiseReduction,
     file: Arc<RawFile>,
     cam: Arc<CameraImage>,
 }
@@ -41,16 +43,18 @@ impl RawSummary {
 }
 
 impl Engine {
-    /// Decodes and demosaics a RAW file (or takes it from the cache).
+    /// Decodes, demosaics and denoises a RAW file (or takes it from the cache).
     fn raw_source(&mut self, r: &RawLayer) -> anyhow::Result<(Arc<RawFile>, Arc<CameraImage>)> {
-        if let Some(c) = &self.raw_cache
-            && c.id == r.data.id
-        {
-            return Ok((c.file.clone(), c.cam.clone()));
-        }
+        let noise = r.develop.noise;
+        let file = match &self.raw_cache {
+            Some(c) if c.id == r.data.id && c.noise == noise => return Ok((c.file.clone(), c.cam.clone())),
+            // Same file, other noise reduction: demosaic again from the decoded file.
+            Some(c) if c.id == r.data.id => c.file.clone(),
+            _ => Arc::new(RawFile::from_bytes(r.data.bytes.clone(), &r.data.name)?),
+        };
         let t0 = std::time::Instant::now();
-        let file = Arc::new(RawFile::from_bytes(r.data.bytes.clone(), &r.data.name)?);
-        let cam = Arc::new(file.camera_image()?);
+        let mut cam = file.camera_image()?;
+        file.denoise(&mut cam, &noise);
         tracing::debug!(
             "{}",
             imagine_core::tr!(
@@ -58,18 +62,20 @@ impl Engine {
                 ms = format!("{:.0}", t0.elapsed().as_secs_f64() * 1e3)
             )
         );
-        self.prime_raw(r.data.id, file.clone(), cam.clone());
+        let cam = Arc::new(cam);
+        self.prime_raw(r.data.id, noise, file.clone(), cam.clone());
         Ok((file, cam))
     }
 
-    /// Hands over a RAW file decoded elsewhere (the loader), so opening does
-    /// not decode it twice.
-    pub fn prime_raw(&mut self, id: u64, file: Arc<RawFile>, cam: Arc<CameraImage>) {
-        let modes = [WhiteBalance::AsShot, WhiteBalance::Auto, WhiteBalance::Daylight]
-            .map(|wb| file.temperature_of(file.multipliers(wb, &cam)));
-        let size = file.output_size(&cam);
-        self.raw_summaries.insert(id, RawSummary { info: file.info.clone(), size, modes });
-        self.raw_cache = Some(RawCache { id, file, cam });
+    /// Hands over a RAW file decoded elsewhere (the loader; `cam` denoised
+    /// with `noise`), so opening does not decode it twice.
+    pub fn prime_raw(&mut self, id: u64, noise: NoiseReduction, file: Arc<RawFile>, cam: Arc<CameraImage>) {
+        self.raw_summaries.entry(id).or_insert_with(|| {
+            let modes = [WhiteBalance::AsShot, WhiteBalance::Auto, WhiteBalance::Daylight]
+                .map(|wb| file.temperature_of(file.multipliers(wb, &cam)));
+            RawSummary { info: file.info.clone(), size: file.output_size(&cam), modes }
+        });
+        self.raw_cache = Some(RawCache { id, noise, file, cam });
     }
 
     /// Develops a RAW layer into tiles.

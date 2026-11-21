@@ -20,6 +20,38 @@ pub enum WhiteBalance {
     Custom { temperature: f32, tint: f32 },
 }
 
+/// What happens where the sensor was saturated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Highlights {
+    /// Blown areas become neutral white at the clipping level.
+    Clip,
+    /// Blown channels are estimated from the others (values may exceed 1,
+    /// so lowering the exposure brings detail back).
+    #[default]
+    Reconstruct,
+}
+
+/// Wavelet noise reduction, strengths 0…100.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NoiseReduction {
+    pub luminance: f32,
+    pub color: f32,
+}
+
+impl Default for NoiseReduction {
+    fn default() -> Self {
+        Self { luminance: 0.0, color: 25.0 }
+    }
+}
+
+impl NoiseReduction {
+    pub fn is_off(&self) -> bool {
+        self.luminance <= 0.0 && self.color <= 0.0
+    }
+}
+
 /// How to develop a RAW file.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -27,11 +59,18 @@ pub struct Develop {
     pub white_balance: WhiteBalance,
     /// In stops.
     pub exposure: f32,
+    pub highlights: Highlights,
+    pub noise: NoiseReduction,
 }
 
 impl Default for Develop {
     fn default() -> Self {
-        Self { white_balance: WhiteBalance::AsShot, exposure: 0.0 }
+        Self {
+            white_balance: WhiteBalance::AsShot,
+            exposure: 0.0,
+            highlights: Highlights::default(),
+            noise: NoiseReduction::default(),
+        }
     }
 }
 

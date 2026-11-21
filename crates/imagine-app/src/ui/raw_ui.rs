@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use egui::{RichText, Vec2};
 use imagine_core::i18n::tr_ctx;
 use imagine_core::tr;
-use imagine_io::raw::{CameraImage, Develop, RawFile, WhiteBalance};
+use imagine_io::raw::{CameraImage, Develop, Highlights, RawFile, WhiteBalance};
 
 use super::panels::Action;
 
@@ -19,6 +19,8 @@ const VIEW: Vec2 = Vec2::new(640.0, 460.0);
 struct Loaded {
     file: RawFile,
     cam: CameraImage,
+    /// `cam` with noise reduction, and the settings used.
+    denoised: Option<(imagine_io::raw::NoiseReduction, CameraImage)>,
 }
 
 pub struct RawDialog {
@@ -69,7 +71,7 @@ impl RawDialog {
             .name("raw preview".into())
             .spawn(move || {
                 let r = RawFile::open(&p)
-                    .and_then(|file| Ok(Loaded { cam: file.camera_image()?.downscale(PREVIEW), file }))
+                    .and_then(|file| Ok(Loaded { cam: file.camera_image()?.downscale(PREVIEW), file, denoised: None }))
                     .map_err(|e| format!("{e:#}"));
                 let _ = tx.send(r);
             })
@@ -105,10 +107,17 @@ impl RawDialog {
             }
         }
         if self.dirty
-            && let Some(l) = &self.loaded
+            && let Some(l) = &mut self.loaded
         {
             self.dirty = false;
-            let (w, h, px) = l.file.develop(&l.cam, &self.develop);
+            let n = self.develop.noise;
+            if !n.is_off() && l.denoised.as_ref().is_none_or(|d| d.0 != n) {
+                let mut c = l.cam.clone();
+                l.file.denoise(&mut c, &n);
+                l.denoised = Some((n, c));
+            }
+            let cam = if n.is_off() { &l.cam } else { &l.denoised.as_ref().unwrap().1 };
+            let (w, h, px) = l.file.develop(cam, &self.develop);
             let rgba: Vec<u8> = px
                 .as_chunks::<4>()
                 .0
@@ -261,6 +270,45 @@ pub fn develop_controls(
         let r = ui.add(egui::Slider::new(&mut develop.exposure, -5.0..=5.0).suffix(" EV").max_decimals(2));
         out.changed |= r.changed();
         track(&mut out, &r);
+        ui.end_row();
+        ui.label(tr("Highlights"));
+        let label = |h: Highlights| match h {
+            Highlights::Clip => tr_ctx("highlights", "Clip"),
+            Highlights::Reconstruct => tr("Reconstruct"),
+        };
+        egui::ComboBox::from_id_salt(("raw highlights", salt)).selected_text(label(develop.highlights)).show_ui(ui, |ui| {
+            for h in [Highlights::Reconstruct, Highlights::Clip] {
+                if ui.selectable_label(develop.highlights == h, label(h)).clicked() && develop.highlights != h {
+                    develop.highlights = h;
+                    out.changed = true;
+                    out.done = true;
+                }
+            }
+        });
+        ui.end_row();
+        ui.label(RichText::new(tr("Noise Reduction")).strong());
+        ui.end_row();
+        // Denoising takes a moment: the value applies when the slider is let go.
+        let mut slow = |ui: &mut egui::Ui, v: &mut f32, which: &str| {
+            let id = ui.scope_id().with(("raw nr", salt, which));
+            let mut x: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(*v);
+            let r = ui.add(egui::Slider::new(&mut x, 0.0..=100.0).max_decimals(0));
+            if r.dragged() || r.has_focus() {
+                ui.data_mut(|d| d.insert_temp(id, x));
+            } else {
+                ui.data_mut(|d| d.remove::<f32>(id));
+                if (x - *v).abs() > 0.01 {
+                    *v = x;
+                    out.changed = true;
+                    out.done = true;
+                }
+            }
+        };
+        ui.label(tr("Luminance"));
+        slow(ui, &mut develop.noise.luminance, "luminance");
+        ui.end_row();
+        ui.label(tr_ctx("noise", "Color"));
+        slow(ui, &mut develop.noise.color, "color");
         ui.end_row();
     });
     if wb_changed {

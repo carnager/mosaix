@@ -56,6 +56,7 @@ pub enum LoaderMsg {
     /// A RAW file the loader already decoded (saves the engine doing it again).
     RawDecoded {
         id: u64,
+        noise: imagine_core::raw::NoiseReduction,
         file: std::sync::Arc<imagine_io::raw::RawFile>,
         cam: std::sync::Arc<imagine_io::raw::CameraImage>,
     },
@@ -146,7 +147,8 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
             let bytes = anyhow::Context::with_context(std::fs::read(&path), || path.display().to_string())?;
             let data = imagine_core::raw::RawData::new(bytes, name.clone());
             let file = imagine_io::raw::RawFile::from_bytes(data.bytes.clone(), &name)?;
-            let cam = file.camera_image()?;
+            let mut cam = file.camera_image()?;
+            file.denoise(&mut cam, &develop.noise);
             let (w, h) = file.output_size(&cam);
             let decode_ms = ms(t0);
             tracing::info!(
@@ -169,7 +171,7 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                 native_len: None,
                 expected_tiles: 0,
             })?;
-            send(LoaderMsg::RawDecoded { id, file: file.into(), cam: cam.into() })?;
+            send(LoaderMsg::RawDecoded { id, noise: develop.noise, file: file.into(), cam: cam.into() })?;
             send(LoaderMsg::Done {
                 decode_ms,
                 total_ms: ms(t0),

@@ -329,6 +329,8 @@ pub enum Command {
         layer: Option<LayerId>,
         white_balance: Option<imagine_core::raw::WhiteBalance>,
         exposure: Option<f32>,
+        highlights: Option<imagine_core::raw::Highlights>,
+        noise: Option<imagine_core::raw::NoiseReduction>,
     },
     LayerEffectsSet {
         layer: Option<LayerId>,
@@ -1578,7 +1580,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 .map_err(engine_err)?;
             vector_ok(s, id)
         }
-        Command::RawSet { layer, white_balance, exposure } => {
+        Command::RawSet { layer, white_balance, exposure, highlights, noise } => {
             let id = target_layer(s, layer)?;
             let mut d = s
                 .engine
@@ -1592,6 +1594,16 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             if let Some(e) = exposure {
                 ensure!((-10.0..=10.0).contains(&e), "exposure must be −10…10 stops");
                 d.exposure = e;
+            }
+            if let Some(h) = highlights {
+                d.highlights = h;
+            }
+            if let Some(n) = noise {
+                ensure!(
+                    (0.0..=100.0).contains(&n.luminance) && (0.0..=100.0).contains(&n.color),
+                    "noise strengths must be 0–100"
+                );
+                d.noise = n;
             }
             s.engine.set_raw(id, d, tr("Develop RAW"), None).map_err(engine_err)?;
             s.engine.flush();

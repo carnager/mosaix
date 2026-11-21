@@ -212,7 +212,7 @@ impl Session {
     /// RAW data from the loader: a decoded file or where a native file stores RAW files.
     pub fn add_raw(&mut self, m: LoaderMsg) {
         match m {
-            LoaderMsg::RawDecoded { id, file, cam } => self.engine.prime_raw(id, file, cam),
+            LoaderMsg::RawDecoded { id, noise, file, cam } => self.engine.prime_raw(id, noise, file, cam),
             LoaderMsg::RawBlobs(b) => self.saved.extend(b),
             _ => {}
         }

@@ -13,7 +13,9 @@ use rawler::imgop::xyz::Illuminant;
 use rawler::rawsource::RawSource;
 use rawler::{Orientation, RawImage};
 use rayon::prelude::*;
-pub use imagine_core::raw::{Develop, WhiteBalance};
+pub use imagine_core::raw::{Develop, Highlights, NoiseReduction, WhiteBalance};
+
+mod denoise;
 
 /// File extensions treated as camera RAW.
 pub const EXTENSIONS: &[&str] = &[
@@ -179,6 +181,9 @@ fn planckian_xy(t: f32) -> (f32, f32) {
     };
     (x as f32, y as f32)
 }
+
+/// Demosaiced camera values at or above this count as sensor saturation.
+const CLIPPED: f32 = 0.99;
 
 /// Tint is a factor on the green multiplier: +100 halves it… roughly
 /// (2^(−tint/300)); good enough to match the feel of other raw converters.
@@ -395,8 +400,56 @@ impl RawFile {
 
     /// Develops a camera image to straight RGBA, linear sRGB (extended range),
     /// oriented. Returns (width, height, pixels).
+    /// Noise reduction for this file's camera image (in place).
+    pub fn denoise(&self, cam: &mut CameraImage, n: &NoiseReduction) {
+        denoise::denoise(cam, n, self.channels);
+    }
+
+    /// Typical colour of the image just outside blown areas, per channel as
+    /// the difference to the mean of the other channels (white balanced).
+    fn highlight_chroma(&self, cam: &CameraImage, wb: &[f32; 4]) -> [f32; 4] {
+        let n = self.channels;
+        let (w, h) = (cam.width, cam.height);
+        if w < 8 || h < 8 {
+            return [0.0; 4];
+        }
+        let clipped = |p: &[f32; 4]| p[..n].iter().any(|v| *v >= CLIPPED);
+        let (sum, count) = (2..h - 2)
+            .into_par_iter()
+            .map(|y| {
+                let mut s = [0.0f64; 4];
+                let mut c = 0usize;
+                for x in 2..w - 2 {
+                    let p = &cam.data[y * w + x];
+                    if clipped(p) {
+                        continue;
+                    }
+                    let near = [(x - 2, y), (x + 2, y), (x, y - 2), (x, y + 2)]
+                        .iter()
+                        .any(|&(xx, yy)| clipped(&cam.data[yy * w + xx]));
+                    if !near {
+                        continue;
+                    }
+                    let v: [f32; 4] = std::array::from_fn(|k| p[k] * wb[k]);
+                    for k in 0..n {
+                        let opp = (0..n).filter(|j| *j != k).map(|j| v[j]).sum::<f32>() / (n - 1) as f32;
+                        s[k] += (v[k] - opp) as f64;
+                    }
+                    c += 1;
+                }
+                (s, c)
+            })
+            .reduce(|| ([0.0; 4], 0), |a, b| (std::array::from_fn(|k| a.0[k] + b.0[k]), a.1 + b.1));
+        if count < 50 {
+            return [0.0; 4];
+        }
+        sum.map(|v| (v / count as f64) as f32)
+    }
+
     pub fn develop(&self, cam: &CameraImage, d: &Develop) -> (u32, u32, Vec<f32>) {
         let wb = self.multipliers(d.white_balance, cam);
+        let reconstruct = d.highlights == Highlights::Reconstruct;
+        let chroma = if reconstruct { self.highlight_chroma(cam, &wb) } else { [0.0; 4] };
         let gain = d.exposure.exp2();
         let n = self.channels;
         let m = self.cam_to_rgb;
@@ -420,8 +473,28 @@ impl RawFile {
                 };
                 let p = cam.data[sy * w + sx];
                 let mut c = [0.0f32; 4];
+                let mut clipped = 0;
                 for k in 0..n {
-                    c[k] = (p[k] * wb[k]).min(1.0);
+                    c[k] = p[k] * wb[k];
+                    clipped += (p[k] >= CLIPPED) as usize;
+                }
+                if !reconstruct {
+                    for v in &mut c[..n] {
+                        *v = v.min(1.0);
+                    }
+                } else if clipped == n {
+                    // Everything blown: neutral, at the brightest level.
+                    let m = c[..n].iter().cloned().fold(0.0, f32::max);
+                    c[..n].fill(m);
+                } else if clipped > 0 {
+                    // Blown channels from the others plus the colour around them.
+                    let v = c;
+                    for k in 0..n {
+                        if p[k] >= CLIPPED {
+                            let opp = (0..n).filter(|j| *j != k).map(|j| v[j]).sum::<f32>() / (n - 1) as f32;
+                            c[k] = v[k].max(opp + chroma[k]);
+                        }
+                    }
                 }
                 let o = &mut row[ox * 4..ox * 4 + 4];
                 for r in 0..3 {
@@ -437,7 +510,8 @@ impl RawFile {
 /// Opens and develops a RAW file in one go.
 pub fn load(path: &Path, d: &Develop) -> Result<(u32, u32, Vec<f32>, Info)> {
     let f = RawFile::open(path)?;
-    let cam = f.camera_image()?;
+    let mut cam = f.camera_image()?;
+    f.denoise(&mut cam, &d.noise);
     let (w, h, px) = f.develop(&cam, d);
     Ok((w, h, px, f.info.clone()))
 }
