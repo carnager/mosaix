@@ -136,6 +136,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         histogram: None,
     };
     tracing::info!("{}", tr!("UI snapshot {w}×{h}", w = w, h = h));
+    state.snapshot_flyout = std::env::var("MOSAIX_SNAPSHOT_FLYOUT").ok().and_then(|v| v.parse().ok());
     if let Ok(menu) = std::env::var("MOSAIX_SNAPSHOT_MENU")
         && let Some(i) = super::palette::MENUS.iter().position(|m| m.eq_ignore_ascii_case(&menu))
     {

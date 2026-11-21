@@ -359,8 +359,12 @@ pub enum Action {
 #[derive(Default)]
 pub struct State {
     pub hidden: bool,
+    /// The tool each tool-bar group shows (index into [`TOOL_GROUPS`]).
+    pub group_tool: std::collections::HashMap<usize, ToolId>,
     /// UI snapshots: a menu drawn open (English menu name, horizontal offset).
     pub snapshot_menu: Option<(&'static str, f32)>,
+    /// UI snapshots: a tool group's list drawn open.
+    pub snapshot_flyout: Option<usize>,
     /// Area left for the canvas (points); `None` = whole window.
     pub canvas: Option<egui::Rect>,
     pub palette: Option<(String, usize)>,
@@ -1039,20 +1043,98 @@ fn status_bar(ui: &mut egui::Ui, m: &Model, st: &mut State) {
     });
 }
 
+/// Tools that share a place in the tool bar (like Photoshop): the place shows
+/// the last one used; right-click or press and hold lists them all.
+pub const TOOL_GROUPS: &[&[ToolId]] = &[
+    &[ToolId::Move],
+    &[ToolId::Marquee, ToolId::Ellipse],
+    &[ToolId::Lasso],
+    &[ToolId::ObjectSelect, ToolId::Wand],
+    &[ToolId::Crop],
+    &[ToolId::Eyedropper],
+    &[ToolId::SpotHeal, ToolId::Remove, ToolId::Heal],
+    &[ToolId::Brush],
+    &[ToolId::Clone],
+    &[ToolId::Eraser],
+    &[ToolId::Gradient, ToolId::Radial],
+    &[ToolId::Smudge],
+    &[ToolId::Pen],
+    &[ToolId::Text],
+    &[ToolId::Shape],
+];
+
+/// How long a press on a tool group opens its list.
+const HOLD_SECS: f64 = 0.35;
+
+fn tool_info(id: ToolId) -> (&'static str, &'static str) {
+    TOOLS.iter().find(|t| t.0 == id).map(|t| (t.1, t.2)).unwrap_or(("", ""))
+}
+
+fn tool_hover(id: ToolId) -> String {
+    let (name, key) = tool_info(id);
+    format!("{} ({})", tr(name), key.replace("Shift", tr("Shift")))
+}
+
 fn toolbar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>) {
     ui.add_space(4.0);
     ui.vertical_centered(|ui| {
-        for (id, name, key) in TOOLS {
-            if icons::button(ui, Icon::Tool(id), 34.0, m.tool == id)
-                .on_hover_text(format!(
-                    "{} ({})",
-                    tr(name),
-                    key.replace("Shift", tr("Shift"))
-                ))
-                .clicked()
-            {
-                out.push(Action::Tool(id));
+        for (gi, group) in TOOL_GROUPS.iter().enumerate() {
+            if group.contains(&m.tool) {
+                st.group_tool.insert(gi, m.tool);
             }
+            let shown = st.group_tool.get(&gi).copied().filter(|t| group.contains(t)).unwrap_or(group[0]);
+            let active = group.contains(&m.tool);
+            let resp = icons::button(ui, Icon::Tool(shown), 34.0, active);
+            let several = group.len() > 1;
+            if several {
+                // The small corner triangle that says "more tools here".
+                let r = resp.rect;
+                let c = if active { Color32::WHITE } else { ui.visuals().weak_text_color() };
+                ui.painter().add(egui::Shape::convex_polygon(
+                    vec![r.right_bottom() + egui::vec2(-3.0, -3.0), r.right_bottom() + egui::vec2(-3.0, -8.0), r.right_bottom() + egui::vec2(-8.0, -3.0)],
+                    c,
+                    egui::Stroke::NONE,
+                ));
+            }
+            let id = egui::Id::unique(("tool group", gi));
+            let held = several
+                && resp.is_pointer_button_down_on()
+                && ui.input(|i| i.pointer.press_start_time().is_some_and(|t| i.time - t >= HOLD_SECS));
+            if several && resp.is_pointer_button_down_on() {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
+            }
+            if several && (resp.secondary_clicked() || held || st.snapshot_flyout == Some(gi)) {
+                egui::Popup::open_id(ui.ctx(), id);
+            }
+            let resp = if egui::Popup::is_id_open(ui.ctx(), id) {
+                resp
+            } else {
+                let more = if several { format!("\n{}", tr("Right-click or hold: more tools")) } else { String::new() };
+                resp.on_hover_text(format!("{}{more}", tool_hover(shown)))
+            };
+            if resp.clicked() {
+                out.push(Action::Tool(shown));
+            }
+            egui::Popup::from_response(&resp)
+                .id(id)
+                .align(egui::RectAlign::RIGHT_START)
+                .open_memory(None)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    egui::containers::menu::menu_style(ui.style_mut());
+                    ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
+                        for &t in group.iter() {
+                            let (name, key) = tool_info(t);
+                            let b = egui::Button::new((super::menus::atom(super::menus::Icon::Tool(t)), tr(name)))
+                                .shortcut_text(key.replace("Shift", tr("Shift")))
+                                .selected(t == m.tool);
+                            if ui.add(b).clicked() {
+                                out.push(Action::Tool(t));
+                                egui::Popup::close_id(ui.ctx(), id);
+                            }
+                        }
+                    });
+                });
         }
         ui.add_space(10.0);
         color_chips(ui, m, st, out);

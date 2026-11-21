@@ -2641,3 +2641,6 @@ msgstr "Geht nur bei Pixelebenen"
 
 msgid "Only text, shape and RAW layers"
 msgstr "Nur für Text-, Form- und RAW-Ebenen"
+
+msgid "Right-click or hold: more tools"
+msgstr "Rechtsklick oder gedrückt halten: weitere Werkzeuge"
