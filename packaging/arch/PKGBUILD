@@ -16,6 +16,8 @@ optdepends=('onnxruntime-cpu: local AI tools (select subject, remove background 
             'lensfun: lens profiles for camera RAW')
 provides=("$_name")
 conflicts=("$_name")
+# makepkg's LTO turns the C parts (zstd, ring) into GCC bitcode that the Rust link cannot read.
+options=('!lto')
 source=("$_name::git+${MOSAIX_SRC:-https://github.com/carnager/mosaix.git}")
 sha256sums=('SKIP')
 
