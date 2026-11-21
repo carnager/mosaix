@@ -15,7 +15,7 @@ use half::f16;
 use image::RgbaImage;
 use imagine_core::color::{Pixels, extract_region, linear_to_srgb, srgb_to_linear};
 use imagine_core::doc::Content;
-use imagine_core::mask::{CombineOp, Shape};
+use imagine_core::mask::{CombineOp, CpuMask, Shape};
 use imagine_core::tile::tiles_in_rect;
 use imagine_core::tr;
 use imagine_core::{
@@ -83,6 +83,26 @@ pub enum Command {
         /// How to develop a camera RAW file (default: as shot, no exposure change).
         #[serde(default)]
         raw: Option<imagine_io::raw::Develop>,
+    },
+    /// Selects the main subject of the picture (local AI).
+    SelectSubject {
+        mode: Option<String>,
+    },
+    /// Selects the object(s) at points (local AI); `negative` points mark
+    /// what does not belong to it.
+    SelectObject {
+        points: Vec<Vec<f64>>,
+        #[serde(default)]
+        negative: Vec<Vec<f64>>,
+        mode: Option<String>,
+    },
+    /// Masks everything but the main subject on a layer (local AI).
+    RemoveBackground {
+        layer: Option<LayerId>,
+    },
+    /// Downloads the local AI models (the user agreed to the download).
+    AiModelDownload {
+        model: String,
     },
     /// Actions (macros) and scripts in the actions folder.
     ActionList,
@@ -458,6 +478,10 @@ impl Command {
             Self::RawInfo { .. } => "raw_info",
             Self::FilterPluginList => "filter_plugin_list",
             Self::ActionList => "action_list",
+            Self::SelectSubject { .. } => "select_subject",
+            Self::SelectObject { .. } => "select_object",
+            Self::RemoveBackground { .. } => "remove_background",
+            Self::AiModelDownload { .. } => "ai_model_download",
             Self::ActionRun { .. } => "action_run",
             Self::FilterPluginInstall { .. } => "filter_plugin_install",
             Self::DocumentInfo => "document_info",
@@ -636,6 +660,18 @@ fn resolve_plugin(f: imagine_core::Filter) -> anyhow::Result<imagine_core::Filte
     Ok(Filter::Plugin { name, source, values: v })
 }
 
+/// Combines a mask with the selection and reports how much is selected.
+fn apply_selection(s: &mut Session, mask: CpuMask, op: CombineOp, label: &str) -> anyhow::Result<Output> {
+    let new = match s.engine.selection_cpu() {
+        Some(old) if op != CombineOp::Replace => imagine_core::mask::combine(&old, &mask, op),
+        None if matches!(op, CombineOp::Subtract | CombineOp::Intersect) => CpuMask::filled(0),
+        _ => mask,
+    };
+    let empty = new.is_empty();
+    s.engine.set_selection(Some(new), label).map_err(engine_err)?;
+    Ok(Output::json(json!({ "ok": true, "empty": empty })))
+}
+
 fn target_layer(s: &mut Session, layer: Option<LayerId>) -> anyhow::Result<LayerId> {
     let id = layer.unwrap_or(s.engine.doc().active);
     ensure!(
@@ -796,6 +832,23 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
             let mut out = Output::json(info(session(ctx.session)?));
             out.replaced_document = true;
             Ok(out)
+        }
+        Command::AiModelDownload { model } => {
+            let m = match model.as_str() {
+                "subject" | "birefnet-lite" => &imagine_ai::SUBJECT,
+                "object" | "sam" | "sam2.1-small" => &imagine_ai::SAM,
+                other => bail!("unknown model {other} (subject or object)"),
+            };
+            let t0 = std::time::Instant::now();
+            let mut last = 0;
+            let dir = imagine_ai::models::download(m, &mut |done, total| {
+                let pct = done * 10 / total.max(1);
+                if pct != last {
+                    last = pct;
+                    tracing::info!("{}: {} %", m.name, pct * 10);
+                }
+            })?;
+            Ok(Output::json(json!({ "ok": true, "path": dir, "seconds": t0.elapsed().as_secs() })))
         }
         Command::ActionList => {
             use crate::app::actions;
@@ -1733,6 +1786,34 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 "lens_profile": sum.as_ref().and_then(|m| m.info.lens_profile.clone()),
             })))
         }
+        Command::SelectSubject { mode } => {
+            let op = parse_mode(&mode)?;
+            let snap = crate::ai::snapshot(s);
+            let mask = crate::ai::subject(&snap)?;
+            apply_selection(s, mask, op, tr("Select Subject"))
+        }
+        Command::SelectObject { points, negative, mode } => {
+            let op = parse_mode(&mode)?;
+            ensure!(!points.is_empty(), "give at least one point");
+            let mut pts = Vec::new();
+            for (list, pos) in [(&points, true), (&negative, false)] {
+                for p in list {
+                    ensure!(p.len() == 2, "points are [x, y]");
+                    pts.push((p[0], p[1], pos));
+                }
+            }
+            let snap = crate::ai::snapshot(s);
+            let mask = crate::ai::object(&snap, &pts)?;
+            apply_selection(s, mask, op, tr("Select Object"))
+        }
+        Command::RemoveBackground { layer } => {
+            let id = target_layer(s, layer)?;
+            let snap = crate::ai::snapshot(s);
+            let mask = crate::ai::subject(&snap)?;
+            ensure!(!mask.is_empty(), "no subject found");
+            s.engine.set_layer_mask(id, Some(mask), tr("Remove Background")).map_err(engine_err)?;
+            ok(s)
+        }
         Command::LayerEffectsSet { layer, effects } => {
             let id = target_layer(s, layer)?;
             let l = s.engine.doc().find(id).unwrap();
@@ -1752,7 +1833,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
         | Command::FilterPluginList
         | Command::FilterPluginInstall { .. }
         | Command::ActionList
-        | Command::ActionRun { .. } => unreachable!(),
+        | Command::ActionRun { .. }
+        | Command::AiModelDownload { .. } => unreachable!(),
         Command::PatternDefine { name } => {
             let c = s.engine.copy_pixels(true).map_err(engine_err)?;
             let img = crate::app::clipboard::to_rgba8(c.w, c.h, &c.px);
@@ -2383,6 +2465,28 @@ fn sample(s: &mut Session, x: f64, y: f64) -> anyhow::Result<Output> {
 }
 
 /// Flattened image (or a region of it) as PNG, at most `max_size` px on its longer side.
+/// The whole visible image as sRGB RGBA, its longest side between
+/// `max / 2` and `max` (read at a mip level, no further scaling).
+pub(crate) fn read_composite(s: &mut Session, max: u32) -> RgbaImage {
+    let (dw, dh) = s.engine.size();
+    let longest = dw.max(dh) as f64;
+    let mip = (longest / max as f64).log2().ceil().clamp(0.0, 8.0) as u32;
+    let scale = 1i64 << mip;
+    s.engine.flush();
+    let have: std::collections::HashSet<_> = s.engine.composite_coords().into_iter().collect();
+    let coords: Vec<TileCoord> = tiles_in_rect((0.0, 0.0), (dw as f64, dh as f64), dw, dh)
+        .filter(|c| have.contains(c))
+        .collect();
+    let (iw, ih) = ((dw as i64 + scale - 1) / scale, (dh as i64 + scale - 1) / scale);
+    let mut img = RgbaImage::new(iw.max(1) as u32, ih.max(1) as u32);
+    for batch in coords.chunks(256) {
+        let px = s.engine.read_composite_mip(batch, mip);
+        let tiles: Vec<_> = batch.iter().copied().zip(px).collect();
+        blit_region(&mut img, &tiles, TILE_SIZE >> mip, (0, 0));
+    }
+    img
+}
+
 fn preview(
     s: &mut Session,
     max_size: u32,

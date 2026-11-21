@@ -9,12 +9,13 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 18] = [
+pub const TOOLS: [(ToolId, &str, &str); 19] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
     (ToolId::Lasso, "Lasso", "L"),
     (ToolId::Wand, "Magic Wand", "W"),
+    (ToolId::ObjectSelect, "Object Selection (AI)", "Shift+W"),
     (ToolId::Crop, "Crop", "C"),
     (ToolId::Brush, "Brush", "B"),
     (ToolId::Smudge, "Smudge", "U"),
@@ -50,6 +51,7 @@ pub enum ToolId {
     Eraser,
     Gradient,
     Radial,
+    ObjectSelect,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,6 +236,8 @@ pub enum Action {
     /// Stop recording; save under this name (`None`: discard).
     StopRecording(Option<String>),
     ReloadActions,
+    /// Download a local AI model (by id) after the user agreed.
+    DownloadModel(String),
     /// Keyboard shortcut of a command: `None` removes it, `reset` restores the default.
     Shortcut { id: String, combo: Option<palette::Combo>, reset: bool },
     ResetShortcuts,
@@ -367,6 +371,8 @@ pub struct State {
     pub new_doc: Option<super::files::NewDialog>,
     /// Naming the recorded action.
     pub record_name: Option<String>,
+    /// Asking to download a local AI model (its id).
+    pub ai_download: Option<&'static str>,
     /// Developing a camera RAW file before it opens.
     pub raw: Option<super::raw_ui::RawDialog>,
     /// Unsaved-changes question: what happens if the user discards.
@@ -424,6 +430,7 @@ impl State {
             || self.new_doc.is_some()
             || self.raw.is_some()
             || self.record_name.is_some()
+            || self.ai_download.is_some()
             || self.dialog.is_some()
             || self.filter.is_some()
             || self.vec_editor.fonts.open
@@ -583,6 +590,7 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
     }
     filter_dialog(ctx, st, &mut out);
     record_name_dialog(ctx, st, &mut out);
+    ai_download_dialog(ctx, st, &mut out);
     shortcuts_dialog(ctx, m, st, &mut out);
     if let Some((query, sel)) = &mut st.palette {
         let mut close = false;
@@ -692,6 +700,40 @@ fn actions_menu(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Acti
             ui.close();
         }
     });
+}
+
+/// Asks before downloading a local AI model.
+fn ai_download_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
+    let Some(id) = st.ai_download else { return };
+    let m = if id == imagine_ai::SAM.id { &imagine_ai::SAM } else { &imagine_ai::SUBJECT };
+    let mut close = false;
+    egui::Window::new(tr("Download AI Model"))
+        .id(egui::Id::unique("ai download"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.label(tr!(
+                "This feature needs the model {name} ({mb} MB, license {license}). It is downloaded once from huggingface.co and then runs on this computer – your images are not sent anywhere.",
+                name = m.name,
+                mb = m.size() / 1_000_000,
+                license = m.license
+            ));
+            ui.label(RichText::new(imagine_ai::models::root().join(m.id).display().to_string()).weak().small());
+            ui.horizontal(|ui| {
+                if ui.button(tr("Download")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    out.push(Action::DownloadModel(id.to_string()));
+                    close = true;
+                }
+                if ui.button(tr("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    close = true;
+                }
+            });
+        });
+    if close {
+        st.ai_download = None;
+    }
 }
 
 /// Name for the recorded action.
@@ -1482,6 +1524,12 @@ fn slider(
 /// Options of the active tool, laid out in a row (the options bar).
 fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     match m.tool {
+        ToolId::ObjectSelect => hint(
+            ui,
+            tr(
+                "Click an object to select it (Shift adds, Alt subtracts). Local AI (SAM 2.1): the first click on an image takes a moment, further ones are quick. Select › Subject (Ctrl+Alt+S) finds the main subject.",
+            ),
+        ),
         ToolId::Text => hint(
             ui,
             tr(

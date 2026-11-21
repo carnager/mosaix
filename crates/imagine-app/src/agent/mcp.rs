@@ -151,6 +151,36 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "select_subject",
+            "Select the main subject of the picture with a local AI model (BiRefNet, runs on this computer; ~5 s). mode: replace|add|subtract|intersect. Needs the model: ai_model_download {model: subject} once, after asking the user.",
+            json!({ "mode": { "type": "string", "enum": ["replace", "add", "subtract", "intersect"] } }),
+            &[],
+            false,
+        ),
+        tool(
+            "select_object",
+            "Select the object at points with a local AI model (SAM 2.1; first call on an image ~1–2 s, further ones ~0.1 s): points [[x, y], …] on the object, optional negative [[x, y], …] on what does not belong to it. mode: replace|add|subtract|intersect. Check with render_preview show_selection. Needs ai_model_download {model: object} once.",
+            json!({ "points": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
+                "negative": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
+                "mode": { "type": "string", "enum": ["replace", "add", "subtract", "intersect"] } }),
+            &["points"],
+            false,
+        ),
+        tool(
+            "remove_background",
+            "Hide the background of a layer: a layer mask from the main subject of the visible picture (local AI, non-destructive).",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "ai_model_download",
+            "Download a local AI model from huggingface.co (subject: BiRefNet lite, 224 MB, MIT; object: SAM 2.1 small, 184 MB, Apache-2.0). Ask the user before calling this.",
+            json!({ "model": { "type": "string", "enum": ["subject", "object"] } }),
+            &["model"],
+            false,
+        ),
+        tool(
             "action_list",
             "The user's actions (recorded macros: .jsonl files of these commands) and scripts, and the folder they live in. You can write a macro there yourself (one command per line, no layer ids).",
             json!({}),
@@ -888,7 +918,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "filter_plugin_list": {}, "action_list": {}, "action_run": {"name": "x"}, "filter_plugin_install": {"source": "x", "check_only": true}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "filter_plugin_list": {}, "action_list": {}, "select_subject": {}, "select_object": {"points": [[1, 2]]}, "remove_background": {}, "ai_model_download": {"model": "subject"}, "action_run": {"name": "x"}, "filter_plugin_install": {"source": "x", "check_only": true}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples
             .as_object_mut()
@@ -932,6 +962,7 @@ mod tests {
                         ("white_balance", _) => json!({"mode": "auto"}),
                         ("highlights", _) => json!("clip"),
                         ("tone", _) => json!({"highlights": -50}),
+                        ("negative", _) => json!([[1, 2]]),
                         ("noise", _) => json!({"luminance": 10, "color": 30}),
                         ("raw", _) => json!({"white_balance": {"mode": "custom", "temperature": 5000, "tint": 0}, "exposure": 1}),
                         ("filter", _) => json!({"kind": "high_pass", "radius": 3}),

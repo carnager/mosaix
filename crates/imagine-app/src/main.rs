@@ -1,6 +1,7 @@
 //! imagine – GPU-first image editor for Linux/Wayland.
 
 mod agent;
+mod ai;
 mod app;
 mod boxedit;
 mod loader;

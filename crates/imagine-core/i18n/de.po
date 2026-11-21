@@ -2469,3 +2469,69 @@ msgstr "Skript „{name}“ fehlgeschlagen ({status})"
 
 msgid "Script “{name}” could not start: {error}"
 msgstr "Skript „{name}“ ließ sich nicht starten: {error}"
+
+msgid "Object Selection"
+msgstr "Objektauswahl"
+
+msgid "Remove Background"
+msgstr "Hintergrund entfernen"
+
+msgid "Background removed ({ms} ms)"
+msgstr "Hintergrund entfernt ({ms} ms)"
+
+msgid "No subject found"
+msgstr "Kein Motiv gefunden"
+
+msgid "Remove Background: {error}"
+msgstr "Hintergrund entfernen: {error}"
+
+msgid "{name} is ready – try again"
+msgstr "{name} ist bereit – bitte noch einmal versuchen"
+
+msgid "Download of {name} failed: {error}"
+msgstr "Download von {name} fehlgeschlagen: {error}"
+
+msgid "Finding the object …"
+msgstr "Objekt wird gesucht …"
+
+msgid "Finding the subject …"
+msgstr "Motiv wird gesucht …"
+
+msgid "Select Object"
+msgstr "Objekt auswählen"
+
+msgid "Select Subject"
+msgstr "Motiv auswählen"
+
+msgid "Downloading {name} ({mb} MB) …"
+msgstr "{name} wird heruntergeladen ({mb} MB) …"
+
+msgid "Object Selection: click an object (Shift adds, Alt subtracts) – local AI"
+msgstr "Objektauswahl: auf ein Objekt klicken (Umschalt fügt hinzu, Alt zieht ab) – lokale KI"
+
+msgid "The model {name} ({mb} MB) is not downloaded yet"
+msgstr "Das Modell {name} ({mb} MB) ist noch nicht heruntergeladen"
+
+msgid "Image analysed in {ms} ms"
+msgstr "Bild in {ms} ms analysiert"
+
+msgid "Download AI Model"
+msgstr "KI-Modell herunterladen"
+
+msgid "This feature needs the model {name} ({mb} MB, license {license}). It is downloaded once from huggingface.co and then runs on this computer – your images are not sent anywhere."
+msgstr "Diese Funktion braucht das Modell {name} ({mb} MB, Lizenz {license}). Es wird einmalig von huggingface.co geladen und läuft dann auf diesem Rechner – deine Bilder werden nirgendwohin geschickt."
+
+msgid "Download"
+msgstr "Herunterladen"
+
+msgid "Click an object to select it (Shift adds, Alt subtracts). Local AI (SAM 2.1): the first click on an image takes a moment, further ones are quick. Select › Subject (Ctrl+Alt+S) finds the main subject."
+msgstr "Auf ein Objekt klicken, um es auszuwählen (Umschalt fügt hinzu, Alt zieht ab). Lokale KI (SAM 2.1): Der erste Klick auf ein Bild dauert einen Moment, weitere gehen schnell. Auswahl › Motiv (Strg+Alt+S) findet das Hauptmotiv."
+
+msgid "Subject (AI)"
+msgstr "Motiv (KI)"
+
+msgid "Remove Background (AI)"
+msgstr "Hintergrund entfernen (KI)"
+
+msgid "Object Selection (AI)"
+msgstr "Objektauswahl (KI)"

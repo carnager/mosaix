@@ -179,6 +179,8 @@ enum Tool {
     Shape { ellipse: bool },
     Pen,
     Eyedropper,
+    /// Local AI: click an object to select it.
+    ObjectSelect,
 }
 
 impl Tool {
@@ -203,6 +205,7 @@ impl Tool {
             Tool::Shape { ellipse: true } => tr("Ellipse"),
             Tool::Pen => tr("Pen"),
             Tool::Eyedropper => tr("Eyedropper"),
+            Tool::ObjectSelect => tr("Object Selection"),
         }
     }
 
@@ -237,6 +240,16 @@ enum BgDone {
     },
     /// Clipboard data read from another program: (mime type, bytes).
     Pasted(Result<(String, Vec<u8>), String>),
+    /// A layer mask computed by a model (Remove Background).
+    LayerMask {
+        layer: imagine_core::LayerId,
+        mask: anyhow::Result<CpuMask>,
+        started: Instant,
+    },
+    ModelDownloaded {
+        name: &'static str,
+        result: anyhow::Result<()>,
+    },
 }
 
 /// The rectangle of a shape drag: Shift = square, Alt = from the centre.
@@ -1087,6 +1100,10 @@ impl App {
                 }
                 Drag::None
             }
+            Tool::ObjectSelect => {
+                self.ai_select(Some(doc), op);
+                Drag::None
+            }
         }
     }
 
@@ -1909,6 +1926,7 @@ impl App {
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
             "wand" => Tool::Wand,
+            "object_select" => Tool::ObjectSelect,
             "gradient" => Tool::Gradient { radial: false },
             "radial" => Tool::Gradient { radial: true },
             "move" => Tool::Move,
@@ -1941,6 +1959,7 @@ impl App {
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
             Tool::Wand => "wand",
+            Tool::ObjectSelect => "object_select",
             Tool::Gradient { radial: false } => "gradient",
             Tool::Gradient { radial: true } => "radial",
             Tool::Move => "move",
@@ -2247,6 +2266,19 @@ impl App {
                 }
                 Err(e) => tracing::warn!("{}", tr!("Content-Aware Fill: {error}", error = tr(e))),
             },
+            BgDone::LayerMask { layer, mask, started } => match mask {
+                Ok(m) if !m.is_empty() => {
+                    self.engine_op(|e| e.set_layer_mask(layer, Some(m), tr("Remove Background")));
+                    self.touch();
+                    tracing::info!("{}", tr!("Background removed ({ms} ms)", ms = started.elapsed().as_millis()));
+                }
+                Ok(_) => tracing::warn!("{}", tr("No subject found")),
+                Err(e) => tracing::warn!("{}", tr!("Remove Background: {error}", error = format!("{e:#}"))),
+            },
+            BgDone::ModelDownloaded { name, result } => match result {
+                Ok(()) => tracing::info!("{}", tr!("{name} is ready – try again", name = name)),
+                Err(e) => tracing::error!("{}", tr!("Download of {name} failed: {error}", name = name, error = format!("{e:#}"))),
+            },
             BgDone::Selection {
                 label,
                 base,
@@ -2368,6 +2400,81 @@ impl App {
     }
 
     /// Magic wand: similarity map on the GPU here, flood fill and combining on a worker.
+    /// Asks for the download if a model is missing; true if it can run.
+    fn ai_ready(&mut self, m: &'static imagine_ai::Model) -> bool {
+        if let Err(e) = imagine_ai::available() {
+            tracing::warn!("{e:#}");
+            return false;
+        }
+        if imagine_ai::models::path(m).is_none() {
+            self.ui_state.ai_download = Some(m.id);
+            self.ui_state.hidden = false;
+            self.needs_redraw = true;
+            return false;
+        }
+        true
+    }
+
+    /// Object Selection (click at `at`) or Select › Subject (`None`).
+    fn ai_select(&mut self, at: Option<DVec2>, op: CombineOp) {
+        let model = if at.is_some() { &imagine_ai::SAM } else { &imagine_ai::SUBJECT };
+        if !self.ai_ready(model) {
+            return;
+        }
+        let Some(s) = self.session.as_mut() else { return };
+        if let Some(p) = at {
+            let (w, h) = s.engine.size();
+            if p.x < 0.0 || p.y < 0.0 || p.x >= w as f64 || p.y >= h as f64 {
+                return;
+            }
+        }
+        let snap = crate::ai::snapshot(s);
+        tracing::info!("{}", if at.is_some() { tr("Finding the object …") } else { tr("Finding the subject …") });
+        let label = if at.is_some() { tr("Select Object") } else { tr("Select Subject") };
+        self.selection_job(label, move |old| {
+            let region = match at {
+                Some(p) => crate::ai::object(&snap, &[(p.x, p.y, true)])?,
+                None => crate::ai::subject(&snap)?,
+            };
+            Ok(match old {
+                Some(old) if op != CombineOp::Replace => imagine_core::mask::combine(&old, &region, op),
+                None if matches!(op, CombineOp::Subtract | CombineOp::Intersect) => CpuMask::filled(0),
+                _ => region,
+            })
+        });
+    }
+
+    /// Layer › Remove Background: a mask from the subject on the active layer.
+    fn remove_background(&mut self) {
+        if !self.ai_ready(&imagine_ai::SUBJECT) {
+            return;
+        }
+        let Some(s) = self.session.as_mut() else { return };
+        let layer = s.engine.doc().active;
+        let snap = crate::ai::snapshot(s);
+        tracing::info!("{}", tr("Finding the subject …"));
+        let started = Instant::now();
+        self.spawn_bg("remove background", move || BgDone::LayerMask { layer, mask: crate::ai::subject(&snap), started });
+    }
+
+    /// Downloads a model in the background (the user agreed).
+    fn download_model(&mut self, id: &str) {
+        let m: &'static imagine_ai::Model = if id == imagine_ai::SAM.id { &imagine_ai::SAM } else { &imagine_ai::SUBJECT };
+        tracing::info!("{}", tr!("Downloading {name} ({mb} MB) …", name = m.name, mb = m.size() / 1_000_000));
+        self.spawn_bg("model download", move || {
+            let mut last = 0;
+            let result = imagine_ai::models::download(m, &mut |done, total| {
+                let pct = done * 10 / total.max(1);
+                if pct != last {
+                    last = pct;
+                    tracing::info!("{}: {} %", m.name, pct * 10);
+                }
+            })
+            .map(|_| ());
+            BgDone::ModelDownloaded { name: m.name, result }
+        });
+    }
+
     fn magic_wand(&mut self, x: u32, y: u32, op: CombineOp) {
         let (tol, contiguous) = (self.wand_tolerance, self.wand_contiguous);
         let Some(e) = self.engine() else { return };
@@ -2591,6 +2698,12 @@ impl App {
             Keysym::z | Keysym::Z if ctrl && shift => self.redo(),
             Keysym::z if ctrl => self.undo(),
             Keysym::y if ctrl => self.redo(),
+            Keysym::s | Keysym::S if ctrl && alt && !shift => self.ai_select(None, CombineOp::Replace),
+            Keysym::b if ctrl && alt && !shift => self.remove_background(),
+            Keysym::W if shift && !ctrl && !alt => {
+                self.set_tool(Tool::ObjectSelect);
+                tracing::info!("{}", tr("Object Selection: click an object (Shift adds, Alt subtracts) – local AI"));
+            }
             Keysym::s | Keysym::S if ctrl && shift => self.file_dialog(ui::files::FileMode::SaveAs),
             Keysym::s | Keysym::S if ctrl => self.save(),
             Keysym::e | Keysym::E if ctrl && shift && alt => self.file_dialog(ui::files::FileMode::ExportAs),
@@ -3153,6 +3266,7 @@ impl App {
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
             Tool::Wand => ToolId::Wand,
+            Tool::ObjectSelect => ToolId::ObjectSelect,
             Tool::Gradient { radial: false } => ToolId::Gradient,
             Tool::Gradient { radial: true } => ToolId::Radial,
             Tool::Move => ToolId::Move,
@@ -3318,6 +3432,7 @@ impl App {
                     self.stop_recording(name);
                     self.actions = std::sync::Arc::new(actions::list(&actions::actions_dir()));
                 }
+                Action::DownloadModel(id) => self.download_model(&id),
                 Action::ReloadActions => {
                     self.actions = std::sync::Arc::new(actions::list(&actions::actions_dir()));
                     self.needs_redraw = true;
@@ -3338,6 +3453,7 @@ impl App {
                         ToolId::Ellipse => Tool::Marquee { ellipse: true },
                         ToolId::Lasso => Tool::Lasso,
                         ToolId::Wand => Tool::Wand,
+                        ToolId::ObjectSelect => Tool::ObjectSelect,
                         ToolId::Gradient => Tool::Gradient { radial: false },
                         ToolId::Radial => Tool::Gradient { radial: true },
                         ToolId::Move => Tool::Move,

@@ -80,6 +80,21 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 mid,
             ));
         }
+        Icon::Tool(ToolId::ObjectSelect) => {
+            // A dashed frame around a figure, with a spark (AI).
+            for (a, b) in [((2.5, 4.5), (6.0, 4.5)), ((9.0, 4.5), (12.0, 4.5)), ((2.5, 4.5), (2.5, 8.0)), ((2.5, 11.0), (2.5, 14.5)),
+                ((2.5, 17.5), (6.0, 17.5)), ((9.0, 17.5), (12.5, 17.5)), ((15.5, 17.5), (17.5, 17.5)), ((17.5, 14.5), (17.5, 11.0))] {
+                p.line_segment([at(a.0, a.1), at(b.0, b.1)], thin);
+            }
+            p.circle_filled(at(10.0, 8.5), 2.0 * u, color);
+            p.add(Shape::convex_polygon(vec![at(6.5, 16.0), at(7.5, 12.0), at(12.5, 12.0), at(13.5, 16.0)], color, Stroke::NONE));
+            let star = at(16.0, 4.5);
+            for k in 0..4 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4 * 2.0;
+                let d = vec2(a.cos(), a.sin()) * 2.8 * u;
+                p.line_segment([star - d, star + d], thin);
+            }
+        }
         Icon::Tool(ToolId::Wand) => {
             p.line_segment([at(3.0, 17.0), at(12.0, 8.0)], Stroke::new(2.4 * u, color));
             let star = at(14.5, 5.5);

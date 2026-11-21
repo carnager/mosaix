@@ -248,6 +248,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("Layer", "Add Layer Mask", K::M, true, true, false),
     c("Layer", "Toggle Layer Mask", K::m, true, false, true),
     c("Layer", "Apply Layer Mask", K::M, true, true, true),
+    c("Layer", "Remove Background (AI)", K::b, true, false, true),
     c(
         "Layer",
         "Paint Mask / Pixels",
@@ -286,6 +287,8 @@ pub const COMMANDS: &[Cmd] = &[
     c("Select", "Inverse", K::I, true, true, false),
     c("Select", "Feather (10 px)", K::F6, false, true, false),
     c("Select", "Quick Mask View", K::q, false, false, false),
+    c("Select", "Subject (AI)", K::s, true, false, true),
+    c("Tool", "Object Selection (AI)", K::W, false, true, false),
     c("Tool", "Brush", K::b, false, false, false),
     c("Tool", "Text", K::t, false, false, false),
     c("Tool", "Pen", K::p, false, false, false),

@@ -153,6 +153,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         }
         Ok("new") => state.new_doc = Some(Default::default()),
         Ok("record") => state.record_name = Some("Web Look".into()),
+        Ok("ai") => state.ai_download = Some(imagine_ai::SUBJECT.id),
         Ok(d) if d.starts_with("raw:") => {
             let mut r = super::raw_ui::RawDialog::new(d[4..].into());
             r.wait();
@@ -331,6 +332,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
     if let Ok(t) = std::env::var("IMAGINE_SNAPSHOT_TOOL") {
         model.tool = match t.as_str() {
             "wand" => ToolId::Wand,
+            "object" => ToolId::ObjectSelect,
             "smudge" => ToolId::Smudge,
             "clone" => ToolId::Clone,
             "heal" => ToolId::Heal,

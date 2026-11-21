@@ -16,6 +16,7 @@ imagine-core.workspace = true
 imagine-gpu.workspace = true
 imagine-io.workspace = true
 imagine-vector.workspace = true
+imagine-ai = { path = "../imagine-ai" }
 wgpu.workspace = true
 smithay-client-toolkit.workspace = true
 wayland-client.workspace = true
