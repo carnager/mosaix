@@ -2884,3 +2884,50 @@ fn layer_style_follows_the_layer_mask() {
     assert_eq!(at(&mut e, 100, 100), [1.0, 0.0, 0.0, 1.0]);
     assert_eq!(at(&mut e, 200, 100), [1.0, 1.0, 1.0, 1.0], "masked part hidden");
 }
+
+/// Remove tool path: a painted stroke is not kept; its footprint becomes the
+/// hole of a fill job, and only the hole takes the computed pixels.
+#[test]
+fn painted_area_fill_job() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(600, 400));
+    e.select_all("all").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 1.0, "blue").unwrap();
+    e.deselect("none").unwrap();
+    let before = e.history_len().0;
+    e.begin_stroke(StrokeParams { opacity: 1.0, ..Default::default() }).unwrap();
+    let mut s = Stroke::new(red_brush());
+    let mut dabs = Vec::new();
+    for i in 0..=40 {
+        dabs.extend(s.add(InputSample { pos: DVec2::new(200.0 + i as f64 * 5.0, 200.0), pressure: 1.0 }));
+    }
+    e.stroke_dabs(&dabs);
+    let (layer, footprint) = e.take_stroke_footprint().unwrap();
+    assert!(!footprint.is_empty());
+    assert_eq!(e.history_len().0, before, "the preview stroke is not kept");
+    // The preview is gone: still blue under the stroke.
+    e.flush();
+    let at = |e: &Engine, x: usize, y: usize| composite_px(e, TileCoord::new((x / TS) as i32, (y / TS) as i32), x % TS, y % TS);
+    assert!(at(&e, 300, 200)[0] < 0.01);
+    let job = e.fill_job_dabs(layer, &footprint, false, 512).unwrap();
+    let r = job
+        .run_with(|w, h, img, hole| {
+            // The stroke (x 190…410) plus ¾ of its size on each side; full height.
+            assert_eq!((w, h), (550, 400));
+            assert!(hole.iter().any(|&b| b) && !hole.iter().all(|&b| b));
+            for (p, &hl) in img.iter_mut().zip(hole) {
+                if hl {
+                    *p = [0.0, 1.0, 0.0];
+                }
+            }
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+    assert!(e.apply_fill(r, "Remove"));
+    assert_eq!(e.history_len().0, before + 1);
+    e.flush();
+    let mid = at(&e, 300, 200);
+    assert!(mid[1] > 0.99 && mid[2] < 0.01, "{mid:?}");
+    let away = at(&e, 300, 260);
+    assert!(away[2] > 0.99 && away[1] < 0.01, "{away:?}");
+}

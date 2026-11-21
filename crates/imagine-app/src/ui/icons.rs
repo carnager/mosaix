@@ -151,6 +151,18 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             ));
             p.line_segment([at(4.0, 17.5), at(16.0, 17.5)], thin);
         }
+        Icon::Tool(ToolId::Remove) => {
+            // A painted-over figure, dashed (going away), with a spark (AI).
+            dashed_poly(p, &circle_pts(at(8.0, 7.0), vec2(2.4 * u, 2.4 * u), 10), thin);
+            dashed_poly(p, &[at(4.0, 18.0), at(5.0, 12.0), at(11.0, 12.0), at(12.0, 18.0)], thin);
+            p.line_segment([at(3.0, 15.5), at(13.5, 9.5)], Stroke::new(3.2 * u, color.gamma_multiply(0.6)));
+            let star = at(16.0, 4.5);
+            for k in 0..4 {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4 * 2.0;
+                let d = vec2(a.cos(), a.sin()) * 2.8 * u;
+                p.line_segment([star - d, star + d], thin);
+            }
+        }
         Icon::Tool(ToolId::SpotHeal) => {
             // A plaster with a dotted spot next to it.
             let band = [at(6.0, 15.0), at(15.0, 6.0), at(18.0, 9.0), at(9.0, 18.0)];

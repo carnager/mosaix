@@ -9,7 +9,7 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 19] = [
+pub const TOOLS: [(ToolId, &str, &str); 20] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
@@ -21,6 +21,7 @@ pub const TOOLS: [(ToolId, &str, &str); 19] = [
     (ToolId::Smudge, "Smudge", "U"),
     (ToolId::Clone, "Clone Stamp", "S"),
     (ToolId::SpotHeal, "Spot Healing Brush", "J"),
+    (ToolId::Remove, "Remove (AI)", "J"),
     (ToolId::Heal, "Healing Brush", "J"),
     (ToolId::Eraser, "Eraser", "E"),
     (ToolId::Text, "Text", "T"),
@@ -52,6 +53,7 @@ pub enum ToolId {
     Gradient,
     Radial,
     ObjectSelect,
+    Remove,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -705,7 +707,7 @@ fn actions_menu(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Acti
 /// Asks before downloading a local AI model.
 fn ai_download_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
     let Some(id) = st.ai_download else { return };
-    let m = if id == imagine_ai::SAM.id { &imagine_ai::SAM } else { &imagine_ai::SUBJECT };
+    let Some(m) = imagine_ai::models::by_id(id) else { return };
     let mut close = false;
     egui::Window::new(tr("Download AI Model"))
         .id(egui::Id::unique("ai download"))
@@ -1564,7 +1566,8 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
         | ToolId::Smudge
         | ToolId::Clone
         | ToolId::Heal
-        | ToolId::SpotHeal => {
+        | ToolId::SpotHeal
+        | ToolId::Remove => {
             let mut b = m.brush;
             let mut changed = false;
             ui.label(tr("Size"));
@@ -1613,7 +1616,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                 if slider(ui, tr("Strength"), &mut s, 0.0..=1.0, true) {
                     out.push(Action::SmudgeStrength(s));
                 }
-            } else if m.tool != ToolId::SpotHeal {
+            } else if !matches!(m.tool, ToolId::SpotHeal | ToolId::Remove) {
                 changed |= slider(ui, tr("Opacity"), &mut b.opacity, 0.0..=1.0, true);
                 changed |= slider(ui, tr("Flow"), &mut b.flow, 0.01..=1.0, true);
             }
@@ -1649,10 +1652,10 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             if changed {
                 out.push(Action::Brush(b));
             }
-            if matches!(m.tool, ToolId::Clone | ToolId::Heal | ToolId::SpotHeal) {
+            if matches!(m.tool, ToolId::Clone | ToolId::Heal | ToolId::SpotHeal | ToolId::Remove) {
                 ui.separator();
                 let (mut all, mut aligned) = (m.clone_all, m.clone_aligned);
-                let tip = if m.tool == ToolId::SpotHeal {
+                let tip = if matches!(m.tool, ToolId::SpotHeal | ToolId::Remove) {
                     tr("Heal on an empty layer")
                 } else {
                     tr("The source is the whole image – for stamping onto an empty layer")
@@ -1661,7 +1664,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                     .checkbox(&mut all, tr("Sample All Layers"))
                     .on_hover_text(tip)
                     .changed();
-                if m.tool != ToolId::SpotHeal {
+                if !matches!(m.tool, ToolId::SpotHeal | ToolId::Remove) {
                     c |= ui
                         .checkbox(&mut aligned, tr("Aligned"))
                         .on_hover_text(tr(
@@ -1676,6 +1679,11 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                     hint(
                         ui,
                         tr("Paint over the spot – the source is found automatically"),
+                    );
+                } else if m.tool == ToolId::Remove {
+                    hint(
+                        ui,
+                        tr("Paint over what should go – local AI (LaMa) fills it in. A selection: Shift+Alt+Backspace."),
                     );
                 } else if !m.clone_source {
                     ui.separator();

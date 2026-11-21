@@ -1367,10 +1367,9 @@ impl Engine {
 
     pub fn stroke_dabs(&mut self, dabs: &[Dab]) {
         if let Some(s) = &mut self.stroke {
-            if s.params.clone.is_some_and(|c| c.heal) {
-                s.footprint
-                    .extend(dabs.iter().map(|d| [d.center[0], d.center[1], d.radius]));
-            }
+            // Healing and AI removal work from the painted area.
+            s.footprint
+                .extend(dabs.iter().map(|d| [d.center[0], d.center[1], d.radius]));
             self.pending_dabs.extend_from_slice(dabs);
         }
     }

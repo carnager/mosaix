@@ -5,6 +5,7 @@
 //!
 //! - [`Sam`]: SAM 2.1 (Meta, Apache-2.0) – select an object by clicking.
 //! - [`Subject`]: BiRefNet lite (MIT) – the main subject of a picture.
+//! - [`Inpaint`]: LaMa (Apache-2.0) – fills a hole plausibly (Remove).
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -17,7 +18,7 @@ use rayon::prelude::*;
 
 pub mod models;
 
-pub use models::{Model, SAM, SUBJECT};
+pub use models::{INPAINT, Model, SAM, SUBJECT};
 
 /// Where ONNX Runtime is looked for (`ORT_DYLIB_PATH` first).
 fn dylib_candidates() -> Vec<PathBuf> {
@@ -172,8 +173,7 @@ impl Sam {
         })
     }
 
-    /// The mask for some clicks (the best of SAM's three proposals for one
-    /// click; the first proposal for several, as SAM recommends).
+    /// The mask for some clicks (the best rated of SAM's three proposals).
     pub fn segment(&mut self, e: &Embedding, points: &[Point]) -> Result<Mask> {
         if points.is_empty() {
             bail!("no points");
@@ -194,11 +194,9 @@ impl Sam {
         let (_, iou) = out["iou_scores"].try_extract_tensor::<f32>()?;
         let (shape, masks) = out["pred_masks"].try_extract_tensor::<f32>()?;
         let (k, mh, mw) = (shape[2] as usize, shape[3] as usize, shape[4] as usize);
-        let best = if n == 1 {
-            (0..k).max_by(|a, b| iou[*a].total_cmp(&iou[*b])).unwrap_or(0)
-        } else {
-            0
-        };
+        // This export only has SAM's three proposals (not its single-mask
+        // output for several clicks): the best-rated one, also for several.
+        let best = (0..k).max_by(|a, b| iou[*a].total_cmp(&iou[*b])).unwrap_or(0);
         let m = &masks[best * mh * mw..(best + 1) * mh * mw];
         // Logits, inside > 0 (as SAM thresholds them); a narrow ramp
         // anti-aliases the edge.
@@ -226,5 +224,124 @@ impl Subject {
         let (h, w) = (shape[2] as usize, shape[3] as usize);
         // The export ends in logits.
         Ok(resize_map(data, w, h, img.width, img.height, sigmoid))
+    }
+}
+
+// ---- inpainting (LaMa) -------------------------------------------------------
+
+/// Fills holes plausibly from their surroundings (LaMa, works at 512²).
+pub struct Inpaint {
+    s: Session,
+}
+
+const LAMA_SIZE: usize = 512;
+
+/// A straight sRGB pixel, 0…1.
+pub type Rgb = [f32; 3];
+
+/// Box-filtered resize (down) / bilinear (up) of an RGB image.
+fn resize_rgb(src: &[Rgb], sw: usize, sh: usize, w: usize, h: usize) -> Vec<Rgb> {
+    let mut out = vec![[0.0; 3]; w * h];
+    let (kx, ky) = (sw as f32 / w as f32, sh as f32 / h as f32);
+    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (x, o) in row.iter_mut().enumerate() {
+            if kx > 1.0 || ky > 1.0 {
+                // Average of the covered source pixels.
+                let (x0, x1) = ((x as f32 * kx) as usize, (((x + 1) as f32 * kx).ceil() as usize).clamp(1, sw));
+                let (y0, y1) = ((y as f32 * ky) as usize, (((y + 1) as f32 * ky).ceil() as usize).clamp(1, sh));
+                let (x0, y0) = (x0.min(x1 - 1), y0.min(y1 - 1));
+                let mut s = [0.0f32; 3];
+                for yy in y0..y1 {
+                    for p in &src[yy * sw + x0..yy * sw + x1] {
+                        for c in 0..3 {
+                            s[c] += p[c];
+                        }
+                    }
+                }
+                let n = ((x1 - x0) * (y1 - y0)) as f32;
+                *o = s.map(|v| v / n);
+            } else {
+                let fx = ((x as f32 + 0.5) * kx - 0.5).clamp(0.0, (sw - 1) as f32);
+                let fy = ((y as f32 + 0.5) * ky - 0.5).clamp(0.0, (sh - 1) as f32);
+                let (x0, y0, ax, ay) = (fx as usize, fy as usize, fx.fract(), fy.fract());
+                let (x1, y1) = ((x0 + 1).min(sw - 1), (y0 + 1).min(sh - 1));
+                let p = |x: usize, y: usize| src[y * sw + x];
+                *o = [0, 1, 2].map(|c| {
+                    let top = p(x0, y0)[c] + (p(x1, y0)[c] - p(x0, y0)[c]) * ax;
+                    let bot = p(x0, y1)[c] + (p(x1, y1)[c] - p(x0, y1)[c]) * ax;
+                    top + (bot - top) * ay
+                });
+            }
+        }
+    });
+    out
+}
+
+impl Inpaint {
+    pub fn load() -> Result<Self> {
+        let dir = models::path(&INPAINT).ok_or_else(|| anyhow!("model {} is not installed", INPAINT.id))?;
+        Ok(Inpaint { s: session(&dir.join("lama_fp32.onnx"))? })
+    }
+
+    /// Replaces the hole pixels of `img` (`w × h`, straight sRGB 0…1) with
+    /// generated ones. Larger areas are scaled down to 512 for the model,
+    /// and only the hole takes the (scaled up) result.
+    pub fn fill(&mut self, w: usize, h: usize, img: &mut [Rgb], hole: &[bool]) -> Result<()> {
+        let n = LAMA_SIZE;
+        let k = (n as f32 / w.max(h) as f32).min(1.0);
+        let (sw, sh) = (((w as f32 * k).round() as usize).clamp(1, n), ((h as f32 * k).round() as usize).clamp(1, n));
+        let small = resize_rgb(img, w, h, sw, sh);
+        // The hole at model size: any hole pixel in the covered area, grown
+        // by a few pixels (LaMa wants the object fully covered).
+        let mut m = vec![false; sw * sh];
+        for y in 0..h {
+            for x in 0..w {
+                if hole[y * w + x] {
+                    let (sx, sy) = (((x as f32 + 0.5) * k) as usize, ((y as f32 + 0.5) * k) as usize);
+                    m[sy.min(sh - 1) * sw + sx.min(sw - 1)] = true;
+                }
+            }
+        }
+        const GROW: i64 = 3;
+        let mut grown = vec![0.0f32; n * n];
+        for y in 0..sh as i64 {
+            for x in 0..sw as i64 {
+                let hit = (-GROW..=GROW).any(|dy| {
+                    (-GROW..=GROW).any(|dx| {
+                        let (xx, yy) = (x + dx, y + dy);
+                        xx >= 0 && yy >= 0 && xx < sw as i64 && yy < sh as i64 && m[(yy * sw as i64 + xx) as usize]
+                    })
+                });
+                grown[y as usize * n + x as usize] = hit as u8 as f32;
+            }
+        }
+        // NCHW, the area beyond the image repeats its edge.
+        let mut t = vec![0.0f32; 3 * n * n];
+        for y in 0..n {
+            for x in 0..n {
+                let p = small[y.min(sh - 1) * sw + x.min(sw - 1)];
+                for c in 0..3 {
+                    t[c * n * n + y * n + x] = p[c];
+                }
+            }
+        }
+        let image = Tensor::from_array(Array4::from_shape_vec((1, 3, n, n), t)?)?;
+        let mask = Tensor::from_array(Array4::from_shape_vec((1, 1, n, n), grown)?)?;
+        let out = self.s.run(ort::inputs!["image" => image, "mask" => mask])?;
+        let (_, data) = out["output"].try_extract_tensor::<f32>()?;
+        // The export returns 0…255.
+        let mut res = vec![[0.0f32; 3]; sw * sh];
+        for y in 0..sh {
+            for x in 0..sw {
+                res[y * sw + x] = [0, 1, 2].map(|c| (data[c * n * n + y * n + x] / 255.0).clamp(0.0, 1.0));
+            }
+        }
+        let big = if (sw, sh) == (w, h) { res } else { resize_rgb(&res, sw, sh, w, h) };
+        for (i, p) in img.iter_mut().enumerate() {
+            if hole[i] {
+                *p = big[i];
+            }
+        }
+        Ok(())
     }
 }

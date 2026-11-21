@@ -333,6 +333,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         model.tool = match t.as_str() {
             "wand" => ToolId::Wand,
             "object" => ToolId::ObjectSelect,
+            "remove" => ToolId::Remove,
             "smudge" => ToolId::Smudge,
             "clone" => ToolId::Clone,
             "heal" => ToolId::Heal,

@@ -1,6 +1,7 @@
 //! Local AI selections: the visible image is read (scaled to ~1–2k px),
 //! the model runs on the CPU (crate imagine-ai), and its mask is scaled
-//! back up to a selection or layer mask. Models stay loaded; the SAM
+//! back up to a selection or layer mask. Remove (LaMa) fills a painted
+//! area or the selection from its surroundings. Models stay loaded; the SAM
 //! encoding of the last image is kept, so further clicks take ~0.1 s.
 
 use std::collections::HashMap;
@@ -8,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
 use anyhow::{Result, anyhow, bail};
-use imagine_ai::{Embedding, Image, Mask, Model, Point, Sam, Subject};
+use imagine_ai::{Embedding, Image, Inpaint, Mask, Model, Point, Sam, Subject};
 use imagine_core::mask::{CpuMask, MaskData};
 use imagine_core::{TILE_SIZE, TileCoord, tr};
 use rayon::prelude::*;
@@ -56,6 +57,7 @@ struct Loaded {
     sam: Option<Sam>,
     embedding: Option<(u64, Embedding)>,
     subject: Option<Subject>,
+    inpaint: Option<Inpaint>,
 }
 
 fn loaded() -> &'static Mutex<Loaded> {
@@ -111,6 +113,25 @@ pub fn object(snap: &Snapshot, points: &[(f64, f64, bool)]) -> Result<CpuMask> {
     let Loaded { sam, embedding, .. } = &mut *l;
     let m = sam.as_mut().unwrap().segment(&embedding.as_ref().unwrap().1, &pts)?;
     Ok(to_cpu(&m, snap.doc))
+}
+
+/// Context (pixels per side) read around an area to remove: LaMa works at 512².
+pub const INPAINT_CONTEXT: i64 = 512;
+
+/// A selection to remove is grown by this much (selections hug the object;
+/// its fringe would stay).
+pub const REMOVE_GROW: usize = 4;
+
+/// Remove: the hole of a fill job generated from its surroundings (LaMa;
+/// worker thread).
+pub fn inpaint(job: imagine_gpu::FillJob) -> Result<imagine_gpu::FillResult> {
+    ready(&imagine_ai::INPAINT)?;
+    let mut l = loaded().lock().map_err(|_| anyhow!("model lock poisoned"))?;
+    if l.inpaint.is_none() {
+        l.inpaint = Some(Inpaint::load()?);
+    }
+    let m = l.inpaint.as_mut().unwrap();
+    job.run_with(|w, h, img, hole| m.fill(w, h, img, hole))
 }
 
 /// A model mask scaled (bilinear) to a document-size mask.

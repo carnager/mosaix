@@ -181,6 +181,8 @@ enum Tool {
     Eyedropper,
     /// Local AI: click an object to select it.
     ObjectSelect,
+    /// Local AI: paint over something, it is removed (LaMa).
+    Remove,
 }
 
 impl Tool {
@@ -206,13 +208,14 @@ impl Tool {
             Tool::Pen => tr("Pen"),
             Tool::Eyedropper => tr("Eyedropper"),
             Tool::ObjectSelect => tr("Object Selection"),
+            Tool::Remove => tr("Remove"),
         }
     }
 
     fn paints(self) -> bool {
         matches!(
             self,
-            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal | Tool::SpotHeal
+            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal | Tool::SpotHeal | Tool::Remove
         )
     }
 }
@@ -235,8 +238,10 @@ enum BgDone {
         result: anyhow::Result<()>,
     },
     Filled {
-        result: Result<imagine_gpu::FillResult, &'static str>,
+        result: Result<imagine_gpu::FillResult, String>,
         started: Instant,
+        /// Content-Aware Fill or Remove.
+        label: &'static str,
     },
     /// Clipboard data read from another program: (mime type, bytes).
     Pasted(Result<(String, Vec<u8>), String>),
@@ -1056,7 +1061,8 @@ impl App {
             | Tool::Smudge
             | Tool::Clone
             | Tool::Heal
-            | Tool::SpotHeal => {
+            | Tool::SpotHeal
+            | Tool::Remove => {
                 self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
             }
             Tool::Marquee { ellipse } => Drag::Marquee {
@@ -1360,6 +1366,10 @@ impl App {
             settings.color = [0.35; 3];
             settings.opacity = 0.5;
         }
+        if self.tool == Tool::Remove {
+            // Preview: a translucent pink trail; removed on release.
+            (settings.color, settings.opacity, settings.flow, settings.eraser) = ([1.0, 0.1, 0.35], 0.45, 1.0, false);
+        }
         let clone = (matches!(self.tool, Tool::Clone | Tool::Heal) && !eraser).then(|| {
             let offset = match self.clone_offset {
                 Some(o) if self.clone_aligned => o,
@@ -1537,6 +1547,15 @@ impl App {
         let e = &mut s.engine;
         let result: Result<bool, &str> = match drag {
             Drag::Paint => match self.stroke.take() {
+                Some(mut stroke) if tool == Tool::Remove && !stroke.settings.eraser => {
+                    e.stroke_dabs(&stroke.finish(InputSample { pos: doc_pos, pressure }));
+                    let fp = e.take_stroke_footprint();
+                    self.needs_redraw = true;
+                    if let Some((layer, dabs)) = fp {
+                        self.ai_remove(Some((layer, dabs)));
+                    }
+                    return;
+                }
                 Some(mut stroke) => {
                     e.stroke_dabs(&stroke.finish(InputSample {
                         pos: doc_pos,
@@ -1927,6 +1946,7 @@ impl App {
             "lasso" => Tool::Lasso,
             "wand" => Tool::Wand,
             "object_select" => Tool::ObjectSelect,
+            "remove" => Tool::Remove,
             "gradient" => Tool::Gradient { radial: false },
             "radial" => Tool::Gradient { radial: true },
             "move" => Tool::Move,
@@ -1960,6 +1980,7 @@ impl App {
             Tool::Lasso => "lasso",
             Tool::Wand => "wand",
             Tool::ObjectSelect => "object_select",
+            Tool::Remove => "remove",
             Tool::Gradient { radial: false } => "gradient",
             Tool::Gradient { radial: true } => "radial",
             Tool::Move => "move",
@@ -2246,25 +2267,23 @@ impl App {
                 ),
             },
             BgDone::Pasted(result) => self.on_pasted(result),
-            BgDone::Filled { result, started } => match result {
+            BgDone::Filled { result, started, label } => match result {
                 Ok(r) => {
                     let ms = r.ms;
-                    if self
-                        .engine()
-                        .is_some_and(|e| e.apply_fill(r, tr("Content-Aware Fill")))
-                    {
+                    if self.engine().is_some_and(|e| e.apply_fill(r, label)) {
                         self.touch();
                         tracing::info!(
                             "{}",
                             tr!(
-                                "Content-aware fill done: {total} ms (computation {ms} ms)",
+                                "{label} done: {total} ms (computation {ms} ms)",
+                                label = label,
                                 total = format!("{:.0}", started.elapsed().as_secs_f64() * 1e3),
                                 ms = format!("{ms:.0}")
                             )
                         );
                     }
                 }
-                Err(e) => tracing::warn!("{}", tr!("Content-Aware Fill: {error}", error = tr(e))),
+                Err(e) => tracing::warn!("{}", tr!("{label}: {error}", label = label, error = e)),
             },
             BgDone::LayerMask { layer, mask, started } => match mask {
                 Ok(m) if !m.is_empty() => {
@@ -2391,8 +2410,9 @@ impl App {
                     }
                 );
                 self.spawn_bg("content fill", move || BgDone::Filled {
-                    result: job.run(),
+                    result: job.run().map_err(|e| tr(e).to_string()),
                     started,
+                    label: tr("Content-Aware Fill"),
                 });
             }
             Err(err) => tracing::warn!("{}", tr!("Content-Aware Fill: {error}", error = tr(err))),
@@ -2457,9 +2477,35 @@ impl App {
         self.spawn_bg("remove background", move || BgDone::LayerMask { layer, mask: crate::ai::subject(&snap), started });
     }
 
+    /// Remove (local AI): fills a painted area (`Some((layer, dabs))`) or the
+    /// selection (`None`) with generated surroundings, on a worker.
+    fn ai_remove(&mut self, painted: Option<(imagine_core::LayerId, Vec<[f32; 3]>)>) {
+        if !self.ai_ready(&imagine_ai::INPAINT) {
+            return;
+        }
+        let all = self.clone_all;
+        let Some(e) = self.engine() else { return };
+        let job = match painted {
+            Some((layer, dabs)) => e.fill_job_dabs(layer, &dabs, all, crate::ai::INPAINT_CONTEXT),
+            None => e.fill_job_sized(all, crate::ai::INPAINT_CONTEXT, crate::ai::REMOVE_GROW),
+        };
+        match job {
+            Ok(job) => {
+                tracing::info!("{}", tr("Removing …"));
+                let started = Instant::now();
+                self.spawn_bg("remove", move || BgDone::Filled {
+                    result: crate::ai::inpaint(job).map_err(|e| format!("{e:#}")),
+                    started,
+                    label: tr("Remove"),
+                });
+            }
+            Err(err) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Remove"), error = tr(err))),
+        }
+    }
+
     /// Downloads a model in the background (the user agreed).
     fn download_model(&mut self, id: &str) {
-        let m: &'static imagine_ai::Model = if id == imagine_ai::SAM.id { &imagine_ai::SAM } else { &imagine_ai::SUBJECT };
+        let Some(m) = imagine_ai::models::by_id(id) else { return };
         tracing::info!("{}", tr!("Downloading {name} ({mb} MB) …", name = m.name, mb = m.size() / 1_000_000));
         self.spawn_bg("model download", move || {
             let mut last = 0;
@@ -2730,6 +2776,8 @@ impl App {
             Keysym::g if ctrl => self.edit(tr("Group Layers"), |d| d.group_active().is_some()),
             // Shift+Rücktaste: content-aware fill (Strg: learn from all layers).
             Keysym::BackSpace if shift && !alt => self.content_fill(ctrl),
+            // Shift+Alt+Rücktaste: remove the selected (local AI).
+            Keysym::BackSpace if shift && alt && !ctrl => self.ai_remove(None),
             // Photoshop: Entf and Rücktaste both clear the selection.
             Keysym::Delete | Keysym::BackSpace
                 if !alt && self.session.as_ref().is_some_and(|s| s.engine.has_selection()) =>
@@ -2893,8 +2941,12 @@ impl App {
             Keysym::t if !ctrl => self.set_tool(Tool::Text),
             Keysym::r if ctrl && alt => self.rasterize_active(),
             Keysym::s if !ctrl => self.set_tool(Tool::Clone),
-            // j: spot healing, again: healing brush (and back).
-            Keysym::j if !ctrl && !shift => self.set_tool(if self.tool == Tool::SpotHeal { Tool::Heal } else { Tool::SpotHeal }),
+            // j: spot healing, again: remove (AI), again: healing brush (and around).
+            Keysym::j if !ctrl && !shift => self.set_tool(match self.tool {
+                Tool::SpotHeal => Tool::Remove,
+                Tool::Remove => Tool::Heal,
+                _ => Tool::SpotHeal,
+            }),
             Keysym::J if shift => {
                 let on = self.brush.size_jitter == 0.0;
                 let b = &mut self.brush;
@@ -3267,6 +3319,7 @@ impl App {
             Tool::Lasso => ToolId::Lasso,
             Tool::Wand => ToolId::Wand,
             Tool::ObjectSelect => ToolId::ObjectSelect,
+            Tool::Remove => ToolId::Remove,
             Tool::Gradient { radial: false } => ToolId::Gradient,
             Tool::Gradient { radial: true } => ToolId::Radial,
             Tool::Move => ToolId::Move,
@@ -3454,6 +3507,7 @@ impl App {
                         ToolId::Lasso => Tool::Lasso,
                         ToolId::Wand => Tool::Wand,
                         ToolId::ObjectSelect => Tool::ObjectSelect,
+                        ToolId::Remove => Tool::Remove,
                         ToolId::Gradient => Tool::Gradient { radial: false },
                         ToolId::Radial => Tool::Gradient { radial: true },
                         ToolId::Move => Tool::Move,

@@ -55,6 +55,20 @@ pub const SUBJECT: Model = Model {
     }],
 };
 
+pub const INPAINT: Model = Model {
+    id: "lama",
+    name: "LaMa (Samsung AI)",
+    license: "Apache-2.0",
+    files: &[File { name: "lama_fp32.onnx", url: "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx", size: 208_044_816 }],
+};
+
+/// All models, for lookups by id.
+pub const ALL: [&Model; 3] = [&SAM, &SUBJECT, &INPAINT];
+
+pub fn by_id(id: &str) -> Option<&'static Model> {
+    ALL.into_iter().find(|m| m.id == id)
+}
+
 /// Folder of all models: `$IMAGINE_MODELS`, else `$XDG_DATA_HOME/imagine/models`.
 pub fn root() -> PathBuf {
     if let Some(d) = std::env::var_os("IMAGINE_MODELS") {

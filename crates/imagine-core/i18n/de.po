@@ -413,9 +413,6 @@ msgstr "Inhaltsbasiert füllen (alle Ebenen)"
 msgid "Content-Aware Fill (all layers) …"
 msgstr "Inhaltsbasiert füllen (alle Ebenen) …"
 
-msgid "Content-aware fill done: {total} ms (computation {ms} ms)"
-msgstr "Inhaltsbasiert gefüllt: {total} ms (Rechnung {ms} ms)"
-
 msgid "Content-Aware Fill …"
 msgstr "Inhaltsbasiert füllen …"
 
@@ -1494,7 +1491,7 @@ msgid "Reds"
 msgstr "Rottöne"
 
 msgid "Remove"
-msgstr "entfernen"
+msgstr "Entfernen"
 
 msgid "Remove Smart Filter"
 msgstr "Smart-Filter entfernen"
@@ -1745,8 +1742,6 @@ msgstr "Abstand"
 msgid "Spot Healing"
 msgstr "Bereichsreparatur"
 
-msgid "Spot Healing / Healing Brush"
-msgstr "Bereichsreparatur / Reparaturpinsel"
 
 msgid "Spot Healing Brush"
 msgstr "Bereichsreparatur"
@@ -2535,3 +2530,24 @@ msgstr "Hintergrund entfernen (KI)"
 
 msgid "Object Selection (AI)"
 msgstr "Objektauswahl (KI)"
+
+msgid "the active layer has no pixels to edit"
+msgstr "die aktive Ebene hat keine Pixel zum Bearbeiten"
+
+msgid "{label} done: {total} ms (computation {ms} ms)"
+msgstr "{label} fertig: {total} ms (Rechnung {ms} ms)"
+
+msgid "{label}: {error}"
+msgstr "{label}: {error}"
+
+msgid "Removing …"
+msgstr "Entferne …"
+
+msgid "Paint over what should go – local AI (LaMa) fills it in. A selection: Shift+Alt+Backspace."
+msgstr "Über das malen, was weg soll – lokale KI (LaMa) füllt es auf. Eine Auswahl: Umschalt+Alt+Rücktaste."
+
+msgid "Remove (AI)"
+msgstr "Entfernen (KI)"
+
+msgid "Spot Healing / Remove (AI) / Healing Brush"
+msgstr "Bereichsreparatur / Entfernen (KI) / Reparaturpinsel"

@@ -174,9 +174,16 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "remove_area",
+            "Remove what is selected: the area is replaced by plausible surroundings generated with a local AI model (LaMa; ~1–3 s). The selection is grown by expand px first (default 4) so the object's fringe goes too. all_layers: learn from the whole visible image (to work on an empty layer). Needs ai_model_download {model: remove} once.",
+            json!({ "layer": layer_param(), "all_layers": { "type": "boolean" }, "expand": { "type": "integer" } }),
+            &[],
+            false,
+        ),
+        tool(
             "ai_model_download",
-            "Download a local AI model from huggingface.co (subject: BiRefNet lite, 224 MB, MIT; object: SAM 2.1 small, 184 MB, Apache-2.0). Ask the user before calling this.",
-            json!({ "model": { "type": "string", "enum": ["subject", "object"] } }),
+            "Download a local AI model from huggingface.co (subject: BiRefNet lite, 224 MB, MIT; object: SAM 2.1 small, 184 MB, Apache-2.0; remove: LaMa, 208 MB, Apache-2.0). Ask the user before calling this.",
+            json!({ "model": { "type": "string", "enum": ["subject", "object", "remove"] } }),
             &["model"],
             false,
         ),
@@ -918,7 +925,7 @@ mod tests {
             "layer_transform": {"scale": 2}, "layer_bounds": {}, "histogram": {"bins": 16}, "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
             "canvas_size": {"width": 1, "height": 1}, "image_resize": {"width": 1},
             "select_magic_wand": {"x": 0, "y": 0}, "select_color_range": {"color": "#ff0000"},
-            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "filter_plugin_list": {}, "action_list": {}, "select_subject": {}, "select_object": {"points": [[1, 2]]}, "remove_background": {}, "ai_model_download": {"model": "subject"}, "action_run": {"name": "x"}, "filter_plugin_install": {"source": "x", "check_only": true}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
+            "adjustment_add": {"adjustment": {"kind": "invert"}}, "filter_apply": {"filter": {"kind": "gaussian_blur", "radius": 2}}, "smart_filter_set": {"index": 0, "enabled": false}, "content_aware_fill": {}, "text_add": {"text": "Hi", "x": 1, "y": 2, "size": 20}, "shape_add": {"shape": "rect", "x": 0, "y": 0, "width": 5, "height": 5}, "vector_set": {"changes": {"text": "x"}}, "layer_rasterize": {}, "pattern_list": {}, "raw_info": {"path": "x.nef"}, "filter_plugin_list": {}, "action_list": {}, "select_subject": {}, "select_object": {"points": [[1, 2]]}, "remove_background": {}, "remove_area": {}, "ai_model_download": {"model": "subject"}, "action_run": {"name": "x"}, "filter_plugin_install": {"source": "x", "check_only": true}, "raw_set": {"exposure": 1}, "pattern_import": {"path": "p.png"}, "pattern_define": {}, "layer_effects_set": {"effects": [{"effect": "color_overlay", "color": [1, 0, 0], "opacity": 1}]}, "liquify": {"strokes": [{"points": [[0, 0], [5, 0]], "radius": 20}]}, "adjustment_set": {"adjustment": {"kind": "invert"}}
         });
         samples
             .as_object_mut()

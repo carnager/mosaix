@@ -361,6 +361,16 @@ impl Engine {
         changed
     }
 
+    /// Ends a stroke without keeping it (its preview disappears) and
+    /// returns its layer and the painted dabs (`[x, y, radius]`).
+    pub fn take_stroke_footprint(&mut self) -> Option<(LayerId, Vec<[f32; 3]>)> {
+        let stroke = self.stroke.take()?;
+        self.pending_dabs.clear();
+        self.clone_cache.clear();
+        self.recheck.extend(stroke.tiles.keys().copied());
+        Some((stroke.layer, stroke.footprint))
+    }
+
     /// Bakes the stroke into new tiles and records an undo step.
     pub fn end_stroke(&mut self, label: &str) {
         if self.stroke.is_none() {

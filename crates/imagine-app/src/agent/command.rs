@@ -100,6 +100,14 @@ pub enum Command {
     RemoveBackground {
         layer: Option<LayerId>,
     },
+    /// Removes the selected area: generated from its surroundings (local AI).
+    RemoveArea {
+        layer: Option<LayerId>,
+        #[serde(default)]
+        all_layers: bool,
+        /// Grow the selection by this many pixels first (default 4, at most 48).
+        expand: Option<u32>,
+    },
     /// Downloads the local AI models (the user agreed to the download).
     AiModelDownload {
         model: String,
@@ -481,6 +489,7 @@ impl Command {
             Self::SelectSubject { .. } => "select_subject",
             Self::SelectObject { .. } => "select_object",
             Self::RemoveBackground { .. } => "remove_background",
+            Self::RemoveArea { .. } => "remove_area",
             Self::AiModelDownload { .. } => "ai_model_download",
             Self::ActionRun { .. } => "action_run",
             Self::FilterPluginInstall { .. } => "filter_plugin_install",
@@ -837,7 +846,8 @@ pub fn execute(ctx: &mut Ctx, cmd: Command) -> anyhow::Result<Output> {
             let m = match model.as_str() {
                 "subject" | "birefnet-lite" => &imagine_ai::SUBJECT,
                 "object" | "sam" | "sam2.1-small" => &imagine_ai::SAM,
-                other => bail!("unknown model {other} (subject or object)"),
+                "remove" | "lama" => &imagine_ai::INPAINT,
+                other => bail!("unknown model {other} (subject, object or remove)"),
             };
             let t0 = std::time::Instant::now();
             let mut last = 0;
@@ -1813,6 +1823,17 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             ensure!(!mask.is_empty(), "no subject found");
             s.engine.set_layer_mask(id, Some(mask), tr("Remove Background")).map_err(engine_err)?;
             ok(s)
+        }
+        Command::RemoveArea { layer, all_layers, expand } => {
+            pixel_layer(s, layer)?;
+            let grow = expand.map_or(crate::ai::REMOVE_GROW, |e| e.min(48) as usize);
+            let job = s.engine.fill_job_sized(all_layers, crate::ai::INPAINT_CONTEXT, grow).map_err(engine_err)?;
+            let r = crate::ai::inpaint(job)?;
+            let ms = r.ms;
+            ensure!(s.engine.apply_fill(r, tr("Remove")), "the layer has changed in the meantime");
+            let mut v = ok(s)?;
+            v.result["ms"] = json!(ms.round());
+            Ok(v)
         }
         Command::LayerEffectsSet { layer, effects } => {
             let id = target_layer(s, layer)?;

@@ -168,6 +168,7 @@ pub const COMMANDS: &[Cmd] = &[
         true,
         false,
     ),
+    c("Edit", "Remove (AI)", K::BackSpace, false, true, true),
     c(
         "Edit",
         "Delete Selection (Pixels)",
@@ -305,7 +306,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("Tool", "Clone Stamp", K::s, false, false, false),
     c(
         "Tool",
-        "Spot Healing / Healing Brush",
+        "Spot Healing / Remove (AI) / Healing Brush",
         K::j,
         false,
         false,
