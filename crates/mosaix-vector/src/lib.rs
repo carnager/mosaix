@@ -1512,7 +1512,7 @@ mod tests {
             (0..600).find(|&y| (x - 8..x + 8).any(|x| px(&tiles, x, y)[3] > 0.5))
         };
         let [x0, _, x1, _] = bounds(&flat).unwrap();
-        let (l, m, r) = ((x0 + 40.0) as i64, ((x0 + x1) / 2.0) as i64, (x1 - 40.0) as i64);
+        let (l, m) = ((x0 + 40.0) as i64, ((x0 + x1) / 2.0) as i64);
         let (fl, fm) = (top(&flat, l).unwrap(), top(&flat, m).unwrap());
         assert!((fl - fm).abs() <= 2, "flat text is level: {fl} {fm}");
         t.warp = Some(TextWarp::new(WarpStyle::Arc));
