@@ -288,6 +288,8 @@ pub enum Action {
     SetLock(mosaix_core::doc::Lock),
     /// The History Brush's source state.
     HistorySource(usize),
+    /// A .cube file for the Color Lookup being edited.
+    LoadLut(std::path::PathBuf),
     /// Edit › Preferences.
     SetPrefs(crate::settings::Prefs),
     SetLanguage(String),
@@ -578,6 +580,20 @@ impl State {
     pub fn open_effect(&mut self, i: usize) {
         self.fx_open = Some(i);
         self.focus_pane = Some(super::dock::Pane::Styles);
+    }
+
+    /// A loaded LUT for an open Image › Adjustments › Color Lookup dialog;
+    /// the new adjustment if the dialog took it.
+    pub fn lut_loaded(&mut self, name: &str, size: u32, data: &[[f32; 3]]) -> Option<mosaix_core::Adjustment> {
+        if let Some(Dialog::Adjust { adj: mosaix_core::Adjustment::ColorLookup { name: n, size: s, data: d, .. } }) = &mut self.dialog {
+            (*n, *s, *d) = (name.to_string(), size, data.to_vec());
+        } else {
+            return None;
+        }
+        match &self.dialog {
+            Some(Dialog::Adjust { adj }) => Some(adj.clone()),
+            _ => None,
+        }
     }
 
     /// Opens an Image › Adjustments dialog (Invert applies at once).
@@ -1103,7 +1119,9 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
     let need = |ok: bool, why: &'static str| (!ok).then_some(why);
     match label {
         "Layer via Cut" => need(m.has_selection && pixel_active(m), tr("Needs a selection on a pixel layer")),
-        "Invert" | "Desaturate" | "Hue/Saturation …" | "Levels …" | "Curves …" => need(pixel_active(m), tr("Works on pixel layers")),
+        "Invert" | "Desaturate" | "Hue/Saturation …" | "Levels …" | "Curves …" | "Auto Tone" | "Auto Contrast" | "Auto Color" => {
+            need(pixel_active(m), tr("Works on pixel layers"))
+        }
         "Merge Down" if m.selected.len() > 1 => {
             // Merges the selected layers then; they must share one list.
             let depth = |id: LayerId| m.layers.iter().find(|r| r.id == id).map(|r| r.depth);
@@ -1926,6 +1944,9 @@ pub(super) fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: 
             super::adjust_ui::editor(ui, adj, &mut st.adj_editor, m.histogram.as_deref())
         {
             out.push(Action::SetAdjustment { adj, done });
+        }
+        if std::mem::take(&mut st.adj_editor.pick_lut) {
+            out.push(Action::PickFile(super::files::FileMode::LoadLut));
         }
     } else {
         ui.label(
@@ -3326,6 +3347,9 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                         *adj = new;
                         out.push(Action::AdjustPreview(Some(adj.clone())));
                     }
+                    if std::mem::take(&mut st.adj_editor.pick_lut) {
+                        out.push(Action::PickFile(super::files::FileMode::LoadLut));
+                    }
                     ui.separator();
                     ui.horizontal(|ui| {
                         ok = ui.button("OK").clicked();
@@ -3833,6 +3857,37 @@ fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
                 }
                 Filter::Median { radius } => s(ui, "Radius", radius, 1.0..=10.0, false, " px"),
                 Filter::Pixelate { size } => s(ui, tr("Cell Size"), size, 2.0..=500.0, true, " px"),
+                Filter::ReduceNoise { strength, detail, color } => {
+                    s(ui, tr("Strength"), strength, 0.0..=100.0, false, " %");
+                    s(ui, tr("Preserve Details"), detail, 0.0..=100.0, false, " %");
+                    s(ui, tr("Reduce Color Noise"), color, 0.0..=100.0, false, " %");
+                }
+                Filter::SurfaceBlur { radius, threshold } => {
+                    s(ui, "Radius", radius, 1.0..=100.0, false, " px");
+                    s(ui, tr("Threshold"), threshold, 2.0..=255.0, false, "");
+                }
+                Filter::SmartSharpen { amount, radius, noise } => {
+                    s(ui, tr("Amount"), amount, 1.0..=500.0, false, " %");
+                    s(ui, "Radius", radius, 0.1..=64.0, true, " px");
+                    s(ui, tr("Reduce Noise"), noise, 0.0..=100.0, false, " %");
+                }
+                Filter::LensBlur { radius, highlights, threshold } => {
+                    s(ui, "Radius", radius, 1.0..=200.0, true, " px");
+                    s(ui, tr("Specular Highlights"), highlights, 0.0..=100.0, false, " %");
+                    s(ui, tr("Threshold"), threshold, 0.0..=255.0, false, "");
+                }
+                Filter::BoxBlur { radius } => s(ui, "Radius", radius, 1.0..=500.0, true, " px"),
+                Filter::RadialBlur { amount, spin, center_x, center_y } => {
+                    s(ui, tr("Amount"), amount, 1.0..=100.0, false, "");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(spin, false, tr("Zoom"));
+                        ui.selectable_value(spin, true, tr("Spin"));
+                    });
+                    let (mut cx, mut cy) = (*center_x * 100.0, *center_y * 100.0);
+                    s(ui, tr("Centre X"), &mut cx, 0.0..=100.0, false, " %");
+                    s(ui, tr("Centre Y"), &mut cy, 0.0..=100.0, false, " %");
+                    (*center_x, *center_y) = (cx / 100.0, cy / 100.0);
+                }
                 Filter::ShadowsHighlights { shadows, highlights, radius } => {
                     s(ui, tr("Shadows"), shadows, 0.0..=100.0, false, " %");
                     s(ui, tr("Highlights"), highlights, 0.0..=100.0, false, " %");

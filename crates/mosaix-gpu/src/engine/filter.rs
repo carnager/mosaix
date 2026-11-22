@@ -37,6 +37,12 @@ const SHADOWS_HIGHLIGHTS: u32 = 4;
 const MOTION: u32 = 5;
 const MEDIAN: u32 = 6;
 const PIXELATE: u32 = 7;
+const BILATERAL: u32 = 8;
+const SURFACE: u32 = 9;
+const SMART_SHARPEN: u32 = 10;
+const LENS: u32 = 11;
+const BOX: u32 = 12;
+const RADIAL: u32 = 13;
 /// Above this sigma the blur runs on a downscaled copy.
 const DIRECT_SIGMA: f32 = 10.0;
 
@@ -166,6 +172,8 @@ impl Engine {
         let spread = match f {
             Filter::GaussianBlur { .. } => (3.0 * f.radius()).ceil() as i32,
             Filter::MotionBlur { distance, .. } => (distance.clamp(1.0, 1000.0) * 0.5).ceil() as i32 + 1,
+            Filter::LensBlur { radius, .. } => radius.clamp(1.0, 200.0).ceil() as i32 + 1,
+            Filter::BoxBlur { radius } => radius.clamp(1.0, 500.0).ceil() as i32,
             _ => 0,
         };
         let reach = (spread + TILE_SIZE as i32 - 1) / TILE_SIZE as i32;
@@ -233,6 +241,68 @@ impl Engine {
                     .iter()
                     .map(|&c| FilterJob { radius, p, ..Self::fjob(c, g, kind) })
                     .collect();
+                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
+                dest.into_iter().zip(tiles).collect()
+            }
+            Filter::SmartSharpen { amount, noise, .. } if !src.is_empty() => {
+                let dest: Vec<TileCoord> = dest.into_iter().filter(|c| src.contains_key(c)).collect();
+                let blurred = self.blur(src, f.radius(), &dest).ok_or(full)?;
+                let mut grids = Grids::default();
+                let g = grids.layer(src);
+                let p = [amount.clamp(1.0, 500.0) / 100.0, noise.clamp(0.0, 100.0) / 100.0 * 0.08, 0.0, 0.0];
+                let jobs: Vec<FilterJob> = dest
+                    .iter()
+                    .map(|&c| FilterJob { blur_slot: blurred[&c].slot().packed(), p, ..Self::fjob(c, g, SMART_SHARPEN) })
+                    .collect();
+                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
+                dest.into_iter().zip(tiles).collect()
+            }
+            Filter::BoxBlur { radius } if !src.is_empty() => {
+                let r = radius.clamp(1.0, 500.0).round() as u32;
+                let reach = (r as i32 + TILE_SIZE as i32 - 1) / TILE_SIZE as i32;
+                let mid: Vec<TileCoord> = dest
+                    .iter()
+                    .flat_map(|c| (-reach..=reach).map(move |dy| TileCoord::new(c.x, c.y + dy)))
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                let mut pass = |src: &TileSet, coords: &[TileCoord], dir: [i32; 2]| -> Option<TileSet> {
+                    let mut grids = Grids::default();
+                    let g = grids.layer(src);
+                    let jobs: Vec<FilterJob> = coords.iter().map(|&c| FilterJob { dir, radius: r, ..Self::fjob(c, g, BOX) }).collect();
+                    let tiles = self.filter_jobs(&jobs, &grids.data)?;
+                    Some(coords.iter().copied().zip(tiles).collect())
+                };
+                let h = pass(src, &mid, [1, 0]).ok_or(full)?;
+                pass(&h, &dest, [0, 1]).ok_or(full)?
+            }
+            Filter::ReduceNoise { .. } | Filter::SurfaceBlur { .. } | Filter::LensBlur { .. } | Filter::RadialBlur { .. } if !src.is_empty() => {
+                let (kind, radius, p) = match f {
+                    Filter::ReduceNoise { strength, detail, color } => {
+                        let (s, d, c) = (strength.clamp(0.0, 100.0) / 100.0, detail.clamp(0.0, 100.0) / 100.0, color.clamp(0.0, 100.0) / 100.0);
+                        let r = (1.0 + 4.0 * s).round();
+                        (BILATERAL, r as u32, [0.005 + 0.12 * s * (1.0 - d), 0.01 + 0.25 * c, r / 1.5 + 0.5, 1.0])
+                    }
+                    Filter::SurfaceBlur { radius, threshold } => {
+                        let r = radius.clamp(1.0, 100.0).round();
+                        (SURFACE, r as u32, [threshold.clamp(2.0, 255.0) / 255.0, 0.0, 0.0, (r / 8.0).ceil()])
+                    }
+                    Filter::LensBlur { radius, highlights, threshold } => {
+                        let r = radius.clamp(1.0, 200.0);
+                        let n = (r * r * 0.8).clamp(16.0, 160.0) as u32;
+                        (LENS, n, [r, highlights.clamp(0.0, 100.0) / 100.0, threshold.clamp(0.0, 255.0) / 255.0, 0.0])
+                    }
+                    Filter::RadialBlur { amount, spin, center_x, center_y } => {
+                        let c = [center_x.clamp(0.0, 1.0) * self.doc.width as f32, center_y.clamp(0.0, 1.0) * self.doc.height as f32];
+                        (RADIAL, 0, [c[0], c[1], amount.clamp(1.0, 100.0), *spin as u8 as f32])
+                    }
+                    _ => unreachable!(),
+                };
+                // Lens blur spreads beyond the layer; the others stay on it.
+                let dest: Vec<TileCoord> = if kind == LENS { dest } else { dest.into_iter().filter(|c| src.contains_key(c)).collect() };
+                let mut grids = Grids::default();
+                let g = grids.layer(src);
+                let jobs: Vec<FilterJob> = dest.iter().map(|&c| FilterJob { radius, p, ..Self::fjob(c, g, kind) }).collect();
                 let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
                 dest.into_iter().zip(tiles).collect()
             }

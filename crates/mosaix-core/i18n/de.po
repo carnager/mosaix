@@ -3424,3 +3424,114 @@ msgstr "diese Ebene gab es im Quellzustand (als Pixel) nicht – im Protokoll ei
 
 msgid "Brush / Pencil"
 msgstr "Pinsel / Buntstift"
+
+msgid "Color lookup tables"
+msgstr "Farbtabellen"
+
+msgid "{file}: {error}"
+msgstr "{file}: {error}"
+
+msgid "Auto Tone"
+msgstr "Auto-Farbton"
+
+msgid "Auto Contrast"
+msgstr "Auto-Kontrast"
+
+msgid "Auto Color"
+msgstr "Auto-Farbe"
+
+msgid "Relative"
+msgstr "Relativ"
+
+msgid "Absolute"
+msgstr "Absolut"
+
+msgid "No table loaded"
+msgstr "Keine Tabelle geladen"
+
+msgid "Load .cube …"
+msgstr ".cube laden …"
+
+msgid "Load Color Lookup"
+msgstr "Farbtabelle laden"
+
+msgid "Preserve Details"
+msgstr "Details erhalten"
+
+msgid "Reduce Color Noise"
+msgstr "Farbstörung reduzieren"
+
+msgid "Reduce Noise"
+msgstr "Rauschen reduzieren"
+
+msgid "Specular Highlights"
+msgstr "Spiegelnde Lichter"
+
+msgid "Zoom"
+msgstr "Strahlenförmig"
+
+msgid "Spin"
+msgstr "Kreisförmig"
+
+msgid "Centre X"
+msgstr "Mitte X"
+
+msgid "Centre Y"
+msgstr "Mitte Y"
+
+msgid "Surface Blur"
+msgstr "Matter machen"
+
+msgid "Smart Sharpen"
+msgstr "Selektiver Scharfzeichner"
+
+msgid "Lens Blur"
+msgstr "Tiefenschärfe abmildern"
+
+msgid "Box Blur"
+msgstr "Durchschnitt (Box)"
+
+msgid "Radial Blur"
+msgstr "Radialer Weichzeichner"
+
+msgid "Photo Filter"
+msgstr "Fotofilter"
+
+msgid "Selective Color"
+msgstr "Selektive Farbkorrektur"
+
+msgid "Color Lookup"
+msgstr "Color Lookup"
+
+msgid "Density"
+msgstr "Dichte"
+
+msgid "Warming (85)"
+msgstr "Warmfilter (85)"
+
+msgid "Warming (81)"
+msgstr "Warmfilter (81)"
+
+msgid "Cooling (80)"
+msgstr "Kaltfilter (80)"
+
+msgid "Cooling (82)"
+msgstr "Kaltfilter (82)"
+
+msgid "Sepia"
+msgstr "Sepia"
+
+msgid "Underwater"
+msgstr "Unter Wasser"
+
+msgid "Whites"
+msgstr "Weiß"
+
+msgid "Neutrals"
+msgstr "Neutrale Farben"
+
+msgid "Blacks"
+msgstr "Schwarz"
+
+msgid "Black"
+msgstr "Schwarz"

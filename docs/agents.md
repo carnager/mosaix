@@ -87,8 +87,9 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `place_image` | Image file as a new layer at position (x, y) |
 | `sample_color` | Color of the whole image at a point |
 | `render_preview` | **Look at the result:** the whole image or a region as PNG, optionally also as a file (`output`); `show_selection` tints what is not selected red |
-| `adjustment_add`, `adjustment_set` | Add and change adjustment layers (curves, levels, hue/saturation, exposure, color balance, channel mixer, gradient map, …); with a selection it becomes the mask |
-| `filter_apply` | Filters: Gaussian blur, unsharp mask, high pass, shadows/highlights, motion blur, median, mosaic, noise (through the selection) |
+| `adjustment_add`, `adjustment_set` | Add and change adjustment layers (curves, levels, hue/saturation, exposure, color balance, channel mixer, gradient map, photo filter, selective color, color lookup with a `.cube` `path`, …); with a selection it becomes the mask |
+| `filter_apply` | Filters: Gaussian, box, motion, radial and lens blur, surface blur, unsharp mask, smart sharpen, high pass, shadows/highlights, reduce noise, median, mosaic, add noise (through the selection) |
+| `auto_adjust` | Auto Tone / Contrast / Color on the active layer (`mode`) |
 | `undo`, `redo` | History |
 | `save`, `export` | `.mosaix` (with layers, incremental) or PNG/JPEG/WebP/TIFF; `export` optionally in Display P3, Adobe RGB or Rec. 2020 (profile embedded), with 16 bit (PNG/TIFF) and JPEG quality |
 

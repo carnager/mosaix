@@ -18,6 +18,10 @@ pub struct EditorState {
     tone: Option<usize>,
     /// Channel mixer: output channel 0–2.
     output: usize,
+    /// Selective color: range 0–8.
+    sel_range: usize,
+    /// Color lookup: the user asked to load a .cube file.
+    pub pick_lut: bool,
 }
 
 const CHANNELS: [&str; 4] = ["RGB", "Red", "Green", "Blue"];
@@ -362,6 +366,68 @@ pub fn editor(
                 t.done = true;
             }
             row(ui, "Reverse", egui::Checkbox::without_text(reverse), &mut t);
+        }
+        Adjustment::PhotoFilter { color, density, preserve_luminosity } => {
+            // Photoshop's filters (sRGB).
+            const PRESETS: [(&str, [u8; 3]); 6] = [
+                ("Warming (85)", [236, 138, 0]),
+                ("Warming (81)", [235, 177, 19]),
+                ("Cooling (80)", [0, 109, 255]),
+                ("Cooling (82)", [0, 181, 255]),
+                ("Sepia", [172, 122, 51]),
+                ("Underwater", [0, 194, 177]),
+            ];
+            ui.horizontal_wrapped(|ui| {
+                for (n, c) in PRESETS {
+                    let lin = c.map(|v| mosaix_core::color::srgb_to_linear(v as f32 / 255.0));
+                    let fill = Color32::from_rgb(c[0], c[1], c[2]);
+                    if ui.add(egui::Button::new("").fill(fill).min_size(Vec2::new(18.0, 18.0))).on_hover_text(tr(n)).clicked() {
+                        *color = lin;
+                        t.changed = true;
+                        t.done = true;
+                    }
+                }
+                let mut rgb = egui::Rgba::from_rgb(color[0], color[1], color[2]);
+                let r = egui::color_picker::color_edit_button_rgba(ui, &mut rgb, egui::color_picker::Alpha::Opaque);
+                if r.changed() {
+                    *color = [rgb.r(), rgb.g(), rgb.b()];
+                }
+                t.add(&r);
+            });
+            row(ui, "Density", slider(density, 0.0..=100.0).max_decimals(0).suffix(" %"), &mut t);
+            row(ui, "Preserve Luminosity", egui::Checkbox::without_text(preserve_luminosity), &mut t);
+        }
+        Adjustment::SelectiveColor { ranges, relative } => {
+            egui::ComboBox::from_id_salt("selective range")
+                .selected_text(tr(mosaix_core::adjust::SELECTIVE_RANGES[st.sel_range]))
+                .show_ui(ui, |ui| {
+                    for (i, n) in mosaix_core::adjust::SELECTIVE_RANGES.iter().enumerate() {
+                        ui.selectable_value(&mut st.sel_range, i, tr(n));
+                    }
+                });
+            let r = &mut ranges[st.sel_range.min(8)];
+            for (k, n) in ["Cyan", "Magenta", "Yellow", "Black"].iter().enumerate() {
+                row(ui, n, slider(&mut r[k], -100.0..=100.0).max_decimals(0).suffix(" %"), &mut t);
+            }
+            ui.horizontal(|ui| {
+                let a = ui.selectable_value(relative, true, tr("Relative"));
+                let b = ui.selectable_value(relative, false, tr("Absolute"));
+                t.add(&a);
+                t.add(&b);
+            });
+        }
+        Adjustment::ColorLookup { name, size, amount, .. } => {
+            ui.horizontal(|ui| {
+                if *size == 0 {
+                    ui.label(RichText::new(tr("No table loaded")).weak());
+                } else {
+                    ui.label(format!("{name} ({size}³)"));
+                }
+                if ui.button(tr("Load .cube …")).clicked() {
+                    st.pick_lut = true;
+                }
+            });
+            row(ui, "Amount", slider(amount, 0.0..=100.0).max_decimals(0).suffix(" %"), &mut t);
         }
     }
     if ui.small_button(tr("Reset")).clicked()

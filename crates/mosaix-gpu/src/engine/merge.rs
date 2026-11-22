@@ -281,6 +281,16 @@ impl Engine {
         self.history.squash_since(n, before, label);
         Ok(())
     }
+
+    /// Image › Adjustments › Auto Tone / Contrast / Color: Levels worked out
+    /// from the active layer's histogram, applied to its pixels.
+    pub fn auto_adjust(&mut self, mode: mosaix_core::adjust::AutoMode, label: &str) -> Result<mosaix_core::Adjustment, &'static str> {
+        let layer = self.check_target(super::StrokeTarget::Pixels)?;
+        let h = self.layer_histogram(layer).ok_or_else(|| mosaix_core::tr("no such layer"))?;
+        let a = mosaix_core::adjust::auto_levels(&h.bins, mode);
+        self.apply_adjustment(&a, label)?;
+        Ok(a)
+    }
 }
 
 /// Edges and centres for [`Engine::align_layers`].

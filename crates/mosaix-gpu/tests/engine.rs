@@ -1040,6 +1040,23 @@ fn adjustment_layers_match_cpu_reference() {
     )
     .unwrap();
     let mut cases = Adjustment::defaults();
+    let mut sel = [[0.0f32; 4]; 9];
+    (sel[0], sel[1], sel[7]) = ([30.0, -20.0, 10.0, 5.0], [0.0, 40.0, -30.0, 0.0], [-10.0, 0.0, 20.0, -5.0]);
+    let mut cube = Vec::new();
+    for b in 0..3 {
+        for g in 0..3 {
+            for r in 0..3 {
+                cube.push([(r as f32 / 2.0).powf(0.8), g as f32 / 2.0 * 0.9, (b as f32 / 2.0 + 0.1).min(1.0)]);
+            }
+        }
+    }
+    cases.extend([
+        Adjustment::PhotoFilter { color: [0.0, 0.15, 1.0], density: 60.0, preserve_luminosity: false },
+        Adjustment::PhotoFilter { color: [0.8, 0.3, 0.0], density: 40.0, preserve_luminosity: true },
+        Adjustment::SelectiveColor { ranges: sel, relative: true },
+        Adjustment::SelectiveColor { ranges: sel, relative: false },
+        Adjustment::ColorLookup { name: "test".into(), size: 3, data: cube, amount: 70.0, path: None },
+    ]);
     cases.extend([
         Adjustment::BrightnessContrast {
             brightness: 60.0,
@@ -3679,4 +3696,125 @@ fn select_and_mask_snaps_to_the_image_edge() {
     assert!(e.doc().find(layer).unwrap().mask.is_some());
     e.undo();
     assert!(e.has_selection() && e.doc().find(layer).unwrap().mask.is_none());
+}
+
+#[test]
+fn noise_surface_sharpen_lens_box_radial() {
+    use mosaix_core::Filter;
+    let Some(g) = gpu() else { return };
+    // Noisy grey with a sharp edge at x = 128: dark left, light right.
+    let noisy = || {
+        let mut t = vec![f16::ZERO; TS * TS * 4];
+        for y in 0..TS {
+            for x in 0..TS {
+                let base = if x < 128 { 0.1 } else { 0.6 };
+                let n = (((x * 7919 + y * 104729) % 97) as f32 / 96.0 - 0.5) * 0.08;
+                let v = base + n;
+                t[(y * TS + x) * 4..][..4].copy_from_slice(&[v, v, v, 1.0].map(f16::from_f32));
+            }
+        }
+        t
+    };
+    let spread = |t: &[f16], x0: usize| {
+        let vals: Vec<f32> = (40..80).flat_map(|y| (x0..x0 + 30).map(move |x| (x, y))).map(|(x, y)| px(t, x, y)[0]).collect();
+        let m = vals.iter().sum::<f32>() / vals.len() as f32;
+        (vals.iter().map(|v| (v - m) * (v - m)).sum::<f32>() / vals.len() as f32).sqrt()
+    };
+    for f in [Filter::ReduceNoise { strength: 80.0, detail: 20.0, color: 50.0 }, Filter::SurfaceBlur { radius: 6.0, threshold: 40.0 }] {
+        let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+        let layer = e.doc().active;
+        let src = noisy();
+        e.upload_tile(layer, TileCoord::new(0, 0), &src);
+        e.apply_filter(&f, "Filter").unwrap();
+        let out = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+        assert!(spread(&out, 20) < spread(&src, 20) * 0.6, "{f:?}: noise {} → {}", spread(&src, 20), spread(&out, 20));
+        // The edge stays sharp: two pixels away from it the values are untouched in level.
+        assert!(px(&out, 125, 60)[0] < 0.2 && px(&out, 130, 60)[0] > 0.5, "{f:?} blurred the edge");
+    }
+    // Smart sharpen: more contrast at the edge, but never beyond the neighbours.
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    let mut soft = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS {
+            let v = 0.2 + 0.5 * ((x as f32 - 128.0) / 6.0).tanh().mul_add(0.5, 0.5);
+            soft[(y * TS + x) * 4..][..4].copy_from_slice(&[v, v, v, 1.0].map(f16::from_f32));
+        }
+    }
+    e.upload_tile(layer, TileCoord::new(0, 0), &soft);
+    e.apply_filter(&Filter::SmartSharpen { amount: 200.0, radius: 6.0, noise: 0.0 }, "Sharpen").unwrap();
+    let out = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    // Edge width: pixels between 30 % and 70 % of the step.
+    let width = |t: &[f16]| (100..160).filter(|&x| { let v = px(t, x, 50)[0]; v > 0.35 && v < 0.55 }).count();
+    let mut u = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let ul = u.doc().active;
+    u.upload_tile(ul, TileCoord::new(0, 0), &soft);
+    u.apply_filter(&Filter::UnsharpMask { amount: 200.0, radius: 6.0, threshold: 0.0 }, "USM").unwrap();
+    let usm = u.read_layer_tile(ul, TileCoord::new(0, 0)).unwrap();
+    assert!(width(&out) < width(&soft), "sharper: {} vs {}", width(&out), width(&soft));
+    assert!(width(&out) <= width(&usm) + 1, "as sharp as unsharp mask: {} vs {}", width(&out), width(&usm));
+    for x in 100..160 {
+        let (o, l, r) = (px(&out, x, 50)[0], px(&soft, x - 3, 50)[0], px(&soft, x + 3, 50)[0]);
+        assert!(o >= l.min(r) - 2e-3 && o <= l.max(r) + 2e-3, "halo at {x}: {o} outside {l}…{r}");
+    }
+    // Lens blur: a bright dot becomes a disc of about the radius.
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    let mut dot = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS {
+            let v = if (x as i32 - 128).abs() <= 1 && (y as i32 - 128).abs() <= 1 { 1.0 } else { 0.0 };
+            dot[(y * TS + x) * 4..][..4].copy_from_slice(&[v, v, v, 1.0].map(f16::from_f32));
+        }
+    }
+    e.upload_tile(layer, TileCoord::new(0, 0), &dot);
+    e.apply_filter(&Filter::LensBlur { radius: 12.0, highlights: 0.0, threshold: 200.0 }, "Lens").unwrap();
+    let out = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&out, 128 + 8, 128)[0] > 0.005, "inside the disc: {}", px(&out, 136, 128)[0]);
+    assert!(px(&out, 128 + 16, 128)[0] < 1e-4, "outside the disc");
+    // Box blur: the mean over the square.
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    e.upload_tile(layer, TileCoord::new(0, 0), &dot);
+    e.apply_filter(&Filter::BoxBlur { radius: 4.0 }, "Box").unwrap();
+    let out = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert!((px(&out, 128, 128)[0] - 9.0 / 81.0).abs() < 2e-3, "{}", px(&out, 128, 128)[0]);
+    assert!((px(&out, 132, 128)[0] - 6.0 / 81.0).abs() < 2e-3);
+    // Radial blur leaves the centre alone and smears away from it.
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    let src = noisy();
+    e.upload_tile(layer, TileCoord::new(0, 0), &src);
+    e.apply_filter(&Filter::RadialBlur { amount: 50.0, spin: false, center_x: 0.5, center_y: 0.5 }, "Radial").unwrap();
+    let out = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert!((px(&out, 128, 128)[0] - px(&src, 128, 128)[0]).abs() < 0.03);
+    assert!(spread(&out, 20) < spread(&src, 20));
+}
+
+#[test]
+fn auto_contrast_and_color_stretch_the_layer() {
+    use mosaix_core::adjust::AutoMode;
+    use mosaix_core::color::{linear_to_srgb, srgb_to_linear};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    // A dull, bluish ramp: sRGB 0.3…0.6 in red/green, 0.4…0.7 in blue.
+    let mut t = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS {
+            let v = 0.3 + 0.3 * x as f32 / 255.0;
+            let c = [v, v, v + 0.1].map(srgb_to_linear);
+            t[(y * TS + x) * 4..][..4].copy_from_slice(&[c[0], c[1], c[2], 1.0].map(f16::from_f32));
+        }
+    }
+    e.upload_tile(layer, TileCoord::new(0, 0), &t);
+    e.auto_adjust(AutoMode::Contrast, "Auto Contrast").unwrap();
+    let out = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    let s = |x: usize| px(&out, x, 10).map(linear_to_srgb);
+    assert!(s(1)[0] < 0.05 && s(254)[2] > 0.95, "stretched: {:?} … {:?}", s(1), s(254));
+    e.undo();
+    e.auto_adjust(AutoMode::Color, "Auto Color").unwrap();
+    let out = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    let mid = px(&out, 128, 10).map(linear_to_srgb);
+    assert!((mid[2] - mid[0]).abs() < 0.04, "the blue cast is gone: {mid:?}");
 }

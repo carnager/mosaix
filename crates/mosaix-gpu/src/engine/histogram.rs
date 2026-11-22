@@ -111,6 +111,27 @@ impl Engine {
             Some(id) => src.below(id),
             None => src.clone(),
         };
+        self.histogram_of(doc)
+    }
+
+    /// Histogram of one layer's own pixels (opaque, normal, unmasked), for
+    /// Auto Tone / Contrast / Color.
+    pub fn layer_histogram(&mut self, layer: LayerId) -> Option<Arc<Histogram>> {
+        let mut l = self.doc.find(layer)?.clone();
+        l.opacity = 1.0;
+        l.fill_opacity = 1.0;
+        l.blend = mosaix_core::BlendMode::Normal;
+        l.mask = None;
+        l.effects.clear();
+        l.clip = false;
+        l.visible = true;
+        let mut doc = self.doc.clone();
+        doc.layers = vec![l];
+        doc.selection = None;
+        Some(self.histogram_of(doc))
+    }
+
+    fn histogram_of(&mut self, doc: mosaix_core::Document<Tile>) -> Arc<Histogram> {
         let coords: Vec<TileCoord> = self.all_doc_coords();
         // Key: the compositing program of every tile.
         let mut hasher = DefaultHasher::new();

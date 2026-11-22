@@ -537,6 +537,13 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "auto_adjust",
+            "Image › Adjustments › Auto Tone (levels per channel), Auto Contrast (one levels for all channels) or Auto Color (per channel with neutral midtones), worked out from the active layer and applied to its pixels. Returns the levels used.",
+            json!({ "mode": { "type": "string", "enum": ["tone", "contrast", "color"] } }),
+            &["mode"],
+            false,
+        ),
+        tool(
             "stroke_selection",
             "Edit › Stroke: draw a line of `width` px along the selection's edge on the active pixel layer – inside, center or outside (default) – with color and opacity. The selection stays.",
             json!({ "width": { "type": "number", "minimum": 1 }, "position": { "type": "string", "enum": ["inside", "center", "outside"] }, "color": color_param("Stroke color"), "opacity": { "type": "number", "minimum": 0, "maximum": 1 } }),
@@ -689,7 +696,9 @@ pub fn tools() -> Vec<Value> {
              hue_saturation {hue −180…180, saturation, lightness −100…100, colorize}; black_white {weights: 6 percentages for red, yellow, green, cyan, blue, magenta}; \
              invert; posterize {levels}; threshold {level 1…255}; color_balance {shadows/midtones/highlights: [cyan–red, magenta–green, \
              yellow–blue] −100…100, preserve_luminosity}; channel_mixer {red/green/blue/gray: [r %, g %, b %, constant %], monochrome}; \
-             gradient_map {gradient: {colors: [{at 0…1, color [r,g,b] linear}]}, reverse}. Omitted parameters are neutral.",
+             gradient_map {gradient: {colors: [{at 0…1, color [r,g,b] linear}]}, reverse}; photo_filter {color [r,g,b] linear, density 0…100, preserve_luminosity}; \
+             selective_color {ranges: 9 × [c,m,y,k] −100…100 for reds, yellows, greens, cyans, blues, magentas, whites, neutrals, blacks; relative}; \
+             color_lookup {path: a .cube file, amount 0…100}. Omitted parameters are neutral.",
             json!({ "adjustment": { "type": "object" }, "name": { "type": "string" } }),
             &["adjustment"],
             false,
@@ -698,7 +707,7 @@ pub fn tools() -> Vec<Value> {
             "filter_apply",
             "Apply a pixel filter to a layer (within the selection, if any). filter is an object with \"kind\": \
              gaussian_blur {radius px}; unsharp_mask {amount % 1…500, radius px, threshold 0…255}; \
-             high_pass {radius px}; shadows_highlights {shadows %, highlights %, radius px}; motion_blur {angle °, distance px}; median {radius 1…10}; pixelate {size px}; add_noise {amount % 0…100, monochrome, gaussian, seed}; \
+             high_pass {radius px}; shadows_highlights {shadows %, highlights %, radius px}; motion_blur {angle °, distance px}; median {radius 1…10}; pixelate {size px}; reduce_noise {strength %, detail %, color %}; surface_blur {radius px, threshold 2…255}; smart_sharpen {amount %, radius px, noise %}; lens_blur {radius px, highlights %, threshold 0…255}; box_blur {radius px}; radial_blur {amount 1…100, spin, center_x 0…1, center_y 0…1}; add_noise {amount % 0…100, monochrome, gaussian, seed}; \
              plugin {name, values: {param: number | bool | \"#rrggbb\"}} for a filter plugin (see filter_plugin_list). \
              With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
              listed under smart_filters in document_info and editable with smart_filter_set.",
@@ -1135,7 +1144,7 @@ mod tests {
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
             "generative_fill": {"prompt": "a bench"},
-            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "layer_distribute": {"direction": "vertical"}
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "layer_distribute": {"direction": "vertical"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

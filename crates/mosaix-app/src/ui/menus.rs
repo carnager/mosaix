@@ -70,6 +70,10 @@ const ADJUSTMENTS: &[Item] = &[
     C("Levels …", G(g::CHART_BAR)),
     C("Curves …", G(g::WAVE_SINE)),
     Sep,
+    C("Auto Tone", Icon::None),
+    C("Auto Contrast", Icon::None),
+    C("Auto Color", Icon::None),
+    Sep,
     S(Special::MoreAdjustments, Icon::None),
 ];
 

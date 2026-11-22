@@ -2170,6 +2170,9 @@ impl App {
             Keysym::j if ctrl && self.has_pixel_selection() => json!({ "cmd": "layer_via", "cut": false }),
             Keysym::j if ctrl => json!({ "cmd": "layer_duplicate" }),
             Keysym::i if ctrl && !alt => json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "invert" } }),
+            Keysym::L if ctrl && shift && !alt => json!({ "cmd": "auto_adjust", "mode": "tone" }),
+            Keysym::L if ctrl && shift && alt => json!({ "cmd": "auto_adjust", "mode": "contrast" }),
+            Keysym::B if ctrl && shift && !alt => json!({ "cmd": "auto_adjust", "mode": "color" }),
             Keysym::U if ctrl && !alt => json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "hue_saturation", "saturation": -100 } }),
             Keysym::e | Keysym::E if ctrl && !shift && alt => json!({ "cmd": "layer_merge", "mode": "visible" }),
             Keysym::e if ctrl && !shift && !alt => json!({ "cmd": "layer_merge" }),
@@ -2421,7 +2424,8 @@ impl App {
             | ui::files::FileMode::ImportPatterns
             | ui::files::FileMode::PlaceEmbedded
             | ui::files::FileMode::ReplaceContents
-            | ui::files::FileMode::OpenAsLayer => None,
+            | ui::files::FileMode::OpenAsLayer
+            | ui::files::FileMode::LoadLut => None,
             ui::files::FileMode::SaveAs => s.map(|s| s.default_save_path()),
             ui::files::FileMode::ExportAs => s.map(|s| s.default_export_path()),
         }
@@ -3603,6 +3607,9 @@ impl App {
             Keysym::j if ctrl && self.has_pixel_selection() => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_via", "cut": false })),
             Keysym::j if ctrl => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_duplicate" })),
             Keysym::i if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "invert" } })),
+            Keysym::L if ctrl && shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "auto_adjust", "mode": "tone" })),
+            Keysym::L if ctrl && shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "auto_adjust", "mode": "contrast" })),
+            Keysym::B if ctrl && shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "auto_adjust", "mode": "color" })),
             Keysym::U if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "hue_saturation", "saturation": -100 } })),
             Keysym::u if ctrl && !alt => self.open_adjust("hue_saturation"),
             Keysym::l if ctrl && !alt => self.open_adjust("levels"),
@@ -4701,6 +4708,22 @@ impl App {
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
                 Action::SwitchTab(i) => self.switch_tab(i),
+                Action::LoadLut(p) => match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| mosaix_core::adjust::parse_cube(&t)) {
+                    Ok((size, data)) => {
+                        let name = p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        if let Some(a) = self.ui_state.lut_loaded(&name, size, &data) {
+                            if let Some(e) = self.engine() {
+                                let _ = e.set_adjust_preview(Some(&a));
+                            }
+                        } else if let Some(mosaix_core::Adjustment::ColorLookup { amount, .. }) =
+                            self.session.as_ref().and_then(|s| s.engine.doc().active_layer()).and_then(|l| l.adjustment()).cloned()
+                        {
+                            let adj = mosaix_core::Adjustment::ColorLookup { name, size, data, amount, path: None };
+                            self.apply_ui(vec![ui::panels::Action::SetAdjustment { adj, done: true }]);
+                        }
+                    }
+                    Err(e) => tracing::warn!("{}", tr!("{file}: {error}", file = p.display().to_string(), error = e)),
+                },
                 Action::SetPrefs(p) => {
                     let n = p.history_limit;
                     self.settings.prefs = p;

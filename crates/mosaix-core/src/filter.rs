@@ -45,6 +45,61 @@ pub enum Filter {
         #[serde(default = "ten")]
         size: f32,
     },
+    /// Smooths noise but keeps edges (bilateral): strength and preserved
+    /// detail in % (0…100), colour noise in % (0…100).
+    ReduceNoise {
+        #[serde(default = "fifty")]
+        strength: f32,
+        #[serde(default = "fifty")]
+        detail: f32,
+        #[serde(default = "fifty")]
+        color: f32,
+    },
+    /// Blurs flat areas, keeps edges: radius px (1…100), threshold in
+    /// levels (2…255) – like Photoshop's Surface Blur.
+    SurfaceBlur {
+        #[serde(default = "five")]
+        radius: f32,
+        #[serde(default = "fifteen")]
+        threshold: f32,
+    },
+    /// Sharpening without halos or sharpened noise: amount % (1…500),
+    /// radius px, noise threshold % (0…100).
+    SmartSharpen {
+        #[serde(default = "hundred")]
+        amount: f32,
+        #[serde(default = "one")]
+        radius: f32,
+        #[serde(default = "ten")]
+        noise: f32,
+    },
+    /// Out-of-focus blur with a round aperture: radius px (1…200), bright
+    /// spots bloom into discs (`highlights` %, above `threshold` levels).
+    LensBlur {
+        #[serde(default = "ten")]
+        radius: f32,
+        #[serde(default)]
+        highlights: f32,
+        #[serde(default = "two_hundred")]
+        threshold: f32,
+    },
+    /// Average over a square of radius px (1…500).
+    BoxBlur {
+        #[serde(default = "five")]
+        radius: f32,
+    },
+    /// Blur towards (zoom) or around (spin) a centre; amount 1…100,
+    /// centre as a share of the canvas (0…1).
+    RadialBlur {
+        #[serde(default = "ten")]
+        amount: f32,
+        #[serde(default)]
+        spin: bool,
+        #[serde(default = "half")]
+        center_x: f32,
+        #[serde(default = "half")]
+        center_y: f32,
+    },
     /// amount in % (0…100) of the value range.
     AddNoise {
         amount: f32,
@@ -124,6 +179,27 @@ fn ten() -> f32 {
 fn two() -> f32 {
     2.0
 }
+fn one() -> f32 {
+    1.0
+}
+fn five() -> f32 {
+    5.0
+}
+fn fifteen() -> f32 {
+    15.0
+}
+fn fifty() -> f32 {
+    50.0
+}
+fn hundred() -> f32 {
+    100.0
+}
+fn two_hundred() -> f32 {
+    200.0
+}
+fn half() -> f32 {
+    0.5
+}
 fn shadows_default() -> f32 {
     35.0
 }
@@ -144,6 +220,12 @@ impl Filter {
             Filter::ShadowsHighlights { shadows: 35.0, highlights: 0.0, radius: 30.0 },
             Filter::MotionBlur { angle: 0.0, distance: 20.0 },
             Filter::Median { radius: 2.0 },
+            Filter::ReduceNoise { strength: 50.0, detail: 50.0, color: 50.0 },
+            Filter::SurfaceBlur { radius: 5.0, threshold: 15.0 },
+            Filter::SmartSharpen { amount: 100.0, radius: 1.0, noise: 10.0 },
+            Filter::LensBlur { radius: 10.0, highlights: 0.0, threshold: 200.0 },
+            Filter::BoxBlur { radius: 5.0 },
+            Filter::RadialBlur { amount: 10.0, spin: false, center_x: 0.5, center_y: 0.5 },
             Filter::Pixelate { size: 10.0 },
             Filter::AddNoise {
                 amount: 10.0,
@@ -163,6 +245,12 @@ impl Filter {
             Filter::MotionBlur { .. } => crate::tr("Motion Blur").into(),
             Filter::Median { .. } => crate::tr("Median").into(),
             Filter::Pixelate { .. } => crate::tr("Mosaic").into(),
+            Filter::ReduceNoise { .. } => crate::tr("Reduce Noise").into(),
+            Filter::SurfaceBlur { .. } => crate::tr("Surface Blur").into(),
+            Filter::SmartSharpen { .. } => crate::tr("Smart Sharpen").into(),
+            Filter::LensBlur { .. } => crate::tr("Lens Blur").into(),
+            Filter::BoxBlur { .. } => crate::tr("Box Blur").into(),
+            Filter::RadialBlur { .. } => crate::tr("Radial Blur").into(),
             Filter::AddNoise { .. } => crate::tr("Add Noise").into(),
             Filter::Plugin { name, .. } => name.clone().into(),
         }
@@ -184,7 +272,13 @@ impl Filter {
             Filter::GaussianBlur { radius }
             | Filter::UnsharpMask { radius, .. }
             | Filter::HighPass { radius }
-            | Filter::ShadowsHighlights { radius, .. } => radius.clamp(0.1, 1000.0),
+            | Filter::ShadowsHighlights { radius, .. }
+            | Filter::SmartSharpen { radius, .. } => radius.clamp(0.1, 1000.0),
+            Filter::ReduceNoise { .. }
+            | Filter::SurfaceBlur { .. }
+            | Filter::LensBlur { .. }
+            | Filter::BoxBlur { .. }
+            | Filter::RadialBlur { .. } => 0.0,
             Filter::AddNoise { .. }
             | Filter::Plugin { .. }
             | Filter::MotionBlur { .. }

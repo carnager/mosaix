@@ -8,6 +8,12 @@
 //   kind 5: motion blur    direction p.xy, half length p.z (taps every pixel)
 //   kind 6: median         by luminance within `radius`
 //   kind 7: mosaic         cells of p.x px averaged
+//   kind 8: reduce noise   bilateral: range sigma luma p.x, chroma p.y, spatial p.z, tap step p.w
+//   kind 9: surface blur   threshold p.x (sRGB 0…1), tap step p.w
+//   kind 10: smart sharpen like unsharp (blur_slot), noise threshold p.y, no halos
+//   kind 11: lens blur     disc radius p.x, highlight bloom p.y above p.z
+//   kind 12: box blur      1D average along `dir`
+//   kind 13: radial blur   centre p.xy (px), amount p.z, spin p.w
 
 enable wgpu_binding_array;
 
@@ -208,6 +214,136 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                 }
             }
             return acc / f32(steps * steps);
+        }
+        case 8u, 9u: {
+            // Edge-preserving averages (straight sRGB colours compared).
+            let c0 = texel(job.src, p);
+            if c0.a <= 0.0 {
+                return c0;
+            }
+            let e0 = to_srgb(c0.rgb / c0.a);
+            let l0 = luma(e0);
+            let r = i32(job.radius);
+            let step = max(i32(job.p.w), 1);
+            var acc_l = vec4<f32>(0.0);
+            var w_l = 0.0;
+            var acc_c = vec4<f32>(0.0);
+            var w_c = 0.0;
+            for (var y = -r; y <= r; y += step) {
+                for (var x = -r; x <= r; x += step) {
+                    let c = texel(job.src, p + vec2<i32>(x, y));
+                    if c.a <= 0.0 {
+                        continue;
+                    }
+                    let e = to_srgb(c.rgb / c.a);
+                    var wl: f32;
+                    var wc: f32;
+                    if job.kind == 8u {
+                        let ds = exp(-f32(x * x + y * y) / (2.0 * job.p.z * job.p.z));
+                        let dl = luma(e) - l0;
+                        let dc = length((e - luma(e)) - (e0 - l0));
+                        wl = ds * exp(-(dl * dl) / (2.0 * job.p.x * job.p.x));
+                        wc = ds * exp(-(dc * dc + dl * dl * 0.25) / (2.0 * job.p.y * job.p.y));
+                    } else {
+                        // Photoshop's surface blur: weights fall off linearly with the difference.
+                        let d = max(abs(e.r - e0.r), max(abs(e.g - e0.g), abs(e.b - e0.b)));
+                        wl = max(1.0 - d / (2.5 * job.p.x), 0.0);
+                        wc = wl;
+                    }
+                    acc_l += c * wl;
+                    w_l += wl;
+                    acc_c += c * wc;
+                    w_c += wc;
+                }
+            }
+            if w_l <= 0.0 || w_c <= 0.0 {
+                return c0;
+            }
+            if job.kind == 9u {
+                return acc_l / w_l;
+            }
+            // Luminance from the tight average, colour from the wide one.
+            let al = acc_l / w_l;
+            let ac = acc_c / w_c;
+            let el = to_srgb(al.rgb / max(al.a, 1e-6));
+            let ec = to_srgb(ac.rgb / max(ac.a, 1e-6));
+            let o = clamp(ec - luma(ec) + luma(el), vec3<f32>(0.0), vec3<f32>(1.0));
+            return vec4<f32>(to_linear(o) * c0.a, c0.a);
+        }
+        case 10u: {
+            let s = texel(job.src, p);
+            if s.a <= 0.0 {
+                return s;
+            }
+            let b = load(job.blur_slot, local);
+            var d = s - b;
+            // Small differences are noise: not sharpened.
+            let t = job.p.y;
+            let mag = max(abs(d.r), max(abs(d.g), abs(d.b)));
+            d = d * clamp((mag - t) / max(mag, 1e-6), 0.0, 1.0);
+            var o = s + d * job.p.x;
+            // No halos: stay within what the 7×7 neighbourhood holds.
+            var lo = s;
+            var hi = s;
+            for (var y = -3; y <= 3; y++) {
+                for (var x = -3; x <= 3; x++) {
+                    let c = texel(job.src, p + vec2<i32>(x, y));
+                    lo = min(lo, c);
+                    hi = max(hi, c);
+                }
+            }
+            o = clamp(o, lo, hi);
+            return vec4<f32>(o.rgb, s.a);
+        }
+        case 11u: {
+            // A disc of samples on a golden-angle spiral; bright spots weigh more.
+            let rad = job.p.x;
+            let n = i32(job.radius);
+            var acc = vec4<f32>(0.0);
+            var wsum = 0.0;
+            for (var i = 0; i < n; i++) {
+                let f = (f32(i) + 0.5) / f32(n);
+                let a = f32(i) * 2.39996323;
+                let q = vec2<f32>(p) + vec2<f32>(cos(a), sin(a)) * sqrt(f) * rad;
+                let b = vec2<i32>(floor(q));
+                let c = texel(job.src, b);
+                var w = 1.0;
+                if c.a > 0.0 && job.p.y > 0.0 {
+                    let l = luma(to_srgb(c.rgb / c.a));
+                    w += job.p.y * 8.0 * max(l - job.p.z, 0.0) / max(1.0 - job.p.z, 0.01);
+                }
+                acc += c * w;
+                wsum += w;
+            }
+            return acc / wsum;
+        }
+        case 12u: {
+            let r = i32(job.radius);
+            var acc = vec4<f32>(0.0);
+            for (var i = -r; i <= r; i++) {
+                acc += texel(job.src, p + job.dir * i);
+            }
+            return acc / f32(2 * r + 1);
+        }
+        case 13u: {
+            let c = job.p.xy;
+            let v = vec2<f32>(p) + 0.5 - c;
+            let n = 32;
+            var acc = vec4<f32>(0.0);
+            for (var i = 0; i < n; i++) {
+                let t = (f32(i) / f32(n - 1) - 0.5) * job.p.z / 100.0;
+                var q: vec2<f32>;
+                if job.p.w > 0.5 {
+                    // Spin: along the circle around the centre (amount 100 ≈ ±0.6 rad).
+                    let a = t * 1.2;
+                    q = c + vec2<f32>(v.x * cos(a) - v.y * sin(a), v.x * sin(a) + v.y * cos(a));
+                } else {
+                    // Zoom: along the line to the centre.
+                    q = c + v * (1.0 + t);
+                }
+                acc += texel(job.src, vec2<i32>(floor(q)));
+            }
+            return acc / f32(n);
         }
         case 4u: {
             let s = texel(job.src, p);

@@ -78,6 +78,22 @@ pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
             Adjustment::ChannelMixer { red, green, blue, gray, monochrome }
         }
         b"grdm" => read_gradient_map(&mut b)?,
+        // Selective color: version, method (0 relative, 1 absolute), ten
+        // records of c, m, y, k (the first unused), percent.
+        b"selc" => {
+            b.u16()?;
+            let relative = b.u16()? == 0;
+            for _ in 0..4 {
+                b.i16()?;
+            }
+            let mut ranges = [[0.0f32; 4]; 9];
+            for r in ranges.iter_mut() {
+                for v in r.iter_mut() {
+                    *v = b.i16()? as f32;
+                }
+            }
+            Adjustment::SelectiveColor { ranges, relative }
+        }
         b"post" => Adjustment::Posterize {
             levels: b.u16()?.clamp(2, 255) as f32,
         },
@@ -317,6 +333,21 @@ pub(crate) fn adjustment_blocks(a: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
     let be16 = |o: &mut Vec<u8>, v: u16| o.extend(v.to_be_bytes());
     let mut out = Vec::new();
     match a {
+        Adjustment::SelectiveColor { ranges, relative } => {
+            be16(&mut o, 1);
+            be16(&mut o, if *relative { 0 } else { 1 });
+            for _ in 0..4 {
+                be16(&mut o, 0);
+            }
+            for r in ranges {
+                for v in r {
+                    o.extend((v.round().clamp(-100.0, 100.0) as i16).to_be_bytes());
+                }
+            }
+            out.push((*b"selc", o));
+        }
+        // No Photoshop block written (the layer has no effect there).
+        Adjustment::PhotoFilter { .. } | Adjustment::ColorLookup { .. } => {}
         Adjustment::Invert => out.push((*b"nvrt", o)),
         Adjustment::Posterize { levels } => {
             be16(&mut o, levels.round().clamp(2.0, 255.0) as u16);

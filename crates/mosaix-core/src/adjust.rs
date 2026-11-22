@@ -256,6 +256,224 @@ pub enum Adjustment {
         #[serde(default)]
         reverse: bool,
     },
+    /// Like a coloured filter in front of the lens: `color` linear RGB,
+    /// density 0…100 %.
+    PhotoFilter {
+        #[serde(default = "warming")]
+        color: [f32; 3],
+        #[serde(default = "twenty_five")]
+        density: f32,
+        #[serde(default = "yes")]
+        preserve_luminosity: bool,
+    },
+    /// Cyan, magenta, yellow, black (−100…100 %) per colour range: reds,
+    /// yellows, greens, cyans, blues, magentas, whites, neutrals, blacks.
+    /// `relative` scales by the ink already there (Photoshop's Relative).
+    SelectiveColor {
+        #[serde(default)]
+        ranges: [[f32; 4]; 9],
+        #[serde(default = "yes")]
+        relative: bool,
+    },
+    /// A 3D colour lookup table (.cube), applied to sRGB values; `amount`
+    /// 0…100 %. `path` is read into `data` when given (agents).
+    ColorLookup {
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        size: u32,
+        /// size³ RGB triples, red fastest (as in .cube files).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        data: Vec<[f32; 3]>,
+        #[serde(default = "hundred")]
+        amount: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<std::path::PathBuf>,
+    },
+}
+
+/// Names of the Selective Color ranges, in order.
+pub const SELECTIVE_RANGES: [&str; 9] = ["Reds", "Yellows", "Greens", "Cyans", "Blues", "Magentas", "Whites", "Neutrals", "Blacks"];
+
+fn warming() -> [f32; 3] {
+    // Photoshop's Warming Filter (85): #ec8a00.
+    [srgb_to_linear(236.0 / 255.0), srgb_to_linear(138.0 / 255.0), 0.0]
+}
+fn twenty_five() -> f32 {
+    25.0
+}
+fn hundred() -> f32 {
+    100.0
+}
+
+/// Reads a .cube 3D LUT: (size, size³ RGB triples, red fastest).
+pub fn parse_cube(text: &str) -> Result<(u32, Vec<[f32; 3]>), String> {
+    let mut size = 0u32;
+    let (mut lo, mut hi) = ([0.0f32; 3], [1.0f32; 3]);
+    let mut data = Vec::new();
+    for line in text.lines() {
+        let l = line.trim();
+        if l.is_empty() || l.starts_with('#') {
+            continue;
+        }
+        let mut it = l.split_whitespace();
+        let first = it.next().unwrap_or("");
+        match first {
+            "TITLE" => {}
+            "LUT_3D_SIZE" => size = it.next().and_then(|v| v.parse().ok()).ok_or("bad LUT_3D_SIZE")?,
+            "LUT_1D_SIZE" => return Err("1D LUTs are not supported, only 3D".into()),
+            "DOMAIN_MIN" | "DOMAIN_MAX" => {
+                let v: Vec<f32> = it.filter_map(|v| v.parse().ok()).collect();
+                if v.len() == 3 {
+                    let t = [v[0], v[1], v[2]];
+                    if first == "DOMAIN_MIN" { lo = t } else { hi = t }
+                }
+            }
+            _ if first.parse::<f32>().is_ok() => {
+                let v: Vec<f32> = l.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                if v.len() != 3 {
+                    return Err(format!("bad line: {l}"));
+                }
+                data.push([0, 1, 2].map(|k| (v[k] - lo[k]) / (hi[k] - lo[k]).max(1e-6)));
+            }
+            _ => {}
+        }
+    }
+    if !(2..=65).contains(&size) {
+        return Err("LUT_3D_SIZE missing or out of range (2…65)".into());
+    }
+    if data.len() != (size * size * size) as usize {
+        return Err(format!("expected {} entries, found {}", size * size * size, data.len()));
+    }
+    Ok((size, data))
+}
+
+/// Trilinear lookup in a 3D LUT (sRGB in and out).
+fn lut3d(size: u32, data: &[[f32; 3]], c: [f32; 3]) -> [f32; 3] {
+    let n = size as usize;
+    let at = |r: usize, g: usize, b: usize| data[(b * n + g) * n + r];
+    let pos = c.map(|v| v.clamp(0.0, 1.0) * (n - 1) as f32);
+    let i0 = pos.map(|p| (p.floor() as usize).min(n - 2));
+    let f: [f32; 3] = std::array::from_fn(|k| pos[k] - i0[k] as f32);
+    let mut out = [0.0; 3];
+    for (dz, wz) in [(0, 1.0 - f[2]), (1, f[2])] {
+        for (dy, wy) in [(0, 1.0 - f[1]), (1, f[1])] {
+            for (dx, wx) in [(0, 1.0 - f[0]), (1, f[0])] {
+                let v = at(i0[0] + dx, i0[1] + dy, i0[2] + dz);
+                for k in 0..3 {
+                    out[k] += v[k] * wx * wy * wz;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Selective Color on sRGB values (mirrors `adjust.wgsl`).
+fn selective_color(c: [f32; 3], relative: bool, ranges: &[[f32; 4]]) -> [f32; 3] {
+    let c = c.map(|v| v.clamp(0.0, 1.0));
+    let (mx, mn) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
+    let mid = c[0] + c[1] + c[2] - mx - mn;
+    let w = [
+        if c[0] >= mx { mx - mid } else { 0.0 },
+        if c[2] <= mn { mid - mn } else { 0.0 },
+        if c[1] >= mx && c[0] < mx { mx - mid } else { 0.0 },
+        if c[0] <= mn && c[2] > mn { mid - mn } else { 0.0 },
+        if c[2] >= mx && c[0] < mx && c[1] < mx { mx - mid } else { 0.0 },
+        if c[1] <= mn && c[0] > mn && c[2] > mn { mid - mn } else { 0.0 },
+        ((mn - 0.5) * 2.0).max(0.0),
+        (1.0 - ((mx - 0.5).abs() + (mn - 0.5).abs())).max(0.0),
+        ((0.5 - mx) * 2.0).max(0.0),
+    ];
+    let mut out = c;
+    for (r, &wr) in ranges.iter().zip(&w) {
+        if wr <= 0.0 {
+            continue;
+        }
+        for k in 0..3 {
+            // More of an ink (and of black) takes away its channel.
+            let a = r[k] + r[3];
+            let scale = if relative { 1.0 - c[k] } else { 1.0 };
+            out[k] -= wr * a * scale;
+        }
+    }
+    out.map(|v| v.clamp(0.0, 1.0))
+}
+
+/// Auto Tone / Auto Contrast / Auto Color from a histogram (bins on sRGB
+/// 0…255; 0 = all channels, 1–3 = red, green, blue): Levels that clip 0.1 %
+/// at each end – per channel, for all channels alike, or per channel with
+/// neutral midtones.
+pub fn auto_levels(bins: &[[f32; 256]; 4], mode: AutoMode) -> Adjustment {
+    let ends = |h: &[f32; 256]| {
+        let total: f32 = h.iter().sum();
+        let clip = total * 0.001;
+        let (mut acc, mut lo) = (0.0, 0);
+        for (i, v) in h.iter().enumerate() {
+            acc += v;
+            if acc > clip {
+                lo = i;
+                break;
+            }
+        }
+        let (mut acc, mut hi) = (0.0, 255);
+        for (i, v) in h.iter().enumerate().rev() {
+            acc += v;
+            if acc > clip {
+                hi = i;
+                break;
+            }
+        }
+        let mean = if total > 0.0 { h.iter().enumerate().map(|(i, v)| i as f32 * v).sum::<f32>() / total / 255.0 } else { 0.5 };
+        (lo as f32 / 255.0, (hi.max(lo + 1)) as f32 / 255.0, mean)
+    };
+    let lv = |(b, w, _): (f32, f32, f32)| Levels { in_black: b, in_white: w, ..Default::default() };
+    let identity = Levels::default();
+    match mode {
+        AutoMode::Contrast => {
+            let all = ends(&bins[0]);
+            Adjustment::Levels { master: lv(all), red: identity, green: identity, blue: identity }
+        }
+        AutoMode::Tone | AutoMode::Color => {
+            let ch: [(f32, f32, f32); 3] = [ends(&bins[1]), ends(&bins[2]), ends(&bins[3])];
+            let mut out = ch.map(lv);
+            if mode == AutoMode::Color {
+                // Midtones to the common grey: each channel's stretched mean to the average.
+                let stretched: Vec<f32> = ch.iter().map(|(b, w, m)| ((m - b) / (w - b).max(1e-4)).clamp(0.02, 0.98)).collect();
+                let target = stretched.iter().sum::<f32>() / 3.0;
+                for (l, t) in out.iter_mut().zip(&stretched) {
+                    l.gamma = (t.ln() / target.ln()).clamp(0.3, 3.0);
+                }
+            }
+            let [red, green, blue] = out;
+            Adjustment::Levels { master: identity, red, green, blue }
+        }
+    }
+}
+
+/// Image › Adjustments › Auto …
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoMode {
+    Tone,
+    Contrast,
+    Color,
+}
+
+impl Adjustment {
+    /// Reads files an adjustment refers to (a .cube `path`).
+    pub fn load_files(&mut self) -> Result<(), String> {
+        if let Adjustment::ColorLookup { name, size, data, path, .. } = self
+            && let Some(p) = path.take()
+        {
+            let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+            let (n, d) = parse_cube(&text)?;
+            (*size, *data) = (n, d);
+            if name.is_empty() {
+                *name = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            }
+        }
+        Ok(())
+    }
 }
 
 fn yes() -> bool {
@@ -369,6 +587,9 @@ pub const KIND_THRESHOLD: u32 = 5;
 pub const KIND_COLOR_BALANCE: u32 = 6;
 pub const KIND_CHANNEL_MIXER: u32 = 7;
 pub const KIND_GRADIENT_MAP: u32 = 8;
+pub const KIND_PHOTO_FILTER: u32 = 9;
+pub const KIND_SELECTIVE: u32 = 10;
+pub const KIND_LUT3D: u32 = 11;
 
 impl Adjustment {
     /// All kinds with neutral settings, for menus.
@@ -427,6 +648,9 @@ impl Adjustment {
                 gradient: crate::gradient::Gradient::two([0.0; 3], [1.0; 3]),
                 reverse: false,
             },
+            Adjustment::PhotoFilter { color: warming(), density: 25.0, preserve_luminosity: true },
+            Adjustment::SelectiveColor { ranges: [[0.0; 4]; 9], relative: true },
+            Adjustment::ColorLookup { name: String::new(), size: 0, data: Vec::new(), amount: 100.0, path: None },
             Adjustment::Invert,
             Adjustment::Posterize { levels: 4.0 },
             Adjustment::Threshold { level: 128.0 },
@@ -448,6 +672,9 @@ impl Adjustment {
             Adjustment::ColorBalance { .. } => crate::tr("Color Balance"),
             Adjustment::ChannelMixer { .. } => crate::tr("Channel Mixer"),
             Adjustment::GradientMap { .. } => crate::tr("Gradient Map"),
+            Adjustment::PhotoFilter { .. } => crate::tr("Photo Filter"),
+            Adjustment::SelectiveColor { .. } => crate::tr("Selective Color"),
+            Adjustment::ColorLookup { .. } => crate::tr("Color Lookup"),
         }
     }
 
@@ -466,6 +693,9 @@ impl Adjustment {
             Adjustment::ColorBalance { .. } => "color_balance",
             Adjustment::ChannelMixer { .. } => "channel_mixer",
             Adjustment::GradientMap { .. } => "gradient_map",
+            Adjustment::PhotoFilter { .. } => "photo_filter",
+            Adjustment::SelectiveColor { .. } => "selective_color",
+            Adjustment::ColorLookup { .. } => "color_lookup",
         }
     }
 
@@ -633,6 +863,28 @@ impl Adjustment {
                 }));
                 KIND_GRADIENT_MAP
             }
+            Adjustment::PhotoFilter { color, density, preserve_luminosity } => {
+                let f = color.map(|v| linear_to_srgb(v.clamp(0.0, 1.0)));
+                p[..4].copy_from_slice(&[f[0], f[1], f[2], density.clamp(0.0, 100.0) / 100.0]);
+                p[4] = *preserve_luminosity as u8 as f32;
+                KIND_PHOTO_FILTER
+            }
+            Adjustment::SelectiveColor { ranges, relative } => {
+                p[0] = *relative as u8 as f32;
+                extra.extend(ranges.iter().map(|r| r.map(|v| v.clamp(-100.0, 100.0) / 100.0)));
+                KIND_SELECTIVE
+            }
+            Adjustment::ColorLookup { size, data, amount, .. } => {
+                if *size < 2 || data.len() != (*size as usize).pow(3) {
+                    // No table loaded: no change.
+                    p[1] = 0.0;
+                } else {
+                    p[0] = *size as f32;
+                    p[1] = amount.clamp(0.0, 100.0) / 100.0;
+                    extra.extend(data.iter().map(|c| [c[0], c[1], c[2], 0.0]));
+                }
+                KIND_LUT3D
+            }
             _ => unreachable!("handled by channel_map"),
         };
         GpuAdjust::Shader(kind, p, extra)
@@ -679,6 +931,18 @@ impl Adjustment {
                     std::array::from_fn(|k| extra[i][k] * (1.0 - f) + extra[i + 1][k] * f)
                 }
                 KIND_VIBRANCE => vibrance(enc, p),
+                KIND_PHOTO_FILTER => photo_filter(enc, p),
+                KIND_SELECTIVE => selective_color(enc, p[0] > 0.5, &extra),
+                KIND_LUT3D => {
+                    if p[1] <= 0.0 {
+                        enc
+                    } else {
+                        let n = p[0] as u32;
+                        let data: Vec<[f32; 3]> = extra.iter().map(|v| [v[0], v[1], v[2]]).collect();
+                        let o = lut3d(n, &data, enc);
+                        std::array::from_fn(|k| enc[k] + (o[k] - enc[k]) * p[1])
+                    }
+                }
                 KIND_BW => {
                     let g = black_white(enc, p);
                     [g; 3]
@@ -688,6 +952,22 @@ impl Adjustment {
         };
         out.map(srgb_to_linear)
     }
+}
+
+/// Photo filter on sRGB values (mirrors `adjust.wgsl`): the colour
+/// multiplied in by the density, luminance kept if asked.
+fn photo_filter(c: [f32; 3], p: [f32; 8]) -> [f32; 3] {
+    let luma = |v: [f32; 3]| 0.3 * v[0] + 0.59 * v[1] + 0.11 * v[2];
+    let c = c.map(|v| v.clamp(0.0, 1.0));
+    let m: [f32; 3] = std::array::from_fn(|k| c[k] * p[k]);
+    let mut o: [f32; 3] = std::array::from_fn(|k| c[k] + (m[k] - c[k]) * p[3]);
+    if p[4] > 0.5 {
+        let (l0, l1) = (luma(c), luma(o));
+        if l1 > 1e-5 {
+            o = o.map(|v| v * l0 / l1);
+        }
+    }
+    o.map(|v| v.clamp(0.0, 1.0))
 }
 
 /// Color balance on sRGB values (mirrors `adjust.wgsl`; GIMP's weighting of
@@ -835,6 +1115,51 @@ mod tests {
     }
 
     #[test]
+    fn photo_filter_selective_color_lookup_and_auto() {
+        // Photo filter: warmer, luminance kept.
+        let pf = Adjustment::PhotoFilter { color: warming(), density: 50.0, preserve_luminosity: true };
+        let grey = [0.2f32; 3];
+        let o = pf.apply(grey);
+        assert!(o[0] > o[2] + 0.02, "warmer: {o:?}");
+        let l = |c: [f32; 3]| {
+            let e = c.map(linear_to_srgb);
+            0.3 * e[0] + 0.59 * e[1] + 0.11 * e[2]
+        };
+        assert!((l(o) - l(grey)).abs() < 0.01);
+        // Selective color: more cyan in the reds lowers red, leaves blue alone.
+        let mut ranges = [[0.0; 4]; 9];
+        ranges[0][0] = 50.0;
+        let sc = Adjustment::SelectiveColor { ranges, relative: false };
+        let red = [0.8, 0.05, 0.05];
+        let o = sc.apply(red);
+        assert!(o[0] < red[0] - 0.05 && (o[2] - red[2]).abs() < 1e-4, "{o:?}");
+        assert!(close(sc.apply([0.05, 0.05, 0.8]), [0.05, 0.05, 0.8], 1e-4), "blues untouched");
+        // An identity .cube changes nothing; one that swaps red and blue swaps them.
+        let mut cube = String::from("LUT_3D_SIZE 2\n");
+        for b in 0..2 {
+            for g in 0..2 {
+                for r in 0..2 {
+                    cube += &format!("{b} {g} {r}\n");
+                }
+            }
+        }
+        let (size, data) = parse_cube(&cube).unwrap();
+        let lut = Adjustment::ColorLookup { name: "swap".into(), size, data, amount: 100.0, path: None };
+        let o = lut.apply([0.6, 0.1, 0.02]);
+        assert!(close(o, [0.02, 0.1, 0.6], 0.01), "{o:?}");
+        assert!(parse_cube("LUT_3D_SIZE 2\n0 0 0\n").is_err());
+        // Auto contrast stretches a narrow histogram to the full range.
+        let mut bins = [[0.0f32; 256]; 4];
+        for b in bins.iter_mut() {
+            for v in &mut b[60..=180] {
+                *v = 1.0;
+            }
+        }
+        let Adjustment::Levels { master, .. } = auto_levels(&bins, AutoMode::Contrast) else { panic!() };
+        assert!((master.in_black - 60.0 / 255.0).abs() < 0.01 && (master.in_white - 180.0 / 255.0).abs() < 0.01, "{master:?}");
+    }
+
+    #[test]
     fn neutral_settings_change_nothing() {
         let c = [0.2, 0.5, 0.05];
         for a in Adjustment::defaults() {
@@ -843,6 +1168,7 @@ mod tests {
                 | Adjustment::Posterize { .. }
                 | Adjustment::Threshold { .. }
                 | Adjustment::GradientMap { .. }
+                | Adjustment::PhotoFilter { .. }
                 | Adjustment::BlackWhite { .. } => continue,
                 _ => {}
             }

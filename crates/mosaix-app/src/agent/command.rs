@@ -353,6 +353,10 @@ pub enum Command {
     LayerDistribute {
         direction: String,
     },
+    /// Image › Adjustments › Auto Tone / Contrast / Color.
+    AutoAdjust {
+        mode: String,
+    },
     /// Edit › Stroke: a line along the selection's edge.
     StrokeSelection {
         width: f64,
@@ -678,6 +682,7 @@ impl Command {
             Self::SelectLayerPixels { .. } => "select_layer_pixels",
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
+            Self::AutoAdjust { .. } => "auto_adjust",
             Self::LayerAlign { .. } => "layer_align",
             Self::SelectTransform { .. } => "select_transform",
             Self::HistorySource { .. } => "history_source",
@@ -1808,6 +1813,20 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             s.engine.distribute_layers(horizontal, tr("Distribute Layers")).map_err(engine_err)?;
             ok(s)
         }
+        Command::AutoAdjust { mode } => {
+            use mosaix_core::adjust::AutoMode as M;
+            let (m, label) = match mode.as_str() {
+                "tone" => (M::Tone, tr("Auto Tone")),
+                "contrast" => (M::Contrast, tr("Auto Contrast")),
+                "color" | "colour" => (M::Color, tr("Auto Color")),
+                m => bail!("unknown mode {m:?} (tone, contrast, color)"),
+            };
+            pixel_layer(s, None)?;
+            let a = s.engine.auto_adjust(m, label).map_err(engine_err)?;
+            let mut v = ok(s)?;
+            v.result["levels"] = serde_json::to_value(&a).unwrap_or_default();
+            Ok(v)
+        }
         Command::StrokeSelection { width, position, color, opacity } => {
             pixel_layer(s, None)?;
             use mosaix_core::style::StrokePosition as P;
@@ -1823,7 +1842,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 .map_err(engine_err)?;
             Ok(Output::json(json!({ "ok": true, "tiles": n })))
         }
-        Command::AdjustmentApply { layer, adjustment } => {
+        Command::AdjustmentApply { layer, mut adjustment } => {
+            adjustment.load_files().map_err(|e| anyhow::anyhow!(e))?;
             pixel_layer(s, layer)?;
             let label = tr!("Adjust: {name}", name = adjustment.name());
             s.engine.apply_adjustment(&adjustment, &label).map_err(engine_err)?;
@@ -2520,7 +2540,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             ok(s)
         }
-        Command::AdjustmentAdd { adjustment, name } => {
+        Command::AdjustmentAdd { mut adjustment, name } => {
+            adjustment.load_files().map_err(|e| anyhow::anyhow!(e))?;
             let label = tr!("Adjustment Layer {name}", name = adjustment.name());
             let id = s
                 .engine
@@ -2531,7 +2552,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             ok(s)
         }
-        Command::AdjustmentSet { layer, adjustment } => {
+        Command::AdjustmentSet { layer, mut adjustment } => {
+            adjustment.load_files().map_err(|e| anyhow::anyhow!(e))?;
             let id = target_layer(s, layer)?;
             let l = s.engine.doc().find(id).unwrap();
             let old = l

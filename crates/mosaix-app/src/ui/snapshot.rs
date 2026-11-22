@@ -223,6 +223,17 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         Ok("stroke") => state.open_stroke(),
         Ok("prefs") => state.open_prefs(),
         Ok("adjust") => state.open_adjust(mosaix_core::Adjustment::defaults().into_iter().find(|a| a.key() == "hue_saturation").unwrap()),
+        Ok(d) if d.starts_with("builtin:") => {
+            // A built-in filter by its kind ("reduce_noise", …).
+            if let Some(f) = mosaix_core::Filter::defaults().into_iter().find(|f| serde_json::to_value(f).ok().and_then(|v| v["kind"].as_str().map(|k| k == &d[8..])).unwrap_or(false)) {
+                state.open_filter(f);
+            }
+        }
+        Ok(d) if d.starts_with("adjust:") => {
+            if let Some(a) = mosaix_core::Adjustment::defaults().into_iter().find(|a| a.key() == &d[7..]) {
+                state.open_adjust(a);
+            }
+        }
         Ok("filter") => state.open_filter(mosaix_core::Filter::GaussianBlur { radius: 25.0 }),
         Ok(d) if d.starts_with("filter:") => {
             let lib = crate::app::filters::load_library(&crate::app::filters::filter_dir());

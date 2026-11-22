@@ -59,6 +59,7 @@ fn filters(mode: FileMode) -> Vec<FileFilter> {
         ],
         FileMode::ImportBrushes => vec![one(tr("Brushes and images"), FileMode::ImportBrushes.extensions())],
         FileMode::ImportPatterns => vec![one(tr("Patterns and images"), FileMode::ImportPatterns.extensions())],
+        FileMode::LoadLut => vec![one(tr("Color lookup tables"), &["cube"])],
         FileMode::PlaceEmbedded | FileMode::ReplaceContents | FileMode::OpenAsLayer => vec![one(tr("Images"), FileMode::PlaceEmbedded.extensions())],
     }
 }
@@ -134,7 +135,8 @@ async fn ask(req: &Request, surface: Option<WlSurface>) -> ashpd::Result<Option<
         | FileMode::ImportPatterns
         | FileMode::PlaceEmbedded
         | FileMode::ReplaceContents
-        | FileMode::OpenAsLayer => {
+        | FileMode::OpenAsLayer
+        | FileMode::LoadLut => {
             let mut r = SelectedFiles::open_file()
                 .identifier(parent)
                 .title(title)

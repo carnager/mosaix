@@ -25,6 +25,8 @@ pub enum FileMode {
     ReplaceContents,
     /// An image added as a pixel layer (File › Open as Layers).
     OpenAsLayer,
+    /// A .cube colour lookup table.
+    LoadLut,
 }
 
 impl FileMode {
@@ -38,6 +40,7 @@ impl FileMode {
             FileMode::PlaceEmbedded => tr("Place Embedded"),
             FileMode::ReplaceContents => tr("Replace Contents"),
             FileMode::OpenAsLayer => tr("Open as Layers"),
+            FileMode::LoadLut => tr("Load Color Lookup"),
         }
     }
 
@@ -51,6 +54,7 @@ impl FileMode {
             FileMode::ImportPatterns => &["pat", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
             FileMode::ExportAs => &["png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "psd", "psb"],
             FileMode::PlaceEmbedded | FileMode::ReplaceContents | FileMode::OpenAsLayer => &mosaix_core::raw::IMAGE_EXTENSIONS,
+            FileMode::LoadLut => &["cube"],
         }
     }
 }
@@ -121,6 +125,7 @@ pub fn action_for(mode: FileMode, mut path: PathBuf, export: ExportOptions) -> A
         FileMode::PlaceEmbedded => Action::PlaceEmbedded(path),
         FileMode::ReplaceContents => Action::ReplaceContents(path),
         FileMode::OpenAsLayer => Action::OpenAsLayer(path),
+        FileMode::LoadLut => Action::LoadLut(path),
         FileMode::SaveAs => {
             if path
                 .extension()

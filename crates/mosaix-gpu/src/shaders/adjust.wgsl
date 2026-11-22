@@ -236,6 +236,68 @@ fn adjust_rgb(lin: vec3<f32>, kind: u32, off: u32) -> vec3<f32> {
             let i = min(u32(floor(t)), u32(LUT_SIZE) - 2u);
             o = mix(adjust[off + 2u + i].xyz, adjust[off + 3u + i].xyz, t - f32(i));
         }
+        case 9u: {
+            // Photo filter (mirrors photo_filter in adjust.rs).
+            let c = clamp(e, vec3<f32>(0.0), vec3<f32>(1.0));
+            o = mix(c, c * a.xyz, a.w);
+            if b.x > 0.5 {
+                let l0 = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+                let l1 = 0.3 * o.r + 0.59 * o.g + 0.11 * o.b;
+                if l1 > 1e-5 {
+                    o = o * (l0 / l1);
+                }
+            }
+            o = clamp(o, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        case 10u: {
+            // Selective color (mirrors selective_color in adjust.rs).
+            let c = clamp(e, vec3<f32>(0.0), vec3<f32>(1.0));
+            let mx = max(c.r, max(c.g, c.b));
+            let mn = min(c.r, min(c.g, c.b));
+            let mid = c.r + c.g + c.b - mx - mn;
+            var w: array<f32, 9>;
+            w[0] = select(0.0, mx - mid, c.r >= mx);
+            w[1] = select(0.0, mid - mn, c.b <= mn);
+            w[2] = select(0.0, mx - mid, c.g >= mx && c.r < mx);
+            w[3] = select(0.0, mid - mn, c.r <= mn && c.b > mn);
+            w[4] = select(0.0, mx - mid, c.b >= mx && c.r < mx && c.g < mx);
+            w[5] = select(0.0, mid - mn, c.g <= mn && c.r > mn && c.b > mn);
+            w[6] = max((mn - 0.5) * 2.0, 0.0);
+            w[7] = max(1.0 - (abs(mx - 0.5) + abs(mn - 0.5)), 0.0);
+            w[8] = max((0.5 - mx) * 2.0, 0.0);
+            var scale = vec3<f32>(1.0);
+            if a.x > 0.5 {
+                scale = vec3<f32>(1.0) - c;
+            }
+            o = c;
+            for (var i = 0u; i < 9u; i++) {
+                if w[i] > 0.0 {
+                    let r = adjust[off + 2u + i];
+                    o -= w[i] * (r.xyz + vec3<f32>(r.w)) * scale;
+                }
+            }
+            o = clamp(o, vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        case 11u: {
+            // 3D colour lookup, trilinear (red fastest, like .cube files).
+            if a.y > 0.0 {
+                let n = u32(a.x);
+                let pos = clamp(e, vec3<f32>(0.0), vec3<f32>(1.0)) * f32(n - 1u);
+                let i0 = min(vec3<u32>(floor(pos)), vec3<u32>(n - 2u));
+                let f = pos - vec3<f32>(i0);
+                var acc = vec3<f32>(0.0);
+                for (var dz = 0u; dz < 2u; dz++) {
+                    for (var dy = 0u; dy < 2u; dy++) {
+                        for (var dx = 0u; dx < 2u; dx++) {
+                            let idx = ((i0.z + dz) * n + i0.y + dy) * n + i0.x + dx;
+                            let wv = mix(1.0 - f.x, f.x, f32(dx)) * mix(1.0 - f.y, f.y, f32(dy)) * mix(1.0 - f.z, f.z, f32(dz));
+                            acc += adjust[off + 2u + idx].xyz * wv;
+                        }
+                    }
+                }
+                o = mix(e, acc, a.y);
+            }
+        }
         default: {}
     }
     return vec3<f32>(srgb_to_linear(o.r), srgb_to_linear(o.g), srgb_to_linear(o.b));
