@@ -485,6 +485,101 @@ struct TextLayout {
     height: f32,
     /// Text on a path: per glyph (run, index) its transform onto the curve.
     on_path: Option<Vec<(usize, usize, Affine)>>,
+    /// Warp Text: the glyph outlines bent, in the layer's coordinates.
+    warped: Option<BezPath>,
+}
+
+/// Collects a glyph outline (font units scaled, y up) into a path at `at`.
+struct GlyphPen<'a> {
+    path: &'a mut BezPath,
+    at: (f64, f64),
+}
+
+impl GlyphPen<'_> {
+    fn p(&self, x: f32, y: f32) -> (f64, f64) {
+        (self.at.0 + x as f64, self.at.1 - y as f64)
+    }
+}
+
+impl skrifa::outline::OutlinePen for GlyphPen<'_> {
+    fn move_to(&mut self, x: f32, y: f32) {
+        let p = self.p(x, y);
+        self.path.move_to(p);
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        let p = self.p(x, y);
+        self.path.line_to(p);
+    }
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        let (c, p) = (self.p(cx, cy), self.p(x, y));
+        self.path.quad_to(c, p);
+    }
+    fn curve_to(&mut self, c0x: f32, c0y: f32, c1x: f32, c1y: f32, x: f32, y: f32) {
+        let (a, b, p) = (self.p(c0x, c0y), self.p(c1x, c1y), self.p(x, y));
+        self.path.curve_to(a, b, p);
+    }
+    fn close(&mut self) {
+        self.path.close_path();
+    }
+}
+
+/// Warp Text: every glyph and decoration as outlines, flattened and moved
+/// by the warp across the text box.
+fn warp_text(t: &TextSpec, runs: &[Run], decorations: &[[f64; 4]], width: f32, height: f32) -> Option<BezPath> {
+    use skrifa::MetadataProvider;
+    use skrifa::instance::{LocationRef, NormalizedCoord, Size};
+    use skrifa::outline::DrawSettings;
+    use vello_cpu::kurbo::PathEl;
+    let w = t.warp?;
+    let mut outline = BezPath::new();
+    for run in runs {
+        let Ok(font) = skrifa::FontRef::from_index(run.font.data.data(), run.font.index) else { continue };
+        let glyphs = font.outline_glyphs();
+        let coords: Vec<NormalizedCoord> = run.coords.iter().map(|c| NormalizedCoord::from_bits(*c)).collect();
+        for g in &run.glyphs {
+            let Some(og) = glyphs.get(skrifa::GlyphId::new(g.id)) else { continue };
+            let mut pen = GlyphPen { path: &mut outline, at: (t.x + g.x as f64, t.y + g.y as f64) };
+            let _ = og.draw(DrawSettings::unhinted(Size::new(run.size), LocationRef::new(&coords)), &mut pen);
+        }
+    }
+    for d in decorations {
+        outline.extend(Rect::new(t.x + d[0], t.y + d[1], t.x + d[2], t.y + d[3]).path_elements(0.1));
+    }
+    let half = [width as f64 * 0.5, height as f64 * 0.5];
+    let c = [t.x + half[0], t.y + half[1]];
+    let mut out = BezPath::new();
+    let map = |p: vello_cpu::kurbo::Point| {
+        let q = w.apply([p.x, p.y], c, half);
+        (q[0], q[1])
+    };
+    // Fine enough that the bent outline stays smooth at any size; straight
+    // edges are split too, or they would stay straight when bent.
+    let tol = (t.size as f64 / 400.0).clamp(0.02, 0.5);
+    let step = (t.size as f64 / 16.0).max(0.5);
+    let (mut last, mut start) = (vello_cpu::kurbo::Point::ZERO, vello_cpu::kurbo::Point::ZERO);
+    let line = |out: &mut BezPath, a: vello_cpu::kurbo::Point, b: vello_cpu::kurbo::Point| {
+        let n = ((b - a).hypot() / step).ceil().max(1.0) as usize;
+        for k in 1..=n {
+            out.line_to(map(a.lerp(b, k as f64 / n as f64)));
+        }
+    };
+    vello_cpu::kurbo::flatten(outline.iter(), tol, |el| match el {
+        PathEl::MoveTo(p) => {
+            out.move_to(map(p));
+            (last, start) = (p, p);
+        }
+        PathEl::LineTo(p) => {
+            line(&mut out, last, p);
+            last = p;
+        }
+        PathEl::ClosePath => {
+            line(&mut out, last, start);
+            out.close_path();
+            last = start;
+        }
+        _ => {}
+    });
+    Some(out)
 }
 
 /// A path flattened into points with cumulative lengths.
@@ -782,12 +877,15 @@ fn layout_text(t: &TextSpec) -> TextLayout {
         }
         Some(out)
     });
+    let width = t.width.unwrap_or(l.width()).max(l.width());
+    let warped = if on_path.is_none() { warp_text(t, &runs, &decorations, width, l.height()) } else { None };
     TextLayout {
         runs,
         decorations,
-        width: t.width.unwrap_or(l.width()).max(l.width()),
+        width,
         height: l.height(),
         on_path,
+        warped,
     }
 }
 
@@ -952,6 +1050,9 @@ fn local_bounds(p: &Prepared) -> Option<Rect> {
             if l.runs.is_empty() {
                 return None;
             }
+            if let Some(p) = &l.warped {
+                return Some(p.bounding_box().inflate(2.0, 2.0));
+            }
             if let Some(gs) = &l.on_path {
                 // Around every placed glyph.
                 let m = t.size as f64 * 1.2;
@@ -1103,6 +1204,10 @@ fn draw_part(ctx: &mut RenderContext, res: &mut Resources, p: &Prepared, part: P
     match p {
         Prepared::Text(t, l) => {
             ctx.set_paint(color(t.color));
+            if let Some(p) = &l.warped {
+                ctx.fill_path(p);
+                return;
+            }
             let base = *ctx.transform();
             if let Some(gs) = &l.on_path {
                 for (ri, gi, a) in gs {
@@ -1394,6 +1499,34 @@ mod tests {
             }
             None => [0.0; 4],
         }
+    }
+
+    #[test]
+    fn warped_text_bends() {
+        use mosaix_core::vector::{TextWarp, WarpStyle};
+        let mut t = TextSpec::new("MMMMMMMMMMMM", 100.0, 200.0, 60.0, [0.0, 0.0, 0.0, 1.0]);
+        let flat = VectorLayer::text(t.clone());
+        // Topmost ink in a column.
+        let top = |v: &VectorLayer, x: i64| {
+            let tiles = render(v);
+            (0..600).find(|&y| (x - 8..x + 8).any(|x| px(&tiles, x, y)[3] > 0.5))
+        };
+        let [x0, _, x1, _] = bounds(&flat).unwrap();
+        let (l, m, r) = ((x0 + 40.0) as i64, ((x0 + x1) / 2.0) as i64, (x1 - 40.0) as i64);
+        let (fl, fm) = (top(&flat, l).unwrap(), top(&flat, m).unwrap());
+        assert!((fl - fm).abs() <= 2, "flat text is level: {fl} {fm}");
+        t.warp = Some(TextWarp::new(WarpStyle::Arc));
+        let arc = VectorLayer::text(t.clone());
+        // The ends curl inwards: sample within the warped text.
+        let [ax0, _, ax1, _] = bounds(&arc).unwrap();
+        let (l, r) = ((ax0 + 30.0) as i64, (ax1 - 30.0) as i64);
+        let (al, am, ar) = (top(&arc, l).unwrap(), top(&arc, m).unwrap(), top(&arc, r).unwrap());
+        assert!(am + 20 < al && am + 20 < ar, "arc: middle higher: {al} {am} {ar}");
+        // Bend −50 %: the other way.
+        t.warp = Some(TextWarp { bend: -0.5, ..TextWarp::new(WarpStyle::Arc) });
+        let down = VectorLayer::text(t);
+        let (dl, dm) = (top(&down, l).unwrap(), top(&down, m).unwrap());
+        assert!(dm > dl + 20, "negative bend sags: {dl} {dm}");
     }
 
     #[test]

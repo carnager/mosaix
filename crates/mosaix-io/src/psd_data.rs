@@ -199,6 +199,13 @@ pub fn read_desc(b: &[u8]) -> Result<Desc> {
     R { b, p: 0 }.desc()
 }
 
+/// [`read_desc`] and the number of bytes it took.
+pub fn read_desc_len(b: &[u8]) -> Result<(Desc, usize)> {
+    let mut r = R { b, p: 0 };
+    let d = r.desc()?;
+    Ok((d, r.p))
+}
+
 // --- Writing descriptors --------------------------------------------------
 
 fn w_unicode(o: &mut Vec<u8>, s: &str) {

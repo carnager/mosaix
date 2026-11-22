@@ -753,6 +753,7 @@ fn psd_text_layer(
     spec.align = t.align;
     spec.line_height = t.line_height;
     spec.letter_spacing = t.tracking;
+    spec.warp = t.warp;
     spec.width = t.width;
     // Photoshop's transform is anchored at the first baseline (point text):
     // place the layout so that anchor lands on it.
@@ -761,8 +762,9 @@ fn psd_text_layer(
     spec.y = -ay;
     let mut v = VectorLayer::text(spec);
     v.transform = t.transform;
-    // Align the ink with Photoshop's pixels (baselines and metrics differ a little).
-    if rect.w > 0 && rect.h > 0 {
+    // Align the ink with Photoshop's pixels (baselines and metrics differ a
+    // little). Not for warped text: its pixels follow Photoshop's own warp.
+    if rect.w > 0 && rect.h > 0 && t.warp.is_none() {
         let tiles = mosaix_vector::render(&v);
         let ts = TILE_SIZE as i64;
         let (mut x0, mut y0) = (i64::MAX, i64::MAX);

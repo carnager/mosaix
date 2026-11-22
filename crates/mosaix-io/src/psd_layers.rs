@@ -597,7 +597,13 @@ pub(crate) fn read_text(data: &[u8]) -> Result<crate::psd::Text> {
     }
     b.u16().ok_or_else(bad)?; // text version (50)
     b.u32().ok_or_else(bad)?; // descriptor version (16)
-    let d = read_desc(b.rest())?;
+    let (d, used) = crate::psd_data::read_desc_len(b.rest())?;
+    // After the text descriptor: warp version (1), descriptor version, the warp.
+    let warp = b
+        .rest()
+        .get(used + 6..)
+        .and_then(|w| read_desc(w).ok())
+        .and_then(|w| read_warp(&w));
     let mut text = d.text("Txt ").unwrap_or("").to_string();
     let engine = d
         .raw("EngineData")
@@ -707,6 +713,43 @@ pub(crate) fn read_text(data: &[u8]) -> Result<crate::psd::Text> {
         width,
         transform: t,
         features,
+        warp,
+    })
+}
+
+/// Photoshop's warp style names, in [`WarpStyle::ALL`] order.
+const WARP_NAMES: [&str; 15] = [
+    "warpArc",
+    "warpArcLower",
+    "warpArcUpper",
+    "warpArch",
+    "warpBulge",
+    "warpShellLower",
+    "warpShellUpper",
+    "warpFlag",
+    "warpWave",
+    "warpFish",
+    "warpRise",
+    "warpFishEye",
+    "warpInflate",
+    "warpSqueeze",
+    "warpTwist",
+];
+
+fn read_warp(d: &Desc) -> Option<mosaix_core::vector::TextWarp> {
+    use mosaix_core::vector::{TextWarp, WarpStyle};
+    let style = match d.get("warpStyle") {
+        Some(Value::Enum(_, v)) => WARP_NAMES.iter().position(|n| n == v).map(|i| WarpStyle::ALL[i])?,
+        _ => return None,
+    };
+    let pct = |k: &str| (d.num(k).unwrap_or(0.0) / 100.0) as f32;
+    let vertical = matches!(d.get("warpRotate"), Some(Value::Enum(_, v)) if v == "Vrtc");
+    Some(TextWarp {
+        style,
+        bend: pct("warpValue"),
+        horizontal_distortion: pct("warpPerspective"),
+        vertical_distortion: pct("warpPerspectiveOther"),
+        vertical,
     })
 }
 
@@ -835,14 +878,21 @@ pub(crate) fn write_text(t: &crate::psd::Text, height: f32) -> Vec<u8> {
     w_desc(&mut o, &txt);
     o.extend(1u16.to_be_bytes());
     o.extend(16u32.to_be_bytes());
+    let (style, bend, h, v, vertical) = match t.warp {
+        Some(w) => {
+            let i = mosaix_core::vector::WarpStyle::ALL.iter().position(|s| *s == w.style).unwrap_or(0);
+            (WARP_NAMES[i], w.bend, w.horizontal_distortion, w.vertical_distortion, w.vertical)
+        }
+        None => ("warpNone", 0.0, 0.0, 0.0, false),
+    };
     let warp = Desc {
         class: "warp".into(),
         items: vec![
-            ("warpStyle".into(), en("warpStyle", "warpNone")),
-            ("warpValue".into(), Value::Double(0.0)),
-            ("warpPerspective".into(), Value::Double(0.0)),
-            ("warpPerspectiveOther".into(), Value::Double(0.0)),
-            ("warpRotate".into(), en("Ornt", "Hrzn")),
+            ("warpStyle".into(), en("warpStyle", style)),
+            ("warpValue".into(), Value::Double(bend as f64 * 100.0)),
+            ("warpPerspective".into(), Value::Double(h as f64 * 100.0)),
+            ("warpPerspectiveOther".into(), Value::Double(v as f64 * 100.0)),
+            ("warpRotate".into(), en("Ornt", if vertical { "Vrtc" } else { "Hrzn" })),
         ],
     };
     w_desc(&mut o, &warp);
@@ -994,6 +1044,13 @@ mod tests {
             width: Some(400.0),
             transform: [1.0, 0.0, 0.0, 1.0, 20.0, 60.0],
             features: [("dlig".to_string(), 1u16), ("liga".to_string(), 0)].into_iter().collect(),
+            warp: Some(mosaix_core::vector::TextWarp {
+                style: mosaix_core::vector::WarpStyle::Flag,
+                bend: -0.35,
+                horizontal_distortion: 0.1,
+                vertical_distortion: 0.0,
+                vertical: true,
+            }),
         };
         let b = write_text(&t, 200.0);
         let back = read_text(&b).unwrap();
@@ -1004,9 +1061,12 @@ mod tests {
         assert!(back.faux_italic && !back.faux_bold);
         assert!((back.color[1] - 0.5).abs() < 1e-6);
         assert_eq!(back.features, t.features);
-        // Point text with default leading.
-        let p = crate::psd::Text { width: None, line_height: 1.2, align: TextAlign::Left, features: Default::default(), ..t };
+        let w = back.warp.expect("warp read back");
+        assert_eq!((w.style, w.vertical), (mosaix_core::vector::WarpStyle::Flag, true));
+        assert!((w.bend + 0.35).abs() < 1e-5 && (w.horizontal_distortion - 0.1).abs() < 1e-5);
+        // Point text with default leading, no warp.
+        let p = crate::psd::Text { width: None, line_height: 1.2, align: TextAlign::Left, features: Default::default(), warp: None, ..t };
         let back = read_text(&write_text(&p, 0.0)).unwrap();
-        assert_eq!((back.width, back.line_height, back.align), (None, 1.2, TextAlign::Left));
+        assert_eq!((back.width, back.line_height, back.align, back.warp), (None, 1.2, TextAlign::Left, None));
     }
 }

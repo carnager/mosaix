@@ -111,8 +111,173 @@ pub struct TextSpec {
     /// Text on a path: one line set along the curve (x/y and width unused).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<TextPath>,
+    /// Warp Text: bends the whole text (stays editable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warp: Option<TextWarp>,
     pub x: f64,
     pub y: f64,
+}
+
+/// Photoshop's Warp Text styles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarpStyle {
+    Arc,
+    ArcLower,
+    ArcUpper,
+    Arch,
+    Bulge,
+    ShellLower,
+    ShellUpper,
+    Flag,
+    Wave,
+    Fish,
+    Rise,
+    Fisheye,
+    Inflate,
+    Squeeze,
+    Twist,
+}
+
+impl WarpStyle {
+    pub const ALL: [Self; 15] = [
+        Self::Arc,
+        Self::ArcLower,
+        Self::ArcUpper,
+        Self::Arch,
+        Self::Bulge,
+        Self::ShellLower,
+        Self::ShellUpper,
+        Self::Flag,
+        Self::Wave,
+        Self::Fish,
+        Self::Rise,
+        Self::Fisheye,
+        Self::Inflate,
+        Self::Squeeze,
+        Self::Twist,
+    ];
+
+    pub fn name(self) -> &'static str {
+        crate::tr(match self {
+            Self::Arc => "Arc",
+            Self::ArcLower => "Arc Lower",
+            Self::ArcUpper => "Arc Upper",
+            Self::Arch => "Arch",
+            Self::Bulge => "Bulge",
+            Self::ShellLower => "Shell Lower",
+            Self::ShellUpper => "Shell Upper",
+            Self::Flag => "Flag",
+            Self::Wave => "Wave",
+            Self::Fish => "Fish",
+            Self::Rise => "Rise",
+            Self::Fisheye => "Fisheye",
+            Self::Inflate => "Inflate",
+            Self::Squeeze => "Squeeze",
+            Self::Twist => "Twist",
+        })
+    }
+}
+
+/// Warp Text settings: style, bend and distortions in −1…1.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TextWarp {
+    pub style: WarpStyle,
+    #[serde(default = "half")]
+    pub bend: f32,
+    #[serde(default)]
+    pub horizontal_distortion: f32,
+    #[serde(default)]
+    pub vertical_distortion: f32,
+    /// Bends along the vertical axis instead of the horizontal one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vertical: bool,
+}
+
+fn half() -> f32 {
+    0.5
+}
+
+impl TextWarp {
+    pub fn new(style: WarpStyle) -> Self {
+        Self { style, bend: 0.5, horizontal_distortion: 0.0, vertical_distortion: 0.0, vertical: false }
+    }
+
+    /// Where `p` ends up, for a text box with centre `c` and half size `half`.
+    pub fn apply(&self, p: [f64; 2], c: [f64; 2], half: [f64; 2]) -> [f64; 2] {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        // Along the bending axis: x (u) across, y (v) the other way.
+        let (mut x, mut y, w, h) = if self.vertical {
+            (p[1] - c[1], p[0] - c[0], half[1].max(1e-6), half[0].max(1e-6))
+        } else {
+            (p[0] - c[0], p[1] - c[1], half[0].max(1e-6), half[1].max(1e-6))
+        };
+        let b = self.bend.clamp(-1.0, 1.0) as f64;
+        let (u, v) = (x / w, y / h);
+        // How far the edges rise, relative to the box.
+        let lift = b * (h * 1.5).max(w * 0.4);
+        let dome = 1.0 - u * u;
+        // Bent along a circle: the middle line keeps its length, letters fan out.
+        let arc = |x: f64, y: f64, b: f64| -> (f64, f64) {
+            let half_angle = b.abs() * std::f64::consts::FRAC_PI_2;
+            if half_angle < 1e-4 {
+                return (x, y);
+            }
+            let r0 = w / half_angle;
+            let phi = x / r0;
+            if b > 0.0 {
+                let r = r0 - y;
+                (r * phi.sin(), r0 - r * phi.cos())
+            } else {
+                let r = r0 + y;
+                (r * phi.sin(), -r0 + r * phi.cos())
+            }
+        };
+        let blend = |x: f64, y: f64, q: (f64, f64), t: f64| (x + (q.0 - x) * t, y + (q.1 - y) * t);
+        match self.style {
+            WarpStyle::Arc => (x, y) = arc(x, y, b),
+            WarpStyle::ArcLower => y += lift * dome * (v + 1.0) * 0.5,
+            WarpStyle::ArcUpper => y -= lift * dome * (1.0 - v) * 0.5,
+            WarpStyle::Arch => y -= lift * dome,
+            WarpStyle::Bulge => y *= 1.0 + 1.2 * b * dome,
+            WarpStyle::ShellLower => (x, y) = blend(x, y, arc(x, y, -b * 0.5), ((v + 1.0) * 0.5).clamp(0.0, 1.0)),
+            WarpStyle::ShellUpper => (x, y) = blend(x, y, arc(x, y, b * 0.5), ((1.0 - v) * 0.5).clamp(0.0, 1.0)),
+            WarpStyle::Flag => y -= b * h * 0.8 * (PI * u).sin(),
+            WarpStyle::Wave => y -= b * h * 0.8 * (PI * u + FRAC_PI_2 * v).sin(),
+            // A fat body, a narrow waist and a flaring tail on the right.
+            WarpStyle::Fish => y *= 1.0 + b * (dome * dome + 3.0 * (u - 0.6).max(0.0).powi(2) - 0.2),
+            WarpStyle::Rise => y -= b * h * (FRAC_PI_2 * u).sin(),
+            WarpStyle::Fisheye => {
+                let k = 1.0 + b * 0.8 * (1.0 - (u * u + v * v) * 0.5).max(0.0);
+                x *= k;
+                y *= k;
+            }
+            WarpStyle::Inflate => {
+                x *= 1.0 + b * 0.4 * (1.0 - v * v);
+                y *= 1.0 + b * 0.6 * dome;
+            }
+            WarpStyle::Squeeze => {
+                y *= 1.0 - b * 0.6 * dome;
+                x *= 1.0 + b * 0.2 * (1.0 - v * v);
+            }
+            // A ribbon turned about the horizontal axis.
+            WarpStyle::Twist => {
+                let a = b * PI * 0.6 * u;
+                x += y * a.sin() * 0.25;
+                y *= a.cos();
+            }
+        }
+        // Distortions: perspective-like, one side larger than the other.
+        let hd = self.horizontal_distortion.clamp(-1.0, 1.0) as f64;
+        let vd = self.vertical_distortion.clamp(-1.0, 1.0) as f64;
+        y *= 1.0 + hd * 0.6 * (x / w).clamp(-1.5, 1.5);
+        x *= 1.0 + vd * 0.6 * (y / h).clamp(-1.5, 1.5);
+        if self.vertical {
+            [c[0] + y, c[1] + x]
+        } else {
+            [c[0] + x, c[1] + y]
+        }
+    }
 }
 
 /// The curve a text runs along (in the text layer's own coordinates).
@@ -187,6 +352,7 @@ impl TextSpec {
             width: None,
             features: Default::default(),
             path: None,
+            warp: None,
             x,
             y,
         }

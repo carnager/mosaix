@@ -3769,3 +3769,57 @@ msgstr "Schnittmenge von Formbereichen"
 
 msgid "Exclude Overlapping Shapes"
 msgstr "Überlappende Formen ausschließen"
+
+msgid "Bend the whole text (stays editable)"
+msgstr "Den ganzen Text verbiegen (bleibt bearbeitbar)"
+
+msgid "Bend"
+msgstr "Biegung"
+
+msgid "Horizontal Distortion"
+msgstr "Horizontale Verzerrung"
+
+msgid "Vertical Distortion"
+msgstr "Vertikale Verzerrung"
+
+msgid "Arc"
+msgstr "Bogen"
+
+msgid "Arc Lower"
+msgstr "Bogen unten"
+
+msgid "Arc Upper"
+msgstr "Bogen oben"
+
+msgid "Arch"
+msgstr "Torbogen"
+
+msgid "Bulge"
+msgstr "Wulst"
+
+msgid "Shell Lower"
+msgstr "Muschel unten"
+
+msgid "Shell Upper"
+msgstr "Muschel oben"
+
+msgid "Flag"
+msgstr "Flagge"
+
+msgid "Fish"
+msgstr "Fisch"
+
+msgid "Rise"
+msgstr "Ansteigend"
+
+msgid "Fisheye"
+msgstr "Fischauge"
+
+msgid "Inflate"
+msgstr "Aufblasen"
+
+msgid "Squeeze"
+msgstr "Stauchen"
+
+msgid "Twist"
+msgstr "Verbiegen"

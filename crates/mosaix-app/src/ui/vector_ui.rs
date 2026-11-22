@@ -429,6 +429,62 @@ pub fn editor(
                         });
                         ui.end_row();
                     }
+                    // Warp Text (not for text on a path).
+                    if s.path.is_none() {
+                        use mosaix_core::vector::{TextWarp, WarpStyle};
+                        ui.label(tr("Warp"));
+                        let current = s.warp.map_or(tr("None"), |w| w.style.name());
+                        egui::ComboBox::from_id_salt("text warp")
+                            .selected_text(current)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(s.warp.is_none(), tr("None")).clicked() && s.warp.is_some() {
+                                    s.warp = None;
+                                    t.changed = true;
+                                    t.done = true;
+                                }
+                                for st in WarpStyle::ALL {
+                                    if ui.selectable_label(s.warp.is_some_and(|w| w.style == st), st.name()).clicked() {
+                                        // Keep the amounts when switching styles.
+                                        s.warp = Some(match s.warp {
+                                            Some(w) => TextWarp { style: st, ..w },
+                                            None => TextWarp::new(st),
+                                        });
+                                        t.changed = true;
+                                        t.done = true;
+                                    }
+                                }
+                            })
+                            .response
+                            .on_hover_text(tr("Bend the whole text (stays editable)"));
+                        ui.end_row();
+                        if let Some(w) = &mut s.warp {
+                            ui.label("");
+                            ui.horizontal(|ui| {
+                                for (vertical, label) in [(false, tr("Horizontal")), (true, tr("Vertical"))] {
+                                    if ui.selectable_label(w.vertical == vertical, label).clicked() && w.vertical != vertical {
+                                        w.vertical = vertical;
+                                        t.changed = true;
+                                        t.done = true;
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                            for (label, val) in [
+                                (tr("Bend"), &mut w.bend),
+                                (tr("Horizontal Distortion"), &mut w.horizontal_distortion),
+                                (tr("Vertical Distortion"), &mut w.vertical_distortion),
+                            ] {
+                                ui.label(label);
+                                let mut pct = *val * 100.0;
+                                let r = ui.add(egui::Slider::new(&mut pct, -100.0..=100.0).suffix(" %").max_decimals(0));
+                                if r.changed() {
+                                    *val = pct / 100.0;
+                                }
+                                t.add(&r);
+                                ui.end_row();
+                            }
+                        }
+                    }
                     ui.label(tr("Paragraph"));
                     ui.horizontal(|ui| {
                         let mut wrap = s.width.is_some();

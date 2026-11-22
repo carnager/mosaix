@@ -82,7 +82,7 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `liquify` | Liquify with strokes (push along a path, reconstruct, twirl_cw/ccw, pucker, bloat), one undo step |
 | `paint_stroke` with `clone_offset` | Clone stamp: copies pixel-exact from point + offset; `clone_all_layers` uses the whole image as the source; with `heal: true` the Healing Brush (color/brightness matched to the surroundings); `spot_heal: true` Spot Healing without a source |
 | `content_aware_fill` | Fills the selection content-aware (removing objects); `all_layers` learns from the whole image |
-| `text_add`, `shape_add`, `vector_set`, `layer_rasterize` | Create text (also `underline`, `strikethrough`) and shape layers (rect, ellipse, polygon, path, line, regular_polygon, star, ready-made shapes), change them through their description (JSON merge, colors also as `#rrggbb`) and turn them into pixels |
+| `text_add`, `shape_add`, `vector_set`, `layer_rasterize` | Create text (also `underline`, `strikethrough`) and shape layers (rect, ellipse, polygon, path, line, regular_polygon, star, ready-made shapes), change them through their description (JSON merge, colors also as `#rrggbb`; `{"warp": {"style": "arc", "bend": 0.5}}` warps text, 15 styles) and turn them into pixels |
 | `path_smooth` | Smooth all nodes of a pen path or polygon (the curve runs through the nodes; a polygon becomes a path), or with `smooth: false` make them corners |
 | `layer_effects_set` | Set layer styles: stroke, drop shadow, inner/outer shadow and glow, color overlay, bevel & emboss |
 | `histogram` | Histogram per channel with mean, median, 1st/99th percentile and clipping, optionally of what lies below a layer |

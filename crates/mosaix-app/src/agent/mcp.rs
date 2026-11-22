@@ -797,6 +797,8 @@ pub fn tools() -> Vec<Value> {
              (e.g. {\"text\": \"New\", \"size\": 64, \"color\": \"#ff0000\"} or {\"fill\": \"#00ff00\", \"radius\": 12}; \
              \"transform\": [a, b, c, d, e, f] places it). Text on a path: {\"path\": {\"nodes\": [{\"p\": [x, y], \"h_in\": [x, y], \"h_out\": [x, y]}, …], \
              \"closed\": false, \"offset\": 0.0–1.0, \"flip\": false}} (null removes it). OpenType: {\"features\": {\"smcp\": 1, \"liga\": 0}}. \
+             Warp Text: {\"warp\": {\"style\": \"arc\"|\"arc_lower\"|\"arc_upper\"|\"arch\"|\"bulge\"|\"shell_lower\"|\"shell_upper\"|\"flag\"|\"wave\"|\"fish\"|\"rise\"|\"fisheye\"|\"inflate\"|\"squeeze\"|\"twist\", \
+             \"bend\": −1…1, \"horizontal_distortion\": −1…1, \"vertical_distortion\": −1…1, \"vertical\": false}} (null removes it). \
              Shape paint: {\"paint\": {\"type\": \"gradient\", \"gradient\": {\"colors\": [{\"at\": 0, \"color\": [r, g, b]}, …], \"alphas\": [{\"at\": 0, \"opacity\": 1}, …], \
              \"smoothness\": 0–1}, \"style\": \"linear|radial|angle|reflected|diamond\", \"angle\": 90, \"scale\": 1, \"reverse\": false}} or \
              {\"paint\": {\"type\": \"pattern\", \"pattern\": \"Dots\", \"scale\": 1, \"offset\": [x, y]}}; null: the plain fill colour.",

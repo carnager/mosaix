@@ -112,6 +112,8 @@ pub struct Text {
     pub transform: [f64; 6],
     /// OpenType features Photoshop switched (tag → value).
     pub features: std::collections::BTreeMap<String, u16>,
+    /// Warp Text.
+    pub warp: Option<mosaix_core::vector::TextWarp>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

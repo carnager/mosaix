@@ -566,6 +566,7 @@ fn psd_texts<T: Clone>(doc: &Document<T>) -> HashMap<LayerId, (mosaix_io::psd::T
             width: t.width,
             transform: [m[0], m[1], m[2], m[3], m[0] * ax + m[2] * ay + m[4], m[1] * ax + m[3] * ay + m[5]],
             features: t.features.clone(),
+            warp: t.warp.filter(|_| t.path.is_none()),
         };
         out.insert(l.id, (text, mosaix_vector::text_box_size(t).1));
     });
