@@ -6,6 +6,8 @@
 enable wgpu_binding_array;
 
 const NONE: u32 = 0xffffffffu;
+// `primed` of a clone job that paints back a history state (replace, not over).
+const HISTORY: u32 = 100u;
 
 struct Job {
     center: vec2<f32>,
@@ -200,5 +202,9 @@ fn fs_clone(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         return old;
     }
     let src = canvas_texel(job, vec2<i32>(job.origin) + p + job.offset);
+    // History Brush: towards the old state, transparency included.
+    if job.primed == HISTORY {
+        return mix(old, src, cov);
+    }
     return src * cov + old * (1.0 - src.a * cov);
 }

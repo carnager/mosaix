@@ -31,6 +31,7 @@ pub enum Special {
     Revert,
     /// Edit › Stroke.
     StrokeSelection,
+    TransformSelection,
     ConvertToSmart,
     NewGuide,
     GridSettings,
@@ -179,12 +180,13 @@ const SELECT: &[Item] = &[
     S(Special::LayerPixels, G(g::SELECTION_FOREGROUND)),
     Sep,
     S(Special::Modify, G(g::SELECTION_PLUS)),
+    S(Special::TransformSelection, G(g::BOUNDING_BOX)),
     C("Feather …", G(g::SELECTION_FOREGROUND)),
     Sep,
     S(Special::SaveSelection, G(g::FLOPPY_DISK)),
     S(Special::LoadSelection, G(g::FOLDER_OPEN)),
     Sep,
-    C("Quick Mask View", G(g::MASK_HAPPY)),
+    C("Quick Mask", G(g::MASK_HAPPY)),
 ];
 
 const TOOL: &[Item] = &[
@@ -195,11 +197,12 @@ const TOOL: &[Item] = &[
     C("Object Selection (AI)", T(ToolId::ObjectSelect)),
     C("Crop Tool", T(ToolId::Crop)),
     Sep,
-    C("Brush", T(ToolId::Brush)),
+    C("Brush / Pencil", T(ToolId::Brush)),
     C("Smudge", T(ToolId::Smudge)),
     C("Dodge / Burn / Sponge", T(ToolId::Dodge)),
     C("Eraser", T(ToolId::Eraser)),
     C("Clone Stamp", T(ToolId::Clone)),
+    C("History Brush", T(ToolId::HistoryBrush)),
     C("Spot Healing / Remove (AI) / Healing Brush", T(ToolId::SpotHeal)),
     C("Gradient / Paint Bucket", T(ToolId::Gradient)),
     Sep,

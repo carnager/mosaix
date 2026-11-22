@@ -8,6 +8,10 @@ fn coverage(local: vec2<f32>, radius: f32, hardness: f32, shape: vec3<f32>, tip:
     // Into the tip's frame: undo the rotation, stretch the short axis.
     let q = vec2<f32>(shape.x * local.x + shape.y * local.y, -shape.y * local.x + shape.x * local.y);
     let e = vec2<f32>(q.x, q.y / max(shape.z, 0.05));
+    // Pencil (hardness above 1): a pixel is in or out, no anti-aliasing.
+    if hardness > 1.5 {
+        return select(0.0, 1.0, length(e) <= max(radius, 0.5));
+    }
     if tip == 0u {
         let dist = length(e);
         // Falloff width as a fraction of the radius; at least one pixel for anti-aliasing.

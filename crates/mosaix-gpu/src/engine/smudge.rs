@@ -388,6 +388,15 @@ impl Engine {
                 .iter()
                 .filter_map(|(c, t)| t.as_ref().map(|t| (*c, t.slot().packed())))
                 .collect()
+        } else if self.stroke.as_ref().is_some_and(|s| s.params.history) {
+            // History Brush: the layer as it was at the source state.
+            let stroke = self.stroke.as_ref().unwrap();
+            let p = self.history_source();
+            self.history
+                .state(p, &self.doc)
+                .and_then(|d| d.find(stroke.layer))
+                .and_then(|l| l.tiles())
+                .map_or(Vec::new(), |t| t.iter().map(|(c, t)| (*c, t.slot().packed())).collect())
         } else {
             let stroke = self.stroke.as_ref().unwrap();
             self.doc
@@ -398,6 +407,7 @@ impl Engine {
                 })
         };
         let stroke = self.stroke.as_ref().unwrap();
+        let history = stroke.params.history;
         let (gx0, gy0) = (
             source.iter().map(|e| e.0.x).min().unwrap_or(0),
             source.iter().map(|e| e.0.y).min().unwrap_or(0),
@@ -434,7 +444,7 @@ impl Engine {
                     shape: [d.angle.cos(), d.angle.sin(), d.roundness, 0.0],
                     tip: d.tip,
                     rate: d.color[3],
-                    primed: tone.map_or(1, |t| t.kind as u32),
+                    primed: if history { 100 } else { tone.map_or(1, |t| t.kind as u32) },
                     stroke_slot: tile.slot().packed(),
                     origin: [tx as f32, ty as f32],
                     grid_x0: gx0,

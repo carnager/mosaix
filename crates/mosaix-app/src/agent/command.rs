@@ -186,6 +186,13 @@ pub enum Command {
         color: Option<ColorSpec>,
         size: f32,
         hardness: Option<f32>,
+        /// Pencil: hard pixels without anti-aliasing.
+        #[serde(default)]
+        pencil: bool,
+        /// History Brush: paint the layer back as it was at the history
+        /// source (see `history_source`).
+        #[serde(default)]
+        history: bool,
         opacity: Option<f32>,
         flow: Option<f32>,
         spacing: Option<f32>,
@@ -316,6 +323,19 @@ pub enum Command {
         contiguous: Option<bool>,
         antialias: Option<bool>,
         sample: Option<String>,
+    },
+    /// Which history state the History Brush paints from (0 = as opened).
+    HistorySource {
+        position: usize,
+    },
+    /// Select › Transform Selection: the outline only, about its centre.
+    SelectTransform {
+        scale: Option<f64>,
+        scale_x: Option<f64>,
+        scale_y: Option<f64>,
+        rotate: Option<f64>,
+        dx: Option<f64>,
+        dy: Option<f64>,
     },
     /// Align the selected layers (or one layer to the canvas).
     LayerAlign {
@@ -651,6 +671,8 @@ impl Command {
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
             Self::LayerAlign { .. } => "layer_align",
+            Self::SelectTransform { .. } => "select_transform",
+            Self::HistorySource { .. } => "history_source",
             Self::LayerDistribute { .. } => "layer_distribute",
             Self::AdjustmentApply { .. } => "adjustment_apply",
             Self::SmartReplace { .. } => "smart_replace",
@@ -1295,6 +1317,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             color,
             size,
             hardness,
+            pencil,
+            history,
             opacity,
             flow,
             spacing,
@@ -1358,7 +1382,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             let settings = BrushSettings {
                 size,
-                hardness: hardness.unwrap_or(0.8).clamp(0.0, 1.0),
+                hardness: if pencil { 2.0 } else { hardness.unwrap_or(0.8).clamp(0.0, 1.0) },
                 flow: flow.unwrap_or(1.0).clamp(0.0, 1.0),
                 opacity: (opacity.unwrap_or(1.0) * alpha).clamp(0.0, 1.0),
                 spacing: spacing.unwrap_or(0.1).clamp(0.01, 10.0),
@@ -1406,6 +1430,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                             heal: true,
                             spot: true,
                         })
+                    } else if history {
+                        Some(mosaix_gpu::CloneSource { offset: [0, 0], all_layers: false, heal: false, spot: false })
                     } else {
                         clone_offset.map(|offset| mosaix_gpu::CloneSource {
                             offset,
@@ -1416,6 +1442,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                     },
                     tone,
                     keep_alpha: false,
+                    history,
                 })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);
@@ -1707,6 +1734,24 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 )
                 .map_err(engine_err)?;
             Ok(Output::json(json!({ "ok": true, "tiles": n })))
+        }
+        Command::HistorySource { position } => {
+            let (labels, _) = s.engine.history_labels();
+            ensure!(position <= labels.len(), "no history position {position}; there are {} steps", labels.len());
+            s.engine.set_history_source(position);
+            ok(s)
+        }
+        Command::SelectTransform { scale, scale_x, scale_y, rotate, dx, dy } => {
+            let b = s.engine.selection_bounds().context("nothing is selected")?;
+            let pivot = DVec2::new((b.0 + b.2) as f64 * 0.5, (b.1 + b.3) as f64 * 0.5);
+            let k = DVec2::new(scale_x.or(scale).unwrap_or(1.0), scale_y.or(scale).unwrap_or(1.0));
+            ensure!(k.x != 0.0 && k.y != 0.0, "scale must not be 0");
+            let fwd = DAffine2::from_translation(DVec2::new(dx.unwrap_or(0.0), dy.unwrap_or(0.0)) + pivot)
+                * DAffine2::from_angle(rotate.unwrap_or(0.0).to_radians())
+                * DAffine2::from_scale(k)
+                * DAffine2::from_translation(-pivot);
+            s.engine.transform_selection(fwd, tr("Transform Selection")).map_err(engine_err)?;
+            ok(s)
         }
         Command::LayerAlign { edge } => {
             use mosaix_gpu::Align as A;

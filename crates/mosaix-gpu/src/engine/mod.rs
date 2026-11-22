@@ -145,6 +145,9 @@ pub struct StrokeParams {
     /// Set by the engine from the layer's lock: the stroke keeps each
     /// pixel's opacity.
     pub keep_alpha: bool,
+    /// History Brush (with `clone` at offset 0): paints the layer back as it
+    /// was at the history source state.
+    pub history: bool,
 }
 
 /// The retouching brushes that change the pixels under them. One stroke
@@ -198,6 +201,7 @@ impl Default for StrokeParams {
             clone: None,
             tone: None,
             keep_alpha: false,
+            history: false,
         }
     }
 }
@@ -246,6 +250,8 @@ pub struct Engine {
     recheck: HashSet<TileCoord>,
     recheck_all: bool,
     stroke: Option<ActiveStroke>,
+    /// History Brush source (history position).
+    history_source: usize,
     preview: Option<transform::Preview>,
     merge_key: Option<String>,
     thumbs: Option<thumbs::Thumbs>,
@@ -1021,6 +1027,7 @@ impl Engine {
             recheck: HashSet::new(),
             recheck_all: true,
             stroke: None,
+            history_source: 0,
             preview: None,
             merge_key: None,
             thumbs: None,
@@ -1183,6 +1190,15 @@ impl Engine {
                 .collect(),
             self.history.undo_len(),
         )
+    }
+
+    /// The history position the History Brush paints from (0 = as opened).
+    pub fn history_source(&self) -> usize {
+        self.history_source.min(self.history.undo_len() + self.history.redo_len())
+    }
+
+    pub fn set_history_source(&mut self, p: usize) {
+        self.history_source = p;
     }
 
     /// Undoes/redoes until exactly `done` steps are applied.
@@ -1410,6 +1426,13 @@ impl Engine {
         }
         if params.target == StrokeTarget::Pixels && l.lock.pixels {
             return Err(mosaix_core::tr("the layer's pixels are locked"));
+        }
+        if params.history {
+            let p = self.history_source();
+            let had = self.history.state(p, &self.doc).and_then(|d| d.find(l.id)).is_some_and(|o| o.is_pixels());
+            if !had {
+                return Err(mosaix_core::tr("this layer did not exist (as pixels) at the history source – pick another state in the History panel"));
+            }
         }
         let mut params = params;
         params.keep_alpha = params.target == StrokeTarget::Pixels && l.lock.transparency;

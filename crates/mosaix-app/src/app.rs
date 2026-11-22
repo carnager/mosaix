@@ -192,12 +192,18 @@ enum Tool {
     PolyLasso,
     /// Click to fill the region of similar colour.
     Bucket,
+    /// Hard pixels, no anti-aliasing.
+    Pencil,
+    /// Paints the layer back as it was at a history state.
+    HistoryBrush,
 }
 
 impl Tool {
     fn name(self) -> &'static str {
         match self {
             Tool::Brush => tr("Brush"),
+            Tool::Pencil => tr("Pencil"),
+            Tool::HistoryBrush => tr("History Brush"),
             Tool::Eraser => tr("Eraser"),
             Tool::Marquee { ellipse: false } => tr("Rectangular Marquee"),
             Tool::Marquee { ellipse: true } => tr("Elliptical Marquee"),
@@ -232,6 +238,8 @@ impl Tool {
         matches!(
             self,
             Tool::Brush
+                | Tool::Pencil
+                | Tool::HistoryBrush
                 | Tool::Eraser
                 | Tool::Smudge
                 | Tool::Clone
@@ -375,6 +383,8 @@ const AUTOSAVE_EVERY: Duration = Duration::from_secs(180);
 enum BoxKind {
     Transform,
     Crop,
+    /// Select › Transform Selection: the outline only.
+    Selection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -453,6 +463,8 @@ pub struct App {
     /// Paint into the active layer's mask instead of its pixels.
     mask_edit: bool,
     quick_mask: bool,
+    /// Quick Mask in progress: its layer and the layer that was active.
+    qm: Option<(LayerId, LayerId)>,
     /// Free transform (Strg+T) or crop box being edited.
     boxed: Option<(BoxKind, BoxEdit)>,
     /// Move tool: bounds of what moves, for snapping (document px).
@@ -723,6 +735,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         tool: Tool::Brush,
         mask_edit: false,
         quick_mask: false,
+        qm: None,
         boxed: None,
         move_bounds: None,
         nav: None,
@@ -1184,6 +1197,8 @@ impl App {
                 Drag::None
             }
             Tool::Brush
+            | Tool::Pencil
+            | Tool::HistoryBrush
             | Tool::Eraser
             | Tool::Smudge
             | Tool::Clone
@@ -1265,6 +1280,45 @@ impl App {
                 Drag::None
             }
         }
+    }
+
+    /// Painting on the Quick Mask layer right now.
+    fn in_quick_mask(&self) -> bool {
+        self.qm.is_some_and(|(l, _)| self.session.as_ref().is_some_and(|s| s.engine.doc().active == l))
+    }
+
+    /// Q: the selection becomes a red layer to paint on, and back.
+    fn toggle_quick_mask(&mut self) {
+        // Undone or deleted meanwhile: nothing to turn back.
+        if let Some((l, _)) = self.qm
+            && self.session.as_ref().is_none_or(|s| s.engine.doc().find(l).is_none())
+        {
+            self.qm = None;
+        }
+        match self.qm.take() {
+            None => {
+                let back = self.session.as_ref().map_or(0, |s| s.engine.doc().active);
+                if let Some(e) = self.engine() {
+                    match e.enter_quick_mask(tr("Quick Mask")) {
+                        Ok(l) => {
+                            self.qm = Some((l, back));
+                            self.touch();
+                            tracing::info!("{}", tr("Quick Mask: paint with black to mask (deselect), with white or the eraser to reveal; Q turns it back into a selection"));
+                        }
+                        Err(err) => tracing::warn!("{}", tr(err)),
+                    }
+                }
+            }
+            Some((l, back)) => {
+                if let Some(e) = self.engine()
+                    && let Err(err) = e.leave_quick_mask(l, back, tr("Quick Mask"))
+                {
+                    tracing::warn!("{}", tr(err));
+                }
+                self.touch();
+            }
+        }
+        self.needs_redraw = true;
     }
 
     /// A selection exists and the active layer has pixels (Ctrl+J copies it then).
@@ -1502,6 +1556,23 @@ impl App {
     }
 
     /// Enter: applies the transform or crop.
+    /// Select › Transform Selection: a box around the selection.
+    fn begin_select_transform(&mut self) {
+        if self.boxed.is_some() {
+            return;
+        }
+        let Some(b) = self.engine().and_then(|e| e.selection_bounds()) else {
+            return tracing::warn!("{}", tr("Nothing is selected"));
+        };
+        let (x0, y0, x1, y1) = b;
+        self.boxed = Some((
+            BoxKind::Selection,
+            BoxEdit::new(DVec2::new(x0 as f64, y0 as f64), DVec2::new(x1 as f64, y1 as f64), true),
+        ));
+        tracing::info!("{}", tr("Transform Selection: the outline only. Enter applies, Esc cancels."));
+        self.needs_redraw = true;
+    }
+
     fn commit_box(&mut self) {
         let Some((kind, b)) = self.boxed.take() else {
             return;
@@ -1510,6 +1581,10 @@ impl App {
             BoxKind::Transform => {
                 let fwd = b.delta();
                 self.engine_op(|e| e.transform_active(fwd, Interp::Bicubic, tr("Free Transform")));
+            }
+            BoxKind::Selection => {
+                let fwd = b.delta();
+                self.engine_op(|e| e.transform_selection(fwd, tr("Transform Selection")));
             }
             BoxKind::Crop => {
                 let (x, y, w, h) = b.rect();
@@ -1658,6 +1733,18 @@ impl App {
     fn begin_stroke(&mut self, pos: DVec2, pressure: f32, eraser: bool) -> Drag {
         let mut settings = self.brush;
         settings.eraser = eraser;
+        if self.in_quick_mask() && !matches!(self.tool, Tool::Smudge | Tool::Clone | Tool::Heal | Tool::SpotHeal | Tool::Remove) {
+            // Quick Mask: dark paints the mask (red), light takes it away.
+            let [r, g, b] = settings.color;
+            if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 {
+                settings.eraser = true;
+            }
+            settings.color = [1.0, 0.0, 0.0];
+        }
+        if self.tool == Tool::Pencil {
+            // Round, hard, every pixel: hardness above 1 switches off anti-aliasing.
+            (settings.hardness, settings.tip, settings.spacing, settings.smudge) = (2.0, 0, settings.spacing.min(0.1), None);
+        }
         if self.tool == Tool::Smudge && !eraser {
             settings.smudge = Some(self.smudge_strength);
         }
@@ -1688,6 +1775,12 @@ impl App {
                 spot: false,
             }
         });
+        let history = self.tool == Tool::HistoryBrush && !eraser;
+        let clone = if history {
+            Some(mosaix_gpu::CloneSource { offset: [0, 0], all_layers: false, heal: false, spot: false })
+        } else {
+            clone
+        };
         let clone = clone.or_else(|| {
             spot.then_some(mosaix_gpu::CloneSource {
                 offset: [0, 0],
@@ -1738,6 +1831,7 @@ impl App {
             clone,
             tone,
             keep_alpha: false,
+            history,
         };
         if let Err(e) = engine.begin_stroke(params) {
             tracing::warn!("{}", tr!("Cannot paint: {error}", error = e));
@@ -2398,6 +2492,8 @@ impl App {
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
             "poly_lasso" => Tool::PolyLasso,
+            "pencil" => Tool::Pencil,
+            "history_brush" => Tool::HistoryBrush,
             "bucket" => Tool::Bucket,
             "wand" => Tool::Wand,
             "object_select" => Tool::ObjectSelect,
@@ -2426,6 +2522,8 @@ impl App {
         self.settings.smudge_strength = self.smudge_strength;
         self.settings.tool = match self.tool {
             Tool::Brush => "brush",
+            Tool::Pencil => "pencil",
+            Tool::HistoryBrush => "history_brush",
             Tool::Eraser => "eraser",
             Tool::Smudge => "smudge",
             Tool::Clone => "clone",
@@ -2654,6 +2752,9 @@ impl App {
     /// Finishes what is in progress on the canvas before the document changes.
     fn end_transient(&mut self) {
         self.ui_state.close_doc_dialogs();
+        if self.qm.is_some() {
+            self.toggle_quick_mask();
+        }
         self.end_text_edit();
         self.pen_finish(false);
         if self.boxed.is_some() {
@@ -3539,6 +3640,16 @@ impl App {
                 })
             }
             Keysym::Delete => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_delete" })),
+            Keysym::BackSpace if alt && self.in_quick_mask() => {
+                // Quick Mask: dark fills mask (red), light ones reveal.
+                let [r, g, b] = self.brush.color;
+                let opacity = self.brush.opacity;
+                if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5 {
+                    self.engine_op(|e| e.clear_selected(tr("Fill")).map(|_| ()))
+                } else {
+                    self.engine_op(|e| e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], opacity, tr("Fill")).map(|_| ()))
+                }
+            }
             Keysym::BackSpace if alt => {
                 let [r, g, b] = self.brush.color;
                 let (target, opacity) = (self.stroke_target(), self.brush.opacity);
@@ -3663,7 +3774,7 @@ impl App {
             Keysym::bracketleft => self.brush.size = (self.brush.size / 1.2).max(1.0),
             Keysym::bracketright => self.brush.size = (self.brush.size * 1.2).min(5000.0),
             Keysym::e => self.set_tool(Tool::Eraser),
-            Keysym::b => self.set_tool(Tool::Brush),
+            Keysym::b => self.set_tool(if self.tool == Tool::Brush { Tool::Pencil } else { Tool::Brush }),
             Keysym::B => {
                 // Built-in tips, then the custom ones.
                 let builtin = mosaix_core::TIP_NAMES.len() as u32;
@@ -3721,10 +3832,8 @@ impl App {
                 _ => Tool::Gradient { radial: false },
             }),
             Keysym::v => self.set_tool(Tool::Move),
-            Keysym::q => {
-                self.quick_mask = !self.quick_mask;
-                tracing::info!("{}", if self.quick_mask { tr("Quick Mask view on") } else { tr("Quick Mask view off") });
-            }
+            Keysym::y if !ctrl && !alt => self.set_tool(Tool::HistoryBrush),
+            Keysym::q => self.toggle_quick_mask(),
             Keysym::x => self.swap_colors(),
             Keysym::d if !ctrl => self.reset_colors(),
             Keysym::i if !ctrl => self.set_tool(Tool::Eyedropper),
@@ -3830,7 +3939,7 @@ impl App {
             self.pen_finish(false);
         }
         match self.boxed.as_ref().map(|b| b.0) {
-            Some(BoxKind::Transform) => self.commit_box(),
+            Some(BoxKind::Transform | BoxKind::Selection) => self.commit_box(),
             Some(BoxKind::Crop) if tool != Tool::Crop => self.boxed = None,
             _ => {}
         }
@@ -4099,6 +4208,8 @@ impl App {
     fn tool_id(&self) -> ToolId {
         match self.tool {
             Tool::Brush => ToolId::Brush,
+            Tool::Pencil => ToolId::Pencil,
+            Tool::HistoryBrush => ToolId::HistoryBrush,
             Tool::Eraser => ToolId::Eraser,
             Tool::Smudge => ToolId::Smudge,
             Tool::Clone => ToolId::Clone,
@@ -4149,6 +4260,7 @@ impl App {
                 })
                 .collect(),
             tab: self.active_tab(),
+            history_source: e.history_source(),
             zoom: self.view.zoom / self.scale,
             rotation_deg: self.view.rotation.to_degrees(),
             // Not while dragging: the panels need not be rebuilt for every stroke frame.
@@ -4195,11 +4307,12 @@ impl App {
             eyedrop_all: self.eyedrop_all,
             boxed: self.boxed.as_ref().map(|(k, _)| match k {
                 BoxKind::Transform => tr("Free Transform"),
+                BoxKind::Selection => tr("Transform Selection"),
                 BoxKind::Crop => tr("Crop"),
             }),
             mask_edit: self.mask_edit,
             box_angle: match &self.boxed {
-                Some((BoxKind::Transform, b)) if b.quad.is_none() => Some(b.angle()),
+                Some((BoxKind::Transform | BoxKind::Selection, b)) if b.quad.is_none() => Some(b.angle()),
                 _ => None,
             },
             box_geom: self.boxed.as_ref().and_then(|(_, b)| {
@@ -4207,7 +4320,7 @@ impl App {
                 Some([c.x, c.y, s.x, s.y].map(|v| (v * 10.0).round() / 10.0))
             }),
             box_mode: match &self.boxed {
-                Some((BoxKind::Transform, b)) => Some(b.mode),
+                Some((BoxKind::Transform | BoxKind::Selection, b)) => Some(b.mode),
                 _ => None,
             },
             liquify: e.liquify_active().then_some((
@@ -4292,7 +4405,7 @@ impl App {
         for a in actions {
             self.needs_redraw = true;
             // Like Photoshop: changing anything else confirms an open free transform.
-            if matches!(self.boxed, Some((BoxKind::Transform, _)))
+            if matches!(self.boxed, Some((BoxKind::Transform | BoxKind::Selection, _)))
                 && !matches!(
                     a,
                     Action::CommitBox
@@ -4410,6 +4523,8 @@ impl App {
                 Action::Tool(t) => {
                     let tool = match t {
                         ToolId::Brush => Tool::Brush,
+                        ToolId::Pencil => Tool::Pencil,
+                        ToolId::HistoryBrush => Tool::HistoryBrush,
                         ToolId::Eraser => Tool::Eraser,
                         ToolId::Smudge => Tool::Smudge,
                         ToolId::Clone => Tool::Clone,
@@ -4581,6 +4696,12 @@ impl App {
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
                 Action::SwitchTab(i) => self.switch_tab(i),
+                Action::HistorySource(p) => {
+                    if let Some(e) = self.engine() {
+                        e.set_history_source(p);
+                    }
+                }
+                Action::TransformSelection => self.begin_select_transform(),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::SetLock(l) => self.run_agent_cmd(serde_json::json!({
                     "cmd": "layer_set", "lock": { "transparency": l.transparency, "pixels": l.pixels, "position": l.position },
@@ -4740,7 +4861,7 @@ impl App {
                     }
                 }
                 Action::BoxRotate(deg) => {
-                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                    if let Some((BoxKind::Transform | BoxKind::Selection, b)) = &mut self.boxed {
                         b.rotate_by(deg);
                     }
                 }
@@ -4751,7 +4872,7 @@ impl App {
                     }
                 }
                 Action::BoxAngle(deg) => {
-                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                    if let Some((BoxKind::Transform | BoxKind::Selection, b)) = &mut self.boxed {
                         let now = b.angle();
                         b.rotate_by(if b.fwd.matrix2.determinant() < 0.0 {
                             now - deg
@@ -4761,7 +4882,7 @@ impl App {
                     }
                 }
                 Action::BoxFlip { x, y } => {
-                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                    if let Some((BoxKind::Transform | BoxKind::Selection, b)) = &mut self.boxed {
                         b.flip(x, y);
                     }
                 }
@@ -4769,7 +4890,7 @@ impl App {
                     if self.boxed.is_none() {
                         self.begin_transform();
                     }
-                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                    if let Some((BoxKind::Transform | BoxKind::Selection, b)) = &mut self.boxed {
                         b.mode = mode;
                     }
                 }

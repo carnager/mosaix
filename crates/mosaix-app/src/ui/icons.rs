@@ -123,6 +123,24 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 mid,
             ));
         }
+        Icon::Tool(ToolId::HistoryBrush) => {
+            // A brush with a turning-back arrow.
+            p.line_segment([at(17.0, 7.0), at(10.0, 14.0)], Stroke::new(2.0 * u, color));
+            p.add(Shape::convex_polygon(vec![at(9.0, 13.0), at(11.0, 15.0), at(8.0, 18.0), at(5.0, 18.5), at(6.0, 16.0)], color, Stroke::NONE));
+            let mut arc = Vec::new();
+            for i in 0..=10 {
+                let t = std::f32::consts::PI * (0.6 + 1.2 * i as f32 / 10.0);
+                arc.push(at(7.0 + 4.5 * t.cos(), 7.0 + 4.5 * t.sin()));
+            }
+            p.add(Shape::line(arc, thin));
+            p.add(Shape::convex_polygon(vec![at(2.0, 6.0), at(5.0, 7.5), at(1.5, 9.5)], color, Stroke::NONE));
+        }
+        Icon::Tool(ToolId::Pencil) => {
+            // A pencil: long body, sharpened tip.
+            p.add(Shape::convex_polygon(vec![at(14.5, 2.5), at(17.5, 5.5), at(7.0, 16.0), at(4.0, 13.0)], Color32::TRANSPARENT, mid));
+            p.add(Shape::convex_polygon(vec![at(4.0, 13.0), at(7.0, 16.0), at(2.5, 17.5)], color, Stroke::NONE));
+            p.line_segment([at(12.5, 4.5), at(15.5, 7.5)], thin);
+        }
         Icon::Tool(ToolId::Brush) => {
             p.line_segment([at(17.0, 3.0), at(9.0, 11.0)], Stroke::new(2.2 * u, color));
             p.add(Shape::convex_polygon(

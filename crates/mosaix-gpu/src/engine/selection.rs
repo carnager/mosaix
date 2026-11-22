@@ -225,6 +225,122 @@ impl Engine {
         self.set_selection(Some(result), label)
     }
 
+    /// Pixel bounds of the selected area (x0, y0, x1, y1; exclusive).
+    pub fn selection_bounds(&self) -> Option<(i64, i64, i64, i64)> {
+        let sel = self.selection_cpu()?;
+        let ts = mosaix_core::TILE_SIZE as i64;
+        if sel.default > 0 {
+            return Some((0, 0, self.doc.width as i64, self.doc.height as i64));
+        }
+        let mut b = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+        for (c, m) in &sel.tiles {
+            let (ox, oy) = (c.x as i64 * ts, c.y as i64 * ts);
+            match m {
+                MaskData::Solid(0) => {}
+                MaskData::Solid(_) => b = (b.0.min(ox), b.1.min(oy), b.2.max(ox + ts), b.3.max(oy + ts)),
+                MaskData::Pixels(p) => {
+                    for (i, &v) in p.iter().enumerate() {
+                        if v > 0 {
+                            let (x, y) = (ox + i as i64 % ts, oy + i as i64 / ts);
+                            b = (b.0.min(x), b.1.min(y), b.2.max(x + 1), b.3.max(y + 1));
+                        }
+                    }
+                }
+            }
+        }
+        (b.0 < b.2).then_some(b)
+    }
+
+    /// Select › Transform Selection: moves, scales, rotates or distorts the
+    /// selection outline only (the pixels stay). One undo step.
+    pub fn transform_selection(&mut self, fwd: impl Into<super::Warp>, label: &str) -> Result<(), &'static str> {
+        if self.stroke.is_some() {
+            return Err(mosaix_core::tr("not possible during a brush stroke"));
+        }
+        let sel = self.doc.selection.clone().ok_or(mosaix_core::tr("nothing is selected"))?;
+        let new = self.warp_mask(&sel, fwd.into(), super::Interp::Bilinear)?;
+        self.edit(label, |d| {
+            d.selection = Some(new);
+            true
+        });
+        Ok(())
+    }
+
+    /// Quick Mask: the selection becomes a red, half-opaque layer on top
+    /// (red = not selected) that every painting tool can edit; the
+    /// selection itself is lifted so painting is not clipped. Returns the
+    /// layer; [`Self::leave_quick_mask`] turns it back into a selection.
+    pub fn enter_quick_mask(&mut self, label: &str) -> Result<LayerId, &'static str> {
+        if self.stroke.is_some() {
+            return Err(mosaix_core::tr("not possible during a brush stroke"));
+        }
+        let sel = self.selection_cpu();
+        let ts = mosaix_core::TILE_SIZE as usize;
+        let mut tiles = HashMap::new();
+        for c in self.all_doc_coords() {
+            let m = sel.as_ref().map(|s| s.tiles.get(&c).cloned().unwrap_or(MaskData::Solid(s.default)));
+            if matches!(m, Some(MaskData::Solid(255))) {
+                continue;
+            }
+            let mut px = vec![half::f16::ZERO; ts * ts * 4];
+            for i in 0..ts * ts {
+                let v = m.as_ref().map_or(0, |m| m.get(i % ts, i / ts));
+                let a = 1.0 - v as f32 / 255.0;
+                px[i * 4] = half::f16::from_f32(a);
+                px[i * 4 + 3] = half::f16::from_f32(a);
+            }
+            if sel.is_some() {
+                tiles.insert(c, self.write_new_tile(&px).ok_or(mosaix_core::tr("GPU memory full"))?);
+            }
+        }
+        let coords: Vec<TileCoord> = tiles.keys().copied().collect();
+        let mut id = 0;
+        self.edit(label, |d| {
+            id = d.alloc_id();
+            let mut l = mosaix_core::Layer::pixels(id, mosaix_core::tr("Quick Mask"));
+            l.content = mosaix_core::Content::Pixels(Arc::new(tiles));
+            l.opacity = 0.5;
+            d.layers.push(l);
+            d.active = id;
+            d.picked.clear();
+            d.selection = None;
+            true
+        });
+        self.dirty.extend(coords);
+        Ok(id)
+    }
+
+    /// Ends Quick Mask: the layer's opacity (inverted) becomes the
+    /// selection, the layer goes away and `back` is active again.
+    pub fn leave_quick_mask(&mut self, layer: LayerId, back: LayerId, label: &str) -> Result<(), &'static str> {
+        if self.stroke.is_some() {
+            return Err(mosaix_core::tr("not possible during a brush stroke"));
+        }
+        let Some(tiles) = self.doc.find(layer).and_then(|l| l.tiles()).cloned() else {
+            return Err(mosaix_core::tr("the Quick Mask layer is gone"));
+        };
+        let coords: Vec<TileCoord> = tiles.keys().copied().filter(|c| self.in_document(*c)).collect();
+        let data = self.read_layer_tiles(&coords.iter().map(|c| tiles[c].clone()).collect::<Vec<_>>());
+        // Where the layer has no tile nothing is masked: selected.
+        let mut sel = CpuMask::filled(255);
+        for (c, px) in coords.into_iter().zip(data) {
+            let v: Vec<u8> = px.chunks(4).map(|p| ((1.0 - p[3].to_f32().clamp(0.0, 1.0)) * 255.0).round() as u8).collect();
+            sel.tiles.insert(c, MaskData::Pixels(v).normalized());
+        }
+        sel.compact();
+        let everything = sel.tiles.is_empty() && sel.default == 255;
+        let gpu = if everything { None } else { Some(self.mask_to_gpu(sel).ok_or(mosaix_core::tr("GPU memory full"))?) };
+        self.edit(label, |d| {
+            d.remove_layers(&[layer]);
+            if d.find(back).is_some() {
+                d.active = back;
+            }
+            d.selection = gpu;
+            true
+        });
+        Ok(())
+    }
+
     pub fn delete_channel(&mut self, index: usize, label: &str) -> Result<(), &'static str> {
         if index >= self.doc.channels.len() {
             return Err(mosaix_core::tr("no such channel"));

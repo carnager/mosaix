@@ -721,7 +721,7 @@ impl Engine {
     }
 
     /// A mask (e.g. a saved selection) resampled by `fwd`.
-    fn warp_mask(&mut self, m: &Mask<Tile>, fwd: Warp, interp: Interp) -> Result<Mask<Tile>, &'static str> {
+    pub(super) fn warp_mask(&mut self, m: &Mask<Tile>, fwd: Warp, interp: Interp) -> Result<Mask<Tile>, &'static str> {
         let inv = fwd.inverse();
         let mut grids = Grids::default();
         let g = grids.mask(m);

@@ -320,6 +320,8 @@ pub fn tools() -> Vec<Value> {
                 "color": color_param("Brush colour (required unless eraser)"),
                 "size": { "type": "number", "exclusiveMinimum": 0, "maximum": 5000, "description": "Diameter in px at pressure 1" },
                 "hardness": { "type": "number", "minimum": 0, "maximum": 1, "description": "Edge hardness (default 0.8)" },
+                "pencil": { "type": "boolean", "description": "Pencil: every pixel fully painted or not at all (no anti-aliasing), for pixel art and crisp mask edges" },
+                "history": { "type": "boolean", "description": "History Brush: paint the active layer back as it was at the history source state (history_source)" },
                 "opacity": { "type": "number", "minimum": 0, "maximum": 1, "description": "Maximum coverage of the stroke (default 1)" },
                 "flow": { "type": "number", "minimum": 0, "maximum": 1, "description": "Coverage per dab, builds up to opacity (default 1)" },
                 "spacing": { "type": "number", "minimum": 0.01, "description": "Dab spacing as fraction of diameter (default 0.1)" },
@@ -497,6 +499,20 @@ pub fn tools() -> Vec<Value> {
                 "contiguous": { "type": "boolean" }, "antialias": { "type": "boolean" }, "sample": { "type": "string", "enum": ["layer", "image"] }
             }),
             &["x", "y", "color"],
+            false,
+        ),
+        tool(
+            "history_source",
+            "Set the state the History Brush (paint_stroke history: true) paints from: 0 = as opened, n = after the n-th step of document_info's history.",
+            json!({ "position": { "type": "integer", "minimum": 0 } }),
+            &["position"],
+            false,
+        ),
+        tool(
+            "select_transform",
+            "Transform the selection outline only (not the pixels), about its centre: scale (or scale_x/scale_y), rotate (degrees, clockwise), then move by dx/dy.",
+            json!({ "scale": { "type": "number" }, "scale_x": { "type": "number" }, "scale_y": { "type": "number" }, "rotate": { "type": "number" }, "dx": { "type": "number" }, "dy": { "type": "number" } }),
+            &[],
             false,
         ),
         tool(
@@ -1112,7 +1128,7 @@ mod tests {
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
             "generative_fill": {"prompt": "a bench"},
-            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "layer_distribute": {"direction": "vertical"}
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "layer_distribute": {"direction": "vertical"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

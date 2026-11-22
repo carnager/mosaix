@@ -71,6 +71,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         modified: true,
         tabs: std::env::var("MOSAIX_SNAPSHOT_TABS").map(|v| v.split(',').map(|n| (n.to_string(), n.starts_with('*'))).collect()).unwrap_or_default(),
         tab: 0,
+        history_source: 0,
         zoom: view.zoom,
         rotation_deg: 0.0,
         cursor_doc: Some((dw as f64 * 0.4, dh as f64 * 0.3)),

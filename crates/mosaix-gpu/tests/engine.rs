@@ -3545,3 +3545,109 @@ fn align_and_distribute_layers() {
     assert_eq!((ca, cc), (5, 205), "the outer ones stay");
     assert!((cb - 105).abs() <= 1, "the middle one is centred: {cb}");
 }
+
+#[test]
+fn pencil_has_no_soft_pixels() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    e.begin_stroke(StrokeParams::default()).unwrap();
+    let mut b = red_brush();
+    (b.size, b.hardness, b.spacing) = (7.0, 2.0, 0.1);
+    let mut s = Stroke::new(b);
+    let mut dabs = Vec::new();
+    for i in 0..60 {
+        let t = i as f64;
+        dabs.extend(s.add(InputSample { pos: DVec2::new(40.0 + t * 2.0, 50.0 + t * 1.3), pressure: 1.0 }));
+    }
+    e.stroke_dabs(&dabs);
+    e.end_stroke("Pencil");
+    e.flush();
+    let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    let mut painted = 0;
+    for y in 0..TS {
+        for x in 0..TS {
+            let a = px(&t, x, y)[3];
+            assert!(a == 0.0 || (a - 1.0).abs() < 1e-3, "soft pixel {a} at ({x},{y})");
+            painted += (a > 0.5) as usize;
+        }
+    }
+    assert!(painted > 300, "{painted}");
+}
+
+#[test]
+fn quick_mask_round_trip_and_painting() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let back = e.doc().active;
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 128.0, h: 256.0 }, CombineOp::Replace, "Sel").unwrap();
+    let qm = e.enter_quick_mask("Quick Mask").unwrap();
+    assert!(!e.has_selection(), "painting is not clipped");
+    assert_eq!(e.doc().active, qm);
+    let t = e.read_layer_tile(qm, TileCoord::new(0, 0)).unwrap();
+    assert_eq!(px(&t, 10, 10)[3], 0.0, "selected: no red");
+    assert_eq!(px(&t, 200, 10)[3], 1.0, "not selected: red");
+    // Erase the red in the top right corner: that becomes selected too.
+    e.select_shape(&Shape::Rect { x: 128.0, y: 0.0, w: 128.0, h: 64.0 }, CombineOp::Replace, "Sel").unwrap();
+    e.clear_selected("Clear").unwrap();
+    e.deselect("None").unwrap();
+    e.leave_quick_mask(qm, back, "Quick Mask").unwrap();
+    assert_eq!(e.doc().active, back);
+    assert!(e.doc().find(qm).is_none(), "the helper layer is gone");
+    let sel = e.selection_cpu().unwrap();
+    let at = |x: usize, y: usize| sel.tiles.get(&TileCoord::new(0, 0)).map_or(sel.default, |m| m.get(x, y));
+    assert_eq!(at(10, 200), 255);
+    assert_eq!(at(200, 20), 255, "erased mask = selected");
+    assert_eq!(at(200, 200), 0);
+}
+
+#[test]
+fn transform_selection_moves_only_the_outline() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    let layer = e.doc().active;
+    e.upload_tile(layer, TileCoord::new(0, 0), &pattern(1, true));
+    let before = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    e.select_shape(&Shape::Rect { x: 100.0, y: 100.0, w: 50.0, h: 50.0 }, CombineOp::Replace, "Sel").unwrap();
+    assert_eq!(e.selection_bounds(), Some((100, 100, 150, 150)));
+    let c = DVec2::splat(125.0);
+    let fwd = glam::DAffine2::from_translation(c + DVec2::new(100.0, 0.0)) * glam::DAffine2::from_scale(DVec2::splat(2.0)) * glam::DAffine2::from_translation(-c);
+    e.transform_selection(fwd, "Transform Selection").unwrap();
+    let b = e.selection_bounds().unwrap();
+    assert!((b.0 - 175).abs() <= 1 && (b.2 - 275).abs() <= 1 && (b.1 - 75).abs() <= 1 && (b.3 - 175).abs() <= 1, "{b:?}");
+    assert_eq!(e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap(), before, "pixels untouched");
+    e.undo();
+    assert_eq!(e.selection_bounds(), Some((100, 100, 150, 150)));
+}
+
+#[test]
+fn history_brush_paints_back_an_earlier_state() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Red").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 1.0, 1.0], 1.0, "Blue").unwrap();
+    // Source: after "Red" (position 1).
+    e.set_history_source(1);
+    let params = StrokeParams {
+        clone: Some(mosaix_gpu::CloneSource { offset: [0, 0], all_layers: false, heal: false, spot: false }),
+        history: true,
+        ..Default::default()
+    };
+    stroke(&mut e, DVec2::new(100.0, 100.0), params);
+    let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    let p = px(&t, 100, 100);
+    assert!(p[0] > 0.99 && p[2] < 0.01, "red again under the brush: {p:?}");
+    assert!(px(&t, 200, 200)[2] > 0.99, "blue elsewhere");
+    // A state where the layer had no pixels at all is refused when the
+    // layer did not exist; position 0 (empty layer) paints transparency.
+    e.set_history_source(0);
+    let params = StrokeParams {
+        clone: Some(mosaix_gpu::CloneSource { offset: [0, 0], all_layers: false, heal: false, spot: false }),
+        history: true,
+        ..Default::default()
+    };
+    stroke(&mut e, DVec2::new(200.0, 200.0), params);
+    let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&t, 200, 200)[3] < 0.01, "back to the empty layer");
+}

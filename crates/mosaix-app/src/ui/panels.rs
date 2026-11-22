@@ -9,7 +9,7 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 27] = [
+pub const TOOLS: [(ToolId, &str, &str); 29] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
@@ -19,6 +19,7 @@ pub const TOOLS: [(ToolId, &str, &str); 27] = [
     (ToolId::ObjectSelect, "Object Selection (AI)", "Shift+W"),
     (ToolId::Crop, "Crop", "C"),
     (ToolId::Brush, "Brush", "B"),
+    (ToolId::Pencil, "Pencil", "B"),
     (ToolId::Smudge, "Smudge", "U"),
     (ToolId::Blur, "Blur", ""),
     (ToolId::Sharpen, "Sharpen", ""),
@@ -26,6 +27,7 @@ pub const TOOLS: [(ToolId, &str, &str); 27] = [
     (ToolId::Burn, "Burn", "O"),
     (ToolId::Sponge, "Sponge", "O"),
     (ToolId::Clone, "Clone Stamp", "S"),
+    (ToolId::HistoryBrush, "History Brush", "Y"),
     (ToolId::SpotHeal, "Spot Healing Brush", "J"),
     (ToolId::Remove, "Remove (AI)", "J"),
     (ToolId::Heal, "Healing Brush", "J"),
@@ -68,6 +70,8 @@ pub enum ToolId {
     Sharpen,
     PolyLasso,
     Bucket,
+    Pencil,
+    HistoryBrush,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -170,6 +174,8 @@ pub struct Model {
     /// Open documents (name, unsaved changes) in tab order and the active
     /// one; empty with a single document.
     pub tabs: Vec<(String, bool)>,
+    /// History position the History Brush paints from.
+    pub history_source: usize,
     pub tab: usize,
     pub zoom: f64,
     pub rotation_deg: f64,
@@ -277,6 +283,8 @@ pub enum Action {
     BucketAll(bool),
     /// The active layer's locks.
     SetLock(mosaix_core::doc::Lock),
+    /// The History Brush's source state.
+    HistorySource(usize),
     /// Document tabs: make one active, close one.
     SwitchTab(usize),
     CloseTab(usize),
@@ -288,6 +296,7 @@ pub enum Action {
     OpenAsLayer(std::path::PathBuf),
     /// File › Revert.
     Revert,
+    TransformSelection,
     /// Edit › Stroke with the foreground colour.
     StrokeSelection { width: f64, position: &'static str, opacity: f32 },
     ReplaceContents(std::path::PathBuf),
@@ -1178,6 +1187,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         ("View", S::Messages, "Messages", None),
         ("Select", S::LayerPixels, "Layer Pixels", None),
         ("File", S::OpenAsLayers, "Open as Layers …", None),
+        ("Select", S::TransformSelection, "Transform Selection", sel(m.has_selection)),
         ("File", S::Revert, "Revert", (!m.can_revert).then_some(tr("The image was never saved"))),
         ("Edit", S::StrokeSelection, "Stroke …", (!(m.has_selection && pixel_active(m))).then_some(tr("Needs a selection on a pixel layer"))),
     ] {
@@ -1237,6 +1247,7 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
             S::Messages => st.show_log = true,
             S::OpenAsLayers => out.push(Action::PickFile(super::files::FileMode::OpenAsLayer)),
             S::Revert => out.push(Action::Revert),
+            S::TransformSelection => out.push(Action::TransformSelection),
             S::StrokeSelection => st.dialog = Some(Dialog::Stroke { width: 4.0, position: "outside", opacity: 1.0 }),
             S::LayerPixels => out.push(Action::SelectLayerPixels { layer: m.active, mode: "replace" }),
             _ => {}
@@ -1472,6 +1483,13 @@ fn special_entry(
                 ui.close();
             }
         }
+        Special::TransformSelection => {
+            let r = ui.add_enabled(m.has_selection, egui::Button::new((icon, tr("Transform Selection"))));
+            if r.on_disabled_hover_text(tr("Needs a selection")).on_hover_text(tr("Scale, rotate or distort the selection outline; the pixels stay")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
         Special::StrokeSelection => {
             let r = ui.add_enabled(m.has_selection && pixel_active(m), egui::Button::new((icon, tr("Stroke …"))));
             if r.on_disabled_hover_text(tr("Needs a selection on a pixel layer")).clicked() {
@@ -1597,8 +1615,8 @@ pub const TOOL_GROUPS: &[&[ToolId]] = &[
     &[ToolId::Crop],
     &[ToolId::Eyedropper],
     &[ToolId::SpotHeal, ToolId::Remove, ToolId::Heal],
-    &[ToolId::Brush],
-    &[ToolId::Clone],
+    &[ToolId::Brush, ToolId::Pencil],
+    &[ToolId::Clone, ToolId::HistoryBrush],
     &[ToolId::Eraser],
     &[ToolId::Gradient, ToolId::Radial, ToolId::Bucket],
     &[ToolId::Smudge, ToolId::Blur, ToolId::Sharpen],
@@ -2315,6 +2333,8 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             );
         }
         ToolId::Brush
+        | ToolId::Pencil
+        | ToolId::HistoryBrush
         | ToolId::Eraser
         | ToolId::Smudge
         | ToolId::Clone
@@ -3071,9 +3091,18 @@ pub(super) fn history_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action
         } else {
             Color32::from_gray(110)
         });
-        if ui.selectable_label(i == m.history_done, text).clicked() {
-            out.push(Action::HistoryJump(i));
-        }
+        ui.horizontal(|ui| {
+            // The History Brush paints from the marked state.
+            let src = i == m.history_source;
+            let b = icons::button(ui, Icon::Tool(ToolId::HistoryBrush), 16.0, src)
+                .on_hover_text(tr("History Brush source: the History Brush (Y) paints this state back"));
+            if b.clicked() {
+                out.push(Action::HistorySource(i));
+            }
+            if ui.selectable_label(i == m.history_done, text).clicked() {
+                out.push(Action::HistoryJump(i));
+            }
+        });
     };
     egui::ScrollArea::vertical()
         .max_height(220.0)

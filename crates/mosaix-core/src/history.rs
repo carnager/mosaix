@@ -67,6 +67,17 @@ impl<S> History<S> {
         self.redo.clear();
     }
 
+    /// The state at history position `p` (0 = before the first recorded
+    /// step, `undo_len()` = `current`, beyond that the redo steps).
+    pub fn state<'a>(&'a self, p: usize, current: &'a S) -> Option<&'a S> {
+        let u = self.undo.len();
+        match p.cmp(&u) {
+            std::cmp::Ordering::Less => self.undo.get(p).map(|(s, _)| s),
+            std::cmp::Ordering::Equal => Some(current),
+            std::cmp::Ordering::Greater => self.redo.len().checked_sub(p - u).and_then(|i| self.redo.get(i)).map(|(s, _)| s),
+        }
+    }
+
     pub fn undo_len(&self) -> usize {
         self.undo.len()
     }
