@@ -19,6 +19,10 @@ pub enum FileMode {
     ImportBrushes,
     /// Patterns: GIMP .pat or an image.
     ImportPatterns,
+    /// An image placed as a smart object.
+    PlaceEmbedded,
+    /// New contents for the active smart object.
+    ReplaceContents,
 }
 
 impl FileMode {
@@ -29,6 +33,8 @@ impl FileMode {
             FileMode::ExportAs => tr("Export As"),
             FileMode::ImportBrushes => tr("Import Brushes"),
             FileMode::ImportPatterns => tr("Import Patterns"),
+            FileMode::PlaceEmbedded => tr("Place Embedded"),
+            FileMode::ReplaceContents => tr("Replace Contents"),
         }
     }
 
@@ -41,6 +47,7 @@ impl FileMode {
             FileMode::ImportBrushes => &["abr", "gbr", "gih", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
             FileMode::ImportPatterns => &["pat", "png", "jpg", "jpeg", "webp", "tif", "tiff"],
             FileMode::ExportAs => &["png", "jpg", "jpeg", "webp", "avif", "jxl", "tif", "tiff", "psd", "psb"],
+            FileMode::PlaceEmbedded | FileMode::ReplaceContents => &mosaix_core::raw::IMAGE_EXTENSIONS,
         }
     }
 }
@@ -108,6 +115,8 @@ pub fn action_for(mode: FileMode, mut path: PathBuf, export: ExportOptions) -> A
         FileMode::Open => Action::OpenFile(path),
         FileMode::ImportBrushes => Action::ImportBrushes(path),
         FileMode::ImportPatterns => Action::ImportPatterns(path),
+        FileMode::PlaceEmbedded => Action::PlaceEmbedded(path),
+        FileMode::ReplaceContents => Action::ReplaceContents(path),
         FileMode::SaveAs => {
             if path
                 .extension()

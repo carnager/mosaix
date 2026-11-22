@@ -214,6 +214,8 @@ pub struct Model {
     pub has_selection: bool,
     /// Names of the saved selections.
     pub channels: Vec<String>,
+    /// Content bounds of the active smart object (x0, y0, x1, y1).
+    pub active_bounds: Option<(i64, i64, i64, i64)>,
     /// The canvas view (for rulers, guides and the grid).
     pub view: mosaix_core::View,
     pub guides: Vec<mosaix_core::Guide>,
@@ -244,6 +246,10 @@ pub struct Model {
 pub enum Action {
     /// An agent command (JSON), run in the window and recorded as is.
     Agent(serde_json::Value),
+    PickFile(super::files::FileMode),
+    PlaceEmbedded(std::path::PathBuf),
+    ReplaceContents(std::path::PathBuf),
+    ConvertToSmart,
     /// Select › Modify (`op` as in the `select_modify` command).
     ModifySelection { op: &'static str, amount: f64 },
     /// Color Range: a `select_color_range` command, previewed, applied or cancelled.
@@ -1004,6 +1010,23 @@ fn special_entry(
             });
         }
         Special::Actions => actions_menu(ui, icon, m, st, out),
+        Special::PlaceEmbedded => {
+            if ui.button((icon, tr("Place Embedded …"))).on_hover_text(tr("An image as a smart object: scale and transform it as often as you like without losing detail")).clicked() {
+                out.push(Action::PickFile(super::files::FileMode::PlaceEmbedded));
+                ui.close();
+            }
+        }
+        Special::ConvertToSmart => {
+            let active = m.layers.iter().find(|r| r.id == m.active);
+            let ok = active.is_some_and(|r| !r.group && !r.adjustment && r.vector.is_none()) && m.active_raw.is_none();
+            let r = ui
+                .add_enabled(ok, egui::Button::new((icon, tr("Convert to Smart Object"))))
+                .on_disabled_hover_text(tr("Works on pixel layers"));
+            if r.clicked() {
+                out.push(Action::ConvertToSmart);
+                ui.close();
+            }
+        }
         Special::NewGuide => {
             if ui.button((icon, tr("New Guide …"))).clicked() {
                 st.dialog = Some(Dialog::NewGuide { vertical: true, pos: (m.doc_size.0 / 2) as f64 });
@@ -1504,6 +1527,24 @@ pub(super) fn properties_tab(ui: &mut egui::Ui, m: &Model, st: &mut State, out: 
         if let Some(f) = e.toggle_favourite {
             out.push(Action::ToggleFavouriteFont(f));
         }
+    } else if let Some(r) = m.active_raw.as_ref().filter(|r| r.smart) {
+        ui.label(RichText::new(tr("Smart Object")).strong());
+        ui.label(&r.file);
+        if let Some((x0, y0, x1, y1)) = m.active_bounds {
+            ui.label(RichText::new(format!("{} × {} px", x1 - x0, y1 - y0)).weak());
+        }
+        ui.label(
+            RichText::new(tr("Scale, turn and transform it as often as you like: it is always drawn from the original."))
+                .weak(),
+        );
+        ui.horizontal(|ui| {
+            if ui.button(tr("Replace Contents …")).clicked() {
+                out.push(Action::PickFile(super::files::FileMode::ReplaceContents));
+            }
+            if ui.button(tr("Rasterize")).clicked() {
+                out.push(Action::Command(palette::find("Rasterize (Text/Shape/RAW to Pixels)")));
+            }
+        });
     } else if let Some(r) = &m.active_raw {
         if let Some((d, done)) = super::raw_ui::layer_editor(ui, r) {
             out.push(Action::SetRaw { d, done });

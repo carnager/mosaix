@@ -2132,7 +2132,11 @@ impl App {
         .or_else(|| self.settings.last_dir.clone())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         let name = match mode {
-            ui::files::FileMode::Open | ui::files::FileMode::ImportBrushes | ui::files::FileMode::ImportPatterns => None,
+            ui::files::FileMode::Open
+            | ui::files::FileMode::ImportBrushes
+            | ui::files::FileMode::ImportPatterns
+            | ui::files::FileMode::PlaceEmbedded
+            | ui::files::FileMode::ReplaceContents => None,
             ui::files::FileMode::SaveAs => s.map(|s| s.default_save_path()),
             ui::files::FileMode::ExportAs => s.map(|s| s.default_export_path()),
         }
@@ -3793,6 +3797,7 @@ impl App {
             history_done,
             has_selection: doc.selection.is_some(),
             channels: doc.channels.iter().map(|c| c.name.clone()).collect(),
+            active_bounds: None,
             view: self.view,
             guides: doc.guides.clone(),
             view_opts: self.settings.view,
@@ -3808,6 +3813,7 @@ impl App {
                     file: r.data.name.clone(),
                     develop: r.develop,
                     summary: self.session.as_ref().and_then(|s| s.engine.raw_summary(l.id)),
+                    smart: r.data.is_image(),
                 })
             }),
             active_effects: active
@@ -3905,6 +3911,10 @@ impl App {
                 }
                 Action::ViewOpts(v) => self.settings.view = v,
                 Action::ToneOpts(t) => self.settings.tone = t,
+                Action::PickFile(mode) => self.file_dialog(mode),
+                Action::PlaceEmbedded(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_place", "path": p })),
+                Action::ReplaceContents(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "smart_replace", "path": p })),
+                Action::ConvertToSmart => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_convert_smart" })),
                 Action::ViewCenter(x, y) => {
                     let (a, b) = self.canvas_rect;
                     let mid = if b == DVec2::ZERO { self.view.viewport * 0.5 } else { (a + b) * 0.5 };
@@ -4465,6 +4475,12 @@ impl App {
 
     /// Navigator texture, histogram and pointer colour for the panels that show.
     fn panel_data(&mut self, model: &mut ui::panels::Model) {
+        // A smart object's size (computed on the CPU from its placement).
+        if model.active_raw.as_ref().is_some_and(|r| r.smart)
+            && let Some(s) = &mut self.session
+        {
+            model.active_bounds = s.engine.content_bounds(model.active);
+        }
         let shown = self.ui_state.panels_shown;
         if shown.navigator {
             if self.nav.is_none() {

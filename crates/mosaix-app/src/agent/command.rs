@@ -277,6 +277,16 @@ pub enum Command {
         position: f64,
     },
     GuideList,
+    LayerPlace {
+        path: PathBuf,
+    },
+    LayerConvertSmart {
+        layer: Option<LayerId>,
+    },
+    SmartReplace {
+        layer: Option<LayerId>,
+        path: PathBuf,
+    },
     GuideDelete {
         index: usize,
     },
@@ -573,6 +583,9 @@ impl Command {
             Self::ChannelList => "channel_list",
             Self::GuideAdd { .. } => "guide_add",
             Self::GuideList => "guide_list",
+            Self::LayerPlace { .. } => "layer_place",
+            Self::LayerConvertSmart { .. } => "layer_convert_smart",
+            Self::SmartReplace { .. } => "smart_replace",
             Self::GuideDelete { .. } => "guide_delete",
             Self::GuideClear => "guide_clear",
             Self::ChannelDelete { .. } => "channel_delete",
@@ -1528,6 +1541,25 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             Ok(Output::json(json!({ "guides": s.engine.doc().guides })))
         }
         Command::GuideList => Ok(Output::json(json!({ "guides": s.engine.doc().guides }))),
+        Command::LayerPlace { path } => {
+            let bytes = std::fs::read(&path).with_context(|| format!("cannot read {}", path.display()))?;
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let id = s.engine.place_smart(bytes, &name, tr("Place Embedded")).map_err(engine_err)?;
+            let bounds = s.engine.content_bounds(id).map(bounds_json);
+            Ok(Output::json(json!({ "ok": true, "active_layer": id, "bounds": bounds })))
+        }
+        Command::LayerConvertSmart { layer } => {
+            let id = pixel_layer(s, layer)?;
+            s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::SmartReplace { layer, path } => {
+            let id = target_layer(s, layer)?;
+            let bytes = std::fs::read(&path).with_context(|| format!("cannot read {}", path.display()))?;
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            s.engine.replace_smart(id, bytes, &name, tr("Replace Contents")).map_err(engine_err)?;
+            ok(s)
+        }
         Command::GuideDelete { index } => {
             let mut g = s.engine.doc().guides.clone();
             ensure!(index < g.len(), "no guide {index}; there are {}", g.len());

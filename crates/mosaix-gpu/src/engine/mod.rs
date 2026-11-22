@@ -254,6 +254,8 @@ pub struct Engine {
     /// The last decoded RAW file (demosaiced) and facts about RAW files by id.
     raw_cache: Option<raw::RawCache>,
     raw_summaries: HashMap<u64, raw::RawSummary>,
+    /// Smart objects: decoded images (straight linear RGBA) by data id.
+    smart_cache: HashMap<u64, Arc<raw::SmartImage>>,
     /// Layer styles: effect layers and styled pixels per layer.
     styles: HashMap<LayerId, style::StyleEntry>,
     /// The composited document when smart filters substitute layer pixels.
@@ -1022,6 +1024,7 @@ impl Engine {
             vector_cpu: HashMap::new(),
             raw_cache: None,
             raw_summaries: HashMap::new(),
+            smart_cache: HashMap::new(),
             styles: HashMap::new(),
             render: None,
             liquify: None,

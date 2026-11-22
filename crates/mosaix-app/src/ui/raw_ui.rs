@@ -370,6 +370,8 @@ pub struct ActiveRaw {
     pub file: String,
     pub develop: Develop,
     pub summary: Option<mosaix_gpu::engine::raw::RawSummary>,
+    /// A smart object (an embedded ordinary image) rather than camera RAW.
+    pub smart: bool,
 }
 
 /// Returns the new settings and whether the edit is finished.

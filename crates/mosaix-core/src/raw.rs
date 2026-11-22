@@ -107,7 +107,18 @@ pub struct RawData {
     pub name: String,
 }
 
+/// File types a smart object (an embedded ordinary image) can hold.
+pub const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "webp", "tif", "tiff", "avif", "exr"];
+
 impl RawData {
+    /// An ordinary image (smart object) rather than a camera RAW file.
+    pub fn is_image(&self) -> bool {
+        std::path::Path::new(&self.name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+    }
+
     pub fn new(bytes: Vec<u8>, name: String) -> Self {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();

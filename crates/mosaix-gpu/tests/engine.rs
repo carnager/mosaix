@@ -3129,3 +3129,43 @@ fn motion_blur_median_and_mosaic() {
     let (l, r) = (alpha_at(&mut e, 210, 10), alpha_at(&mut e, 290, 10));
     assert!((l - 0.44).abs() < 0.05 && (l - r).abs() < 1e-3, "{l} {r}");
 }
+
+#[test]
+fn smart_objects_scale_without_loss() {
+    use glam::DAffine2;
+    use mosaix_gpu::Interp;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 512));
+    // A 1 px checker in the square 100…164: fine detail that a pixel
+    // layer would lose when shrunk and enlarged again.
+    let layer = e.doc().active;
+    let ts = TILE_SIZE as usize;
+    let mut px = vec![f16::ZERO; ts * ts * 4];
+    for y in 100..164 {
+        for x in 100..164 {
+            let v = if (x + y) % 2 == 0 { 1.0 } else { 0.0 };
+            let i = (y * ts + x) * 4;
+            px[i..i + 4].copy_from_slice(&[v, v, v, 1.0].map(f16::from_f32));
+        }
+    }
+    assert!(e.replace_tiles(layer, vec![(TileCoord::new(0, 0), Some(px))], "Checker"));
+    let at = |e: &mut Engine, x: usize, y: usize| {
+        e.flush();
+        composite_px(e, TileCoord::new(0, 0), x, y)
+    };
+    let before = [at(&mut e, 120, 130), at(&mut e, 121, 130)];
+    e.convert_to_smart(layer, "Smart").unwrap();
+    assert!(e.doc().find(layer).unwrap().raw().is_some_and(|r| r.data.is_image()));
+    assert_eq!(e.content_bounds(layer), Some((100, 100, 164, 164)));
+    let c = DVec2::splat(132.0);
+    let scale = |k: f64| DAffine2::from_translation(c) * DAffine2::from_scale(DVec2::splat(k)) * DAffine2::from_translation(-c);
+    e.transform_layer(scale(0.25), Interp::Bicubic, false, "Shrink").unwrap();
+    e.transform_layer(scale(4.0), Interp::Bicubic, false, "Grow").unwrap();
+    let after = [at(&mut e, 120, 130), at(&mut e, 121, 130)];
+    for (b, a) in before.iter().zip(after) {
+        assert!((b[0] - a[0]).abs() < 0.02 && (a[3] - 1.0).abs() < 0.02, "{b:?} vs {a:?}");
+    }
+    // Rasterized it is pixels again.
+    e.rasterize(layer, "Rasterize").unwrap();
+    assert!(e.doc().find(layer).unwrap().tiles().is_some());
+}

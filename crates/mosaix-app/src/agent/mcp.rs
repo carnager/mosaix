@@ -457,6 +457,29 @@ pub fn tools() -> Vec<Value> {
             &["orientation", "position"],
             false,
         ),
+        tool(
+            "layer_place",
+            "Place an image file (png, jpg, webp, tif, avif, exr) as a smart object above the active layer: centred, scaled to fit \
+             the canvas if larger. Smart objects are drawn from the embedded original, so layer_transform never loses detail. \
+             layer_rasterize turns one into pixels.",
+            json!({ "path": { "type": "string" } }),
+            &["path"],
+            false,
+        ),
+        tool(
+            "layer_convert_smart",
+            "Turn a pixel layer into a smart object (its pixels embedded), so later transforms are lossless.",
+            json!({ "layer": layer_param() }),
+            &[],
+            false,
+        ),
+        tool(
+            "smart_replace",
+            "Replace the image inside a smart object (its placement stays).",
+            json!({ "layer": layer_param(), "path": { "type": "string" } }),
+            &["path"],
+            false,
+        ),
         tool("guide_list", "The guides: [{vertical, pos}] by index.", json!({}), &[], false),
         tool(
             "guide_delete",
@@ -1015,7 +1038,8 @@ mod tests {
         let selection = json!({
             "select_modify": {"op": "expand", "amount": 3}, "select_save": {"name": "a"},
             "channel_delete": {"channel": 0}, "channel_rename": {"channel": 0, "name": "b"},
-            "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0}
+            "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
+            "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

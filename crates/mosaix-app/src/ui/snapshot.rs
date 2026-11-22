@@ -124,6 +124,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         history_done: done,
         has_selection: doc.selection.is_some(),
         channels: doc.channels.iter().map(|c| c.name.clone()).collect(),
+        active_bounds: None,
         view,
         guides: if std::env::var_os("MOSAIX_SNAPSHOT_RULERS").is_some() {
             vec![mosaix_core::Guide { vertical: true, pos: dw as f64 / 3.0 }, mosaix_core::Guide { vertical: false, pos: dh as f64 / 2.0 }]
@@ -331,7 +332,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         r.transform = [0.4, 0.0, 0.0, 0.4, 0.0, 0.0];
         let id = s.engine.add_raw(r.clone(), "RAW", tr("Place Image")).unwrap_or_default();
         s.engine.flush();
-        model.active_raw = Some(super::raw_ui::ActiveRaw { file: name, develop: r.develop, summary: s.engine.raw_summary(id) });
+        model.active_raw = Some(super::raw_ui::ActiveRaw { file: name, develop: r.develop, summary: s.engine.raw_summary(id), smart: r.data.is_image() });
         model.layers = panels::layer_rows(s.engine.doc());
         model.active = s.engine.doc().active;
     }

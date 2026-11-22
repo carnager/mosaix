@@ -1257,8 +1257,12 @@ impl Engine {
             ));
         }
         if let Some(r) = l.raw() {
-            let (w, h) = self.raw_summaries.get(&r.data.id)?.size;
-            let t = r.transform;
+            let (data, t) = (r.data.clone(), r.transform);
+            let (w, h) = if data.is_image() {
+                self.smart_size(&data)?
+            } else {
+                self.raw_summaries.get(&data.id)?.size
+            };
             let pts = [(0.0, 0.0), (w as f64, 0.0), (0.0, h as f64), (w as f64, h as f64)]
                 .map(|(x, y)| (t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]));
             let f = |g: fn(f64, f64) -> f64, k: usize| pts.iter().map(|p| if k == 0 { p.0 } else { p.1 }).reduce(g).unwrap();

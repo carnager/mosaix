@@ -2929,3 +2929,51 @@ msgstr "Dokument"
 
 msgid "Click into the picture to pick the color. The selection shows live."
 msgstr "Ins Bild klicken nimmt die Farbe auf. Die Auswahl erscheint sofort."
+
+msgid "Images"
+msgstr "Bilder"
+
+msgid "Place Embedded"
+msgstr "Platzieren (eingebettet)"
+
+msgid "Convert to Smart Object"
+msgstr "In Smart-Objekt konvertieren"
+
+msgid "Replace Contents"
+msgstr "Inhalt ersetzen"
+
+msgid "Place Embedded …"
+msgstr "Platzieren (eingebettet) …"
+
+msgid "An image as a smart object: scale and transform it as often as you like without losing detail"
+msgstr "Ein Bild als Smart-Objekt: beliebig oft skalieren und transformieren, ohne Details zu verlieren"
+
+msgid "Smart Object"
+msgstr "Smart-Objekt"
+
+msgid "Scale, turn and transform it as often as you like: it is always drawn from the original."
+msgstr "Beliebig oft skalieren, drehen und transformieren: Es wird immer aus dem Original gezeichnet."
+
+msgid "Replace Contents …"
+msgstr "Inhalt ersetzen …"
+
+msgid "Smart object {name}: {error}"
+msgstr "Smart-Objekt {name}: {error}"
+
+msgid "not an image this can embed (PNG, JPEG, WebP, TIFF, AVIF, EXR)"
+msgstr "kein Bild, das sich einbetten lässt (PNG, JPEG, WebP, TIFF, AVIF, EXR)"
+
+msgid "the image cannot be read"
+msgstr "das Bild lässt sich nicht lesen"
+
+msgid "only pixel layers can become smart objects"
+msgstr "nur Pixelebenen können Smart-Objekte werden"
+
+msgid "the layer is too large"
+msgstr "die Ebene ist zu groß"
+
+msgid "the layer could not be encoded"
+msgstr "die Ebene ließ sich nicht kodieren"
+
+msgid "not a smart object"
+msgstr "kein Smart-Objekt"
