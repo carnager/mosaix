@@ -3091,3 +3091,18 @@ msgstr "Ergebnis auf neuer Ebene"
 
 msgid "Only the filled area, in place, above the active layer; the model still sees all visible layers"
 msgstr "Nur der gefüllte Bereich, an Ort und Stelle, über der aktiven Ebene; das Modell sieht trotzdem alle sichtbaren Ebenen"
+
+msgid "Rename …"
+msgstr "Umbenennen …"
+
+msgid "No layer below to merge with"
+msgstr "Keine Ebene darunter zum Zusammenfügen"
+
+msgid "Both layers must be visible"
+msgstr "Beide Ebenen müssen sichtbar sein"
+
+msgid "Needs two visible layers"
+msgstr "Braucht zwei sichtbare Ebenen"
+
+msgid "The image has only one layer"
+msgstr "Das Bild hat nur eine Ebene"

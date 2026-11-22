@@ -499,6 +499,14 @@ const MODIFY: [(&str, &str, f64); 5] = [
     ("feather", "Feather …", 10.0),
 ];
 
+/// The layer panel's right-click menu, in groups.
+const LAYER_MENU: &[&[&str]] = &[
+    &["Duplicate Layer", "Group Layers", "Ungroup Layers"],
+    &["Merge Down", "Merge Visible", "Flatten Image"],
+    &["Add Layer Mask", "Apply Layer Mask", "Create/Release Clipping Mask"],
+    &["Rasterize (Text/Shape/RAW to Pixels)", "Toggle Layer Visibility"],
+];
+
 const ACCENT: Color32 = Color32::from_rgb(90, 150, 255);
 
 impl State {
@@ -978,6 +986,20 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
     let pixels = active.is_some_and(|r| !r.group && !r.adjustment && r.vector.is_none());
     let need = |ok: bool, why: &'static str| (!ok).then_some(why);
     match label {
+        "Merge Down" => {
+            // Rows run top → bottom; the sibling below is the next row at the same depth.
+            let below = m.layers.iter().position(|r| r.id == m.active).and_then(|i| {
+                let d = m.layers[i].depth;
+                m.layers[i + 1..].iter().take_while(|r| r.depth >= d).find(|r| r.depth == d)
+            });
+            match below {
+                None => Some(tr("No layer below to merge with")),
+                Some(b) if !b.visible || !active.is_some_and(|a| a.visible) => Some(tr("Both layers must be visible")),
+                _ => None,
+            }
+        }
+        "Merge Visible" => need(m.layers.iter().filter(|r| r.depth == 0 && r.visible).count() >= 2, tr("Needs two visible layers")),
+        "Flatten Image" => need(m.layers.len() > 1, tr("The image has only one layer")),
         "Undo" => need(m.history_done > 0, tr("Nothing to undo")),
         "Redo" => need(m.history_done < m.history.len(), tr("Nothing to redo")),
         "Delete Selection (Pixels)" | "Content-Aware Fill" | "Content-Aware Fill (All Layers)" | "Remove (AI)"
@@ -2718,12 +2740,40 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                     Color32::WHITE,
                                 );
                         }
-                        if resp.clicked() {
+                        if resp.clicked() || resp.secondary_clicked() {
                             out.push(Action::SelectLayer(row.id));
                         }
                         if resp.double_clicked() {
                             st.rename = Some((row.id, row.name.clone()));
                         }
+                        // Right click: the layer commands (on this layer, which
+                        // the click made active).
+                        resp.context_menu(|ui| {
+                            if ui.button(tr("Rename …")).clicked() {
+                                st.rename = Some((row.id, row.name.clone()));
+                                ui.close();
+                            }
+                            for group in LAYER_MENU {
+                                ui.separator();
+                                for &label in *group {
+                                    let c = palette::find(label);
+                                    let why = unavailable(label, m);
+                                    let b = egui::Button::new(c.label_text()).shortcut_text(palette::shortcut_text(&c, &m.keymap));
+                                    let r = ui.add_enabled(why.is_none(), b);
+                                    if let Some(w) = why {
+                                        r.on_disabled_hover_text(w);
+                                    } else if r.clicked() {
+                                        out.push(Action::Command(c));
+                                        ui.close();
+                                    }
+                                }
+                            }
+                            ui.separator();
+                            if ui.button(tr("Delete Layer")).clicked() {
+                                out.push(Action::DeleteLayer);
+                                ui.close();
+                            }
+                        });
                         // Drag & drop: drop on the upper/lower third = above/below, middle of a group = into.
                         resp.dnd_set_drag_payload(row.id);
                         if let Some(pointer) = ui.ctx().pointer_interact_pos()
