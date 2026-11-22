@@ -3049,3 +3049,6 @@ msgstr "Den ausgewählten Bereich samt Umgebung an OpenAI senden (die dürfen ih
 
 msgid "Generate"
 msgstr "Generieren"
+
+msgid "Not for this layer"
+msgstr "Nicht für diese Ebene"

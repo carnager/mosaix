@@ -706,9 +706,13 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
     shortcuts_dialog(ctx, m, st, &mut out);
     if let Some((query, sel)) = &mut st.palette {
         let mut close = false;
-        command_palette(ctx, &m.keymap, query, sel, &mut out, &mut close);
+        let mut picked = None;
+        command_palette(ctx, m, query, sel, &mut out, &mut picked, &mut close);
         if close {
             st.palette = None;
+        }
+        if let Some(e) = picked {
+            run_extra(e, m, st, &mut out);
         }
     }
     if st.hidden {
@@ -995,6 +999,128 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
     }
 }
 
+/// What a palette entry beyond the plain commands does (dialogs and the
+/// entries of submenus).
+#[derive(Clone)]
+pub enum Extra {
+    Special(super::menus::Special),
+    Filter(mosaix_core::Filter),
+    Adjust(mosaix_core::Adjustment),
+    Modify(&'static str),
+    Transform(crate::boxedit::Mode),
+    Upscale(u32),
+    LoadChannel(usize),
+    Recent(std::path::PathBuf),
+}
+
+pub struct ExtraItem {
+    pub label: String,
+    pub label_en: String,
+    pub menu: &'static str,
+    /// Why it cannot run now.
+    pub disabled: Option<&'static str>,
+    pub what: Extra,
+}
+
+fn can_convert_to_smart(m: &Model) -> bool {
+    let active = m.layers.iter().find(|r| r.id == m.active);
+    active.is_some_and(|r| !r.group && !r.adjustment && r.vector.is_none()) && m.active_raw.is_none()
+}
+
+/// Which transform modes the active layer allows (None: none at all).
+fn transform_ok(m: &Model, mo: crate::boxedit::Mode) -> bool {
+    use crate::boxedit::Mode;
+    let active = m.layers.iter().find(|r| r.id == m.active);
+    let any = active.is_some_and(|r| !r.adjustment);
+    let pixels = any && active.is_some_and(|r| r.vector.is_none()) && m.active_raw.is_none();
+    any && (pixels || matches!(mo, Mode::Scale | Mode::Skew))
+}
+
+/// Menu entries that are not plain commands, for the command palette.
+pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
+    use super::menus::Special as S;
+    let sel = |ok: bool| (!ok).then_some(tr("Needs a selection"));
+    let mut v = Vec::new();
+    let mut add = |menu: &'static str, en: &str, label: String, disabled: Option<&'static str>, what: Extra| {
+        v.push(ExtraItem { label, label_en: en.to_string(), menu, disabled, what });
+    };
+    let one = |en: &'static str| (en, tr(en).to_string());
+    for (menu, sp, en, disabled) in [
+        ("File", S::PlaceEmbedded, "Place Embedded …", None),
+        ("Edit", S::GenerativeFill, "Generative Fill …", sel(m.has_selection)),
+        ("Image", S::ImageSize, "Image Size …", None),
+        ("Image", S::CanvasSize, "Canvas Size …", None),
+        ("Layer", S::ConvertToSmart, "Convert to Smart Object", (!can_convert_to_smart(m)).then_some(tr("Works on pixel layers"))),
+        ("Select", S::ColorRange, "Color Range …", None),
+        ("Select", S::SaveSelection, "Save Selection …", sel(m.has_selection)),
+        ("View", S::NewGuide, "New Guide …", None),
+        ("View", S::Messages, "Messages", None),
+    ] {
+        let (en, label) = one(en);
+        add(menu, en, label, disabled, Extra::Special(sp));
+    }
+    for (op, label, _) in MODIFY.iter().filter(|x| x.0 != "feather") {
+        add("Select", &format!("Modify {label}"), format!("{}: {}", tr("Modify"), tr(label)), sel(m.has_selection), Extra::Modify(op));
+    }
+    for (i, name) in m.channels.iter().enumerate() {
+        add("Select", &format!("Load Selection {name}"), format!("{}: {name}", tr("Load Selection")), None, Extra::LoadChannel(i));
+    }
+    for mo in crate::boxedit::Mode::ALL {
+        let ok = transform_ok(m, mo);
+        add("Edit", &format!("Transform {}", mo.name()), format!("{}: {}", tr("Transform"), tr(mo.name())), (!ok).then_some(tr("Not for this layer")), Extra::Transform(mo));
+    }
+    for f in mosaix_core::Filter::defaults().into_iter().chain(m.filter_plugins.iter().filter_map(|p| p.result.as_ref().ok().cloned())) {
+        let name = f.name().to_string();
+        add("Image", &format!("Filter {name}"), format!("{}: {name} …", tr("Filter")), None, Extra::Filter(f));
+    }
+    for a in mosaix_core::Adjustment::defaults() {
+        let name = a.name();
+        add("Layer", &format!("Adjustment Layer {name}"), format!("{}: {name}", tr("New Adjustment Layer")), None, Extra::Adjust(a));
+    }
+    for k in [2u32, 4] {
+        add("Image", &format!("Upscale (AI) {k}x"), format!("{} {k}×", tr("Upscale (AI)")), None, Extra::Upscale(k));
+    }
+    for p in &m.recent {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        add("File", &format!("Open Recent {name}"), format!("{}: {name}", tr("Open Recent")), None, Extra::Recent(p.clone()));
+    }
+    v
+}
+
+/// Runs a palette entry (or the matching menu entry).
+fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    use super::menus::Special as S;
+    match e {
+        Extra::Special(sp) => match sp {
+            S::PlaceEmbedded => out.push(Action::PickFile(super::files::FileMode::PlaceEmbedded)),
+            S::ConvertToSmart => out.push(Action::ConvertToSmart),
+            S::GenerativeFill => {
+                st.dialog = Some(Dialog::Generative { prompt: String::new(), settings: m.generative.clone(), key: String::new() });
+            }
+            S::NewGuide => st.dialog = Some(Dialog::NewGuide { vertical: true, pos: (m.doc_size.0 / 2) as f64 }),
+            S::ColorRange => {
+                st.dialog = Some(Dialog::ColorRange { color: m.color, fuzziness: 40.0, image: false, mode: "replace" });
+                st.dialog_new = true;
+            }
+            S::SaveSelection => {
+                let n = m.channels.len() + 1;
+                st.dialog = Some(Dialog::SaveSelection { name: tr!("Selection {n}", n = n).to_string() });
+            }
+            S::CanvasSize => st.dialog = Some(Dialog::Canvas { w: m.doc_size.0, h: m.doc_size.1, anchor: (1, 1) }),
+            S::ImageSize => st.dialog = Some(Dialog::Image { w: m.doc_size.0, h: m.doc_size.1, keep: true }),
+            S::Messages => st.show_log = true,
+            _ => {}
+        },
+        Extra::Filter(f) => st.open_filter(f),
+        Extra::Adjust(a) => out.push(Action::AddAdjustment(a)),
+        Extra::Modify(op) => st.open_modify(op),
+        Extra::Transform(mo) => out.push(Action::BoxMode(mo)),
+        Extra::Upscale(k) => out.push(Action::Upscale(k)),
+        Extra::LoadChannel(i) => out.push(Action::Agent(serde_json::json!({ "cmd": "select_load", "channel": i, "mode": "replace" }))),
+        Extra::Recent(p) => out.push(Action::OpenFile(p)),
+    }
+}
+
 fn special_entry(
     ui: &mut egui::Ui,
     sp: super::menus::Special,
@@ -1024,18 +1150,16 @@ fn special_entry(
         Special::Actions => actions_menu(ui, icon, m, st, out),
         Special::PlaceEmbedded => {
             if ui.button((icon, tr("Place Embedded …"))).on_hover_text(tr("An image as a smart object: scale and transform it as often as you like without losing detail")).clicked() {
-                out.push(Action::PickFile(super::files::FileMode::PlaceEmbedded));
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
         Special::ConvertToSmart => {
-            let active = m.layers.iter().find(|r| r.id == m.active);
-            let ok = active.is_some_and(|r| !r.group && !r.adjustment && r.vector.is_none()) && m.active_raw.is_none();
             let r = ui
-                .add_enabled(ok, egui::Button::new((icon, tr("Convert to Smart Object"))))
+                .add_enabled(can_convert_to_smart(m), egui::Button::new((icon, tr("Convert to Smart Object"))))
                 .on_disabled_hover_text(tr("Works on pixel layers"));
             if r.clicked() {
-                out.push(Action::ConvertToSmart);
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
@@ -1044,13 +1168,13 @@ fn special_entry(
                 .add_enabled(m.has_selection, egui::Button::new((icon, tr("Generative Fill …"))))
                 .on_disabled_hover_text(tr("Needs a selection"));
             if r.clicked() {
-                st.dialog = Some(Dialog::Generative { prompt: String::new(), settings: m.generative.clone(), key: String::new() });
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
         Special::NewGuide => {
             if ui.button((icon, tr("New Guide …"))).clicked() {
-                st.dialog = Some(Dialog::NewGuide { vertical: true, pos: (m.doc_size.0 / 2) as f64 });
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
@@ -1073,8 +1197,7 @@ fn special_entry(
         }
         Special::ColorRange => {
             if ui.button((icon, tr("Color Range …"))).clicked() {
-                st.dialog = Some(Dialog::ColorRange { color: m.color, fuzziness: 40.0, image: false, mode: "replace" });
-                st.dialog_new = true;
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
@@ -1095,8 +1218,7 @@ fn special_entry(
         Special::SaveSelection => {
             let r = ui.add_enabled(m.has_selection, egui::Button::new((icon, tr("Save Selection …"))));
             if r.on_disabled_hover_text(tr("Needs a selection")).clicked() {
-                let n = m.channels.len() + 1;
-                st.dialog = Some(Dialog::SaveSelection { name: tr!("Selection {n}", n = n).to_string() });
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
@@ -1133,13 +1255,11 @@ fn special_entry(
         }
         Special::Transform => {
             use crate::boxedit::Mode;
-            let active = m.layers.iter().find(|r| r.id == m.active);
-            let any = active.is_some_and(|r| !r.adjustment);
-            let pixels = any && active.is_some_and(|r| r.vector.is_none()) && m.active_raw.is_none();
+            let any = m.layers.iter().find(|r| r.id == m.active).is_some_and(|r| !r.adjustment);
             ui.add_enabled_ui(any, |ui| {
                 ui.menu_button((icon, tr("Transform")), |ui| {
                     for mo in Mode::ALL {
-                        let ok = pixels || matches!(mo, Mode::Scale | Mode::Skew);
+                        let ok = transform_ok(m, mo);
                         let r = ui
                             .add_enabled(ok, egui::Button::new(tr(mo.name())))
                             .on_disabled_hover_text(tr("Text, shape and RAW layers: rasterize first"));
@@ -1206,21 +1326,13 @@ fn special_entry(
         }
         Special::CanvasSize => {
             if ui.button((icon, tr("Canvas Size …"))).clicked() {
-                st.dialog = Some(Dialog::Canvas {
-                    w: m.doc_size.0,
-                    h: m.doc_size.1,
-                    anchor: (1, 1),
-                });
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
         Special::ImageSize => {
             if ui.button((icon, tr("Image Size …"))).clicked() {
-                st.dialog = Some(Dialog::Image {
-                    w: m.doc_size.0,
-                    h: m.doc_size.1,
-                    keep: true,
-                });
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
@@ -1242,7 +1354,7 @@ fn special_entry(
         }
         Special::Messages => {
             if ui.button((icon, tr("Messages"))).clicked() {
-                st.show_log = true;
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
@@ -2953,15 +3065,27 @@ fn size_fields(ui: &mut egui::Ui, w: &mut u32, h: &mut u32) {
     });
 }
 
+enum Hit<'a> {
+    Cmd(&'static palette::Cmd),
+    Extra(&'a ExtraItem),
+}
+
 fn command_palette(
     ctx: &egui::Context,
-    keymap: &palette::Keymap,
+    m: &Model,
     query: &mut String,
     sel: &mut usize,
     out: &mut Vec<Action>,
+    picked: &mut Option<Extra>,
     close: &mut bool,
 ) {
-    let hits = palette::search(query);
+    let keymap = &m.keymap;
+    let extras = palette_extras(m);
+    let items = palette::COMMANDS
+        .iter()
+        .map(|c| (Hit::Cmd(c), [c.label_text(), c.menu_text(), c.label, c.menu]))
+        .chain(extras.iter().map(|e| (Hit::Extra(e), [e.label.as_str(), tr(e.menu), e.label_en.as_str(), e.menu])));
+    let hits = palette::rank(query, items);
     *sel = (*sel).min(hits.len().saturating_sub(1));
     let (up, down, enter, esc) = ctx.input(|i| {
         (
@@ -2981,11 +3105,21 @@ fn command_palette(
         *close = true;
         return;
     }
-    if enter {
-        if let Some(c) = hits.get(*sel) {
+    let mut run = |h: &Hit, close: &mut bool| match h {
+        Hit::Cmd(c) => {
             out.push(Action::Command(**c));
+            *close = true;
         }
-        *close = true;
+        Hit::Extra(e) if e.disabled.is_none() => {
+            *picked = Some(e.what.clone());
+            *close = true;
+        }
+        Hit::Extra(_) => {}
+    };
+    if enter {
+        if let Some(h) = hits.get(*sel) {
+            run(h, close);
+        }
         return;
     }
     let screen = ctx.content_rect();
@@ -3014,7 +3148,7 @@ fn command_palette(
                         ui.label(RichText::new(tr("No matching command")).weak());
                     }
                     let w = ui.available_width();
-                    for (i, c) in hits.iter().enumerate() {
+                    for (i, h) in hits.iter().enumerate() {
                         let active = i == *sel;
                         let (rect, resp) =
                             ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::click());
@@ -3030,24 +3164,27 @@ fn command_palette(
                                 },
                             );
                         }
+                        let (label, menu, shortcut, disabled) = match h {
+                            Hit::Cmd(c) => (c.label_text(), c.menu_text(), palette::shortcut_text(c, keymap), None),
+                            Hit::Extra(e) => (e.label.as_str(), tr(e.menu), String::new(), e.disabled),
+                        };
                         let y = rect.center().y;
                         p.text(
                             egui::pos2(rect.left() + 10.0, y),
                             egui::Align2::LEFT_CENTER,
-                            c.label_text(),
+                            label,
                             egui::FontId::proportional(14.5),
-                            Color32::from_gray(240),
+                            Color32::from_gray(if disabled.is_some() { 130 } else { 240 }),
                         );
                         let menu_col = if active {
                             Color32::from_gray(215)
                         } else {
                             Color32::from_gray(150)
                         };
-                        let shortcut = palette::shortcut_text(c, keymap);
-                        let right = if shortcut.is_empty() {
-                            c.menu_text().to_string()
-                        } else {
-                            format!("{}    {}", c.menu_text(), shortcut)
+                        let right = match (disabled, shortcut.is_empty()) {
+                            (Some(why), _) => format!("{why}    {menu}"),
+                            (None, true) => menu.to_string(),
+                            (None, false) => format!("{menu}    {shortcut}"),
                         };
                         p.text(
                             egui::pos2(rect.right() - 10.0, y),
@@ -3063,8 +3200,7 @@ fn command_palette(
                             *sel = i;
                         }
                         if resp.clicked() {
-                            out.push(Action::Command(**c));
-                            *close = true;
+                            run(h, close);
                         }
                     }
                 });

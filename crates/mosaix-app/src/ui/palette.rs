@@ -427,11 +427,18 @@ pub fn find(label: &str) -> Cmd {
 /// Commands matching a query: all words must occur (case-insensitive) in
 /// "menu label" (shown text, or the English original); prefix matches of
 /// the label rank first.
+#[cfg(test)]
 pub fn search(query: &str) -> Vec<&'static Cmd> {
+    rank(query, COMMANDS.iter().map(|c| (c, [c.label_text(), c.menu_text(), c.label, c.menu])))
+}
+
+/// Ranks items by `query`: each item comes with its shown label and menu
+/// and their English originals. Without a query all items, in order.
+pub fn rank<'a, T>(query: &str, items: impl IntoIterator<Item = (T, [&'a str; 4])>) -> Vec<T> {
     let q = query.to_lowercase();
     let words: Vec<&str> = q.split_whitespace().collect();
     if words.is_empty() {
-        return COMMANDS.iter().collect();
+        return items.into_iter().map(|(t, _)| t).collect();
     }
     // How well one query word fits a label: 0 = the label starts with it,
     // 1 = a word of the label does, 2 = somewhere inside; menu name: 3.
@@ -455,15 +462,15 @@ pub fn search(query: &str) -> Vec<&'static Cmd> {
     let score = |label: &str, menu: &str| -> Option<u32> {
         words.iter().map(|w| fit(w, label, menu)).sum()
     };
-    let mut hits: Vec<(&Cmd, u32, usize)> = COMMANDS
-        .iter()
-        .filter_map(|c| {
+    let mut hits: Vec<(T, u32, usize)> = items
+        .into_iter()
+        .filter_map(|(t, [label, menu, label_en, menu_en])| {
             // Translated text or the English original, whichever fits better.
-            let s = match (score(c.label_text(), c.menu_text()), score(c.label, c.menu)) {
+            let s = match (score(label, menu), score(label_en, menu_en)) {
                 (Some(a), Some(b)) => a.min(b),
                 (a, b) => a.or(b)?,
             };
-            Some((c, s, c.label_text().chars().count()))
+            Some((t, s, label.chars().count()))
         })
         .collect();
     hits.sort_by_key(|(_, s, len)| (*s, *len));
