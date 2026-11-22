@@ -3400,3 +3400,49 @@ fn paint_bucket_fills_the_region_and_keeps_the_selection() {
     assert_eq!(px(&after, 20, 200), [1.0, 0.0, 0.0, 1.0]);
     assert!(e.has_selection());
 }
+
+#[test]
+fn several_selected_layers_move_and_merge_together() {
+    use mosaix_core::MergeKind;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let a = e.doc().active;
+    let (mut b, mut c) = (0, 0);
+    e.edit("Layers", |d| {
+        b = d.add_pixel_layer();
+        c = d.add_pixel_layer();
+        true
+    });
+    for id in [a, b, c] {
+        e.upload_tile(id, TileCoord::new(0, 0), &pattern(id as usize, false));
+    }
+    let before = |e: &Engine, id| e.read_layer_tile(id, TileCoord::new(0, 0)).unwrap();
+    let (pa, pb, pc) = (before(&e, a), before(&e, b), before(&e, c));
+    e.select(|d| {
+        d.active = c;
+        d.picked = vec![a];
+    });
+    e.transform_active(glam::DAffine2::from_translation(DVec2::new(10.0, 0.0)), mosaix_gpu::Interp::Nearest, "Move").unwrap();
+    let moved = |e: &Engine, id| px(&e.read_layer_tile(id, TileCoord::new(0, 0)).unwrap(), 30, 40);
+    assert_eq!(moved(&e, a), px(&pa, 20, 40), "a moved");
+    assert_eq!(moved(&e, c), px(&pc, 20, 40), "c moved");
+    assert_eq!(moved(&e, b), px(&pb, 30, 40), "b, not selected, stays");
+    e.undo();
+    assert_eq!(moved(&e, a), px(&pa, 30, 40), "one undo step for both");
+    assert_eq!(moved(&e, c), px(&pc, 30, 40));
+
+    // Merging the selected (non-adjacent) layers: b stays, the look too.
+    e.select(|d| {
+        d.active = c;
+        d.picked = vec![b];
+    });
+    e.flush();
+    let look = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+    let m = e.merge(MergeKind::Selected, "Merge Layers").unwrap();
+    e.flush();
+    let after = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+    let worst = look.iter().zip(&after).map(|(x, y)| (x.to_f32() - y.to_f32()).abs()).fold(0.0, f32::max);
+    assert!(worst < 2e-3, "{worst}");
+    let ids: Vec<_> = e.doc().layers.iter().map(|l| l.id).collect();
+    assert_eq!(ids, vec![a, m]);
+}

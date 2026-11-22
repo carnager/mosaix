@@ -160,6 +160,10 @@ pub enum Command {
     },
     LayerSelect {
         layer: LayerId,
+        /// Further layers selected along with it (delete, group, merge,
+        /// duplicate and move then act on all of them).
+        #[serde(default)]
+        also: Vec<LayerId>,
     },
     LayerMove {
         layer: Option<LayerId>,
@@ -318,8 +322,8 @@ pub enum Command {
     },
     /// "down" (active onto the one below), "visible" or "flatten".
     LayerMerge {
-        #[serde(default = "default_merge")]
-        mode: String,
+        /// Default: "selected" when several layers are selected, else "down".
+        mode: Option<String>,
     },
     SmartReplace {
         layer: Option<LayerId>,
@@ -841,10 +845,6 @@ fn yes() -> bool {
     true
 }
 
-fn default_merge() -> String {
-    "down".into()
-}
-
 fn default_upscale() -> u32 {
     2
 }
@@ -1127,6 +1127,15 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             });
             Ok(Output::json(json!({ "layer": id })))
         }
+        Command::LayerDuplicate { layer: None } if s.engine.doc().selected_layers().len() > 1 => {
+            let ids = s.engine.doc().selected_layers();
+            let mut copies = Vec::new();
+            edit(s, tr("Duplicate Layers"), |d| {
+                copies = d.duplicate_layers(&ids);
+                !copies.is_empty()
+            })?;
+            Ok(Output::json(json!({ "layers": copies })))
+        }
         Command::LayerDuplicate { layer } => {
             target_layer(s, layer)?;
             let mut id = None;
@@ -1135,6 +1144,11 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 id.is_some()
             })?;
             Ok(Output::json(json!({ "layer": id })))
+        }
+        Command::LayerDelete { layer: None } if s.engine.doc().selected_layers().len() > 1 => {
+            let ids = s.engine.doc().selected_layers();
+            edit(s, tr("Delete Layers"), |d| d.remove_layers(&ids)).context("cannot delete the last layer")?;
+            ok(s)
         }
         Command::LayerDelete { layer } => {
             target_layer(s, layer)?;
@@ -1191,9 +1205,16 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             })?;
             ok(s)
         }
-        Command::LayerSelect { layer } => {
+        Command::LayerSelect { layer, also } => {
             target_layer(s, Some(layer))?;
-            ok(s)
+            for id in &also {
+                ensure!(s.engine.doc().find(*id).is_some(), "no layer {id}");
+            }
+            s.engine.select(|d| d.picked = also.iter().copied().filter(|id| *id != layer).collect());
+            let sel = s.engine.doc().selected_layers();
+            let mut v = ok(s)?;
+            v.result["selected_layers"] = json!(sel);
+            Ok(v)
         }
         Command::LayerMove { layer, steps } => {
             target_layer(s, layer)?;
@@ -1209,6 +1230,15 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 moved != 0
             });
             Ok(Output::json(json!({ "moved": moved })))
+        }
+        Command::LayerGroup { layer: None } if s.engine.doc().selected_layers().len() > 1 => {
+            let ids = s.engine.doc().selected_layers();
+            let mut id = None;
+            edit(s, tr("Group Layers"), |d| {
+                id = d.group_layers(&ids);
+                id.is_some()
+            })?;
+            Ok(Output::json(json!({ "group": id })))
         }
         Command::LayerGroup { layer } => {
             target_layer(s, layer)?;
@@ -1660,14 +1690,17 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             ok(s)
         }
         Command::LayerMerge { mode } => {
+            let mode = mode.unwrap_or_else(|| if s.engine.doc().selected_layers().len() > 1 { "selected".into() } else { "down".into() });
             let kind = match mode.as_str() {
+                "selected" => mosaix_core::MergeKind::Selected,
                 "down" => mosaix_core::MergeKind::Down,
                 "visible" => mosaix_core::MergeKind::Visible,
                 "flatten" => mosaix_core::MergeKind::Flatten,
-                m => bail!("unknown merge mode {m:?} (down, visible, flatten)"),
+                m => bail!("unknown merge mode {m:?} (down, selected, visible, flatten)"),
             };
             let label = match kind {
                 mosaix_core::MergeKind::Down => tr("Merge Down"),
+                mosaix_core::MergeKind::Selected => tr("Merge Layers"),
                 mosaix_core::MergeKind::Visible => tr("Merge Visible"),
                 mosaix_core::MergeKind::Flatten => tr("Flatten Image"),
             };

@@ -2036,7 +2036,7 @@ impl App {
             Keysym::i if ctrl && !alt => json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "invert" } }),
             Keysym::U if ctrl && !alt => json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "hue_saturation", "saturation": -100 } }),
             Keysym::e | Keysym::E if ctrl && !shift && alt => json!({ "cmd": "layer_merge", "mode": "visible" }),
-            Keysym::e if ctrl && !shift && !alt => json!({ "cmd": "layer_merge", "mode": "down" }),
+            Keysym::e if ctrl && !shift && !alt => json!({ "cmd": "layer_merge" }),
             Keysym::f | Keysym::F if ctrl && shift && alt => json!({ "cmd": "layer_merge", "mode": "flatten" }),
             Keysym::g | Keysym::G if ctrl && shift && !alt => json!({ "cmd": "layer_ungroup" }),
             Keysym::g if ctrl && !alt => json!({ "cmd": "layer_group" }),
@@ -3265,14 +3265,14 @@ impl App {
             }),
             Keysym::J if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_via", "cut": true })),
             Keysym::j if ctrl && self.has_pixel_selection() => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_via", "cut": false })),
-            Keysym::j if ctrl => self.edit(tr("Duplicate Layer"), |d| d.duplicate_active().is_some()),
+            Keysym::j if ctrl => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_duplicate" })),
             Keysym::i if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "invert" } })),
             Keysym::U if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "hue_saturation", "saturation": -100 } })),
             Keysym::u if ctrl && !alt => self.open_adjust("hue_saturation"),
             Keysym::l if ctrl && !alt => self.open_adjust("levels"),
             Keysym::m if ctrl && !alt && !shift => self.open_adjust("curves"),
             Keysym::e | Keysym::E if ctrl && !shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "visible" })),
-            Keysym::e if ctrl && !shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "down" })),
+            Keysym::e if ctrl && !shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge" })),
             Keysym::f | Keysym::F if ctrl && shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "flatten" })),
             Keysym::g | Keysym::G if ctrl && shift => self.edit(tr("Ungroup Layers"), |d| d.ungroup_active()),
             // Ctrl+Alt+G: clipping mask on/off (clips to the layer below).
@@ -3283,7 +3283,7 @@ impl App {
                 self.ui_state.shortcuts = Some(Default::default());
             }
             Keysym::g if ctrl && alt => self.edit(tr("Clipping Mask"), |d| d.toggle_clip_active()),
-            Keysym::g if ctrl => self.edit(tr("Group Layers"), |d| d.group_active().is_some()),
+            Keysym::g if ctrl => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_group" })),
             // Shift+Rücktaste: content-aware fill (Strg: learn from all layers).
             Keysym::BackSpace if shift && !alt => self.content_fill(ctrl),
             // Shift+Alt+Rücktaste: remove the selected (local AI).
@@ -3306,7 +3306,7 @@ impl App {
                     Ok(())
                 })
             }
-            Keysym::Delete => self.edit(tr("Delete Layer"), |d| d.remove_active()),
+            Keysym::Delete => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_delete" })),
             Keysym::BackSpace if alt => {
                 let [r, g, b] = self.brush.color;
                 let (target, opacity) = (self.stroke_target(), self.brush.opacity);
@@ -3390,9 +3390,13 @@ impl App {
                 self.engine_op(|e| e.transform_active(fwd, Interp::Nearest, tr("Move")))
             }
             Keysym::comma if ctrl => self.edit(tr("Visibility"), |d| {
-                let id = d.active;
-                let l = d.find_mut(id).unwrap();
-                l.visible = !l.visible;
+                // All selected layers follow the active one.
+                let show = !d.active_layer().is_some_and(|l| l.visible);
+                for id in d.selected_layers() {
+                    if let Some(l) = d.find_mut(id) {
+                        l.visible = show;
+                    }
+                }
                 true
             }),
             Keysym::bracketleft if alt => self.select_layer(1),
@@ -3972,6 +3976,7 @@ impl App {
                 .flatten(),
             layers: ui::panels::layer_rows(doc),
             active: doc.active,
+            selected: doc.selected_layers(),
             active_opacity: active.map_or(1.0, |l| l.opacity),
             active_fill: active.map_or(1.0, |l| l.fill_opacity),
             active_blend: active.map_or(mosaix_core::BlendMode::Normal, |l| l.blend),
@@ -4310,6 +4315,31 @@ impl App {
                 Action::WandTolerance(v) => self.wand_tolerance = v,
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
+                Action::PickLayer { layer, range } => {
+                    if let Some(e) = self.engine() {
+                        e.select(|d| {
+                            if range {
+                                // Shift+click: every row between the active layer and this one.
+                                let rows: Vec<LayerId> = d.panel_rows().into_iter().map(|(id, _)| id).collect();
+                                let (Some(a), Some(b)) = (rows.iter().position(|&r| r == d.active), rows.iter().position(|&r| r == layer)) else { return };
+                                let (lo, hi) = (a.min(b), a.max(b));
+                                d.picked = rows[lo..=hi].iter().copied().filter(|&r| r != layer).collect();
+                                d.active = layer;
+                            } else if d.selected_layers().contains(&layer) {
+                                // Ctrl+click on a selected layer: take it out.
+                                let mut rest: Vec<LayerId> = d.selected_layers().into_iter().filter(|&r| r != layer).collect();
+                                if let Some(a) = rest.pop() {
+                                    d.active = a;
+                                    d.picked = rest;
+                                }
+                            } else {
+                                let old = d.active;
+                                d.picked.push(old);
+                                d.active = layer;
+                            }
+                        });
+                    }
+                }
                 Action::AdjustPreview(a) => {
                     if let Some(e) = self.engine()
                         && let Err(err) = e.set_adjust_preview(a.as_ref())
@@ -4334,7 +4364,10 @@ impl App {
                 }
                 Action::SelectLayer(id) => {
                     if let Some(e) = self.engine() {
-                        e.select(|d| d.active = id);
+                        e.select(|d| {
+                            d.active = id;
+                            d.picked.clear();
+                        });
                     }
                     let has_mask = self
                         .engine()
@@ -4414,7 +4447,7 @@ impl App {
                     }
                     c
                 }),
-                Action::DeleteLayer => self.edit(tr("Delete Layer"), |d| d.remove_active()),
+                Action::DeleteLayer => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_delete" })),
                 Action::HistoryJump(n) => {
                     if self.engine().is_some_and(|e| e.jump_history(n)) {
                         self.touch();

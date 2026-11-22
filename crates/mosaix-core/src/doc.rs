@@ -246,6 +246,8 @@ pub enum MergeKind {
     Visible,
     /// Everything into one layer; hidden layers are dropped.
     Flatten,
+    /// The selected layers (active plus [`Document::picked`]), siblings.
+    Selected,
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +258,10 @@ pub struct Document<T> {
     /// Top-level layers, bottom → top.
     pub layers: Vec<Layer<T>>,
     pub active: LayerId,
+    /// Further layers selected in the layer panel besides `active` (Shift/
+    /// Ctrl+click); commands like delete, group and merge act on all of them.
+    /// Not saved.
+    pub picked: Vec<LayerId>,
     /// `None` = nothing selected, everything is editable.
     pub selection: Option<Mask<T>>,
     /// Saved selections.
@@ -282,6 +288,7 @@ impl<T: Clone> Document<T> {
             blend_space: BlendSpace::default(),
             layers: Vec::new(),
             active: 0,
+            picked: Vec::new(),
             selection: None,
             channels: Vec::new(),
             guides: Vec::new(),
@@ -371,6 +378,85 @@ impl<T: Clone> Document<T> {
         walk(&self.layers, id)
     }
 
+    /// The selected layers: `active` and the picked ones that still exist,
+    /// bottom → top in document order; a layer inside a selected group is
+    /// left out (the group stands for it).
+    pub fn selected_layers(&self) -> Vec<LayerId> {
+        let mut out = Vec::new();
+        fn walk<T>(ls: &[Layer<T>], want: &dyn Fn(LayerId) -> bool, out: &mut Vec<LayerId>) {
+            for l in ls {
+                if want(l.id) {
+                    out.push(l.id);
+                } else if let Content::Group(c) = &l.content {
+                    walk(c, want, out);
+                }
+            }
+        }
+        walk(&self.layers, &|id| id == self.active || self.picked.contains(&id), &mut out);
+        out
+    }
+
+    /// Removes the layers `ids` (keeps at least one layer). False if none went.
+    pub fn remove_layers(&mut self, ids: &[LayerId]) -> bool {
+        let mut any = false;
+        for &id in ids {
+            if self.find(id).is_none() || self.count_layers() <= 1 {
+                continue;
+            }
+            self.active = id;
+            any |= self.remove_active();
+        }
+        self.picked.clear();
+        any
+    }
+
+    /// Puts the layers `ids` into a new group where the topmost of them was.
+    pub fn group_layers(&mut self, ids: &[LayerId]) -> Option<LayerId> {
+        if ids.len() <= 1 {
+            if let Some(&id) = ids.first() {
+                self.active = id;
+            }
+            return self.group_active();
+        }
+        let top = *ids.last()?;
+        let gid = self.alloc_id();
+        let n = self.count_groups() + 1;
+        // Placeholder where the topmost layer is, then take the layers out.
+        let (list, i) = self.locate_mut(top)?;
+        let mut group = Layer::pixels(gid, &crate::tr!("Group {n}", n = n));
+        group.content = Content::Group(Vec::new());
+        group.pass_through = true;
+        list.insert(i + 1, group);
+        let mut children = Vec::new();
+        for &id in ids {
+            if let Some((list, i)) = self.locate_mut(id) {
+                children.push(list.remove(i));
+            }
+        }
+        if let Some(Content::Group(c)) = self.find_mut(gid).map(|g| &mut g.content) {
+            *c = children;
+        }
+        self.active = gid;
+        self.picked.clear();
+        Some(gid)
+    }
+
+    /// Duplicates the layers `ids`, each above itself; the copies become the selection.
+    pub fn duplicate_layers(&mut self, ids: &[LayerId]) -> Vec<LayerId> {
+        let mut copies = Vec::new();
+        for &id in ids {
+            self.active = id;
+            if let Some(c) = self.duplicate_active() {
+                copies.push(c);
+            }
+        }
+        if let Some((&last, rest)) = copies.split_last() {
+            self.active = last;
+            self.picked = rest.to_vec();
+        }
+        copies
+    }
+
     /// The layers a merge combines (bottom → top, all in one list).
     pub fn merge_set(&self, kind: MergeKind) -> Result<Vec<LayerId>, &'static str> {
         match kind {
@@ -389,6 +475,17 @@ impl<T: Clone> Document<T> {
                 let ids: Vec<LayerId> = self.layers.iter().filter(|l| l.visible).map(|l| l.id).collect();
                 if ids.len() < 2 {
                     return Err(crate::tr("fewer than two visible layers"));
+                }
+                Ok(ids)
+            }
+            MergeKind::Selected => {
+                let ids = self.selected_layers();
+                if ids.len() < 2 {
+                    return Err(crate::tr("select at least two layers"));
+                }
+                let (list, _) = self.siblings(ids[0]).ok_or_else(|| crate::tr("no active layer"))?;
+                if !ids.iter().all(|id| list.iter().any(|l| l.id == *id)) {
+                    return Err(crate::tr("the selected layers must be in the same group"));
                 }
                 Ok(ids)
             }
@@ -924,6 +1021,7 @@ impl<T: Clone> Document<T> {
             blend_space: self.blend_space,
             layers: map(&self.layers, f),
             active: self.active,
+            picked: self.picked.clone(),
             selection: self.selection.as_ref().map(|m| m.map(f)),
             channels: self.channels.iter().map(|c| Channel { name: c.name.clone(), mask: c.mask.map(f) }).collect(),
             guides: self.guides.clone(),
@@ -1126,6 +1224,34 @@ mod move_tests {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn several_selected_layers() {
+        let mut d: Document<()> = Document::new(10, 10);
+        let a = d.active;
+        let b = d.add_pixel_layer();
+        let c = d.add_pixel_layer();
+        d.active = c;
+        d.picked = vec![a, 999];
+        assert_eq!(d.selected_layers(), vec![a, c], "bottom to top, missing ids dropped");
+        assert_eq!(d.merge_set(MergeKind::Selected).unwrap(), vec![a, c]);
+        let g = d.group_layers(&[a, c]).unwrap();
+        // b stays, the group sits where c (the topmost) was.
+        assert_eq!(d.layers.iter().map(|l| l.id).collect::<Vec<_>>(), vec![b, g]);
+        match &d.find(g).unwrap().content {
+            Content::Group(ch) => assert_eq!(ch.iter().map(|l| l.id).collect::<Vec<_>>(), vec![a, c]),
+            _ => panic!("not a group"),
+        }
+        // Not siblings any more: merging them needs one list.
+        d.active = b;
+        d.picked = vec![a];
+        assert!(d.merge_set(MergeKind::Selected).is_err());
+        let copies = d.duplicate_layers(&[b]);
+        assert_eq!(copies.len(), 1);
+        assert!(d.remove_layers(&[b, copies[0]]));
+        assert!(d.find(b).is_none() && d.picked.is_empty());
+    }
+
     use super::*;
 
     fn doc() -> Document<u32> {

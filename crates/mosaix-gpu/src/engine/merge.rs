@@ -43,7 +43,7 @@ impl Engine {
 
         let name = match kind {
             MergeKind::Down => shown.find(ids[0]).map_or_else(|| mosaix_core::tr("Merged").to_string(), |l| l.name.clone()),
-            MergeKind::Visible => mosaix_core::tr("Merged").to_string(),
+            MergeKind::Visible | MergeKind::Selected => mosaix_core::tr("Merged").to_string(),
             MergeKind::Flatten => mosaix_core::tr("Background").to_string(),
         };
         let coords: Vec<TileCoord> = tiles.keys().copied().collect();

@@ -3190,3 +3190,21 @@ msgstr "Lasso / Polygon-Lasso"
 
 msgid "Gradient / Paint Bucket"
 msgstr "Verlauf / Füllwerkzeug"
+
+msgid "Duplicate Layers"
+msgstr "Ebenen duplizieren"
+
+msgid "Delete Layers"
+msgstr "Ebenen löschen"
+
+msgid "Merge Layers"
+msgstr "Ebenen zusammenfügen"
+
+msgid "The selected layers must be in the same group"
+msgstr "Die ausgewählten Ebenen müssen in derselben Gruppe liegen"
+
+msgid "select at least two layers"
+msgstr "mindestens zwei Ebenen auswählen"
+
+msgid "the selected layers must be in the same group"
+msgstr "die ausgewählten Ebenen müssen in derselben Gruppe liegen"

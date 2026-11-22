@@ -116,6 +116,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             .map(|_| (mosaix_gpu::LiquifyTool::TwirlCw, 300.0, 0.6)),
         layers: panels::layer_rows(doc),
         active: active.id,
+        selected: std::env::var("MOSAIX_SNAPSHOT_PICKED").map(|v| v.split(',').filter_map(|x| x.parse().ok()).chain([active.id]).collect()).unwrap_or_default(),
         active_opacity: active.opacity,
         active_fill: active.fill_opacity,
         active_blend: active.blend,

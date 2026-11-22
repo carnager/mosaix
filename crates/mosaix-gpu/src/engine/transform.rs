@@ -452,13 +452,14 @@ impl Engine {
         use_selection: bool,
         only: Option<(DVec2, DVec2)>,
     ) -> Result<(LayerId, Document<Tile>), &'static str> {
-        // A group: every layer in it (and the group's own mask) moves along;
-        // the selection does not apply.
-        if self.stroke.is_none()
-            && let Some(g) = self.doc.active_layer().filter(|l| l.is_group())
-        {
-            let id = g.id;
-            let mut ids = vec![id];
+        // A group, or several selected layers: every layer (and a group's
+        // own mask) moves along; the selection does not apply.
+        let several = self.doc.selected_layers();
+        let several = several.len() > 1 && !(use_selection && self.doc.selection.is_some());
+        if self.stroke.is_none() && (several || self.doc.active_layer().is_some_and(|l| l.is_group())) {
+            let id = self.doc.active;
+            let roots = if several { self.doc.selected_layers() } else { vec![id] };
+            let mut ids = Vec::new();
             fn collect(ls: &[mosaix_core::Layer<Tile>], out: &mut Vec<LayerId>) {
                 for l in ls {
                     out.push(l.id);
@@ -467,8 +468,11 @@ impl Engine {
                     }
                 }
             }
-            if let Content::Group(c) = &g.content {
-                collect(c, &mut ids);
+            for r in roots {
+                ids.push(r);
+                if let Some(Content::Group(c)) = self.doc.find(r).map(|l| &l.content) {
+                    collect(c, &mut ids);
+                }
             }
             let mut doc = self.doc.clone();
             for l in ids {
@@ -1005,10 +1009,11 @@ impl Engine {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
-        if !self
-            .doc
-            .active_layer()
-            .is_some_and(|l| l.is_rendered() || l.is_group())
+        if self.doc.selected_layers().len() <= 1
+            && !self
+                .doc
+                .active_layer()
+                .is_some_and(|l| l.is_rendered() || l.is_group())
         {
             self.check_target(StrokeTarget::Pixels)?;
         }

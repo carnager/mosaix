@@ -206,6 +206,8 @@ pub struct Model {
     pub mask_edit: bool,
     pub layers: Vec<LayerRow>,
     pub active: LayerId,
+    /// All selected layers (active included), bottom → top.
+    pub selected: Vec<LayerId>,
     pub active_opacity: f32,
     /// Fill opacity of the active layer (its pixels only, not its style).
     pub active_fill: f32,
@@ -263,6 +265,8 @@ pub enum Action {
     SelectLayerPixels { layer: LayerId, mode: &'static str },
     /// Paint Bucket: sample all layers instead of the active one.
     BucketAll(bool),
+    /// Layer panel: Ctrl+click (toggle) or Shift+click (`range`) a layer.
+    PickLayer { layer: LayerId, range: bool },
     /// Saves (`Some`) or forgets (`None`) the OpenAI API key.
     SaveApiKey(Option<String>),
     PlaceEmbedded(std::path::PathBuf),
@@ -1001,10 +1005,13 @@ fn menu_items(ui: &mut egui::Ui, menu: &str, items: &[super::menus::Item], m: &M
 /// A command's menu text; Duplicate Layer reads "Layer via Copy" while
 /// something is selected, as that is what Ctrl+J then does.
 fn command_text(c: &palette::Cmd, m: &Model) -> &'static str {
-    if c.label == "Duplicate Layer" && m.has_selection && pixel_active(m) {
-        tr("Layer via Copy")
-    } else {
-        c.label_text()
+    let several = m.selected.len() > 1;
+    match c.label {
+        "Duplicate Layer" if m.has_selection && pixel_active(m) => tr("Layer via Copy"),
+        "Duplicate Layer" if several => tr("Duplicate Layers"),
+        "Merge Down" if several => tr("Merge Layers"),
+        "Group Layers" if several => tr("Group Layers"),
+        _ => c.label_text(),
     }
 }
 
@@ -1033,6 +1040,12 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
     match label {
         "Layer via Cut" => need(m.has_selection && pixel_active(m), tr("Needs a selection on a pixel layer")),
         "Invert" | "Desaturate" | "Hue/Saturation …" | "Levels …" | "Curves …" => need(pixel_active(m), tr("Works on pixel layers")),
+        "Merge Down" if m.selected.len() > 1 => {
+            // Merges the selected layers then; they must share one list.
+            let depth = |id: LayerId| m.layers.iter().find(|r| r.id == id).map(|r| r.depth);
+            let d0 = depth(m.active);
+            need(m.selected.iter().all(|id| depth(*id) == d0), tr("The selected layers must be in the same group"))
+        }
         "Merge Down" => {
             // Rows run top → bottom; the sibling below is the next row at the same depth.
             let below = m.layers.iter().position(|r| r.id == m.active).and_then(|i| {
@@ -2592,6 +2605,7 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                     let row_h = 34.0;
                     for row in &m.layers {
                         let active = row.id == m.active;
+                        let picked = !active && m.selected.contains(&row.id);
                         let (rect, resp) = ui.allocate_exact_size(
                             Vec2::new(ui.available_width(), row_h),
                             Sense::click_and_drag(),
@@ -2599,6 +2613,8 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                         let painter = ui.painter_at(rect);
                         if active {
                             painter.rect_filled(rect, 3.0, ACCENT.linear_multiply(0.35));
+                        } else if picked {
+                            painter.rect_filled(rect, 3.0, ACCENT.linear_multiply(0.2));
                         } else if resp.hovered() {
                             painter.rect_filled(rect, 3.0, Color32::from_white_alpha(10));
                         }
@@ -2834,7 +2850,14 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                 );
                         }
                         let mods = ui.input(|i| i.modifiers);
-                        if resp.clicked() && mods.ctrl && !row.group && !row.adjustment {
+                        // The thumbnail: right of the eye and the indent.
+                        let thumb_x = (eye.max.x + 6.0 + row.depth as f32 * 14.0 + if row.clip { 16.0 } else { 0.0 }, eye.max.x + 6.0 + row.depth as f32 * 14.0 + if row.clip { 16.0 } else { 0.0 } + row_h);
+                        let on_thumb = resp.interact_pointer_pos().is_some_and(|p| p.x >= thumb_x.0 && p.x <= thumb_x.1);
+                        if resp.clicked() && mods.shift && !mods.ctrl && !mods.alt {
+                            out.push(Action::PickLayer { layer: row.id, range: true });
+                        } else if resp.clicked() && mods.ctrl && !on_thumb {
+                            out.push(Action::PickLayer { layer: row.id, range: false });
+                        } else if resp.clicked() && mods.ctrl && !row.group && !row.adjustment {
                             // Ctrl+click: select the layer's pixels (Shift adds, Alt subtracts).
                             let mode = match (mods.shift, mods.alt) {
                                 (true, true) => "intersect",
@@ -2843,7 +2866,8 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                 _ => "replace",
                             };
                             out.push(Action::SelectLayerPixels { layer: row.id, mode });
-                        } else if resp.clicked() || resp.secondary_clicked() {
+                        } else if resp.clicked() || (resp.secondary_clicked() && !m.selected.contains(&row.id)) {
+                            // A right-click inside the selection keeps it (the menu acts on all).
                             out.push(Action::SelectLayer(row.id));
                         }
                         if resp.double_clicked() {
