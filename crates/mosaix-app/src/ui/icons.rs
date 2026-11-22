@@ -295,6 +295,14 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             ));
             p.line_segment([at(9.0, 19.0), at(18.0, 19.0)], thin);
         }
+        Icon::Tool(ToolId::BgEraser) => {
+            // Eraser with scissors-like sample dot: eraser outline over a crosshair.
+            let pts = [at(5.0, 11.0), at(11.0, 5.0), at(17.0, 11.0), at(11.0, 17.0)];
+            p.add(Shape::convex_polygon(pts.to_vec(), Color32::TRANSPARENT, mid));
+            p.line_segment([at(11.0, 8.0), at(11.0, 14.0)], thin);
+            p.line_segment([at(8.0, 11.0), at(14.0, 11.0)], thin);
+            p.line_segment([at(4.0, 19.0), at(18.0, 19.0)], thin);
+        }
         Icon::Tool(ToolId::Text) => {
             p.line_segment([at(4.0, 4.0), at(16.0, 4.0)], Stroke::new(2.4 * u, color));
             p.line_segment([at(10.0, 4.0), at(10.0, 17.0)], Stroke::new(2.4 * u, color));

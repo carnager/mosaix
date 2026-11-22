@@ -345,10 +345,10 @@ pub fn tools() -> Vec<Value> {
                 "clone_all_layers": { "type": "boolean", "description": "Clone from the flattened image instead of the layer (stamp onto an empty layer)" },
                 "heal": { "type": "boolean", "description": "With clone_offset: healing brush – texture from the source, colour and brightness matched to the surroundings when the stroke ends" },
                 "spot_heal": { "type": "boolean", "description": "Spot healing brush: paint over a blemish, a matching source is found automatically (no clone_offset, no colour)" },
-                "tone": { "type": "string", "enum": ["dodge", "burn", "sponge_saturate", "sponge_desaturate", "blur", "sharpen"],
-                          "description": "Retouching brush: changes the pixels under it (no colour); one stroke applies it once, strokes add up" },
-                "range": { "type": "string", "enum": ["midtones", "shadows", "highlights"], "description": "dodge/burn: tonal range (default midtones)" },
-                "amount": { "type": "number", "minimum": 0, "maximum": 1, "description": "retouching: exposure/strength (default 0.5)" }
+                "tone": { "type": "string", "enum": ["dodge", "burn", "sponge_saturate", "sponge_desaturate", "blur", "sharpen", "background_erase"],
+                          "description": "Retouching brush: changes the pixels under it (no colour); one stroke applies it once, strokes add up. background_erase erases pixels close to the colour under the brush centre and keeps others (amount = tolerance)" },
+                "range": { "type": "string", "enum": ["midtones", "shadows", "highlights", "continuous", "once"], "description": "dodge/burn: tonal range (default midtones); background_erase: sample the colour continuously (default) or once at the start" },
+                "amount": { "type": "number", "minimum": 0, "maximum": 1, "description": "retouching: exposure/strength/tolerance (default 0.5)" }
             }),
             &["points", "size"],
             false,

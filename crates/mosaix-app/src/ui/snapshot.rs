@@ -416,6 +416,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "eyedropper" => ToolId::Eyedropper,
             "bucket" => ToolId::Bucket,
             "ruler" => ToolId::Ruler,
+            "bgeraser" => ToolId::BgEraser,
             "poly_lasso" => ToolId::PolyLasso,
             _ => ToolId::Brush,
         };

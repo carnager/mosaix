@@ -408,6 +408,8 @@ impl Engine {
         };
         let stroke = self.stroke.as_ref().unwrap();
         let history = stroke.params.history;
+        // Background Eraser, sampled once: the stroke's first dab.
+        let first = stroke.footprint.first().map(|f| [f[0], f[1]]);
         let (gx0, gy0) = (
             source.iter().map(|e| e.0.x).min().unwrap_or(0),
             source.iter().map(|e| e.0.y).min().unwrap_or(0),
@@ -452,6 +454,11 @@ impl Engine {
                     grid_w: gw,
                     grid_h: gh,
                     offset: match tone {
+                        // The sampling point (document px).
+                        Some(t) if t.kind == super::ToneKind::BackgroundErase => {
+                            let k = if t.range == 1 { first.unwrap_or(d.center) } else { d.center };
+                            [k[0].floor() as i32, k[1].floor() as i32]
+                        }
                         Some(t) => [t.range as i32, 0],
                         None => [ox, oy],
                     },

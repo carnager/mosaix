@@ -157,7 +157,8 @@ pub struct StrokeParams {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tone {
     pub kind: ToneKind,
-    /// Dodge and burn: 0 shadows, 1 midtones, 2 highlights.
+    /// Dodge and burn: 0 shadows, 1 midtones, 2 highlights. Background
+    /// Eraser: 0 sample continuously, 1 once.
     pub range: u8,
     /// Exposure / strength / flow of the effect, 0…1.
     pub amount: f32,
@@ -171,6 +172,10 @@ pub enum ToneKind {
     Desaturate = 4,
     Blur = 5,
     Sharpen = 6,
+    /// Background Eraser: erases pixels close to the colour under the brush
+    /// centre (`range` 0 continuous, 1 once: the first dab's colour;
+    /// `amount` = tolerance).
+    BackgroundErase = 7,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

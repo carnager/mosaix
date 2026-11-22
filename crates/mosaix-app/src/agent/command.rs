@@ -1414,9 +1414,13 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                         "sponge_desaturate" => T::Desaturate,
                         "blur" => T::Blur,
                         "sharpen" => T::Sharpen,
-                        _ => bail!("tone must be dodge, burn, sponge_saturate, sponge_desaturate, blur or sharpen"),
+                        "background_erase" => T::BackgroundErase,
+                        _ => bail!("tone must be dodge, burn, sponge_saturate, sponge_desaturate, blur, sharpen or background_erase"),
                     };
-                    let range = match range.as_deref().unwrap_or("midtones") {
+                    let range = match range.as_deref().unwrap_or(if kind == T::BackgroundErase { "continuous" } else { "midtones" }) {
+                        "continuous" if kind == T::BackgroundErase => 0,
+                        "once" if kind == T::BackgroundErase => 1,
+                        r if kind == T::BackgroundErase => bail!("range for background_erase must be continuous or once, got {r:?}"),
                         "shadows" => 0,
                         "midtones" => 1,
                         "highlights" => 2,

@@ -329,7 +329,7 @@ pub const COMMANDS: &[Cmd] = &[
         false,
         false,
     ),
-    c("Tool", "Eraser", K::e, false, false, false),
+    c("Tool", "Eraser / Background Eraser", K::e, false, false, false),
     c(
         "Tool",
         "Rectangular / Elliptical Marquee",

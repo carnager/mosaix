@@ -241,7 +241,7 @@ const TOOL: &[Item] = &[
     C("Brush / Pencil", T(ToolId::Brush)),
     C("Smudge", T(ToolId::Smudge)),
     C("Dodge / Burn / Sponge", T(ToolId::Dodge)),
-    C("Eraser", T(ToolId::Eraser)),
+    C("Eraser / Background Eraser", T(ToolId::Eraser)),
     C("Clone Stamp", T(ToolId::Clone)),
     C("History Brush", T(ToolId::HistoryBrush)),
     C("Eyedropper / Ruler", T(ToolId::Eyedropper)),

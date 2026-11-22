@@ -139,11 +139,15 @@ pub struct ToneOpts {
     pub sponge_flow: f32,
     /// Blur/sharpen strength, 0…1.
     pub strength: f32,
+    /// Background Eraser: colour tolerance 0…1, and sampling once (the
+    /// stroke's first colour) instead of continuously.
+    pub bg_tolerance: f32,
+    pub bg_once: bool,
 }
 
 impl Default for ToneOpts {
     fn default() -> Self {
-        Self { range: 1, exposure: 0.5, sponge_saturate: false, sponge_flow: 0.5, strength: 0.5 }
+        Self { range: 1, exposure: 0.5, sponge_saturate: false, sponge_flow: 0.5, strength: 0.5, bg_tolerance: 0.25, bg_once: false }
     }
 }
 

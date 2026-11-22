@@ -174,7 +174,23 @@ fn fs_tone(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let orig = canvas_texel(job, gp);
     var goal = orig;
     let k = job.shape.w;
-    if job.primed == 5u {
+    if job.primed == 7u {
+        // Background Eraser: pixels close to the sampled colour lose their
+        // opacity (straight sRGB, largest channel difference vs. tolerance).
+        let key = canvas_texel(job, job.offset);
+        if key.a <= 0.002 || orig.a <= 0.0 {
+            return old;
+        }
+        let ku = key.rgb / key.a;
+        let ou = orig.rgb / orig.a;
+        let ke = vec3<f32>(enc1(ku.r), enc1(ku.g), enc1(ku.b));
+        let oe = vec3<f32>(enc1(ou.r), enc1(ou.g), enc1(ou.b));
+        let dv = abs(ke - oe);
+        let d = max(dv.r, max(dv.g, dv.b));
+        let tol = max(k, 0.002);
+        let m = 1.0 - smoothstep(tol * 0.5, tol, d);
+        goal = orig * (1.0 - m);
+    } else if job.primed == 5u {
         goal = mix(orig, blurred(job, gp), k);
     } else if job.primed == 6u {
         let b = blurred(job, gp);

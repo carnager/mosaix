@@ -3983,3 +3983,32 @@ fn warp_bends_the_layer() {
     assert!(px(&t, 66, 50)[3] < 0.1, "the corners stay");
     assert!(px(&t, 128, 128)[3] > 0.9 && px(&t, 128, 220)[3] < 0.1);
 }
+
+#[test]
+fn background_eraser_keeps_other_colours() {
+    use mosaix_gpu::{Tone, ToneKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    // Left half sky blue, right half dark green: an edge at x = 128.
+    e.fill(StrokeTarget::Pixels, [0.02, 0.1, 0.02, 1.0], 1.0, "Green").unwrap();
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 128.0, h: 256.0 }, CombineOp::Replace, "Selection").unwrap();
+    e.fill(StrokeTarget::Pixels, [0.3, 0.5, 0.9, 1.0], 1.0, "Blue").unwrap();
+    e.deselect("x").unwrap();
+    for range in [1u8, 0] {
+        let mut brush = red_brush();
+        brush.size = 80.0;
+        e.begin_stroke(StrokeParams { tone: Some(Tone { kind: ToneKind::BackgroundErase, range, amount: 0.25 }), ..Default::default() }).unwrap();
+        let mut st = Stroke::new(brush);
+        // Start on the blue, run along the edge.
+        for y in [100.0, 110.0, 120.0, 130.0] {
+            e.stroke_dabs(&st.add(InputSample { pos: DVec2::new(110.0, y), pressure: 1.0 }));
+        }
+        e.end_stroke("Background Eraser");
+        e.flush();
+        let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+        assert!(px(&t, 110, 115)[3] < 0.05, "range {range}: blue erased {:?}", px(&t, 110, 115));
+        assert!(px(&t, 135, 115)[3] > 0.99, "range {range}: green kept {:?}", px(&t, 135, 115));
+        e.undo();
+    }
+}

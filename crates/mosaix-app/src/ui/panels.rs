@@ -9,7 +9,7 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 30] = [
+pub const TOOLS: [(ToolId, &str, &str); 31] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
@@ -32,6 +32,7 @@ pub const TOOLS: [(ToolId, &str, &str); 30] = [
     (ToolId::Remove, "Remove (AI)", "J"),
     (ToolId::Heal, "Healing Brush", "J"),
     (ToolId::Eraser, "Eraser", "E"),
+    (ToolId::BgEraser, "Background Eraser", "E"),
     (ToolId::Text, "Text", "T"),
     (ToolId::Shape, "Shape (Rectangle / Ellipse)", "Shift+U"),
     (ToolId::Pen, "Pen", "P"),
@@ -69,6 +70,7 @@ pub enum ToolId {
     Sponge,
     Blur,
     Sharpen,
+    BgEraser,
     PolyLasso,
     Bucket,
     Pencil,
@@ -1793,7 +1795,7 @@ pub const TOOL_GROUPS: &[&[ToolId]] = &[
     &[ToolId::SpotHeal, ToolId::Remove, ToolId::Heal],
     &[ToolId::Brush, ToolId::Pencil],
     &[ToolId::Clone, ToolId::HistoryBrush],
-    &[ToolId::Eraser],
+    &[ToolId::Eraser, ToolId::BgEraser],
     &[ToolId::Gradient, ToolId::Radial, ToolId::Bucket],
     &[ToolId::Smudge, ToolId::Blur, ToolId::Sharpen],
     &[ToolId::Dodge, ToolId::Burn, ToolId::Sponge],
@@ -2560,7 +2562,8 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
         | ToolId::Burn
         | ToolId::Sponge
         | ToolId::Blur
-        | ToolId::Sharpen => {
+        | ToolId::Sharpen
+        | ToolId::BgEraser => {
             let mut b = m.brush;
             let mut changed = false;
             if matches!(m.tool, ToolId::Brush | ToolId::Pencil) {
@@ -2621,7 +2624,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             if b.tip == 0 {
                 changed |= slider(ui, tr("Hardness"), &mut b.hardness, 0.0..=1.0, true);
             }
-            let retouch = matches!(m.tool, ToolId::Dodge | ToolId::Burn | ToolId::Sponge | ToolId::Blur | ToolId::Sharpen);
+            let retouch = matches!(m.tool, ToolId::Dodge | ToolId::Burn | ToolId::Sponge | ToolId::Blur | ToolId::Sharpen | ToolId::BgEraser);
             if retouch {
                 let mut t = m.tone;
                 let mut tc = false;
@@ -2638,6 +2641,21 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                             .response
                             .on_hover_text(tr("Range"));
                         tc |= slider(ui, tr("Exposure"), &mut t.exposure, 0.01..=1.0, true);
+                    }
+                    ToolId::BgEraser => {
+                        egui::ComboBox::from_id_salt("bg sampling")
+                            .selected_text(if t.bg_once { tr("Once") } else { tr("Continuous") })
+                            .width(100.0)
+                            .show_ui(ui, |ui| {
+                                tc |= ui.selectable_value(&mut t.bg_once, false, tr("Continuous")).changed();
+                                tc |= ui.selectable_value(&mut t.bg_once, true, tr("Once")).changed();
+                            })
+                            .response
+                            .on_hover_text(tr("Sampling: the colour under the brush centre all along, or only where the stroke starts"));
+                        let mut pct = t.bg_tolerance * 100.0;
+                        ui.label(tr("Tolerance"));
+                        tc |= ui.add(egui::Slider::new(&mut pct, 1.0..=100.0).suffix(" %").max_decimals(0)).changed();
+                        t.bg_tolerance = pct / 100.0;
                     }
                     ToolId::Sponge => {
                         tc |= ui.selectable_value(&mut t.sponge_saturate, false, tr("Desaturate")).changed();

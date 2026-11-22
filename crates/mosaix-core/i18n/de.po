@@ -3733,3 +3733,18 @@ msgstr "Die Ebene mit einem Gitter aus Griffen biegen"
 
 msgid "Drag the corners, handles and inner points; a corner takes its handles along."
 msgstr "Ecken, Griffe und innere Punkte ziehen; eine Ecke nimmt ihre Griffe mit."
+
+msgid "Background Eraser"
+msgstr "Hintergrund-Radiergummi"
+
+msgid "Once"
+msgstr "Einmal"
+
+msgid "Continuous"
+msgstr "Kontinuierlich"
+
+msgid "Sampling: the colour under the brush centre all along, or only where the stroke starts"
+msgstr "Aufnahme: die Farbe unter der Pinselmitte fortlaufend oder nur am Anfang des Strichs"
+
+msgid "Eraser / Background Eraser"
+msgstr "Radiergummi / Hintergrund-Radiergummi"

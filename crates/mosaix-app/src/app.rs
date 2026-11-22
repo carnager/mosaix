@@ -192,6 +192,8 @@ enum Tool {
     Sponge,
     Blur,
     Sharpen,
+    /// Erases the colour sampled under the brush centre, keeps others.
+    BgEraser,
     /// Click from point to point; closes on the start point, a double-click or Enter.
     PolyLasso,
     /// Click to fill the region of similar colour.
@@ -238,6 +240,7 @@ impl Tool {
             Tool::Sponge => tr("Sponge"),
             Tool::Blur => tr("Blur"),
             Tool::Sharpen => tr("Sharpen"),
+            Tool::BgEraser => tr("Background Eraser"),
         }
     }
 
@@ -258,6 +261,7 @@ impl Tool {
                 | Tool::Sponge
                 | Tool::Blur
                 | Tool::Sharpen
+                | Tool::BgEraser
         )
     }
 }
@@ -1235,7 +1239,8 @@ impl App {
             | Tool::Burn
             | Tool::Sponge
             | Tool::Blur
-            | Tool::Sharpen => {
+            | Tool::Sharpen
+            | Tool::BgEraser => {
                 self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
             }
             Tool::Marquee { ellipse } => Drag::Marquee {
@@ -1903,6 +1908,7 @@ impl App {
                 Tool::Sponge => (K::Desaturate, t.sponge_flow),
                 Tool::Blur => (K::Blur, t.strength),
                 Tool::Sharpen => (K::Sharpen, t.strength),
+                Tool::BgEraser => return Some(mosaix_gpu::Tone { kind: K::BackgroundErase, range: t.bg_once as u8, amount: t.bg_tolerance }),
                 _ => return None,
             };
             Some(mosaix_gpu::Tone { kind, range: t.range.min(2), amount })
@@ -2655,6 +2661,7 @@ impl App {
             "sponge" => Tool::Sponge,
             "blur" => Tool::Blur,
             "sharpen" => Tool::Sharpen,
+            "background_eraser" => Tool::BgEraser,
             "gradient" => Tool::Gradient { radial: false },
             "radial" => Tool::Gradient { radial: true },
             "move" => Tool::Move,
@@ -2699,6 +2706,7 @@ impl App {
             Tool::Sponge => "sponge",
             Tool::Blur => "blur",
             Tool::Sharpen => "sharpen",
+            Tool::BgEraser => "background_eraser",
             Tool::Gradient { radial: false } => "gradient",
             Tool::Gradient { radial: true } => "radial",
             Tool::Move => "move",
@@ -3934,7 +3942,7 @@ impl App {
             }
             Keysym::bracketleft => self.brush.size = (self.brush.size / 1.2).max(1.0),
             Keysym::bracketright => self.brush.size = (self.brush.size * 1.2).min(5000.0),
-            Keysym::e => self.set_tool(Tool::Eraser),
+            Keysym::e => self.set_tool(if self.tool == Tool::Eraser { Tool::BgEraser } else { Tool::Eraser }),
             Keysym::b => self.set_tool(if self.tool == Tool::Brush { Tool::Pencil } else { Tool::Brush }),
             Keysym::B => {
                 // Built-in tips, then the custom ones.
@@ -4396,6 +4404,7 @@ impl App {
             Tool::Sponge => ToolId::Sponge,
             Tool::Blur => ToolId::Blur,
             Tool::Sharpen => ToolId::Sharpen,
+            Tool::BgEraser => ToolId::BgEraser,
             Tool::Gradient { radial: false } => ToolId::Gradient,
             Tool::Gradient { radial: true } => ToolId::Radial,
             Tool::Move => ToolId::Move,
@@ -4721,6 +4730,7 @@ impl App {
                         ToolId::Sponge => Tool::Sponge,
                         ToolId::Blur => Tool::Blur,
                         ToolId::Sharpen => Tool::Sharpen,
+                        ToolId::BgEraser => Tool::BgEraser,
                         ToolId::Gradient => Tool::Gradient { radial: false },
                         ToolId::Radial => Tool::Gradient { radial: true },
                         ToolId::Move => Tool::Move,
