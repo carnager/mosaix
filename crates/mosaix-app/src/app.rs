@@ -371,6 +371,8 @@ struct Bench {
 pub struct App {
     // Field order matters for drop order: the wgpu surface must go before the window.
     surface: wgpu::Surface<'static>,
+    /// For key repeat (the keyboard is made once the seat shows up).
+    loop_handle: smithay_client_toolkit::reexports::calloop::LoopHandle<'static, App>,
     session: Option<Session>,
     gpu: GpuContext,
     surface_config: wgpu::SurfaceConfiguration,
@@ -639,6 +641,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
 
     let gui = ui::Gui::new(&gpu.device, surface_config.format);
     let mut app = App {
+        loop_handle: event_loop.handle(),
         surface,
         session: None,
         gpu,
@@ -2908,6 +2911,13 @@ impl App {
         });
     }
 
+    /// A held key repeating: only typing repeats, never tools or commands.
+    fn repeated_key(&mut self, ev: KeyEvent) {
+        if self.ui_state.captures_keyboard() || self.gui.wants_keyboard() || self.text_edit.is_some() {
+            self.key(&ev, true);
+        }
+    }
+
     fn key(&mut self, ev: &KeyEvent, pressed: bool) {
         let sym = ev.keysym;
         tracing::debug!(?sym, raw = ev.raw_code, pressed, "key");
@@ -5094,7 +5104,18 @@ impl SeatHandler for App {
         cap: Capability,
     ) {
         if cap == Capability::Keyboard && self.keyboard.is_none() {
-            self.keyboard = self.seat_state.get_keyboard(qh, &seat, None).ok();
+            // Held keys repeat at the compositor's rate (the client repeats them).
+            self.keyboard = self
+                .seat_state
+                .get_keyboard_with_repeat(
+                    qh,
+                    &seat,
+                    None,
+                    self.loop_handle.clone(),
+                    Box::new(|app: &mut App, _, ev| app.repeated_key(ev)),
+                )
+                .or_else(|_| self.seat_state.get_keyboard(qh, &seat, None))
+                .ok();
             if self.clipboard.device.is_none()
                 && let Some(m) = &self.clipboard.manager
             {
@@ -5188,12 +5209,7 @@ impl KeyboardHandler for App {
         _: u32,
         ev: KeyEvent,
     ) {
-        if self.ui_state.captures_keyboard()
-            || self.gui.wants_keyboard()
-            || self.text_edit.is_some()
-        {
-            self.key(&ev, true);
-        }
+        self.repeated_key(ev);
     }
 
     fn release_key(
