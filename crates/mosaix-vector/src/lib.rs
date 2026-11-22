@@ -856,6 +856,73 @@ fn geometry_path(g: &Geometry) -> Option<BezPath> {
     })
 }
 
+/// Flattens a path into closed polygons (for the boolean operations).
+fn contours(path: &BezPath) -> Vec<Vec<[f64; 2]>> {
+    let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut cur: Vec<[f64; 2]> = Vec::new();
+    vello_cpu::kurbo::flatten(path.iter(), 0.05, |el| {
+        use vello_cpu::kurbo::PathEl;
+        match el {
+            PathEl::MoveTo(p) => {
+                if cur.len() > 2 {
+                    out.push(std::mem::take(&mut cur));
+                }
+                cur.clear();
+                cur.push([p.x, p.y]);
+            }
+            PathEl::LineTo(p) => cur.push([p.x, p.y]),
+            PathEl::ClosePath => {
+                if cur.len() > 2 {
+                    out.push(std::mem::take(&mut cur));
+                }
+                cur.clear();
+            }
+            _ => {}
+        }
+    });
+    if cur.len() > 2 {
+        out.push(cur);
+    }
+    out
+}
+
+/// The outline of a shape: its geometry combined with its parts.
+fn shape_path(s: &ShapeSpec) -> Option<BezPath> {
+    let base = geometry_path(&s.geometry);
+    if s.parts.is_empty() {
+        return base;
+    }
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::core::overlay_rule::OverlayRule;
+    use i_overlay::float::single::SingleFloatOverlay;
+    use mosaix_core::vector::PathOp;
+    let mut acc: Vec<Vec<Vec<[f64; 2]>>> = base.as_ref().map_or(Vec::new(), |b| vec![contours(b)]);
+    for part in &s.parts {
+        let clip = geometry_path(&part.geometry).map_or(Vec::new(), |p| contours(&p));
+        let rule = match part.op {
+            PathOp::Unite => OverlayRule::Union,
+            PathOp::Subtract => OverlayRule::Difference,
+            PathOp::Intersect => OverlayRule::Intersect,
+            PathOp::Exclude => OverlayRule::Xor,
+        };
+        acc = acc.overlay(&vec![clip], rule, FillRule::NonZero);
+    }
+    let mut path = BezPath::new();
+    for shape in &acc {
+        for c in shape {
+            for (i, q) in c.iter().enumerate() {
+                if i == 0 {
+                    path.move_to((q[0], q[1]));
+                } else {
+                    path.line_to((q[0], q[1]));
+                }
+            }
+            path.close_path();
+        }
+    }
+    Some(path)
+}
+
 fn color(c: [f32; 4]) -> AlphaColor<Srgb> {
     AlphaColor::new([
         linear_to_srgb(c[0].max(0.0)),
@@ -874,7 +941,7 @@ enum Prepared {
 fn prepare(v: &VectorLayer) -> Prepared {
     match &v.kind {
         VectorKind::Text(t) => Prepared::Text(t.clone(), layout_text(t)),
-        VectorKind::Shape(s) => Prepared::Shape(s.clone(), geometry_path(&s.geometry)),
+        VectorKind::Shape(s) => Prepared::Shape(s.clone(), shape_path(s)),
     }
 }
 
@@ -924,7 +991,7 @@ pub fn shape_outline(v: &VectorLayer) -> Option<Vec<(Vec<mosaix_core::vector::Pa
     use mosaix_core::vector::PathNode;
     use vello_cpu::kurbo::{PathEl, Point};
     let VectorKind::Shape(s) = &v.kind else { return None };
-    let mut path = geometry_path(&s.geometry)?;
+    let mut path = shape_path(s)?;
     path.apply_affine(affine(&v.transform));
     let pt = |p: Point| [p.x, p.y];
     let mut out: Vec<(Vec<PathNode>, bool)> = Vec::new();
@@ -969,6 +1036,46 @@ pub fn shape_outline(v: &VectorLayer) -> Option<Vec<(Vec<mosaix_core::vector::Pa
         }
     }
     flush(&mut cur, &mut out, false);
+    Some(out)
+}
+
+/// `path` (document px) as a geometry in the local space of a layer with
+/// transform `t` (unchanged when `t` is the identity).
+fn to_local(path: BezPath, g: Option<&Geometry>, t: &Mat) -> Option<Geometry> {
+    let identity = *t == [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    if identity && let Some(g) = g {
+        return Some(g.clone());
+    }
+    let mut path = path;
+    path.apply_affine(affine(t).inverse());
+    Some(Geometry::Path { d: path.to_svg() })
+}
+
+/// Adds a shape drawn in document px to a shape layer with a path
+/// operation (Combine / Subtract / Intersect / Exclude). False for text.
+pub fn add_shape_part(v: &mut VectorLayer, g: &Geometry, op: mosaix_core::vector::PathOp) -> bool {
+    let t = v.transform;
+    let VectorKind::Shape(s) = &mut v.kind else { return false };
+    let Some(local) = geometry_path(g).and_then(|p| to_local(p, Some(g), &t)) else { return false };
+    s.parts.push(mosaix_core::vector::ShapePart { op, geometry: local });
+    true
+}
+
+/// Layer › Combine Shapes: `others` (above `base`, bottom → top) become
+/// parts of `base` with `op`; `base` keeps its fill and stroke. None if
+/// one of them is not a shape.
+pub fn combine_shapes(base: &VectorLayer, others: &[&VectorLayer], op: mosaix_core::vector::PathOp) -> Option<VectorLayer> {
+    let mut out = base.clone();
+    let VectorKind::Shape(_) = &out.kind else { return None };
+    for o in others {
+        let VectorKind::Shape(os) = &o.kind else { return None };
+        // The other layer's whole outline, in document px.
+        let mut path = shape_path(os)?;
+        path.apply_affine(affine(&o.transform));
+        let geometry = to_local(path, None, &base.transform)?;
+        let VectorKind::Shape(s) = &mut out.kind else { unreachable!() };
+        s.parts.push(mosaix_core::vector::ShapePart { op, geometry });
+    }
     Some(out)
 }
 
@@ -1290,6 +1397,56 @@ mod tests {
     }
 
     #[test]
+    fn shape_parts_combine() {
+        use mosaix_core::vector::{PathOp, ShapePart};
+        let circle = |cx: f64, r: f64| Geometry::Ellipse { cx, cy: 100.0, rx: r, ry: r };
+        let shape = |op: PathOp, part: Geometry| {
+            VectorLayer::shape(ShapeSpec {
+                geometry: circle(100.0, 60.0),
+                fill: Some([1.0, 0.0, 0.0, 1.0]),
+                stroke: None,
+                paint: None,
+                parts: vec![ShapePart { op, geometry: part }],
+            })
+        };
+        let a = |v: &VectorLayer, x: i64| px(&render(v), x, 100)[3];
+        // Ring: a hole in the middle.
+        let ring = shape(PathOp::Subtract, circle(100.0, 30.0));
+        assert!(a(&ring, 100) < 0.01 && a(&ring, 55) > 0.99, "ring");
+        // Two overlapping circles (100 ± 60 and 160 ± 60, overlap 100…160).
+        let other = circle(160.0, 60.0);
+        let u = shape(PathOp::Unite, other.clone());
+        assert!(a(&u, 60) > 0.99 && a(&u, 130) > 0.99 && a(&u, 200) > 0.99);
+        let i = shape(PathOp::Intersect, other.clone());
+        assert!(a(&i, 60) < 0.01 && a(&i, 130) > 0.99 && a(&i, 200) < 0.01);
+        let x = shape(PathOp::Exclude, other.clone());
+        assert!(a(&x, 60) > 0.99 && a(&x, 130) < 0.01 && a(&x, 200) > 0.99);
+        let d = shape(PathOp::Subtract, other);
+        assert!(a(&d, 60) > 0.99 && a(&d, 130) < 0.01 && a(&d, 200) < 0.01);
+        // A rectangle base and a part from path data (as Combine Shapes makes it).
+        let mut rx = VectorLayer::shape(ShapeSpec {
+            geometry: Geometry::Rect { x: 220.0, y: 40.0, w: 120.0, h: 120.0, radius: 0.0 },
+            fill: Some([1.0, 0.0, 0.0, 1.0]),
+            stroke: Some(mosaix_core::vector::StrokeStyle::new([0.0, 0.0, 0.0, 1.0], 4.0)),
+            paint: None,
+            parts: Vec::new(),
+        });
+        let green = VectorLayer::shape(ShapeSpec {
+            geometry: Geometry::Ellipse { cx: 330.0, cy: 70.0, rx: 50.0, ry: 50.0 },
+            fill: Some([0.0, 1.0, 0.0, 1.0]),
+            stroke: None,
+            paint: None,
+            parts: Vec::new(),
+        });
+        rx = combine_shapes(&rx, &[&green], PathOp::Exclude).unwrap();
+        let t = render(&rx);
+        assert!(px(&t, 320, 70)[3] < 0.01, "overlap empty: {:?}", px(&t, 320, 70));
+        assert!(px(&t, 250, 140)[3] > 0.99 && px(&t, 370, 70)[3] > 0.99);
+        // The outline follows the result: the ring has two closed subpaths.
+        assert_eq!(shape_outline(&ring).unwrap().len(), 2);
+    }
+
+    #[test]
     fn rect_fills_exactly_its_area_across_tiles() {
         let red = [1.0, 0.0, 0.0, 1.0];
         let v = VectorLayer::shape(ShapeSpec {
@@ -1303,6 +1460,7 @@ mod tests {
             fill: Some(red),
             stroke: None,
             paint: None,
+            parts: Vec::new(),
         });
         let t = render(&v);
         assert_eq!(px(&t, 300, 120), red);
@@ -1412,6 +1570,7 @@ mod tests {
             fill: Some(red),
             stroke: None,
             paint: None,
+            parts: Vec::new(),
         });
         let t = render(&v);
         assert_eq!(px(&t, 200, 200), red);
@@ -1432,6 +1591,7 @@ mod tests {
             fill: None,
             stroke: Some(StrokeStyle::new(blue, 8.0)),
             paint: None,
+            parts: Vec::new(),
         });
         v.transform = [1.0, 0.0, 0.0, 1.0, 1000.0, 1000.0];
         let t = render(&v);
@@ -1520,6 +1680,7 @@ mod tests {
                 offset: [0.0; 2],
                 bounds: None,
             }),
+            parts: Vec::new(),
         };
         let tiles = render(&VectorLayer::shape(spec.clone()));
         // Left → right, black → white, the fill colour not used.
@@ -1551,11 +1712,13 @@ mod outline_tests {
             fill: Some([1.0; 4]),
             stroke: None,
             paint: None,
+            parts: Vec::new(),
         });
         let o = shape_outline(&v).unwrap();
         assert_eq!(o.len(), 1);
         assert!(o[0].1, "closed");
         assert_eq!(o[0].0.len(), 4, "{:?}", o[0].0);
     }
+
 
 }

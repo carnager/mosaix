@@ -2192,6 +2192,7 @@ name = "mosaix-vector"
 version = "0.1.0"
 dependencies = [
  "half",
+ "i_overlay",
  "image",
  "mosaix-core",
  "mosaix-io",

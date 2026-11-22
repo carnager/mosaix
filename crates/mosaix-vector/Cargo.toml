@@ -12,6 +12,7 @@ rayon.workspace = true
 parley = "0.13"
 vello_cpu = "0.4"
 read-fonts = "0.46"
+i_overlay = "9"
 
 [dev-dependencies]
 image.workspace = true

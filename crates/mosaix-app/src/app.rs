@@ -2127,6 +2127,7 @@ impl App {
             _ => None,
         };
         let (line_width, shape_label) = (self.shape.line_width, ui::panels::shape_name(&self.shape.kind));
+        let path_op = self.shape.op;
         let Some(s) = &mut self.session else { return };
         let e = &mut s.engine;
         let result: Result<bool, &str> = match drag {
@@ -2158,13 +2159,21 @@ impl App {
                 match shape_pts {
                     Some((pts, closed)) if (end - start).length() * zoom >= 3.0 => {
                         let line = !closed;
+                        let geometry = mosaix_core::vector::Geometry::Polygon { points: pts.iter().map(|p| [p.x, p.y]).collect(), closed };
+                        if let (false, Some(op)) = (line, path_op)
+                            && let Some(r) = combine_into_active(e, &geometry, op)
+                        {
+                            r
+                        } else {
                         let v = mosaix_core::VectorLayer::shape(mosaix_core::vector::ShapeSpec {
                             geometry: mosaix_core::vector::Geometry::Polygon { points: pts.iter().map(|p| [p.x, p.y]).collect(), closed },
                             fill: (!line).then_some([color[0], color[1], color[2], 1.0]),
                             stroke: line.then(|| mosaix_core::vector::StrokeStyle::new([color[0], color[1], color[2], 1.0], line_width.max(0.5))),
                             paint: None,
+                            parts: Vec::new(),
                         });
                         Ok(e.add_vector(v, &shape_label).is_some())
+                        }
                     }
                     _ => Ok(false),
                 }
@@ -2193,11 +2202,15 @@ impl App {
                             radius: 0.0,
                         }
                     };
+                    if let Some(r) = path_op.and_then(|op| combine_into_active(e, &geometry, op)) {
+                        r
+                    } else {
                     let v = mosaix_core::VectorLayer::shape(mosaix_core::vector::ShapeSpec {
                         geometry,
                         fill: Some([color[0], color[1], color[2], 1.0]),
                         stroke: None,
                         paint: None,
+                        parts: Vec::new(),
                     });
                     Ok(e.add_vector(
                         v,
@@ -2208,6 +2221,7 @@ impl App {
                         },
                     )
                     .is_some())
+                    }
                 }
             }
             Drag::Marquee {
@@ -6375,6 +6389,22 @@ fn recorded_drag(drag: &Drag, zoom: f64, move_delta: DVec2) -> Option<serde_json
         }
         _ => return None,
     })
+}
+
+/// Shape tool with a path operation: adds the drawn geometry to the active
+/// shape layer. `None` if the active layer is not a shape (a new layer is
+/// made instead).
+fn combine_into_active(
+    e: &mut mosaix_gpu::Engine,
+    g: &mosaix_core::vector::Geometry,
+    op: mosaix_core::vector::PathOp,
+) -> Option<Result<bool, &'static str>> {
+    let id = e.doc().active;
+    let mut v = e.doc().find(id)?.vector()?.clone();
+    if !mosaix_vector::add_shape_part(&mut v, g, op) {
+        return None;
+    }
+    Some(e.set_vector(id, v, op.name(), None).map(|_| true))
 }
 
 #[cfg(test)]

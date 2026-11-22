@@ -534,6 +534,14 @@ pub enum Command {
         pattern: Option<String>,
         pattern_scale: Option<f32>,
         name: Option<String>,
+        /// Add to the active shape layer with this path operation (unite,
+        /// subtract, intersect, exclude) instead of making a new layer.
+        combine: Option<String>,
+    },
+    /// Layer › Combine Shapes: the selected shape layers become one (the
+    /// bottom one keeps its fill and stroke).
+    ShapeCombine {
+        op: String,
     },
     VectorSet {
         layer: Option<LayerId>,
@@ -744,6 +752,7 @@ impl Command {
             Self::ContentAwareFill { .. } => "content_aware_fill",
             Self::TextAdd { .. } => "text_add",
             Self::ShapeAdd { .. } => "shape_add",
+            Self::ShapeCombine { .. } => "shape_combine",
             Self::VectorSet { .. } => "vector_set",
             Self::PathSmooth { .. } => "path_smooth",
             Self::LayerRasterize { .. } => "layer_rasterize",
@@ -1921,6 +1930,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 fill: Some(fill),
                 stroke: None,
                 paint: None,
+                parts: Vec::new(),
             });
             let id = s.engine.add_vector(v, tr("Shape from Selection")).context("not possible right now")?;
             Ok(Output::json(json!({ "ok": true, "layer": id, "outlines": loops.len() })))
@@ -2289,8 +2299,13 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             name,
             sides,
             inset,
+            combine,
         } => {
             use mosaix_core::vector::{Geometry, Paint, ShapeSpec, StrokeStyle};
+            let combine = match combine.as_deref() {
+                None => None,
+                Some(k) => Some(mosaix_core::vector::PathOp::from_key(k).with_context(|| format!("combine must be unite, subtract, intersect or exclude, got {k:?}"))?),
+            };
             // A line is an open polygon with a stroke (and no fill unless asked).
             let is_line = shape == "line";
             let no_fill = no_fill || (is_line && fill.is_none());
@@ -2401,11 +2416,25 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 }
                 (None, None) => None,
             };
+            if let Some(op) = combine {
+                let id = s.engine.doc().active;
+                let mut v = s
+                    .engine
+                    .doc()
+                    .find(id)
+                    .and_then(|l| l.vector().cloned())
+                    .filter(|v| matches!(v.kind, mosaix_core::vector::VectorKind::Shape(_)))
+                    .context("combine needs a shape layer as the active layer")?;
+                ensure!(mosaix_vector::add_shape_part(&mut v, &geometry, op), "the shape is empty or the path data is invalid");
+                s.engine.set_vector(id, v, op.name(), None).map_err(engine_err)?;
+                return vector_ok(s, id);
+            }
             let v = mosaix_core::VectorLayer::shape(ShapeSpec {
                 geometry,
                 fill,
                 stroke,
                 paint,
+                parts: Vec::new(),
             });
             ensure!(
                 mosaix_vector::bounds(&v).is_some(),
@@ -2419,6 +2448,30 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 s.engine.select(|d| d.find_mut(id).unwrap().name = n);
             }
             vector_ok(s, id)
+        }
+        Command::ShapeCombine { op } => {
+            let op = mosaix_core::vector::PathOp::from_key(&op).with_context(|| format!("op must be unite, subtract, intersect or exclude, got {op:?}"))?;
+            not_painting(s)?;
+            let doc = s.engine.doc();
+            let ids: Vec<LayerId> = doc
+                .selected_layers()
+                .into_iter()
+                .filter(|id| doc.find(*id).and_then(|l| l.vector()).is_some_and(|v| matches!(v.kind, mosaix_core::vector::VectorKind::Shape(_))))
+                .collect();
+            ensure!(ids.len() >= 2, "select two or more shape layers (layer_select with also)");
+            let base = ids[0];
+            let layers: Vec<mosaix_core::VectorLayer> = ids.iter().map(|id| doc.find(*id).unwrap().vector().unwrap().clone()).collect();
+            let others: Vec<&mosaix_core::VectorLayer> = layers[1..].iter().collect();
+            let v = mosaix_vector::combine_shapes(&layers[0], &others, op).context("only shape layers can be combined")?;
+            let rest = ids[1..].to_vec();
+            s.engine.edit(op.name(), |d| {
+                d.find_mut(base).unwrap().content = mosaix_core::doc::Content::Vector(v);
+                d.remove_layers(&rest);
+                d.active = base;
+                d.picked.clear();
+                true
+            });
+            vector_ok(s, base)
         }
         Command::PathSmooth { layer, smooth } => {
             let id = target_layer(s, layer)?;

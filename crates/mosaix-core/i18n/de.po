@@ -3748,3 +3748,24 @@ msgstr "Einmal: die angeklickte Farbe wird gelöscht, danach überall hinziehen 
 
 msgid "Eraser / Background Eraser"
 msgstr "Radiergummi / Hintergrund-Radiergummi"
+
+msgid "Select two or more shape layers"
+msgstr "Zwei oder mehr Formebenen auswählen"
+
+msgid "Combine Shapes"
+msgstr "Formen kombinieren"
+
+msgid "Select two or more shape layers (Ctrl+click in the Layers panel)"
+msgstr "Zwei oder mehr Formebenen auswählen (Strg+Klick im Ebenen-Bedienfeld)"
+
+msgid "Path operation: a new shape becomes its own layer, or is combined with the selected shape layer"
+msgstr "Pfadvorgang: eine neue Form wird eine eigene Ebene oder mit der ausgewählten Formebene kombiniert"
+
+msgid "Subtract Front Shape"
+msgstr "Vordere Form subtrahieren"
+
+msgid "Intersect Shape Areas"
+msgstr "Schnittmenge von Formbereichen"
+
+msgid "Exclude Overlapping Shapes"
+msgstr "Überlappende Formen ausschließen"

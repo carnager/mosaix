@@ -102,11 +102,13 @@ pub struct ShapeOpts {
     /// Star: inner radius as a share of the outer one.
     pub inset: f64,
     pub line_width: f32,
+    /// Path operation onto the active shape layer; `None` = new layer.
+    pub op: Option<mosaix_core::vector::PathOp>,
 }
 
 impl Default for ShapeOpts {
     fn default() -> Self {
-        Self { kind: "rect".into(), sides: 5, inset: 0.5, line_width: 4.0 }
+        Self { kind: "rect".into(), sides: 5, inset: 0.5, line_width: 4.0, op: None }
     }
 }
 
@@ -1270,6 +1272,7 @@ pub enum Extra {
     LoadChannel(usize),
     Recent(std::path::PathBuf),
     Warp,
+    CombineShapes(mosaix_core::vector::PathOp),
 }
 
 pub struct ExtraItem {
@@ -1337,6 +1340,10 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         let ok = transform_ok(m, mo);
         add("Edit", &format!("Transform {}", mo.name()), format!("{}: {}", tr("Transform"), tr(mo.name())), (!ok).then_some(tr("Not for this layer")), Extra::Transform(mo));
     }
+    for op in mosaix_core::vector::PathOp::ALL {
+        let off = (shapes_picked(m) < 2).then_some(tr("Select two or more shape layers"));
+        add("Layer", &format!("Combine Shapes {}", op.key()), format!("{}: {}", tr("Combine Shapes"), op.name()), off, Extra::CombineShapes(op));
+    }
     add("Edit", "Transform Warp", format!("{}: {}", tr("Transform"), tr("Warp")), (!pixel_active(m)).then_some(tr("Works on pixel layers")), Extra::Warp);
     for f in mosaix_core::Filter::defaults().into_iter().chain(m.filter_plugins.iter().filter_map(|p| p.result.as_ref().ok().cloned())) {
         let name = f.name().to_string();
@@ -1402,6 +1409,7 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
         Extra::LoadChannel(i) => out.push(Action::Agent(serde_json::json!({ "cmd": "select_load", "channel": i, "mode": "replace" }))),
         Extra::Recent(p) => out.push(Action::OpenFile(p)),
         Extra::Warp => out.push(Action::BeginWarp),
+        Extra::CombineShapes(op) => out.push(Action::Agent(serde_json::json!({ "cmd": "shape_combine", "op": op.key() }))),
     }
 }
 
@@ -1632,6 +1640,21 @@ fn special_entry(
                 run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
+        }
+        Special::CombineShapes => {
+            let ok = shapes_picked(m) >= 2;
+            ui.add_enabled_ui(ok, |ui| {
+                ui.menu_button((icon, tr("Combine Shapes")), |ui| {
+                    for op in mosaix_core::vector::PathOp::ALL {
+                        if ui.button(op.name()).clicked() {
+                            out.push(Action::Agent(serde_json::json!({ "cmd": "shape_combine", "op": op.key() })));
+                            ui.close();
+                        }
+                    }
+                });
+            })
+            .response
+            .on_disabled_hover_text(tr("Select two or more shape layers (Ctrl+click in the Layers panel)"));
         }
         Special::DeleteHidden => {
             let any = m.layers.iter().any(|r| !r.visible);
@@ -2538,6 +2561,21 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                     ui.add(egui::DragValue::new(&mut o.line_width).range(0.5..=500.0).suffix(" px"));
                 }
                 _ => {}
+            }
+            if o.kind != "line" {
+                use mosaix_core::vector::PathOp;
+                let label = |op: Option<PathOp>| op.map_or(tr("New Layer"), |o| o.name());
+                egui::ComboBox::from_id_salt("path op")
+                    .selected_text(label(o.op))
+                    .width(170.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut o.op, None, label(None));
+                        for op in PathOp::ALL {
+                            ui.selectable_value(&mut o.op, Some(op), label(Some(op)));
+                        }
+                    })
+                    .response
+                    .on_hover_text(tr("Path operation: a new shape becomes its own layer, or is combined with the selected shape layer"));
             }
             if o != m.shape {
                 out.push(Action::ShapeOpts(o));
@@ -4420,4 +4458,9 @@ fn shortcuts_dialog(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Ve
     if !open {
         st.shortcuts = None;
     }
+}
+
+/// Selected shape layers (for Layer › Combine Shapes).
+fn shapes_picked(m: &Model) -> usize {
+    m.layers.iter().filter(|r| r.vector == Some(false) && m.selected.contains(&r.id)).count()
 }

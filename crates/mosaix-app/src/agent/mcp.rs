@@ -772,8 +772,16 @@ pub fn tools() -> Vec<Value> {
                     "gradient_angle": { "type": "number", "description": "Degrees, 90 (default) = from bottom to top" },
                     "pattern": { "type": "string", "description": "Pattern fill: a name from pattern_list" },
                     "pattern_scale": { "type": "number" },
-                    "name": { "type": "string" } }),
+                    "name": { "type": "string" },
+                    "combine": { "type": "string", "enum": ["unite", "subtract", "intersect", "exclude"], "description": "Add the shape to the active shape layer with this path operation instead of making a new layer (e.g. subtract a small circle from a big one: a ring)" } }),
             &["shape"],
+            false,
+        ),
+        tool(
+            "shape_combine",
+            "Layer › Combine Shapes: the selected shape layers (layer_select with also) become one shape layer; the bottom one keeps its fill and stroke, the others are united with it, subtracted from it, intersected or excluded (in order, bottom to top). Stays editable.",
+            json!({ "op": { "type": "string", "enum": ["unite", "subtract", "intersect", "exclude"] } }),
+            &["op"],
             false,
         ),
         tool(
@@ -1171,7 +1179,7 @@ mod tests {
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
             "generative_fill": {"prompt": "a bench"},
-            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "image_rotate": {"angle": 2.5}, "layer_warp": {"offsets": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]}, "layer_distribute": {"direction": "vertical"}
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "image_rotate": {"angle": 2.5}, "shape_combine": {"op": "unite"}, "layer_warp": {"offsets": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]}, "layer_distribute": {"direction": "vertical"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

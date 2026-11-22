@@ -239,7 +239,7 @@ pub fn shape(
     };
     let (stroke, fill_on) = stroke.unwrap_or((None, true));
     let stroke = stroke.filter(|_| stroked);
-    Some(ShapeSpec { geometry, fill: fill_on.then_some(fill), stroke, paint: None })
+    Some(ShapeSpec { geometry, fill: fill_on.then_some(fill), stroke, paint: None, parts: Vec::new() })
 }
 
 // --- Writing ----------------------------------------------------------------

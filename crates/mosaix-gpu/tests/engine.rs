@@ -2133,6 +2133,7 @@ fn vector_layers_render_transform_and_rasterize() {
         fill: Some(red),
         stroke: None,
         paint: None,
+        parts: Vec::new(),
     });
     let id = e.add_vector(rect.clone(), "Rectangle").unwrap();
     e.flush();
@@ -2279,6 +2280,7 @@ fn layer_styles_stroke_and_shadow() {
                 fill: Some(red),
                 stroke: None,
                 paint: None,
+                parts: Vec::new(),
             }),
             "R",
         )
@@ -2359,6 +2361,7 @@ fn vector_preview_does_not_touch_the_document() {
         fill: Some(red),
         stroke: None,
         paint: None,
+        parts: Vec::new(),
     });
     let id = e.add_vector(v.clone(), "R").unwrap();
     let mut blue = v.clone();
@@ -2507,6 +2510,7 @@ fn merged_edits_refresh_an_open_transform_preview() {
         fill: Some([1.0, 0.0, 0.0, 1.0]),
         stroke: None,
         paint: None,
+        parts: Vec::new(),
     });
     let id = e.add_vector(v.clone(), "R").unwrap();
     let rot = glam::DAffine2::from_angle(0.1);
@@ -2869,6 +2873,7 @@ fn fill_opacity_fades_the_pixels_but_not_the_style() {
                 fill: Some([0.0, 0.0, 0.0, 1.0]),
                 stroke: None,
                 paint: None,
+                parts: Vec::new(),
             }),
             "R",
         )
