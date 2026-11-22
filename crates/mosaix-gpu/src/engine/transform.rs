@@ -939,6 +939,26 @@ impl Engine {
                 self.warp_layer(id, fwd.into(), interp, false, None, &mut out)?;
             }
         }
+        // Guides too (as long as they stay horizontal or vertical).
+        out.guides = out
+            .guides
+            .iter()
+            .filter_map(|g| {
+                let (p, d) = if g.vertical {
+                    (DVec2::new(g.pos, 0.0), DVec2::Y)
+                } else {
+                    (DVec2::new(0.0, g.pos), DVec2::X)
+                };
+                let (p, d) = (fwd.transform_point2(p), fwd.transform_vector2(d));
+                if d.x.abs() < 1e-9 {
+                    Some(mosaix_core::Guide { vertical: true, pos: p.x })
+                } else if d.y.abs() < 1e-9 {
+                    Some(mosaix_core::Guide { vertical: false, pos: p.y })
+                } else {
+                    None
+                }
+            })
+            .collect();
         // Saved selections move with the image.
         for i in 0..out.channels.len() {
             let m = out.channels[i].mask.clone();

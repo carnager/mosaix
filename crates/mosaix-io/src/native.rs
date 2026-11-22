@@ -34,7 +34,7 @@ const FOOTER_MAGIC: &[u8; 8] = b"IMGNFOOT";
 const FOOTER_LEN: u64 = 24;
 /// 1: layers. 2: + layer masks and selection. … 7: fill opacity. 8: gradient /
 /// pattern fills and multi-stop gradient overlays. 9: RAW layers. 10: saved
-/// selections (channels).
+/// selections (channels) and guides.
 const FORMAT_VERSION: u32 = 10;
 const TILE_VALUES: usize = (TILE_SIZE * TILE_SIZE * 4) as usize;
 const MASK_VALUES: usize = (TILE_SIZE * TILE_SIZE) as usize;
@@ -58,6 +58,8 @@ struct Manifest {
     selection: Option<MaskEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     channels: Vec<ChannelEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    guides: Vec<mosaix_core::Guide>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -277,6 +279,7 @@ fn to_manifest(doc: &Document<BlobRef>, raw: &HashMap<u64, BlobRef>) -> Manifest
             .iter()
             .map(|c| ChannelEntry { name: c.name.clone(), mask: mask_to_entry(&c.mask, true) })
             .collect(),
+        guides: doc.guides.clone(),
     }
 }
 
@@ -365,6 +368,7 @@ fn from_manifest(m: Manifest, file_len: u64, read: ReadBlob, raws: RawRefs) -> a
         .into_iter()
         .map(|c| Ok(mosaix_core::Channel { name: c.name, mask: entry_to_mask(c.mask, file_len)?.0 }))
         .collect::<anyhow::Result<_>>()?;
+    doc.guides = m.guides.into_iter().filter(|g| g.pos.is_finite()).collect();
     ensure!(
         !doc.layers.is_empty(),
         "{}",
@@ -677,6 +681,7 @@ mod tests {
         ];
         d.selection = Some(Mask::filled(255));
         d.channels.push(mosaix_core::Channel { name: "Sky".into(), mask: Mask::filled(255) });
+        d.guides.push(mosaix_core::Guide { vertical: true, pos: 12.5 });
         d
     }
 
@@ -710,6 +715,7 @@ mod tests {
         assert_eq!(decompress_mask(&r.read_blob(mb).unwrap()).unwrap()[100], 77);
         assert_eq!(loaded.selection.as_ref().unwrap().default, 255);
         assert_eq!(loaded.channels.len(), 1);
+        assert_eq!(loaded.guides, vec![mosaix_core::Guide { vertical: true, pos: 12.5 }]);
         assert_eq!((loaded.channels[0].name.as_str(), loaded.channels[0].mask.default), ("Sky", 255));
 
         // Append a tile without rewriting the existing one.

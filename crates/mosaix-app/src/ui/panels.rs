@@ -203,6 +203,10 @@ pub struct Model {
     pub has_selection: bool,
     /// Names of the saved selections.
     pub channels: Vec<String>,
+    /// The canvas view (for rulers, guides and the grid).
+    pub view: mosaix_core::View,
+    pub guides: Vec<mosaix_core::Guide>,
+    pub view_opts: crate::settings::ViewOpts,
     pub status: String,
     pub busy: bool,
     pub recent: Vec<std::path::PathBuf>,
@@ -229,6 +233,8 @@ pub enum Action {
     Agent(serde_json::Value),
     /// Select › Modify (`op` as in the `select_modify` command).
     ModifySelection { op: &'static str, amount: f64 },
+    SetGuides(Vec<mosaix_core::Guide>),
+    ViewOpts(crate::settings::ViewOpts),
     Command(Cmd),
     /// Open a camera RAW file developed with these settings.
     OpenRaw(std::path::PathBuf, mosaix_io::raw::Develop),
@@ -379,6 +385,8 @@ pub struct State {
     pub snapshot_flyout: Option<usize>,
     /// Area left for the canvas (points); `None` = whole window.
     pub canvas: Option<egui::Rect>,
+    /// A guide being dragged out of a ruler or moved.
+    pub guide_drag: Option<super::rulers::GuideDrag>,
     pub palette: Option<(String, usize)>,
     /// The keyboard-shortcuts dialog: search text and the command whose new
     /// keys are being recorded.
@@ -428,6 +436,7 @@ enum Dialog {
     Modify { op: &'static str, amount: f64 },
     ColorRange { color: [f32; 3], fuzziness: f32, image: bool, mode: &'static str },
     SaveSelection { name: String },
+    NewGuide { vertical: bool, pos: f64 },
 }
 
 /// Select › Modify: agent op, menu label, default amount.
@@ -667,6 +676,9 @@ pub fn build(ctx: &egui::Context, m: &Model, st: &mut State) -> Vec<Action> {
         st.had_props = has_props;
         super::dock::show(ui, m, st, &mut out);
     });
+    if let (None, Some(rect)) = (&st.home, st.canvas) {
+        super::rulers::show(ctx, rect, m, &mut st.guide_drag, &mut out);
+    }
     if let (Some(h), Some(rect)) = (&mut st.home, st.canvas)
         && !super::home::show(h, ctx, rect, m, &mut st.new_doc, &mut out)
     {
@@ -863,6 +875,12 @@ pub(super) fn menu_contents(ui: &mut egui::Ui, menu: &str, m: &Model, st: &mut S
                 let Some(c) = COMMANDS.iter().find(|c| c.menu == menu && c.label == label) else {
                     continue;
                 };
+                // On/off commands show a check mark.
+                let icon = match toggled(label, m) {
+                    Some(true) => super::menus::Icon::Glyph(super::glyphs::CHECK),
+                    Some(false) => super::menus::Icon::None,
+                    None => icon,
+                };
                 let b = egui::Button::new((atom(icon), c.label_text()))
                     .shortcut_text(palette::shortcut_text(c, &m.keymap));
                 let why = unavailable(label, m);
@@ -874,6 +892,18 @@ pub(super) fn menu_contents(ui: &mut egui::Ui, menu: &str, m: &Model, st: &mut S
             Item::Special(sp, icon) => special_entry(ui, sp, atom(icon), m, st, out),
         }
     }
+}
+
+/// The state of an on/off command (`None`: not one).
+fn toggled(label: &str, m: &Model) -> Option<bool> {
+    let v = m.view_opts;
+    Some(match label {
+        "Rulers" => v.rulers,
+        "Guides" => v.guides,
+        "Grid" => v.grid,
+        "Snap" => v.snap,
+        _ => return None,
+    })
 }
 
 /// Why a menu command cannot run right now (`None`: it can). Only clear
@@ -895,6 +925,7 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
             need(active.is_some_and(|r| r.has_mask), tr("The layer has no mask"))
         }
         "Remove Background (AI)" => need(pixels, tr("Works on pixel layers")),
+        "Clear Guides" => need(!m.guides.is_empty(), tr("There are no guides")),
         "Rasterize (Text/Shape/RAW to Pixels)" => need(
             active.is_some_and(|r| r.vector.is_some()) || m.active_raw.is_some(),
             tr("Only text, shape and RAW layers"),
@@ -930,6 +961,29 @@ fn special_entry(
             });
         }
         Special::Actions => actions_menu(ui, icon, m, st, out),
+        Special::NewGuide => {
+            if ui.button((icon, tr("New Guide …"))).clicked() {
+                st.dialog = Some(Dialog::NewGuide { vertical: true, pos: (m.doc_size.0 / 2) as f64 });
+                ui.close();
+            }
+        }
+        Special::GridSettings => {
+            ui.menu_button((icon, tr("Grid Settings")), |ui| {
+                let mut v = m.view_opts;
+                egui::Grid::new("grid settings").num_columns(2).show(ui, |ui| {
+                    ui.label(tr("Spacing"));
+                    ui.add(egui::DragValue::new(&mut v.grid_step).range(1.0..=10_000.0).suffix(" px"));
+                    ui.end_row();
+                    ui.label(tr("Subdivisions"));
+                    ui.add(egui::DragValue::new(&mut v.grid_div).range(1..=50));
+                    ui.end_row();
+                });
+                if v != m.view_opts {
+                    v.grid = true;
+                    out.push(Action::ViewOpts(v));
+                }
+            });
+        }
         Special::ColorRange => {
             if ui.button((icon, tr("Color Range …"))).clicked() {
                 st.dialog = Some(Dialog::ColorRange { color: m.color, fuzziness: 40.0, image: false, mode: "replace" });
@@ -2613,6 +2667,28 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                             "cmd": "select_color_range", "color": hex, "fuzziness": *fuzziness,
                             "sample": if *image { "image" } else { "layer" }, "mode": *mode,
                         })));
+                        done = true;
+                    }
+                });
+        }
+        Dialog::NewGuide { vertical, pos } => {
+            egui::Window::new(tr("New Guide"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(vertical, false, tr("Horizontal"));
+                        ui.selectable_value(vertical, true, tr("Vertical"));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(tr("Position"));
+                        ui.add(egui::DragValue::new(pos).speed(1.0).suffix(" px")).request_focus();
+                    });
+                    if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        let mut g = m.guides.clone();
+                        g.push(mosaix_core::Guide { vertical: *vertical, pos: *pos });
+                        out.push(Action::SetGuides(g));
                         done = true;
                     }
                 });

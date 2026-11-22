@@ -17,6 +17,7 @@ pub mod log;
 pub mod menus;
 pub mod palette;
 pub mod panels;
+pub mod rulers;
 pub mod raw_ui;
 pub mod snapshot;
 pub mod style_ui;

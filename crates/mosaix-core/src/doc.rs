@@ -221,6 +221,13 @@ pub struct Channel<T> {
     pub mask: Mask<T>,
 }
 
+/// A guide line: `vertical` ones sit at x = `pos`, horizontal ones at y.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Guide {
+    pub vertical: bool,
+    pub pos: f64,
+}
+
 /// Where a mask belongs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaskSlot {
@@ -242,6 +249,7 @@ pub struct Document<T> {
     pub selection: Option<Mask<T>>,
     /// Saved selections.
     pub channels: Vec<Channel<T>>,
+    pub guides: Vec<Guide>,
     next_id: LayerId,
 }
 
@@ -265,6 +273,7 @@ impl<T: Clone> Document<T> {
             active: 0,
             selection: None,
             channels: Vec::new(),
+            guides: Vec::new(),
             next_id: 1,
         }
     }
@@ -849,6 +858,7 @@ impl<T: Clone> Document<T> {
             active: self.active,
             selection: self.selection.as_ref().map(|m| m.map(f)),
             channels: self.channels.iter().map(|c| Channel { name: c.name.clone(), mask: c.mask.map(f) }).collect(),
+            guides: self.guides.clone(),
             next_id: self.next_id,
         }
     }

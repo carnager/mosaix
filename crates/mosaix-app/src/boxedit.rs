@@ -465,6 +465,11 @@ impl BoxEdit {
         self.drag = None;
     }
 
+    /// The handle being dragged.
+    pub fn dragging(&self) -> Option<Handle> {
+        self.drag.as_ref().map(|d| d.handle)
+    }
+
     /// Outline and handles in screen px.
     pub fn lines(&self, view: &View, scale: f64) -> Vec<OverlayLine> {
         let mut out = vec![OverlayLine {

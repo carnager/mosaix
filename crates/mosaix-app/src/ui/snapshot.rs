@@ -123,6 +123,17 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         history_done: done,
         has_selection: doc.selection.is_some(),
         channels: doc.channels.iter().map(|c| c.name.clone()).collect(),
+        view,
+        guides: if std::env::var_os("MOSAIX_SNAPSHOT_RULERS").is_some() {
+            vec![mosaix_core::Guide { vertical: true, pos: dw as f64 / 3.0 }, mosaix_core::Guide { vertical: false, pos: dh as f64 / 2.0 }]
+        } else {
+            doc.guides.clone()
+        },
+        view_opts: crate::settings::ViewOpts {
+            rulers: std::env::var_os("MOSAIX_SNAPSHOT_RULERS").is_some(),
+            grid: std::env::var_os("MOSAIX_SNAPSHOT_GRID").is_some(),
+            ..Default::default()
+        },
         status: "0.14 ms".into(),
         busy: false,
         recent: std::env::var("MOSAIX_SNAPSHOT_HOME")

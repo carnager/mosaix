@@ -446,6 +446,22 @@ pub fn tools() -> Vec<Value> {
             &[],
             false,
         ),
+        tool(
+            "guide_add",
+            "Add a guide line (snapping aid, saved in .mosaix): vertical at x = position or horizontal at y = position (document px).",
+            json!({ "orientation": { "type": "string", "enum": ["vertical", "horizontal"] }, "position": { "type": "number" } }),
+            &["orientation", "position"],
+            false,
+        ),
+        tool("guide_list", "The guides: [{vertical, pos}] by index.", json!({}), &[], false),
+        tool(
+            "guide_delete",
+            "Delete a guide by index.",
+            json!({ "index": { "type": "integer", "minimum": 0 } }),
+            &["index"],
+            false,
+        ),
+        tool("guide_clear", "Delete all guides.", json!({}), &[], false),
         tool("channel_list", "Names of the saved selections (channels), by index.", json!({}), &[], false),
         tool(
             "channel_delete",
@@ -992,7 +1008,8 @@ mod tests {
             .extend(more.as_object().unwrap().clone());
         let selection = json!({
             "select_modify": {"op": "expand", "amount": 3}, "select_save": {"name": "a"},
-            "channel_delete": {"channel": 0}, "channel_rename": {"channel": 0, "name": "b"}
+            "channel_delete": {"channel": 0}, "channel_rename": {"channel": 0, "name": "b"},
+            "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

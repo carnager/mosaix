@@ -333,6 +333,11 @@ pub const COMMANDS: &[Cmd] = &[
     c("View", "100 %", K::_1, true, false, false),
     c("View", "Reset Rotation", K::R, false, true, false),
     c("View", "Toggle Interface", K::Tab, false, false, false),
+    c("View", "Rulers", K::r, true, false, false),
+    c("View", "Guides", K::semicolon, true, false, false),
+    c("View", "Grid", K::apostrophe, true, false, false),
+    c("View", "Snap", K::colon, true, true, false),
+    c("View", "Clear Guides", K::semicolon, true, false, true),
     c("View", "Command Palette", K::p, true, true, false),
     c("View", "Benchmark", K::F12, false, false, false),
 ];
@@ -372,6 +377,10 @@ impl Cmd {
             K::backslash => "\\".to_string(),
             K::comma => ",".to_string(),
             K::plus => "+".to_string(),
+            K::semicolon => ";".to_string(),
+            // Shift+; on most layouts; Shift is shown already.
+            K::colon => ";".to_string(),
+            K::apostrophe => "'".to_string(),
             K::bracketleft => "[".to_string(),
             K::bracketright => "]".to_string(),
             K::Left => super::glyphs::ARROW_LEFT.to_string(),

@@ -78,6 +78,25 @@ impl Brush {
     }
 }
 
+/// View › Rulers, Guides, Grid, Snap.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewOpts {
+    pub rulers: bool,
+    pub guides: bool,
+    pub grid: bool,
+    pub snap: bool,
+    /// Grid line distance in document px, and subdivisions between lines.
+    pub grid_step: f64,
+    pub grid_div: u32,
+}
+
+impl Default for ViewOpts {
+    fn default() -> Self {
+        Self { rulers: false, guides: true, grid: false, snap: true, grid_step: 100.0, grid_div: 4 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -100,6 +119,7 @@ pub struct Settings {
     /// The user's keyboard shortcuts (only those that differ from the defaults).
     pub keymap: crate::ui::palette::Keymap,
     pub recent_fonts: Vec<String>,
+    pub view: ViewOpts,
 }
 
 impl Default for Settings {
@@ -121,6 +141,7 @@ impl Default for Settings {
             dock_layout: None,
             keymap: Default::default(),
             recent_fonts: Vec::new(),
+            view: ViewOpts::default(),
         }
     }
 }

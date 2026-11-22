@@ -223,6 +223,19 @@ impl Engine {
         Ok(())
     }
 
+    // ---- guides --------------------------------------------------------------------
+
+    /// Replaces the guides as one undo step (nothing happens if they are equal).
+    pub fn set_guides(&mut self, guides: Vec<mosaix_core::Guide>, label: &str) {
+        if self.doc.guides == guides {
+            return;
+        }
+        self.edit(label, |d| {
+            d.guides = guides;
+            true
+        });
+    }
+
     // ---- layer masks --------------------------------------------------------------
 
     pub fn layer_mask_cpu(&self, layer: LayerId) -> Option<CpuMask> {

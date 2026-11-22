@@ -402,6 +402,8 @@ pub struct App {
     quick_mask: bool,
     /// Free transform (Strg+T) or crop box being edited.
     boxed: Option<(BoxKind, BoxEdit)>,
+    /// Move tool: bounds of what moves, for snapping (document px).
+    move_bounds: Option<(DVec2, DVec2)>,
     wand_tolerance: f32,
     smudge_strength: f32,
     /// Clone stamp: source point (document px), the aligned offset once a
@@ -650,6 +652,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         mask_edit: false,
         quick_mask: false,
         boxed: None,
+        move_bounds: None,
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
         clone_source: None,
@@ -1085,8 +1088,8 @@ impl App {
                 self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
             }
             Tool::Marquee { ellipse } => Drag::Marquee {
-                start: doc,
-                end: doc,
+                start: self.snap_point(doc),
+                end: self.snap_point(doc),
                 op,
                 ellipse,
             },
@@ -1098,13 +1101,18 @@ impl App {
                 start: doc,
                 end: doc,
             },
-            Tool::Move => Drag::Move {
-                start: doc,
-                end: doc,
-            },
+            Tool::Move => {
+                self.move_bounds = self.session.as_mut().and_then(|s| {
+                    let id = s.engine.doc().active;
+                    s.engine
+                        .content_bounds(id)
+                        .map(|(x0, y0, x1, y1)| (DVec2::new(x0 as f64, y0 as f64), DVec2::new(x1 as f64, y1 as f64)))
+                });
+                Drag::Move { start: doc, end: doc }
+            }
             Tool::Shape { .. } => Drag::Shape {
-                start: doc,
-                end: doc,
+                start: self.snap_point(doc),
+                end: self.snap_point(doc),
             },
             Tool::Pen => self.pen_press(pos, doc),
             // Handled above.
@@ -1357,7 +1365,90 @@ impl App {
                 d.x = 0.0;
             }
         }
+        if let Some((min, max)) = self.move_bounds {
+            let mut off = self.snap_offset(min + d, max + d).round();
+            if self.mods.shift {
+                // Stay on the constrained axis.
+                if d.y == 0.0 {
+                    off.y = 0.0;
+                } else {
+                    off.x = 0.0;
+                }
+            }
+            d += off;
+        }
         d
+    }
+
+    /// What snaps (document px): guides, the canvas edges and centre, the
+    /// grid. `None` with snapping off.
+    fn snap_lines(&self) -> Option<([Vec<f64>; 2], Option<f64>)> {
+        let v = self.settings.view;
+        if !v.snap {
+            return None;
+        }
+        let s = self.session.as_ref()?;
+        let (w, h) = s.engine.size();
+        let mut xs = vec![0.0, w as f64 * 0.5, w as f64];
+        let mut ys = vec![0.0, h as f64 * 0.5, h as f64];
+        if v.guides {
+            for g in &s.engine.doc().guides {
+                if g.vertical {
+                    xs.push(g.pos);
+                } else {
+                    ys.push(g.pos);
+                }
+            }
+        }
+        let grid = v.grid.then(|| v.grid_step.max(1.0) / v.grid_div.max(1) as f64);
+        Some(([xs, ys], grid))
+    }
+
+    /// Distance within which things snap (document px).
+    fn snap_reach(&self) -> f64 {
+        8.0 * self.scale / self.view.zoom
+    }
+
+    /// The nearest line to `v` on one axis within reach.
+    fn snap_axis(lines: &[f64], grid: Option<f64>, v: f64, reach: f64) -> Option<f64> {
+        let mut best: Option<f64> = None;
+        let mut consider = |t: f64| {
+            if (t - v).abs() <= reach && best.is_none_or(|b| (t - v).abs() < (b - v).abs()) {
+                best = Some(t);
+            }
+        };
+        lines.iter().for_each(|t| consider(*t));
+        if let Some(g) = grid {
+            consider((v / g).round() * g);
+        }
+        best
+    }
+
+    /// Snaps a point (marquee, shape, crop and transform handles).
+    fn snap_point(&self, p: DVec2) -> DVec2 {
+        let Some(([xs, ys], grid)) = self.snap_lines() else { return p };
+        let r = self.snap_reach();
+        DVec2::new(
+            Self::snap_axis(&xs, grid, p.x, r).unwrap_or(p.x),
+            Self::snap_axis(&ys, grid, p.y, r).unwrap_or(p.y),
+        )
+    }
+
+    /// How far to shift a box `(min, max)` so that an edge or its centre
+    /// snaps (zero when nothing is in reach).
+    fn snap_offset(&self, min: DVec2, max: DVec2) -> DVec2 {
+        let Some(([xs, ys], grid)) = self.snap_lines() else { return DVec2::ZERO };
+        let r = self.snap_reach();
+        let best = |lines: &[f64], vals: [f64; 3]| {
+            vals.iter()
+                .filter_map(|v| Self::snap_axis(lines, grid, *v, r).map(|t| t - v))
+                .min_by(|a, b| a.abs().total_cmp(&b.abs()))
+                .unwrap_or(0.0)
+        };
+        DVec2::new(
+            best(&xs, [min.x, (min.x + max.x) * 0.5, max.x]),
+            best(&ys, [min.y, (min.y + max.y) * 0.5, max.y]),
+        )
     }
 
     fn stroke_target(&self) -> StrokeTarget {
@@ -1458,6 +1549,8 @@ impl App {
             self.needs_redraw = true;
             return;
         }
+        let snapped = matches!(self.drag, Drag::Marquee { .. } | Drag::Shape { .. })
+            .then(|| self.snap_point(self.view.screen_to_doc(pos)));
         match &mut self.drag {
             // Handled above.
             Drag::None | Drag::Pen(_) | Drag::Eyedrop => {}
@@ -1500,10 +1593,10 @@ impl App {
                 self.view.zoom_at(anchor, f);
                 self.limit_zoom_out(anchor);
             }
-            Drag::Marquee { end, .. }
-            | Drag::Gradient { end, .. }
-            | Drag::Move { end, .. }
-            | Drag::Shape { end, .. } => {
+            Drag::Marquee { end, .. } | Drag::Shape { end, .. } => {
+                *end = snapped.unwrap_or(*end);
+            }
+            Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
             }
             Drag::BrushHud {
@@ -1522,8 +1615,27 @@ impl App {
             Drag::Box => {
                 let doc = self.view.screen_to_doc(pos);
                 let m = self.box_mods();
+                let handle = self.boxed.as_ref().and_then(|(_, b)| b.dragging());
+                let doc = match handle {
+                    Some(boxedit::Handle::Scale { .. } | boxedit::Handle::Create) => self.snap_point(doc),
+                    _ => doc,
+                };
                 if let Some((_, b)) = &mut self.boxed {
                     b.update(doc, m);
+                }
+                // A moved box snaps with its edges and centre.
+                if handle == Some(boxedit::Handle::Move)
+                    && let Some((_, b)) = &self.boxed
+                {
+                    let c = b.corners();
+                    let min = c.iter().fold(DVec2::INFINITY, |a, p| a.min(*p));
+                    let max = c.iter().fold(DVec2::NEG_INFINITY, |a, p| a.max(*p));
+                    let off = self.snap_offset(min, max);
+                    if off != DVec2::ZERO
+                        && let Some((_, b)) = &mut self.boxed
+                    {
+                        b.update(doc + off, m);
+                    }
                 }
             }
             Drag::Lasso { points, .. } => {
@@ -3142,6 +3254,22 @@ impl App {
             }
             Keysym::F1 => print!("{}", tr(crate::HELP)),
             Keysym::F12 => self.start_bench(false),
+            Keysym::r if ctrl && !alt && !shift => {
+                self.settings.view.rulers = !self.settings.view.rulers;
+                self.r_key = false;
+            }
+            Keysym::semicolon if ctrl && alt => {
+                if let Some(e) = self.engine() {
+                    e.set_guides(Vec::new(), tr("Clear Guides"));
+                    self.touch();
+                }
+            }
+            Keysym::semicolon if ctrl => self.settings.view.guides = !self.settings.view.guides,
+            Keysym::colon if ctrl => {
+                self.settings.view.snap = !self.settings.view.snap;
+                tracing::info!("{}", if self.settings.view.snap { tr("Snap on") } else { tr("Snap off") });
+            }
+            Keysym::apostrophe if ctrl => self.settings.view.grid = !self.settings.view.grid,
             _ => return,
         }
         self.needs_redraw = true;
@@ -3569,6 +3697,9 @@ impl App {
             history_done,
             has_selection: doc.selection.is_some(),
             channels: doc.channels.iter().map(|c| c.name.clone()).collect(),
+            view: self.view,
+            guides: doc.guides.clone(),
+            view_opts: self.settings.view,
             status: self.ui_status.clone(),
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
             recent: self.settings.recent.clone(),
@@ -3642,6 +3773,20 @@ impl App {
                 Action::Command(c) => self.run_cmd(c),
                 Action::Agent(v) => self.run_agent_cmd(v),
                 Action::ModifySelection { op, amount } => self.modify_selection(op, amount),
+                Action::SetGuides(g) => {
+                    let label = match g.len().cmp(&self.session.as_ref().map_or(0, |s| s.engine.doc().guides.len())) {
+                        std::cmp::Ordering::Greater => tr("New Guide"),
+                        std::cmp::Ordering::Less => tr("Delete Guide"),
+                        std::cmp::Ordering::Equal => tr("Move Guide"),
+                    };
+                    if let Some(e) = self.engine() {
+                        e.set_guides(g, label);
+                        self.touch();
+                    }
+                    // A new guide is visible.
+                    self.settings.view.guides = true;
+                }
+                Action::ViewOpts(v) => self.settings.view = v,
                 Action::Run(e) => self.run_action(&e),
                 Action::StartRecording => self.start_recording(),
                 Action::StopRecording(name) => {
@@ -5074,6 +5219,16 @@ fn recorded_drag(drag: &Drag, zoom: f64, move_delta: DVec2) -> Option<serde_json
 
 #[cfg(test)]
 mod record_tests {
+    #[test]
+    fn snapping_picks_the_nearest_line_in_reach() {
+        let lines = [0.0, 500.0, 1000.0, 333.0];
+        assert_eq!(App::snap_axis(&lines, None, 330.0, 8.0), Some(333.0));
+        assert_eq!(App::snap_axis(&lines, None, 320.0, 8.0), None);
+        // The grid counts too, the closer one wins.
+        assert_eq!(App::snap_axis(&lines, Some(25.0), 322.0, 8.0), Some(325.0));
+        assert_eq!(App::snap_axis(&lines, Some(25.0), 332.0, 8.0), Some(333.0));
+    }
+
     use super::*;
 
     /// Every recorded step must be a valid agent command.

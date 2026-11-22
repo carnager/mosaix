@@ -25,7 +25,7 @@ pub mod view;
 pub use adjust::Adjustment;
 pub use blend::{BlendMode, BlendSpace};
 pub use brush::{BrushSettings, Dab, InputSample, Stroke, TIP_NAMES, tip_from_name, tip_label};
-pub use doc::{Channel, Content, Document, Layer, LayerId, Mask, MaskRef, MaskSlot, MaskTile, Op};
+pub use doc::{Channel, Content, Document, Guide, Layer, LayerId, Mask, MaskRef, MaskSlot, MaskTile, Op};
 pub use filter::{Filter, SmartFilter};
 pub use history::History;
 pub use i18n::tr;

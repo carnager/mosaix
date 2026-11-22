@@ -2794,3 +2794,48 @@ msgstr "Hinzufügen"
 
 msgid "Intersect"
 msgstr "Schnittmenge"
+
+msgid "Clear Guides"
+msgstr "Hilfslinien löschen"
+
+msgid "Snap on"
+msgstr "Einrasten an"
+
+msgid "Snap off"
+msgstr "Einrasten aus"
+
+msgid "New Guide"
+msgstr "Neue Hilfslinie"
+
+msgid "Delete Guide"
+msgstr "Hilfslinie löschen"
+
+msgid "Move Guide"
+msgstr "Hilfslinie verschieben"
+
+msgid "There are no guides"
+msgstr "Es gibt keine Hilfslinien"
+
+msgid "New Guide …"
+msgstr "Neue Hilfslinie …"
+
+msgid "Grid Settings"
+msgstr "Raster einstellen"
+
+msgid "Subdivisions"
+msgstr "Unterteilungen"
+
+msgid "Horizontal"
+msgstr "Horizontal"
+
+msgid "Vertical"
+msgstr "Vertikal"
+
+msgid "Rulers"
+msgstr "Lineale"
+
+msgid "Guides"
+msgstr "Hilfslinien"
+
+msgid "Snap"
+msgstr "Einrasten"

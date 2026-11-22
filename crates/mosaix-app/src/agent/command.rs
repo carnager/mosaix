@@ -266,6 +266,15 @@ pub enum Command {
         invert: bool,
     },
     ChannelList,
+    GuideAdd {
+        orientation: String,
+        position: f64,
+    },
+    GuideList,
+    GuideDelete {
+        index: usize,
+    },
+    GuideClear,
     ChannelDelete {
         channel: usize,
     },
@@ -556,6 +565,10 @@ impl Command {
             Self::SelectSave { .. } => "select_save",
             Self::SelectLoad { .. } => "select_load",
             Self::ChannelList => "channel_list",
+            Self::GuideAdd { .. } => "guide_add",
+            Self::GuideList => "guide_list",
+            Self::GuideDelete { .. } => "guide_delete",
+            Self::GuideClear => "guide_clear",
             Self::ChannelDelete { .. } => "channel_delete",
             Self::ChannelRename { .. } => "channel_rename",
             Self::LayerMaskAdd { .. } => "layer_mask_add",
@@ -604,6 +617,8 @@ impl Command {
         !matches!(
             self,
             Self::DocumentInfo
+                | Self::GuideList
+                | Self::ChannelList
                 | Self::SampleColor { .. }
                 | Self::RenderPreview { .. }
                 | Self::Save { .. }
@@ -1467,6 +1482,30 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             Ok(Output::json(selection_info(s)))
         }
         Command::ChannelList => Ok(Output::json(json!({ "channels": channel_names(s) }))),
+        Command::GuideAdd { orientation, position } => {
+            let vertical = match orientation.as_str() {
+                "vertical" => true,
+                "horizontal" => false,
+                _ => bail!("orientation must be vertical or horizontal"),
+            };
+            ensure!(position.is_finite() && position.abs() < 1e7, "position out of range");
+            let mut g = s.engine.doc().guides.clone();
+            g.push(mosaix_core::Guide { vertical, pos: position });
+            s.engine.set_guides(g, tr("New Guide"));
+            Ok(Output::json(json!({ "guides": s.engine.doc().guides })))
+        }
+        Command::GuideList => Ok(Output::json(json!({ "guides": s.engine.doc().guides }))),
+        Command::GuideDelete { index } => {
+            let mut g = s.engine.doc().guides.clone();
+            ensure!(index < g.len(), "no guide {index}; there are {}", g.len());
+            g.remove(index);
+            s.engine.set_guides(g, tr("Delete Guide"));
+            Ok(Output::json(json!({ "guides": s.engine.doc().guides })))
+        }
+        Command::GuideClear => {
+            s.engine.set_guides(Vec::new(), tr("Clear Guides"));
+            Ok(Output::json(json!({ "guides": [] })))
+        }
         Command::ChannelDelete { channel } => {
             s.engine.delete_channel(channel, tr("Delete Channel")).map_err(engine_err)?;
             Ok(Output::json(json!({ "ok": true, "channels": channel_names(s) })))
