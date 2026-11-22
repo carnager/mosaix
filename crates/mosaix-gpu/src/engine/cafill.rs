@@ -35,6 +35,8 @@ pub struct FillJob {
     seed: u64,
     /// Large levels run on the GPU (None: CPU only).
     gpu: Option<super::cafill_gpu::FillGpu>,
+    /// The result goes onto a new layer of this name instead of `layer`.
+    new_layer: Option<String>,
 }
 
 /// The computed fill, ready for [`Engine::apply_fill`].
@@ -42,6 +44,7 @@ pub struct FillResult {
     layer: LayerId,
     base: usize,
     tiles: Vec<(TileCoord, Option<Vec<f16>>)>,
+    new_layer: Option<String>,
     pub ms: f64,
 }
 
@@ -86,6 +89,21 @@ impl Engine {
         let layer = self.check_target(StrokeTarget::Pixels)?;
         let mask_tiles = self.selection_tiles()?;
         self.fill_job_tiles(layer, mask_tiles, all_layers, min_side, grow)
+    }
+
+    /// A fill of the selection that learns from the whole visible image and
+    /// puts its result on a new layer `name` above the active one (only the
+    /// filled area, soft at the selection's edge). Works whatever the active
+    /// layer is.
+    pub fn fill_job_new_layer(&mut self, name: &str, min_side: i64, grow: usize) -> Result<FillJob, &'static str> {
+        let layer = self.doc.active;
+        let mask_tiles = self.selection_tiles()?;
+        let mut job = self.fill_job_tiles(layer, mask_tiles, true, min_side, grow)?;
+        job.dest = vec![[0.0; 4]; job.w * job.h];
+        job.tiles.clear();
+        job.base = 0;
+        job.new_layer = Some(name.to_string());
+        Ok(job)
     }
 
     /// A fill job for a painted area (`[x, y, radius]` dabs) on `layer`.
@@ -246,11 +264,15 @@ impl Engine {
             tiles,
             seed,
             gpu: Some(gpu),
+            new_layer: None,
         })
     }
 
     /// Writes a computed fill (one undo step). False if the layer changed meanwhile.
     pub fn apply_fill(&mut self, r: FillResult, label: &str) -> bool {
+        if let Some(name) = r.new_layer {
+            return self.add_pixel_layer_with(&name, r.tiles, label).is_some();
+        }
         let now = self
             .doc
             .find(r.layer)
@@ -307,6 +329,7 @@ impl FillJob {
             tiles,
             seed,
             mut gpu,
+            new_layer,
         } = self;
         let hole: Vec<bool> = mask.iter().map(|&m| m > 0.0).collect();
         let allowed = vec![true; w * h];
@@ -317,9 +340,9 @@ impl FillJob {
                 "there is too little image around the selection to fill from",
             ));
         }
-        Ok(write_back(
-            layer, base, x0, y0, w, &dest, &mask, &img, tiles, t0,
-        ))
+        let mut r = write_back(layer, base, x0, y0, w, &dest, &mask, &img, tiles, t0);
+        r.new_layer = new_layer;
+        Ok(r)
     }
 
     /// The fill computed by `f` (any thread): it gets the area as straight
@@ -340,6 +363,7 @@ impl FillJob {
             source,
             mask,
             tiles,
+            new_layer,
             ..
         } = self;
         let hole: Vec<bool> = mask.iter().map(|&m| m > 0.0).collect();
@@ -353,9 +377,9 @@ impl FillJob {
             .zip(&hole)
             .map(|((c, e), &hl)| [c[0], c[1], c[2], if hl { 1.0 } else { e[3] }])
             .collect();
-        Ok(write_back(
-            layer, base, x0, y0, w, &dest, &mask, &img, tiles, t0,
-        ))
+        let mut r = write_back(layer, base, x0, y0, w, &dest, &mask, &img, tiles, t0);
+        r.new_layer = new_layer;
+        Ok(r)
     }
 }
 
@@ -426,6 +450,7 @@ fn write_back(
         layer,
         base,
         tiles,
+        new_layer: None,
         ms: t0.elapsed().as_secs_f64() * 1e3,
     }
 }

@@ -2833,11 +2833,17 @@ impl App {
             Ok(p) => p,
             Err(e) => return tracing::warn!("{e}"),
         };
+        let new_layer = self.settings.generative.new_layer;
         let Some(e) = self.engine() else { return };
         if !e.has_selection() {
             return tracing::warn!("{}", tr("Generative fill needs a selection"));
         }
-        match e.fill_job_sized(true, crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW) {
+        let job = if new_layer {
+            e.fill_job_new_layer(&crate::ai::generative_layer_name(&prompt), crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW)
+        } else {
+            e.fill_job_sized(true, crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW)
+        };
+        match job {
             Ok(job) => {
                 tracing::info!("{}", tr!("Generative fill: “{prompt}” …", prompt = prompt.clone()));
                 let started = Instant::now();

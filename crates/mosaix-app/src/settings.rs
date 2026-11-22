@@ -90,6 +90,8 @@ pub struct GenSettings {
     pub command: String,
     /// The user agreed that pixels go to the hosted provider.
     pub remote_ok: bool,
+    /// The result goes onto a new layer above the active one.
+    pub new_layer: bool,
 }
 
 /// OpenAI's default for image edits.
@@ -100,7 +102,7 @@ const RETIRED_MODELS: &[&str] = &["gpt-image-1", "gpt-image-1-mini", "dall-e-2",
 
 impl Default for GenSettings {
     fn default() -> Self {
-        Self { provider: "openai".into(), model: DEFAULT_MODEL.into(), command: String::new(), remote_ok: false }
+        Self { provider: "openai".into(), model: DEFAULT_MODEL.into(), command: String::new(), remote_ok: false, new_layer: true }
     }
 }
 

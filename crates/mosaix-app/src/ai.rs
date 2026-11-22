@@ -138,6 +138,16 @@ pub fn inpaint(job: mosaix_gpu::FillJob) -> Result<mosaix_gpu::FillResult> {
 /// Area around the selection a generative model sees.
 pub const GENERATIVE_CONTEXT: i64 = 1024;
 
+/// Name of the layer a generative fill makes: the prompt, shortened.
+pub fn generative_layer_name(prompt: &str) -> String {
+    let p = prompt.trim();
+    if p.chars().count() > 40 {
+        format!("{} …", p.chars().take(38).collect::<String>().trim_end())
+    } else {
+        p.to_string()
+    }
+}
+
 /// Generative fill: the hole painted from `prompt` by `provider` (worker thread).
 pub fn generative_fill(
     job: mosaix_gpu::FillJob,

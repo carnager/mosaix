@@ -3085,3 +3085,9 @@ msgstr "Zusammengefügt"
 
 msgid "could not merge"
 msgstr "Zusammenfügen fehlgeschlagen"
+
+msgid "Result on a new layer"
+msgstr "Ergebnis auf neuer Ebene"
+
+msgid "Only the filled area, in place, above the active layer; the model still sees all visible layers"
+msgstr "Nur der gefüllte Bereich, an Ort und Stelle, über der aktiven Ebene; das Modell sieht trotzdem alle sichtbaren Ebenen"

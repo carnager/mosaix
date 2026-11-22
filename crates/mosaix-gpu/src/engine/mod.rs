@@ -1289,6 +1289,36 @@ impl Engine {
         changed
     }
 
+    /// A new pixel layer `name` above the active one, holding `tiles`
+    /// (premultiplied linear f16), as one undo step. Returns its id.
+    pub fn add_pixel_layer_with(
+        &mut self,
+        name: &str,
+        tiles: Vec<(TileCoord, Option<Vec<f16>>)>,
+        label: &str,
+    ) -> Option<LayerId> {
+        if self.stroke.is_some() {
+            return None;
+        }
+        let mut map: std::collections::HashMap<TileCoord, Tile> = Default::default();
+        for (c, px) in tiles {
+            if let Some(px) = px {
+                map.insert(c, self.write_new_tile(&px)?);
+            }
+        }
+        let coords: Vec<TileCoord> = map.keys().copied().collect();
+        let mut id = 0;
+        self.edit(label, |d| {
+            id = d.alloc_id();
+            let mut l = mosaix_core::Layer::pixels(id, name);
+            l.content = mosaix_core::Content::Pixels(Arc::new(map));
+            d.insert_above_active(l);
+            true
+        });
+        self.dirty.extend(coords);
+        Some(id)
+    }
+
     fn write_new_tile(&mut self, pixels: &[f16]) -> Option<Tile> {
         assert_eq!(pixels.len(), (TILE_SIZE * TILE_SIZE * 4) as usize);
         let tile = self.layer_pool.alloc()?;

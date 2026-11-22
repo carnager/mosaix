@@ -490,8 +490,10 @@ pub fn tools() -> Vec<Value> {
         tool(
             "generative_fill",
             "Paint the selection from a text prompt with the provider set up under Edit › Generative Fill (OpenAI image \
-             edits – only after the user agreed there – or the user's own program). Applied to the layer as one undo step.",
-            json!({ "layer": layer_param(), "prompt": { "type": "string" } }),
+             edits – only after the user agreed there – or the user's own program). It sees all visible layers. By default \
+             the result goes onto a new layer above the active one (only the filled area, in place); new_layer: false, or \
+             a given layer, paints into that pixel layer instead. One undo step.",
+            json!({ "layer": layer_param(), "prompt": { "type": "string" }, "new_layer": { "type": "boolean" } }),
             &["prompt"],
             false,
         ),

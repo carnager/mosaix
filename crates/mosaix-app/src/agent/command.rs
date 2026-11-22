@@ -280,6 +280,8 @@ pub enum Command {
     GenerativeFill {
         layer: Option<LayerId>,
         prompt: String,
+        /// Result on a new layer (default: as set in the dialog, normally yes).
+        new_layer: Option<bool>,
     },
     LayerPlace {
         path: PathBuf,
@@ -1556,15 +1558,20 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             Ok(Output::json(json!({ "guides": s.engine.doc().guides })))
         }
         Command::GuideList => Ok(Output::json(json!({ "guides": s.engine.doc().guides }))),
-        Command::GenerativeFill { layer, prompt } => {
-            pixel_layer(s, layer)?;
-            ensure!(s.engine.has_selection(), "generative fill needs a selection");
+        Command::GenerativeFill { layer, prompt, new_layer } => {
             let settings = crate::settings::Settings::load_from(&crate::settings::config_path()).generative;
+            let onto_new = new_layer.unwrap_or(settings.new_layer) && layer.is_none();
+            if !onto_new {
+                pixel_layer(s, layer)?;
+            }
+            ensure!(s.engine.has_selection(), "generative fill needs a selection");
             let provider = settings.provider().map_err(|e| anyhow::anyhow!(e))?;
-            let job = s
-                .engine
-                .fill_job_sized(true, crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW)
-                .map_err(engine_err)?;
+            let job = if onto_new {
+                s.engine.fill_job_new_layer(&crate::ai::generative_layer_name(&prompt), crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW)
+            } else {
+                s.engine.fill_job_sized(true, crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW)
+            }
+            .map_err(engine_err)?;
             let r = crate::ai::generative_fill(job, &provider, &prompt)?;
             let ms = r.ms;
             ensure!(s.engine.apply_fill(r, tr("Generative Fill")), "the layer has changed in the meantime");

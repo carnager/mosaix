@@ -2996,6 +2996,8 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                             );
                         }
                     });
+                    ui.checkbox(&mut settings.new_layer, tr("Result on a new layer"))
+                        .on_hover_text(tr("Only the filled area, in place, above the active layer; the model still sees all visible layers"));
                     if *settings != before {
                         out.push(Action::GenSettings(settings.clone()));
                     }

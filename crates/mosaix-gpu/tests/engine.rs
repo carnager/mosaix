@@ -3227,3 +3227,62 @@ fn merge_keeps_the_look_and_off_canvas_pixels() {
         assert!(e.merge(MergeKind::Down, "Merge Down").is_err(), "nothing below");
     }
 }
+
+#[test]
+fn fill_onto_a_new_layer_sees_all_layers_and_leaves_them_alone() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let bottom = e.doc().active;
+    e.upload_tile(bottom, TileCoord::new(0, 0), &pattern(1, true));
+    let mut top = 0;
+    e.edit("Layer", |d| {
+        top = d.add_pixel_layer();
+        true
+    });
+    // The top layer covers only the right half: the fill must see both.
+    let mut half = pattern(5, true);
+    for y in 0..TS {
+        for x in 0..TS / 2 {
+            half[(y * TS + x) * 4..][..4].fill(f16::ZERO);
+        }
+    }
+    e.upload_tile(top, TileCoord::new(0, 0), &half);
+    e.flush();
+    let shown = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+    let (b0, t0) = (e.read_layer_tile(bottom, TileCoord::new(0, 0)), e.read_layer_tile(top, TileCoord::new(0, 0)));
+    e.select_shape(&Shape::Rect { x: 64.0, y: 64.0, w: 128.0, h: 64.0 }, CombineOp::Replace, "Selection").unwrap();
+
+    let job = e.fill_job_new_layer("Generated", 0, 0).unwrap();
+    let r = job
+        .run_with(|w, h, rgb, hole| {
+            // Outside the hole the provider sees the image as shown.
+            assert!(w > 0 && h > 0 && hole.iter().any(|h| !h));
+            for (c, &hl) in rgb.iter_mut().zip(hole) {
+                if hl {
+                    *c = [1.0, 0.0, 0.0];
+                }
+            }
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+    assert!(e.apply_fill(r, "Generative Fill"));
+    e.flush();
+    let d = e.doc();
+    assert_eq!(d.layers.len(), 3);
+    let new = d.active;
+    assert!(new != top && new != bottom);
+    assert_eq!(d.layers[2].id, new, "above the active layer");
+    assert_eq!(e.read_layer_tile(bottom, TileCoord::new(0, 0)), b0, "bottom layer untouched");
+    assert_eq!(e.read_layer_tile(top, TileCoord::new(0, 0)), t0, "top layer untouched");
+    let t = e.read_layer_tile(new, TileCoord::new(0, 0)).unwrap();
+    let inside = px(&t, 100, 90);
+    assert!((inside[0] - 1.0).abs() < 1e-3 && inside[1] < 1e-3 && (inside[3] - 1.0).abs() < 1e-3, "{inside:?}");
+    assert_eq!(px(&t, 10, 10)[3], 0.0, "nothing outside the selection");
+    // The image outside the selection looks as before.
+    let after = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+    assert_eq!(px(&after, 10, 10), px(&shown, 10, 10));
+    assert_eq!(px(&after, 250, 250), px(&shown, 250, 250));
+    // One undo step takes it away again.
+    e.undo();
+    assert_eq!(e.doc().layers.len(), 2);
+}
