@@ -2926,3 +2926,6 @@ msgstr "Info"
 
 msgid "Document"
 msgstr "Dokument"
+
+msgid "Click into the picture to pick the color. The selection shows live."
+msgstr "Ins Bild klicken nimmt die Farbe auf. Die Auswahl erscheint sofort."

@@ -246,6 +246,8 @@ pub enum Action {
     Agent(serde_json::Value),
     /// Select › Modify (`op` as in the `select_modify` command).
     ModifySelection { op: &'static str, amount: f64 },
+    /// Color Range: a `select_color_range` command, previewed, applied or cancelled.
+    ColorRange { cmd: serde_json::Value, phase: RangePhase },
     SetGuides(Vec<mosaix_core::Guide>),
     /// Navigator: show this document point in the middle of the canvas.
     ViewCenter(f64, f64),
@@ -406,6 +408,10 @@ pub struct State {
     pub guide_drag: Option<super::rulers::GuideDrag>,
     /// Which data-hungry panels were drawn in the last frame.
     pub panels_shown: PanelsShown,
+    /// A colour picked on the canvas for the open Color Range dialog (linear).
+    pub color_range_pick: Option<[f32; 3]>,
+    /// The dialog was just opened (Color Range previews right away).
+    dialog_new: bool,
     pub palette: Option<(String, usize)>,
     /// The keyboard-shortcuts dialog: search text and the command whose new
     /// keys are being recorded.
@@ -458,6 +464,13 @@ enum Dialog {
     NewGuide { vertical: bool, pos: f64 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangePhase {
+    Preview,
+    Commit,
+    Cancel,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PanelsShown {
     pub navigator: bool,
@@ -480,6 +493,11 @@ impl State {
     pub fn open_effect(&mut self, i: usize) {
         self.fx_open = Some(i);
         self.focus_pane = Some(super::dock::Pane::Styles);
+    }
+
+    /// The Color Range dialog is open (clicks on the canvas pick its colour).
+    pub fn color_range_open(&self) -> bool {
+        matches!(self.dialog, Some(Dialog::ColorRange { .. }))
     }
 
     /// Opens a Select › Modify dialog (`op` as in `select_modify`).
@@ -1012,6 +1030,7 @@ fn special_entry(
         Special::ColorRange => {
             if ui.button((icon, tr("Color Range …"))).clicked() {
                 st.dialog = Some(Dialog::ColorRange { color: m.color, fuzziness: 40.0, image: false, mode: "replace" });
+                st.dialog_new = true;
                 ui.close();
             }
         }
@@ -2594,6 +2613,8 @@ pub(super) fn history_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action
 }
 
 fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    let pick = st.color_range_pick.take();
+    let first_frame = std::mem::take(&mut st.dialog_new);
     let Some(d) = &mut st.dialog else { return };
     let mut open = true;
     let mut done = false;
@@ -2683,6 +2704,12 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                 });
         }
         Dialog::ColorRange { color, fuzziness, image, mode } => {
+            let mut changed = first_frame;
+            if let Some(c) = pick {
+                *color = c;
+                changed = true;
+            }
+            let mut ok = false;
             egui::Window::new(tr("Color Range"))
                 .open(&mut open)
                 .collapsible(false)
@@ -2691,44 +2718,49 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                     egui::Grid::new("color range").num_columns(2).show(ui, |ui| {
                         ui.label(tr("Color"));
                         ui.horizontal(|ui| {
-                            ui.color_edit_button_rgb(color);
+                            changed |= ui.color_edit_button_rgb(color).changed();
                             if ui.small_button(tr("Foreground")).clicked() {
                                 *color = m.color;
+                                changed = true;
                             }
                         });
                         ui.end_row();
                         ui.label(tr("Fuzziness"));
-                        ui.add(egui::Slider::new(fuzziness, 0.0..=200.0).max_decimals(0));
+                        changed |= ui.add(egui::Slider::new(fuzziness, 0.0..=200.0).max_decimals(0)).changed();
                         ui.end_row();
                         ui.label(tr("Sample"));
                         ui.horizontal(|ui| {
-                            ui.selectable_value(image, false, tr("Layer"));
-                            ui.selectable_value(image, true, tr("Image"));
+                            changed |= ui.selectable_value(image, false, tr("Layer")).changed();
+                            changed |= ui.selectable_value(image, true, tr("Image")).changed();
                         });
                         ui.end_row();
                         ui.label(tr("Selection"));
                         ui.horizontal(|ui| {
                             for (k, l) in [("replace", "New"), ("add", "Add"), ("subtract", "Subtract"), ("intersect", "Intersect")] {
-                                ui.selectable_value(mode, k, tr(l));
+                                changed |= ui.selectable_value(mode, k, tr(l)).changed();
                             }
                         });
                         ui.end_row();
                     });
-                    ui.label(RichText::new(tr("Selects this color everywhere, softly by fuzziness.")).weak());
-                    if ui.button("OK").clicked() {
-                        let hex = format!(
-                            "#{:02x}{:02x}{:02x}",
-                            (color[0] * 255.0).round() as u8,
-                            (color[1] * 255.0).round() as u8,
-                            (color[2] * 255.0).round() as u8
-                        );
-                        out.push(Action::Agent(serde_json::json!({
-                            "cmd": "select_color_range", "color": hex, "fuzziness": *fuzziness,
-                            "sample": if *image { "image" } else { "layer" }, "mode": *mode,
-                        })));
-                        done = true;
-                    }
+                    ui.label(RichText::new(tr("Click into the picture to pick the color. The selection shows live.")).weak());
+                    ok = ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter));
                 });
+            let enc = |v: f32| (mosaix_core::color::linear_to_srgb(v.clamp(0.0, 1.0)) * 255.0).round() as u8;
+            let cmd = serde_json::json!({
+                "cmd": "select_color_range",
+                "color": format!("#{:02x}{:02x}{:02x}", enc(color[0]), enc(color[1]), enc(color[2])),
+                "fuzziness": *fuzziness,
+                "sample": if *image { "image" } else { "layer" },
+                "mode": *mode,
+            });
+            if ok {
+                out.push(Action::ColorRange { cmd, phase: RangePhase::Commit });
+                done = true;
+            } else if !open {
+                out.push(Action::ColorRange { cmd, phase: RangePhase::Cancel });
+            } else if changed {
+                out.push(Action::ColorRange { cmd, phase: RangePhase::Preview });
+            }
         }
         Dialog::NewGuide { vertical, pos } => {
             egui::Window::new(tr("New Guide"))

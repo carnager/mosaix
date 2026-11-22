@@ -431,6 +431,8 @@ pub struct App {
     /// Info panel: histogram (for an edit count) and the colour under the pointer.
     info_hist: Option<(u64, std::sync::Arc<mosaix_gpu::Histogram>)>,
     info_color: Option<((i64, i64), [f32; 4])>,
+    /// The last undo step is a Color Range preview (replaced by the next one).
+    range_preview: bool,
     wand_tolerance: f32,
     smudge_strength: f32,
     /// Clone stamp: source point (document px), the aligned offset once a
@@ -684,6 +686,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         nav_drawn: None,
         info_hist: None,
         info_color: None,
+        range_preview: false,
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
         clone_source: None,
@@ -1056,6 +1059,17 @@ impl App {
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
             Button::Primary if self.liquifying() => self.begin_liquify(pos, pressure),
+            Button::Primary if self.ui_state.color_range_open() => {
+                // Color Range: pick the colour to select from the picture.
+                let d = self.view.screen_to_doc(pos);
+                if d.x >= 0.0
+                    && d.y >= 0.0
+                    && let Some(c) = self.engine().and_then(|e| e.sample_straight(d.x as u32, d.y as u32, mosaix_gpu::SampleFrom::Image).ok())
+                {
+                    self.ui_state.color_range_pick = Some([c[0], c[1], c[2]].map(mosaix_core::color::srgb_to_linear));
+                }
+                Drag::None
+            }
             Button::Primary if self.boxed.is_some() || self.tool == Tool::Crop => {
                 self.begin_box(pos)
             }
@@ -3856,6 +3870,26 @@ impl App {
                 Action::Command(c) => self.run_cmd(c),
                 Action::Agent(v) => self.run_agent_cmd(v),
                 Action::ModifySelection { op, amount } => self.modify_selection(op, amount),
+                Action::ColorRange { cmd, phase } => {
+                    if std::mem::take(&mut self.range_preview)
+                        && let Some(e) = self.engine()
+                    {
+                        e.undo();
+                    }
+                    match phase {
+                        ui::panels::RangePhase::Cancel => {}
+                        ui::panels::RangePhase::Preview => {
+                            self.run_agent_cmd(cmd);
+                            self.range_preview = true;
+                        }
+                        ui::panels::RangePhase::Commit => {
+                            if self.recording.is_some() {
+                                self.record(cmd.clone());
+                            }
+                            self.run_agent_cmd(cmd);
+                        }
+                    }
+                }
                 Action::SetGuides(g) => {
                     let label = match g.len().cmp(&self.session.as_ref().map_or(0, |s| s.engine.doc().guides.len())) {
                         std::cmp::Ordering::Greater => tr("New Guide"),
