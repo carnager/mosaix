@@ -43,6 +43,14 @@ const SMART_SHARPEN: u32 = 10;
 const LENS: u32 = 11;
 const BOX: u32 = 12;
 const RADIAL: u32 = 13;
+const WAVE: u32 = 14;
+const TWIRL: u32 = 15;
+const SPHERIZE: u32 = 16;
+const POLAR: u32 = 17;
+const OFFSET: u32 = 18;
+const EMBOSS: u32 = 19;
+const FIND_EDGES: u32 = 20;
+const OIL: u32 = 21;
 /// Above this sigma the blur runs on a downscaled copy.
 const DIRECT_SIGMA: f32 = 10.0;
 
@@ -177,7 +185,18 @@ impl Engine {
             _ => 0,
         };
         let reach = (spread + TILE_SIZE as i32 - 1) / TILE_SIZE as i32;
-        dilate(src.keys().copied(), reach)
+        let mut out = dilate(src.keys().copied(), reach);
+        // Distortions move pixels anywhere on the canvas.
+        if matches!(f, Filter::Wave { .. } | Filter::Twirl { .. } | Filter::Spherize { .. } | Filter::PolarCoordinates { .. } | Filter::Offset { .. }) {
+            let (w, h) = (self.doc.width as i32, self.doc.height as i32);
+            let ts = TILE_SIZE as i32;
+            for ty in 0..(h + ts - 1) / ts {
+                for tx in 0..(w + ts - 1) / ts {
+                    out.insert(TileCoord::new(tx, ty));
+                }
+            }
+        }
+        out
     }
 
     /// Runs a filter on `src` for the tiles `dest` (no selection involved).
@@ -300,6 +319,49 @@ impl Engine {
                 };
                 // Lens blur spreads beyond the layer; the others stay on it.
                 let dest: Vec<TileCoord> = if kind == LENS { dest } else { dest.into_iter().filter(|c| src.contains_key(c)).collect() };
+                let mut grids = Grids::default();
+                let g = grids.layer(src);
+                let jobs: Vec<FilterJob> = dest.iter().map(|&c| FilterJob { radius, p, ..Self::fjob(c, g, kind) }).collect();
+                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
+                dest.into_iter().zip(tiles).collect()
+            }
+            Filter::Wave { .. }
+            | Filter::Twirl { .. }
+            | Filter::Spherize { .. }
+            | Filter::PolarCoordinates { .. }
+            | Filter::Offset { .. }
+            | Filter::Emboss { .. }
+            | Filter::FindEdges
+            | Filter::OilPaint { .. }
+                if !src.is_empty() =>
+            {
+                let (w, h) = (self.doc.width as f32, self.doc.height as f32);
+                let short = w.min(h) * 0.5;
+                let (kind, radius, p) = match f {
+                    Filter::Wave { amplitude, wavelength, horizontal, vertical } => (
+                        WAVE,
+                        0,
+                        [amplitude.clamp(0.0, 999.0), wavelength.clamp(2.0, 9999.0), *horizontal as u8 as f32, *vertical as u8 as f32],
+                    ),
+                    Filter::Twirl { angle, radius, center_x, center_y } => (
+                        TWIRL,
+                        0,
+                        [center_x * w, center_y * h, radius.clamp(1.0, 100.0) / 100.0 * short, angle.clamp(-999.0, 999.0).to_radians()],
+                    ),
+                    Filter::Spherize { amount } => (SPHERIZE, 0, [w * 0.5, h * 0.5, short, amount.clamp(-100.0, 100.0) / 100.0 * 0.9]),
+                    Filter::PolarCoordinates { to_polar } => (POLAR, 0, [w, h, *to_polar as u8 as f32, 0.0]),
+                    Filter::Offset { dx, dy, wrap } => (OFFSET, *wrap as u32, [*dx, *dy, w, h]),
+                    Filter::Emboss { angle, height, amount } => {
+                        let a = angle.to_radians();
+                        let hgt = height.clamp(1.0, 10.0);
+                        (EMBOSS, 0, [a.cos() * hgt, -a.sin() * hgt, amount.clamp(1.0, 500.0) / 100.0 * 2.0, 0.0])
+                    }
+                    Filter::FindEdges => (FIND_EDGES, 0, [0.0; 4]),
+                    Filter::OilPaint { radius } => (OIL, radius.clamp(1.0, 10.0).round() as u32, [0.0; 4]),
+                    _ => unreachable!(),
+                };
+                let moves = matches!(kind, WAVE | TWIRL | SPHERIZE | POLAR | OFFSET);
+                let dest: Vec<TileCoord> = if moves { dest } else { dest.into_iter().filter(|c| src.contains_key(c)).collect() };
                 let mut grids = Grids::default();
                 let g = grids.layer(src);
                 let jobs: Vec<FilterJob> = dest.iter().map(|&c| FilterJob { radius, p, ..Self::fjob(c, g, kind) }).collect();

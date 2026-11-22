@@ -3619,3 +3619,45 @@ msgstr "Ecken"
 
 msgid "Inner radius"
 msgstr "Innenradius"
+
+msgid "Wave"
+msgstr "Schwingungen"
+
+msgid "Twirl"
+msgstr "Strudel"
+
+msgid "Spherize"
+msgstr "Wölben"
+
+msgid "Polar Coordinates"
+msgstr "Polarkoordinaten"
+
+msgid "Find Edges"
+msgstr "Konturen finden"
+
+msgid "Oil Paint"
+msgstr "Ölfarbe"
+
+msgid "Stylize"
+msgstr "Stilisierungsfilter"
+
+msgid "Amplitude"
+msgstr "Amplitude"
+
+msgid "Wavelength"
+msgstr "Wellenlänge"
+
+msgid "Rectangular to Polar"
+msgstr "Rechteckig nach polar"
+
+msgid "Polar to Rectangular"
+msgstr "Polar nach rechteckig"
+
+msgid "Wrap Around"
+msgstr "Durch verschobenen Teil ersetzen"
+
+msgid "No settings."
+msgstr "Keine Einstellungen."
+
+msgid "Brush Size"
+msgstr "Pinselgröße"

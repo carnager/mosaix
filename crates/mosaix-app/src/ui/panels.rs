@@ -3957,6 +3957,41 @@ fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
                     s(ui, tr("Threshold"), threshold, 0.0..=255.0, false, "");
                 }
                 Filter::BoxBlur { radius } => s(ui, "Radius", radius, 1.0..=500.0, true, " px"),
+                Filter::Wave { amplitude, wavelength, horizontal, vertical } => {
+                    s(ui, tr("Amplitude"), amplitude, 0.0..=500.0, true, " px");
+                    s(ui, tr("Wavelength"), wavelength, 2.0..=2000.0, true, " px");
+                    ui.checkbox(horizontal, tr("Horizontal"));
+                    ui.checkbox(vertical, tr("Vertical"));
+                }
+                Filter::Twirl { angle, radius, center_x, center_y } => {
+                    s(ui, tr("Angle"), angle, -999.0..=999.0, false, "°");
+                    s(ui, "Radius", radius, 1.0..=100.0, false, " %");
+                    let (mut cx, mut cy) = (*center_x * 100.0, *center_y * 100.0);
+                    s(ui, tr("Centre X"), &mut cx, 0.0..=100.0, false, " %");
+                    s(ui, tr("Centre Y"), &mut cy, 0.0..=100.0, false, " %");
+                    (*center_x, *center_y) = (cx / 100.0, cy / 100.0);
+                }
+                Filter::Spherize { amount } => s(ui, tr("Amount"), amount, -100.0..=100.0, false, " %"),
+                Filter::PolarCoordinates { to_polar } => {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(to_polar, true, tr("Rectangular to Polar"));
+                        ui.selectable_value(to_polar, false, tr("Polar to Rectangular"));
+                    });
+                }
+                Filter::Offset { dx, dy, wrap } => {
+                    s(ui, tr("Horizontal"), dx, -5000.0..=5000.0, false, " px");
+                    s(ui, tr("Vertical"), dy, -5000.0..=5000.0, false, " px");
+                    ui.checkbox(wrap, tr("Wrap Around"));
+                }
+                Filter::Emboss { angle, height, amount } => {
+                    s(ui, tr("Angle"), angle, -180.0..=180.0, false, "°");
+                    s(ui, tr("Height"), height, 1.0..=10.0, false, " px");
+                    s(ui, tr("Amount"), amount, 1.0..=500.0, false, " %");
+                }
+                Filter::FindEdges => {
+                    ui.label(RichText::new(tr("No settings.")).weak());
+                }
+                Filter::OilPaint { radius } => s(ui, tr("Brush Size"), radius, 1.0..=10.0, false, " px"),
                 Filter::RadialBlur { amount, spin, center_x, center_y } => {
                     s(ui, tr("Amount"), amount, 1.0..=100.0, false, "");
                     ui.horizontal(|ui| {

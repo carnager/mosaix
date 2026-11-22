@@ -100,6 +100,64 @@ pub enum Filter {
         #[serde(default = "half")]
         center_y: f32,
     },
+    /// Ripples: amplitude and wavelength in px, horizontal and/or vertical.
+    Wave {
+        #[serde(default = "ten")]
+        amplitude: f32,
+        #[serde(default = "hundred")]
+        wavelength: f32,
+        #[serde(default = "yes")]
+        horizontal: bool,
+        #[serde(default)]
+        vertical: bool,
+    },
+    /// Turns the middle more than the edge: angle in degrees (−999…999),
+    /// within a circle of `radius` % of the shorter canvas side around the centre.
+    Twirl {
+        #[serde(default = "fifty")]
+        angle: f32,
+        #[serde(default = "hundred")]
+        radius: f32,
+        #[serde(default = "half")]
+        center_x: f32,
+        #[serde(default = "half")]
+        center_y: f32,
+    },
+    /// Bulges (+) or pinches (−) a circle in the middle: amount −100…100.
+    Spherize {
+        #[serde(default = "fifty")]
+        amount: f32,
+    },
+    /// Rectangular ↔ polar coordinates (e.g. a panorama into a little planet).
+    PolarCoordinates {
+        #[serde(default = "yes")]
+        to_polar: bool,
+    },
+    /// Shifts the layer by dx, dy px; `wrap` brings what leaves back in on the other side.
+    Offset {
+        #[serde(default)]
+        dx: f32,
+        #[serde(default)]
+        dy: f32,
+        #[serde(default = "yes")]
+        wrap: bool,
+    },
+    /// Grey relief lit from `angle` degrees; height px (1…10), amount % (1…500).
+    Emboss {
+        #[serde(default = "one_thirty_five")]
+        angle: f32,
+        #[serde(default = "three")]
+        height: f32,
+        #[serde(default = "hundred")]
+        amount: f32,
+    },
+    /// Edges as dark lines on white.
+    FindEdges,
+    /// Painterly smoothing (Kuwahara): brush radius px (1…10).
+    OilPaint {
+        #[serde(default = "four")]
+        radius: f32,
+    },
     /// amount in % (0…100) of the value range.
     AddNoise {
         amount: f32,
@@ -200,6 +258,15 @@ fn two_hundred() -> f32 {
 fn half() -> f32 {
     0.5
 }
+fn three() -> f32 {
+    3.0
+}
+fn four() -> f32 {
+    4.0
+}
+fn one_thirty_five() -> f32 {
+    135.0
+}
 fn shadows_default() -> f32 {
     35.0
 }
@@ -227,6 +294,14 @@ impl Filter {
             Filter::BoxBlur { radius: 5.0 },
             Filter::RadialBlur { amount: 10.0, spin: false, center_x: 0.5, center_y: 0.5 },
             Filter::Pixelate { size: 10.0 },
+            Filter::Wave { amplitude: 10.0, wavelength: 100.0, horizontal: true, vertical: false },
+            Filter::Twirl { angle: 50.0, radius: 100.0, center_x: 0.5, center_y: 0.5 },
+            Filter::Spherize { amount: 50.0 },
+            Filter::PolarCoordinates { to_polar: true },
+            Filter::Offset { dx: 0.0, dy: 0.0, wrap: true },
+            Filter::Emboss { angle: 135.0, height: 3.0, amount: 100.0 },
+            Filter::FindEdges,
+            Filter::OilPaint { radius: 4.0 },
             Filter::AddNoise {
                 amount: 10.0,
                 monochrome: false,
@@ -251,6 +326,14 @@ impl Filter {
             Filter::LensBlur { .. } => crate::tr("Lens Blur").into(),
             Filter::BoxBlur { .. } => crate::tr("Box Blur").into(),
             Filter::RadialBlur { .. } => crate::tr("Radial Blur").into(),
+            Filter::Wave { .. } => crate::tr("Wave").into(),
+            Filter::Twirl { .. } => crate::tr("Twirl").into(),
+            Filter::Spherize { .. } => crate::tr("Spherize").into(),
+            Filter::PolarCoordinates { .. } => crate::tr("Polar Coordinates").into(),
+            Filter::Offset { .. } => crate::tr("Offset").into(),
+            Filter::Emboss { .. } => crate::tr("Emboss").into(),
+            Filter::FindEdges => crate::tr("Find Edges").into(),
+            Filter::OilPaint { .. } => crate::tr("Oil Paint").into(),
             Filter::AddNoise { .. } => crate::tr("Add Noise").into(),
             Filter::Plugin { name, .. } => name.clone().into(),
         }
@@ -278,7 +361,15 @@ impl Filter {
             | Filter::SurfaceBlur { .. }
             | Filter::LensBlur { .. }
             | Filter::BoxBlur { .. }
-            | Filter::RadialBlur { .. } => 0.0,
+            | Filter::RadialBlur { .. }
+            | Filter::Wave { .. }
+            | Filter::Twirl { .. }
+            | Filter::Spherize { .. }
+            | Filter::PolarCoordinates { .. }
+            | Filter::Offset { .. }
+            | Filter::Emboss { .. }
+            | Filter::FindEdges
+            | Filter::OilPaint { .. } => 0.0,
             Filter::AddNoise { .. }
             | Filter::Plugin { .. }
             | Filter::MotionBlur { .. }

@@ -14,6 +14,14 @@
 //   kind 11: lens blur     disc radius p.x, highlight bloom p.y above p.z
 //   kind 12: box blur      1D average along `dir`
 //   kind 13: radial blur   centre p.xy (px), amount p.z, spin p.w
+//   kind 14: wave          amplitude p.x, wavelength p.y, horizontal p.z, vertical p.w
+//   kind 15: twirl         centre p.xy, radius p.z (px), angle p.w (rad)
+//   kind 16: spherize      centre p.xy, radius p.z, amount p.w (−1…1)
+//   kind 17: polar coords  canvas p.xy, to polar p.z
+//   kind 18: offset        shift p.xy, canvas p.zw, wrap = radius
+//   kind 19: emboss        light direction × height p.xy, amount p.z
+//   kind 20: find edges
+//   kind 21: oil paint     Kuwahara with `radius`
 
 enable wgpu_binding_array;
 
@@ -344,6 +352,127 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                 acc += texel(job.src, vec2<i32>(floor(q)));
             }
             return acc / f32(n);
+        }
+        case 14u, 15u, 16u, 17u, 18u: {
+            // Distortions: where each pixel comes from.
+            let q = vec2<f32>(p) + 0.5;
+            var src = q;
+            switch job.kind {
+                case 14u: {
+                    let k = 6.2831853 / max(job.p.y, 1.0);
+                    if job.p.z > 0.5 {
+                        src.x += job.p.x * sin(q.y * k);
+                    }
+                    if job.p.w > 0.5 {
+                        src.y += job.p.x * sin(q.x * k);
+                    }
+                }
+                case 15u, 16u: {
+                    let v = q - job.p.xy;
+                    let d = length(v);
+                    let t = d / max(job.p.z, 1.0);
+                    if t < 1.0 {
+                        if job.kind == 15u {
+                            // The angle fades from full at the centre to none at the rim.
+                            let a = job.p.w * (1.0 - t) * (1.0 - t);
+                            src = job.p.xy + vec2<f32>(v.x * cos(a) - v.y * sin(a), v.x * sin(a) + v.y * cos(a));
+                        } else {
+                            // A lens: positive amounts magnify the middle.
+                            // Source radius t^(1+k): > t outward (k < 0 pinches), < t inward (k > 0 bulges).
+                            let tt = pow(t, 1.0 + job.p.w);
+                            src = job.p.xy + v * (tt / max(t, 1e-6));
+                        }
+                    }
+                }
+                case 17u: {
+                    let wh = job.p.xy;
+                    let c = wh * 0.5;
+                    if job.p.z > 0.5 {
+                        // Rectangular → polar: the top edge gathers in the centre.
+                        let n = (q - c) / c;
+                        let a = atan2(n.x, -n.y);
+                        src = vec2<f32>((a / 6.2831853 + 0.5) * wh.x, length(n) * wh.y);
+                    } else {
+                        let a = (q.x / wh.x - 0.5) * 6.2831853;
+                        let r = q.y / wh.y;
+                        src = c + vec2<f32>(sin(a), -cos(a)) * r * c;
+                    }
+                }
+                default: {
+                    src = q - job.p.xy;
+                    if job.radius == 1u {
+                        src = src - floor(src / job.p.zw) * job.p.zw;
+                    }
+                }
+            }
+            // Bilinear (pixel centres at +0.5).
+            let s0 = src - 0.5;
+            let f = floor(s0);
+            let w = s0 - f;
+            let b = vec2<i32>(f);
+            return mix(mix(texel(job.src, b), texel(job.src, b + vec2<i32>(1, 0)), w.x),
+                       mix(texel(job.src, b + vec2<i32>(0, 1)), texel(job.src, b + vec2<i32>(1, 1)), w.x), w.y);
+        }
+        case 19u: {
+            let s = texel(job.src, p);
+            if s.a <= 0.0 {
+                return s;
+            }
+            let d = vec2<i32>(round(job.p.xy));
+            let a = texel(job.src, p + d);
+            let b = texel(job.src, p - d);
+            let la = luma(to_srgb(a.rgb / max(a.a, 1e-6))) * step(1e-6, a.a);
+            let lb = luma(to_srgb(b.rgb / max(b.a, 1e-6))) * step(1e-6, b.a);
+            let g = clamp(0.5 + (la - lb) * job.p.z, 0.0, 1.0);
+            return vec4<f32>(vec3<f32>(linear1(g)) * s.a, s.a);
+        }
+        case 20u: {
+            let s = texel(job.src, p);
+            if s.a <= 0.0 {
+                return s;
+            }
+            var e: array<vec3<f32>, 9>;
+            for (var y = -1; y <= 1; y++) {
+                for (var x = -1; x <= 1; x++) {
+                    let c = texel(job.src, p + vec2<i32>(x, y));
+                    e[(y + 1) * 3 + x + 1] = to_srgb(c.rgb / max(c.a, 1e-6)) * step(1e-6, c.a);
+                }
+            }
+            let gx = (e[2] + 2.0 * e[5] + e[8]) - (e[0] + 2.0 * e[3] + e[6]);
+            let gy = (e[6] + 2.0 * e[7] + e[8]) - (e[0] + 2.0 * e[1] + e[2]);
+            let o = clamp(vec3<f32>(1.0) - sqrt(gx * gx + gy * gy) * 0.5, vec3<f32>(0.0), vec3<f32>(1.0));
+            return vec4<f32>(to_linear(o) * s.a, s.a);
+        }
+        case 21u: {
+            // Kuwahara: the mean of the calmest of four quadrants.
+            let r = i32(job.radius);
+            var best = texel(job.src, p);
+            var best_v = 1e9;
+            for (var qd = 0; qd < 4; qd++) {
+                let sx = select(-1, 1, (qd & 1) == 1);
+                let sy = select(-1, 1, (qd & 2) == 2);
+                var sum = vec4<f32>(0.0);
+                var sl = 0.0;
+                var sl2 = 0.0;
+                var n = 0.0;
+                for (var y = 0; y <= r; y++) {
+                    for (var x = 0; x <= r; x++) {
+                        let c = texel(job.src, p + vec2<i32>(x * sx, y * sy));
+                        let l = luma(to_srgb(c.rgb / max(c.a, 1e-6)));
+                        sum += c;
+                        sl += l;
+                        sl2 += l * l;
+                        n += 1.0;
+                    }
+                }
+                let m = sl / n;
+                let v = sl2 / n - m * m;
+                if v < best_v {
+                    best_v = v;
+                    best = sum / n;
+                }
+            }
+            return best;
         }
         case 4u: {
             let s = texel(job.src, p);

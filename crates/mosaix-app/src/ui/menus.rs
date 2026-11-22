@@ -146,21 +146,25 @@ const IMAGE: &[Item] = &[
 ];
 
 /// Filter › Blur, Sharpen, Noise, Pixelate, Other: filter kinds (serde names).
-pub const FILTER_GROUPS: [(&str, &[&str]); 5] = [
+pub const FILTER_GROUPS: [(&str, &[&str]); 7] = [
     ("Blur", &["gaussian_blur", "box_blur", "motion_blur", "radial_blur", "lens_blur", "surface_blur"]),
     ("Sharpen", &["unsharp_mask", "smart_sharpen", "high_pass"]),
     ("Noise", &["reduce_noise", "median", "add_noise"]),
     ("Pixelate", &["pixelate"]),
-    ("Other", &["shadows_highlights"]),
+    ("Other", &["shadows_highlights", "offset"]),
+    ("Distort", &["wave", "twirl", "spherize", "polar_coordinates"]),
+    ("Stylize", &["emboss", "find_edges", "oil_paint"]),
 ];
 
 const FILTER: &[Item] = &[
     C("Last Filter", G(g::ARROWS_CLOCKWISE)),
     Sep,
     Sub("Blur", G(g::DROP), &[S(Special::FilterGroup(0), Icon::None)]),
+    Sub("Distort", G(g::WAVE_SINE), &[S(Special::FilterGroup(5), Icon::None)]),
     Sub("Sharpen", G(g::CROSSHAIR), &[S(Special::FilterGroup(1), Icon::None)]),
     Sub("Noise", G(g::DOTS_NINE), &[S(Special::FilterGroup(2), Icon::None)]),
     Sub("Pixelate", G(g::SQUARES_FOUR), &[S(Special::FilterGroup(3), Icon::None)]),
+    Sub("Stylize", G(g::PALETTE), &[S(Special::FilterGroup(6), Icon::None)]),
     Sub("Other", G(g::SLIDERS_HORIZONTAL), &[S(Special::FilterGroup(4), Icon::None)]),
     Sep,
     C("Liquify …", G(g::WAVES)),

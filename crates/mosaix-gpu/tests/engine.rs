@@ -3818,3 +3818,78 @@ fn auto_contrast_and_color_stretch_the_layer() {
     let mid = px(&out, 128, 10).map(linear_to_srgb);
     assert!((mid[2] - mid[0]).abs() < 0.04, "the blue cast is gone: {mid:?}");
 }
+
+#[test]
+fn distort_and_stylize_filters() {
+    use mosaix_core::Filter;
+    let Some(g) = gpu() else { return };
+    let new = |t: &[f16]| {
+        let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+        let l = e.doc().active;
+        e.upload_tile(l, TileCoord::new(0, 0), t);
+        (e, l)
+    };
+    let dot = |cx: usize, cy: usize| {
+        let mut t = vec![f16::ZERO; TS * TS * 4];
+        for y in 0..TS {
+            for x in 0..TS {
+                let v = if (x as i32 - cx as i32).abs() <= 2 && (y as i32 - cy as i32).abs() <= 2 { 1.0 } else { 0.0 };
+                t[(y * TS + x) * 4..][..4].copy_from_slice(&[v, v, v, 1.0].map(f16::from_f32));
+            }
+        }
+        t
+    };
+    // Offset with wrap: what leaves on the right comes back on the left.
+    let (mut e, l) = new(&dot(250, 100));
+    e.apply_filter(&Filter::Offset { dx: 20.0, dy: 0.0, wrap: true }, "Offset").unwrap();
+    let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&t, 14, 100)[0] > 0.9, "wrapped round: {:?}", px(&t, 14, 100));
+    assert!(px(&t, 250, 100)[0] < 0.1);
+    // Twirl leaves the centre where it is and turns points around it.
+    let (mut e, l) = new(&dot(178, 128));
+    e.apply_filter(&Filter::Twirl { angle: 90.0, radius: 100.0, center_x: 0.5, center_y: 0.5 }, "Twirl").unwrap();
+    let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&t, 178, 128)[0] < 0.5, "the dot moved away");
+    // Spherize +: the middle magnified (a dot near the centre moves out).
+    let (mut e, l) = new(&dot(148, 128));
+    e.apply_filter(&Filter::Spherize { amount: 100.0 }, "Spherize").unwrap();
+    let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
+    let at = (128..250).max_by(|&a, &b| px(&t, a, 128)[0].total_cmp(&px(&t, b, 128)[0])).unwrap();
+    assert!(at > 152, "bulged outwards: brightest at {at}");
+    // Polar there and back is close to the original away from the poles.
+    let mut ramp = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS {
+            let v = x as f32 / 255.0;
+            ramp[(y * TS + x) * 4..][..4].copy_from_slice(&[v, 0.5, 0.2, 1.0].map(f16::from_f32));
+        }
+    }
+    let (mut e, l) = new(&ramp);
+    e.apply_filter(&Filter::PolarCoordinates { to_polar: true }, "Polar").unwrap();
+    e.apply_filter(&Filter::PolarCoordinates { to_polar: false }, "Rect").unwrap();
+    let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
+    assert!((px(&t, 100, 150)[0] - px(&ramp, 100, 150)[0]).abs() < 0.05, "{:?}", px(&t, 100, 150));
+    // Emboss: flat areas become mid grey.
+    let (mut e, l) = new(&ramp);
+    e.apply_filter(&Filter::Emboss { angle: 90.0, height: 3.0, amount: 100.0 }, "Emboss").unwrap();
+    let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
+    let grey = mosaix_core::color::linear_to_srgb(px(&t, 100, 100)[0]);
+    assert!((grey - 0.5).abs() < 0.03, "{grey}");
+    // Find edges: white where flat, dark at the dot's edge.
+    let (mut e, l) = new(&dot(128, 128));
+    e.apply_filter(&Filter::FindEdges, "Edges").unwrap();
+    let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&t, 40, 40)[0] > 0.95 && px(&t, 131, 128)[0] < 0.3);
+    // Oil paint keeps a hard edge (no blur across it).
+    let mut half = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS {
+            let v = if x < 128 { 0.0 } else { 1.0 };
+            half[(y * TS + x) * 4..][..4].copy_from_slice(&[v, v, v, 1.0].map(f16::from_f32));
+        }
+    }
+    let (mut e, l) = new(&half);
+    e.apply_filter(&Filter::OilPaint { radius: 4.0 }, "Oil").unwrap();
+    let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&t, 126, 50)[0] < 0.01 && px(&t, 129, 50)[0] > 0.99);
+}
