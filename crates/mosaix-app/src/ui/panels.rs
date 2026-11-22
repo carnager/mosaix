@@ -176,6 +176,8 @@ pub struct Model {
     pub tabs: Vec<(String, bool)>,
     /// History position the History Brush paints from.
     pub history_source: usize,
+    /// Name of the filter Filter › Last Filter repeats.
+    pub last_filter: Option<String>,
     pub prefs: crate::settings::Prefs,
     /// "auto", "en", "de".
     pub language: String,
@@ -1122,6 +1124,7 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
         "Invert" | "Desaturate" | "Hue/Saturation …" | "Levels …" | "Curves …" | "Auto Tone" | "Auto Contrast" | "Auto Color" => {
             need(pixel_active(m), tr("Works on pixel layers"))
         }
+        "Last Filter" => need(m.last_filter.is_some(), tr("No filter applied yet")),
         "Merge Down" if m.selected.len() > 1 => {
             // Merges the selected layers then; they must share one list.
             let depth = |id: LayerId| m.layers.iter().find(|r| r.id == id).map(|r| r.depth);
@@ -1244,7 +1247,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
     }
     for f in mosaix_core::Filter::defaults().into_iter().chain(m.filter_plugins.iter().filter_map(|p| p.result.as_ref().ok().cloned())) {
         let name = f.name().to_string();
-        add("Image", &format!("Filter {name}"), format!("{}: {name} …", tr("Filter")), None, Extra::Filter(f));
+        add("Filter", &format!("Filter {name}"), format!("{}: {name} …", tr("Filter")), None, Extra::Filter(f));
     }
     for a in mosaix_core::Adjustment::defaults() {
         let name = a.name();
@@ -1458,16 +1461,18 @@ fn special_entry(
             .response
             .on_disabled_hover_text(tr("Select a layer to transform"));
         }
-        Special::Filters => {
-            ui.menu_button((icon, tr("Filter")), |ui| {
-                for f in mosaix_core::Filter::defaults() {
-                    if ui.button(format!("{} …", f.name())).clicked() {
-                        st.open_filter(f);
-                        ui.close();
-                    }
+        Special::FilterGroup(g) => {
+            let kinds = super::menus::FILTER_GROUPS[g as usize].1;
+            for f in mosaix_core::Filter::defaults() {
+                let kind = serde_json::to_value(&f).ok().and_then(|v| v["kind"].as_str().map(String::from)).unwrap_or_default();
+                if kinds.contains(&kind.as_str()) && ui.button(format!("{} …", f.name())).clicked() {
+                    st.open_filter(f);
+                    ui.close();
                 }
-                ui.separator();
-                ui.menu_button((super::menus::atom(super::menus::Icon::Glyph(super::glyphs::PUZZLE_PIECE)), tr("Plugins")), |ui| {
+            }
+        }
+        Special::Plugins => {
+            ui.menu_button((icon, tr("Plugins")), |ui| {
                     for p in m.filter_plugins.iter() {
                         match &p.result {
                             Ok(f) => {
@@ -1496,7 +1501,6 @@ fn special_entry(
                         out.push(Action::ReloadFilterPlugins);
                         ui.close();
                     }
-                });
             });
         }
         Special::MoreAdjustments => {

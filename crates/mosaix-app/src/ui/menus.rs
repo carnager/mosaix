@@ -38,12 +38,15 @@ pub enum Special {
     NewGuide,
     GridSettings,
     Actions,
-    Filters,
     Adjustments,
     /// Image › Adjustments: the other adjustments, applied to the pixels.
     MoreAdjustments,
     /// Select › Layer Pixels (as Ctrl+click on a layer thumbnail).
     LayerPixels,
+    /// The built-in filters of one group (see [`FILTER_GROUPS`]).
+    FilterGroup(u8),
+    /// Filter › Plugins.
+    Plugins,
     CanvasSize,
     ImageSize,
     Upscale,
@@ -137,10 +140,31 @@ const IMAGE: &[Item] = &[
     C("Flip Image Vertical", G(g::FLIP_VERTICAL)),
     Sep,
     Sub("Adjustments", G(g::CIRCLE_HALF_TILT), ADJUSTMENTS),
-    S(Special::Filters, G(g::SLIDERS_HORIZONTAL)),
-    C("Liquify …", G(g::WAVES)),
     Sep,
     C("Blend Space sRGB / Linear", G(g::CIRCLES_THREE)),
+];
+
+/// Filter › Blur, Sharpen, Noise, Pixelate, Other: filter kinds (serde names).
+pub const FILTER_GROUPS: [(&str, &[&str]); 5] = [
+    ("Blur", &["gaussian_blur", "box_blur", "motion_blur", "radial_blur", "lens_blur", "surface_blur"]),
+    ("Sharpen", &["unsharp_mask", "smart_sharpen", "high_pass"]),
+    ("Noise", &["reduce_noise", "median", "add_noise"]),
+    ("Pixelate", &["pixelate"]),
+    ("Other", &["shadows_highlights"]),
+];
+
+const FILTER: &[Item] = &[
+    C("Last Filter", G(g::ARROWS_CLOCKWISE)),
+    Sep,
+    Sub("Blur", G(g::DROP), &[S(Special::FilterGroup(0), Icon::None)]),
+    Sub("Sharpen", G(g::CROSSHAIR), &[S(Special::FilterGroup(1), Icon::None)]),
+    Sub("Noise", G(g::DOTS_NINE), &[S(Special::FilterGroup(2), Icon::None)]),
+    Sub("Pixelate", G(g::SQUARES_FOUR), &[S(Special::FilterGroup(3), Icon::None)]),
+    Sub("Other", G(g::SLIDERS_HORIZONTAL), &[S(Special::FilterGroup(4), Icon::None)]),
+    Sep,
+    C("Liquify …", G(g::WAVES)),
+    Sep,
+    S(Special::Plugins, G(g::PUZZLE_PIECE)),
 ];
 
 const LAYER: &[Item] = &[
@@ -254,6 +278,7 @@ pub fn layout(menu: &str) -> &'static [Item] {
         "Image" => IMAGE,
         "Layer" => LAYER,
         "Select" => SELECT,
+        "Filter" => FILTER,
         "Tool" => TOOL,
         "View" => VIEW,
         _ => &[],

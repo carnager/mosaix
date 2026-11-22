@@ -2,7 +2,7 @@
 
 Your own filters run on the GPU, just as fast as the built-in ones: a
 `.wgsl` file in `~/.local/share/mosaix/filters/` (or `$XDG_DATA_HOME/mosaix/filters/`).
-They show up under *Image › Filter › Plugins* (*Reload Plugins* reads the folder
+They show up under *Filter › Plugins* (*Reload Plugins* reads the folder
 again), with preview, as smart filters, undoable and for agents
 (`filter_apply {"filter": {"kind": "plugin", "name": …}}`). A smart filter stores
 the shader in the document – the file works even without the plugin installed.

@@ -72,6 +72,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         tabs: std::env::var("MOSAIX_SNAPSHOT_TABS").map(|v| v.split(',').map(|n| (n.to_string(), n.starts_with('*'))).collect()).unwrap_or_default(),
         tab: 0,
         history_source: 0,
+        last_filter: None,
         prefs: Default::default(),
         language: "auto".into(),
         zoom: view.zoom,
@@ -183,7 +184,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         && let Some(i) = super::palette::MENUS.iter().position(|m| m.eq_ignore_ascii_case(&menu))
     {
         // Roughly where the menu bar puts it.
-        const X: [f32; 7] = [4.0, 34.0, 68.0, 114.0, 154.0, 200.0, 236.0];
+        const X: [f32; 8] = [4.0, 34.0, 68.0, 114.0, 154.0, 200.0, 240.0, 276.0];
         state.snapshot_menu = Some((super::palette::MENUS[i], X[i]));
     }
     let palette = std::env::var("MOSAIX_SNAPSHOT_PALETTE").ok();

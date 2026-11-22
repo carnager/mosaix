@@ -483,6 +483,8 @@ pub struct App {
     poly_click: Option<Instant>,
     /// Paint Bucket compares colours in the whole image.
     bucket_all: bool,
+    /// Filter › Last Filter (Ctrl+F) repeats it.
+    last_filter: Option<mosaix_core::Filter>,
     /// Whether an OpenAI key is saved or in the environment (for the dialog).
     openai_key: settings::KeyState,
     wand_tolerance: f32,
@@ -746,6 +748,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         poly: None,
         poly_click: None,
         bucket_all: false,
+        last_filter: None,
         openai_key: settings::key_state(),
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
@@ -3607,6 +3610,10 @@ impl App {
             Keysym::j if ctrl && self.has_pixel_selection() => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_via", "cut": false })),
             Keysym::j if ctrl => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_duplicate" })),
             Keysym::i if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "invert" } })),
+            Keysym::f if ctrl && !alt && !shift => match self.last_filter.clone() {
+                Some(f) => self.apply_ui(vec![ui::panels::Action::ApplyFilter(f)]),
+                None => tracing::info!("{}", tr("No filter applied yet")),
+            },
             Keysym::L if ctrl && shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "auto_adjust", "mode": "tone" })),
             Keysym::L if ctrl && shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "auto_adjust", "mode": "contrast" })),
             Keysym::B if ctrl && shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "auto_adjust", "mode": "color" })),
@@ -4271,6 +4278,7 @@ impl App {
                 .collect(),
             tab: self.active_tab(),
             history_source: e.history_source(),
+            last_filter: self.last_filter.as_ref().map(|f| f.name().into_owned()),
             prefs: self.settings.prefs.clone(),
             language: self.settings.language.clone(),
             zoom: self.view.zoom / self.scale,
@@ -4990,6 +4998,7 @@ impl App {
                 Action::ApplyFilter(f) => {
                     let t0 = Instant::now();
                     let label = f.name();
+                    self.last_filter = Some(f.clone());
                     self.engine_op(|e| e.apply_filter(&f, &label));
                     tracing::info!("{label}: {:.0} ms", t0.elapsed().as_secs_f64() * 1e3);
                 }

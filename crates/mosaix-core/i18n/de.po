@@ -3535,3 +3535,15 @@ msgstr "Schwarz"
 
 msgid "Black"
 msgstr "Schwarz"
+
+msgid "Last Filter"
+msgstr "Letzter Filter"
+
+msgid "No filter applied yet"
+msgstr "Noch kein Filter angewendet"
+
+msgid "Pixelate"
+msgstr "Vergröberungsfilter"
+
+msgid "Other"
+msgstr "Sonstige Filter"

@@ -130,7 +130,7 @@ const fn c(
     }
 }
 
-pub const MENUS: [&str; 7] = ["File", "Edit", "Image", "Layer", "Select", "Tool", "View"];
+pub const MENUS: [&str; 8] = ["File", "Edit", "Image", "Layer", "Select", "Filter", "Tool", "View"];
 
 pub const COMMANDS: &[Cmd] = &[
     c("File", "New …", K::n, true, false, false),
@@ -198,7 +198,8 @@ pub const COMMANDS: &[Cmd] = &[
     c("Image", "Rotate Image 180°", K::Down, true, true, true),
     c("Image", "Flip Image Horizontal", K::H, true, true, true),
     c("Image", "Flip Image Vertical", K::V, true, true, true),
-    c("Image", "Liquify …", K::X, true, true, false),
+    c("Filter", "Last Filter", K::f, true, false, false),
+    c("Filter", "Liquify …", K::X, true, true, false),
     c(
         "Image",
         "Blend Space sRGB / Linear",
