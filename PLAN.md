@@ -1,49 +1,49 @@
-# mosaix – Plan für einen GPU-first Bildeditor unter Linux
+# mosaix – Plan for a GPU-first image editor on Linux
 
-> Ziel: Ein Photoshop-Ersatz, der sich **sofort** anfühlt, Spaß beim Bedienen macht
-> und die GPU überall nutzt, wo es sinnvoll ist.
-> Drei Säulen, gleich gewichtet: **Performance · Usability · Features.**
+> Goal: a Photoshop replacement that feels **instant**, is fun to use
+> and uses the GPU everywhere it makes sense.
+> Three pillars, equally weighted: **Performance · Usability · Features.**
 
-Zielhardware für Entwicklung: AMD RX 6700 XT (Navi 22, 12 GB VRAM, RADV/Vulkan), Wayland, Arch.
-
----
-
-## 1. Leitprinzipien
-
-1. **Der UI-Thread blockiert nie.** Alles, was > 2 ms dauern kann, läuft asynchron, ist abbrechbar und zeigt sofort eine Vorschau.
-2. **Nur rechnen, was man sieht.** Dirty-Tiles + Level-of-Detail: Bei 25 % Zoom wird auf Mip-Stufe 2 komponiert (16× weniger Arbeit), Vollauflösung erst beim Reinzoomen/Export.
-3. **Alles ist nicht-destruktiv, wo es geht.** Filter und Korrekturen sind Ebenen/Knoten mit Live-Parametern, keine modalen Dialoge mit „OK“-Knopf.
-4. **Alles ist ein Kommando.** Jede Aktion ist ein serialisierbares Command → Undo, Makros, Scripting, Headless-Batch und Command-Palette fallen „gratis“ ab.
-5. **Linux-only ist ein Feature.** Wir nutzen Wayland-Protokolle direkt (Tablet, Color-Management/HDR, Fractional Scaling, Presentation-Time) statt auf den kleinsten gemeinsamen Nenner zu zielen.
-6. **Agenten sind Nutzer erster Klasse.** Jede Funktion ist auch als Befehl (MCP-Tool / JSON) erreichbar; Agenten können das Ergebnis *sehen* (gerenderte Vorschau), und sie arbeiten auf Wunsch live im selben Dokument wie der Mensch – mit gemeinsamem Undo.
-7. **Messen statt glauben.** Performance-Budgets (Abschnitt 7) sind Teil der CI, Profiling (Tracy) ist ab Tag 1 eingebaut.
+Target hardware for development: AMD RX 6700 XT (Navi 22, 12 GB VRAM, RADV/Vulkan), Wayland, Arch.
 
 ---
 
-## 2. Technologie-Stack
+## 1. Guiding principles
 
-| Bereich | Wahl | Begründung |
+1. **The UI thread never blocks.** Anything that can take > 2 ms runs asynchronously, is cancellable and shows a preview immediately.
+2. **Only compute what you see.** Dirty tiles + level of detail: at 25 % zoom we composite at mip level 2 (16× less work), full resolution only when zooming in/exporting.
+3. **Everything is non-destructive where possible.** Filters and adjustments are layers/nodes with live parameters, not modal dialogs with an "OK" button.
+4. **Everything is a command.** Every action is a serialisable command → undo, macros, scripting, headless batch and the command palette come "for free".
+5. **Linux-only is a feature.** We use Wayland protocols directly (tablet, color management/HDR, fractional scaling, presentation time) instead of aiming for the lowest common denominator.
+6. **Agents are first-class users.** Every function is also reachable as a command (MCP tool / JSON); agents can *see* the result (rendered preview), and on request they work live in the same document as the human – with shared undo.
+7. **Measure, don't guess.** Performance budgets (section 7) are part of CI, profiling (Tracy) is built in from day 1.
+
+---
+
+## 2. Technology stack
+
+| Area | Choice | Rationale |
 |---|---|---|
-| Sprache | **Rust** | Speichersicherheit ohne GC-Pausen, gutes Threading (rayon), starkes GPU-Ökosystem |
-| GPU-API | **wgpu** (Vulkan-Backend) mit nativen Features (`shader-f16`, `subgroup`, `push-constants`, `timestamp-query`, `texture-binding-array`) | Moderne API, WGSL-Compute, gut gewartet. Escape-Hatch: über `wgpu-hal` bzw. `ash` an rohes Vulkan, falls nötig |
-| Fenster/Input | **smithay-client-toolkit** direkt auf Wayland (kein winit): `zwp_tablet_v2`, `wp_fractional_scale_v1` + `wp_viewporter`, `wp_cursor_shape`, Frame-Callbacks; später `wp_color_management_v1`, `wp_presentation` | winit liefert auf Wayland keine vollwertigen Tablet-Daten; direkter Protokollzugriff gibt volle Kontrolle (entschieden in Phase 0) |
-| UI | **egui** + `egui_dock`, eigener Theme, eigene Widgets; im selben wgpu-Device wie die Canvas | Ein GPU-Kontext, keine Texturkopien zwischen Toolkit und Canvas; sehr schnell; Rerun/Graphite beweisen, dass es skaliert |
-| Vektor & Text | **vello** (GPU-Compute 2D-Renderer), **parley/cosmic-text** + **swash** für Layout/Shaping | Vektor-Ebenen, Formen, Text und Pfade komplett auf der GPU |
-| Farbmanagement | **lcms2** (ICC), optional **OpenColorIO** | Display-Transform wird als 3D-LUT in den finalen Shader gebacken |
-| Parallelität | **rayon** (CPU-Jobs), eigener Render-Thread, `crossbeam` Channels | |
-| Kompression | **zstd** / **lz4** | Tile-Swap, natives Dateiformat |
-| Profiling | **tracy** (`tracing-tracy`) + GPU-Timestamp-Queries | |
-| ML (optional) | **ort** (ONNX Runtime, ROCm/MIGraphX-EP) oder **burn** mit wgpu-Backend | Lokale Modelle, kein Cloud-Zwang |
+| Language | **Rust** | Memory safety without GC pauses, good threading (rayon), strong GPU ecosystem |
+| GPU API | **wgpu** (Vulkan backend) with native features (`shader-f16`, `subgroup`, `push-constants`, `timestamp-query`, `texture-binding-array`) | Modern API, WGSL compute, well maintained. Escape hatch: raw Vulkan via `wgpu-hal` or `ash` if needed |
+| Window/input | **smithay-client-toolkit** directly on Wayland (no winit): `zwp_tablet_v2`, `wp_fractional_scale_v1` + `wp_viewporter`, `wp_cursor_shape`, frame callbacks; later `wp_color_management_v1`, `wp_presentation` | winit doesn't deliver full tablet data on Wayland; direct protocol access gives full control (decided in Phase 0) |
+| UI | **egui** + `egui_dock`, own theme, own widgets; in the same wgpu device as the canvas | One GPU context, no texture copies between toolkit and canvas; very fast; Rerun/Graphite prove that it scales |
+| Vector & text | **vello** (GPU compute 2D renderer), **parley/cosmic-text** + **swash** for layout/shaping | Vector layers, shapes, text and paths entirely on the GPU |
+| Color management | **lcms2** (ICC), optionally **OpenColorIO** | Display transform is baked into the final shader as a 3D LUT |
+| Parallelism | **rayon** (CPU jobs), own render thread, `crossbeam` channels | |
+| Compression | **zstd** / **lz4** | Tile swap, native file format |
+| Profiling | **tracy** (`tracing-tracy`) + GPU timestamp queries | |
+| ML (optional) | **ort** (ONNX Runtime, ROCm/MIGraphX EP) or **burn** with wgpu backend | Local models, no cloud requirement |
 
-**Referenzen zum Lernen (keine Basis):** *Krita* (Brush-Engine, Tablet-Handling, Tile-Speicher) und *Graphite* – Letzteres ist ein node-basierter **Vektor**-Editor, also kein Raster-Konkurrent, aber nützlich als Anschauungsmaterial für Rust + wgpu + vello in einer Desktop-App.
+**References for learning (not a base):** *Krita* (brush engine, tablet handling, tile storage) and *Graphite* – the latter is a node-based **vector** editor, so not a raster competitor, but useful as illustrative material for Rust + wgpu + vello in a desktop app.
 
 ---
 
-## 3. Architektur
+## 3. Architecture
 
 ```
 ┌──────────────────────────── mosaix-app ────────────────────────────┐
-│  Wayland/winit · Input (Tablet, Maus, Tastatur) · Keymap · Palette  │
+│  Wayland/winit · Input (Tablet, Mouse, Keyboard) · Keymap · Palette  │
 │                                                                      │
 │   ┌────────── mosaix-ui (egui) ──────────┐   ┌──── Canvas-View ───┐ │
 │   │ Panels · Docking · Inspector · HUDs   │   │ Pan/Zoom/Rotate    │ │
@@ -52,7 +52,7 @@ Zielhardware für Entwicklung: AMD RX 6700 XT (Navi 22, 12 GB VRAM, RADV/Vulkan)
 └───────────────────┼──────────────────────────────────────┼────────────┘
                     ▼                                      │ View-Request (Rect, LOD)
           ┌──── mosaix-core ────┐                         ▼
-          │ Dokumentmodell       │──Snapshot──▶ ┌──── mosaix-render ────┐
+          │ Document model       │──Snapshot──▶ ┌──── mosaix-render ────┐
           │ (persistent, CoW)    │              │ Render-Graph (DAG)     │
           │ Commands · Undo      │              │ Dirty-Tracking · Cache │
           └──────────┬───────────┘              │ Scheduler · LOD        │
@@ -60,466 +60,466 @@ Zielhardware für Entwicklung: AMD RX 6700 XT (Navi 22, 12 GB VRAM, RADV/Vulkan)
           ┌──────────▼───────────┐              ┌──────────▼─────────────┐
           │ mosaix-tiles        │◀────────────▶│ mosaix-gpu            │
           │ CPU-Tiles, Swap,     │   Upload/    │ Device, Tile-Pool      │
-          │ Kompression          │   Readback   │ (Texture-Arrays), LRU  │
+          │ Compression          │   Readback   │ (Texture-Arrays), LRU  │
           └──────────────────────┘              └──────────┬─────────────┘
                                                 ┌──────────▼─────────────┐
                                                 │ mosaix-ops (WGSL)     │
                                                 │ Blend · Filter · Brush │
                                                 └────────────────────────┘
-   mosaix-io (Formate)   mosaix-color (ICC/LUT)   mosaix-cli (headless)
+   mosaix-io (formats)   mosaix-color (ICC/LUT)   mosaix-cli (headless)
 ```
 
-### 3.1 Dokumentmodell
-- Baum aus Knoten: Gruppe, Pixel-Ebene, Korrektur-Ebene, Filter-Ebene, Vektor-Ebene, Text-Ebene, Smart-Object, Maske (Pixel + Vektor), Clipping.
-- **Persistente Datenstruktur** (`Arc` + Copy-on-Write auf Tile-Ebene). Ein Undo-Schritt kostet nur die tatsächlich geänderten Tiles. Snapshots für den Renderer sind O(1).
-- Pro Dokument wählbare Präzision: **8 bit**, **16 bit float (Standard)**, **32 bit float**.
+### 3.1 Document model
+- Tree of nodes: group, pixel layer, adjustment layer, filter layer, vector layer, text layer, smart object, mask (pixel + vector), clipping.
+- **Persistent data structure** (`Arc` + copy-on-write at tile level). An undo step costs only the tiles actually changed. Snapshots for the renderer are O(1).
+- Precision selectable per document: **8 bit**, **16 bit float (default)**, **32 bit float**.
 
-### 3.2 Tiles & Speicher
-- Tile-Größe 256×256 (tunebar), **sparse**: leere/einfarbige Tiles werden nicht allokiert.
-- GPU-Seite: Tile-Pool als große `Texture2DArray`s pro Format; Seitentabelle in einem Storage-Buffer. Shader adressieren Tiles indirekt („virtual texturing light“, ohne Sparse-Binding).
-- Residency-Manager mit LRU und VRAM-Budget (z. B. 70 % von 12 GB). Nicht sichtbare Tiles wandern nach RAM (lz4), bei Druck auf Disk (zstd, mmap).
-- **Mip-Pyramide pro Ebene**, inkrementell aktualisiert, damit herausgezoomte Ansichten billig sind.
+### 3.2 Tiles & memory
+- Tile size 256×256 (tunable), **sparse**: empty/single-color tiles are not allocated.
+- GPU side: tile pool as large `Texture2DArray`s per format; page table in a storage buffer. Shaders address tiles indirectly ("virtual texturing light", without sparse binding).
+- Residency manager with LRU and VRAM budget (e.g. 70 % of 12 GB). Non-visible tiles move to RAM (lz4), under pressure to disk (zstd, mmap).
+- **Mip pyramid per layer**, updated incrementally so zoomed-out views are cheap.
 
-### 3.3 Render-Graph
-- Ebenenstapel wird zu einem DAG kompiliert; jeder Knoten = Compute-/Render-Pass.
-- **Dirty-Regionen** propagieren durch den Graph (Blur vergrößert die Region um seinen Radius usw.).
-- Cache für Zwischenergebnisse (z. B. Gruppen-Komposit unterhalb der aktiven Ebene) → beim Malen wird nur „Cache unten + aktive Ebene + Cache oben“ komponiert.
-- **Progressive Verfeinerung:** Erst niedrige LOD sofort zeigen, dann in Vollauflösung nachrechnen. Jobs tragen eine Generation-ID und werden verworfen, wenn sich Parameter ändern (Slider ziehen ⇒ keine Rückstaus).
-- Filter deklarieren, ob sie **skalierungsinvariant** sind (Blur mit skaliertem Radius) oder Vollauflösung brauchen.
+### 3.3 Render graph
+- The layer stack is compiled into a DAG; each node = compute/render pass.
+- **Dirty regions** propagate through the graph (blur grows the region by its radius, etc.).
+- Cache for intermediate results (e.g. group composite below the active layer) → while painting, only "cache below + active layer + cache above" is composited.
+- **Progressive refinement:** show low LOD immediately first, then recompute at full resolution. Jobs carry a generation ID and are discarded when parameters change (dragging a slider ⇒ no backlog).
+- Filters declare whether they are **scale-invariant** (blur with scaled radius) or need full resolution.
 
 ### 3.4 Threads
-- **UI-Thread:** Input, egui, Command-Dispatch. Nie GPU-Waits.
-- **Render-Thread:** (zurückgestellt, siehe Stand Phase 2b) besitzt Queue, baut Frames, präsentiert (Mailbox/FIFO-relaxed, Frame-Pacing über `wp_presentation`).
-- **Worker-Pool (rayon):** Decoding, Encoding, Kompression, CPU-Fallbacks, Histogramme.
-- **IO-Thread(s):** Laden/Speichern, Autosave.
+- **UI thread:** input, egui, command dispatch. Never GPU waits.
+- **Render thread:** (deferred, see status Phase 2b) owns the queue, builds frames, presents (mailbox/FIFO-relaxed, frame pacing via `wp_presentation`).
+- **Worker pool (rayon):** decoding, encoding, compression, CPU fallbacks, histograms.
+- **IO thread(s):** loading/saving, autosave.
 
-### 3.5 Farbe
-- Arbeitsfarbraum: **linear** (Standard: linear Rec.2020 oder ACEScg wählbar), optional **„Photoshop-kompatibles Gamma-Blending“** – Nutzer erwarten den PS-Look bei Blend-Modi, Linear-Blending ist physikalisch korrekter. Beides anbieten, pro Dokument.
-- Display-Transform (ICC des Monitors via lcms2) → 3D-LUT → letzter Shader-Pass.
-- HDR/Wide-Gamut-Ausgabe über `wp_color_management_v1` (KWin/Mutter unterstützen das).
-- Soft-Proofing (CMYK/Druck) als zusätzlicher LUT-Pass.
-
----
-
-## 4. Feature-Katalog (nach Priorität)
-
-### P0 – Fundament (ohne das ist es kein Ersatz)
-- Öffnen/Speichern: PNG, JPEG, WebP, TIFF, AVIF, **JPEG XL**, EXR, natives Format
-- Ebenen, Gruppen, Deckkraft, alle gängigen **Blend-Modi** (PS-Parität), Ebenenmasken, Clipping
-- Pan / Zoom / **Canvas-Rotation**, flüssig bei jeder Dokumentgröße
-- Pinsel, Radierer, Farbwähler, Füllen, Verlauf
-- Auswahl: Rechteck, Ellipse, Lasso, Polygon, **Zauberstab (GPU-Floodfill)**, Farbbereich, Add/Sub/Intersect, Weiche Kante, Quick-Mask
-- Freies Transformieren (Skalieren, Drehen, Verzerren, Perspektive), Zuschneiden mit Gerade-Richten
-- Unendliches Undo/Redo mit History-Panel
-- Kopieren/Einfügen mit Wayland-Clipboard (inkl. Bilddaten)
-
-### P1 – Was es zum Arbeitswerkzeug macht
-- **Korrektur-Ebenen (live):** Tonwert, Gradationskurven, Farbton/Sättigung, Farbbalance, Vibrance, Belichtung, Schwarzweiß, Kanalmixer, Selektive Farbe, Color Lookup (.cube), Verlaufsumsetzung, Schwellenwert, Tontrennung
-- **Filter-Ebenen (live):** Gauß/Box/Bewegung/Lens-Blur (Bokeh), Unscharf maskieren, Hochpass, Rauschen hinzufügen/entfernen, Clarity/lokaler Kontrast, Verflüssigen (Liquify, Echtzeit-Displacement-Feld)
-- Retusche: **Stempel, Reparaturpinsel (Poisson/Multigrid auf GPU), Bereichsreparatur, inhaltsbasiertes Füllen (PatchMatch auf GPU)**
-- Pinsel-Engine v1: Druck/Neigung/Rotation-Kurven, Stabilisator, Textur-/Bild-Spitzen, Smudge/Mixer, ABR-Import
-- Text-Ebenen (Shaping, OpenType-Features, Absatz-Text)
-- Vektor-Formen und Pfade (Pen-Tool) über vello
-- **PSD-Import/Export** (Ebenen, Masken, Blend-Modi, Korrektur-Ebenen soweit abbildbar) – entscheidend für Adoption
-- Farbmanagement komplett, Soft-Proofing
-- Warp, Puppet-Warp
-- Ebenenstile: Schlagschatten, Kontur, Schein, Farbüberlagerung (als GPU-Effekte)
-
-### P2 – Kür
-- **RAW-Entwicklung** (`rawler`, Demosaicing auf GPU) als Camera-Raw-artiger Smart-Filter
-- KI (lokal, optional): Motiv auswählen / Segmentierung (SAM-artig), generatives Füllen (Inpainting), Upscaling, Entrauschen
-- Makros/Aktionen (Command-Log aufnehmen & abspielen), **Batch über CLI** (`mosaix-cli run makro.toml *.jpg`)
-- Plugins: **WASM** (wasmtime, sandboxed) + **eigene WGSL-Filter** als Plugin-Typ
-- Scripting (Rhai oder Lua)
-- Artboards, Slices/Export-As mit mehreren Größen
-- Frequenztrennung als Ein-Klick-Workflow, Panorama/Focus-Stacking
-
-### Bewusst NICHT (vorerst)
-3D, Video-Timeline, Animation, Druckvorstufen-Spezialitäten. Fokus: **Foto-Bearbeitung, Compositing, Retusche, Digital Painting.**
+### 3.5 Color
+- Working color space: **linear** (default: linear Rec.2020 or ACEScg selectable), optionally **"Photoshop-compatible gamma blending"** – users expect the PS look with blend modes, linear blending is physically more correct. Offer both, per document.
+- Display transform (monitor ICC via lcms2) → 3D LUT → last shader pass.
+- HDR/wide-gamut output via `wp_color_management_v1` (KWin/Mutter support it).
+- Soft proofing (CMYK/print) as an additional LUT pass.
 
 ---
 
-## 5. Usability – „macht Spaß“
+## 4. Feature catalogue (by priority)
 
-- **Command-Palette** (`Strg+K` / `Leertaste` kurz): jede Aktion, jedes Werkzeug, jede Ebene, jeder Filter durchsuchbar – mit Fuzzy-Suche und zuletzt verwendet.
-- **Keymap-Presets:** Photoshop, GIMP, Krita – plus frei konfigurierbar. Umsteiger sollen in 5 Minuten produktiv sein.
-- **On-Canvas statt Dialoge:** Pinselgröße/Härte per `Alt+Rechtsklick ziehen` (HUD), Transform-Gizmos, Verlauf direkt auf der Leinwand, Kurven-Korrektur durch Ziehen im Bild (Targeted Adjustment).
-- **Scrubby-Slider:** Auf jedem Zahlenfeld-Label ziehen ändert den Wert; Shift = fein, Strg = grob. Werte auch als Ausdruck eingebbar (`120*2`).
-- **Live-Vorschau beim Hovern:** Blend-Modi, Filter-Presets, LUTs – Vorschau ohne Klick.
-- **Kein Spinner im Normalbetrieb.** Wenn etwas länger dauert: progressive Vorschau + dezente Fortschrittsanzeige, jederzeit abbrechbar.
-- Flüssige Animationen (Zoom mit Trägheit, Panel-Übergänge) – aber jederzeit abschaltbar.
-- Tabs + schneller Dokumentwechsel, **Crash-Recovery und Autosave** (inkrementell, kostet nichts).
-- Konsistente, ehrliche Fehlermeldungen; nie Datenverlust.
-- Tooltips mit Shortcut, „Was ist das?“-Hover-Erklärungen.
-- Barrierearmut: skalierbares UI (fractional scaling), Kontrast-Theme, alles per Tastatur erreichbar.
+### P0 – Foundation (without this it's no replacement)
+- Open/save: PNG, JPEG, WebP, TIFF, AVIF, **JPEG XL**, EXR, native format
+- Layers, groups, opacity, all common **blend modes** (PS parity), layer masks, clipping
+- Pan / zoom / **canvas rotation**, smooth at any document size
+- Brush, eraser, color picker, fill, gradient
+- Selection: rectangle, ellipse, lasso, polygon, **magic wand (GPU flood fill)**, color range, add/sub/intersect, feather, quick mask
+- Free transform (scale, rotate, distort, perspective), crop with straighten
+- Unlimited undo/redo with history panel
+- Copy/paste with the Wayland clipboard (incl. image data)
+
+### P1 – What makes it a working tool
+- **Adjustment layers (live):** Levels, Curves, Hue/Saturation, Color Balance, Vibrance, Exposure, Black & White, Channel Mixer, Selective Color, Color Lookup (.cube), Gradient Map, Threshold, Posterize
+- **Filter layers (live):** Gaussian/box/motion/lens blur (bokeh), Unsharp Mask, High Pass, add/reduce noise, Clarity/local contrast, Liquify (real-time displacement field)
+- Retouching: **clone stamp, healing brush (Poisson/multigrid on GPU), spot healing, content-aware fill (PatchMatch on GPU)**
+- Brush engine v1: pressure/tilt/rotation curves, stabiliser, texture/image tips, smudge/mixer, ABR import
+- Text layers (shaping, OpenType features, paragraph text)
+- Vector shapes and paths (pen tool) via vello
+- **PSD import/export** (layers, masks, blend modes, adjustment layers as far as they can be mapped) – crucial for adoption
+- Complete color management, soft proofing
+- Warp, puppet warp
+- Layer styles: drop shadow, stroke, glow, color overlay (as GPU effects)
+
+### P2 – Extras
+- **RAW development** (`rawler`, demosaicing on GPU) as a Camera-Raw-like smart filter
+- AI (local, optional): select subject / segmentation (SAM-like), generative fill (inpainting), upscaling, denoising
+- Macros/actions (record & play back the command log), **batch via CLI** (`mosaix-cli run makro.toml *.jpg`)
+- Plugins: **WASM** (wasmtime, sandboxed) + **custom WGSL filters** as a plugin type
+- Scripting (Rhai or Lua)
+- Artboards, slices/Export As with multiple sizes
+- Frequency separation as a one-click workflow, panorama/focus stacking
+
+### Deliberately NOT (for now)
+3D, video timeline, animation, prepress specialities. Focus: **photo editing, compositing, retouching, digital painting.**
 
 ---
 
-## 6. Natives Dateiformat (`.mosaix`)
+## 5. Usability – "fun to use"
 
-- Container mit Manifest (Dokumentbaum, JSON/CBOR) + Tile-Blobs (zstd).
-- **Append-only/inkrementell:** Speichern schreibt nur geänderte Tiles → Speichern großer Dateien in Millisekunden. Gelegentliches Kompaktieren im Hintergrund.
-- Eingebettete Vorschau (für Dateimanager-Thumbnailer, `.thumbnailer`-Datei mitliefern).
-- Versioniert, mit Vorwärts-Kompatibilitätsregeln.
-- Export nach OpenRaster (`.ora`) für Interop mit Krita/GIMP.
+- **Command palette** (`Ctrl+K` / `Space` tap): every action, every tool, every layer, every filter searchable – with fuzzy search and recently used.
+- **Keymap presets:** Photoshop, GIMP, Krita – plus freely configurable. Switchers should be productive within 5 minutes.
+- **On-canvas instead of dialogs:** brush size/hardness via `Alt+right-click drag` (HUD), transform gizmos, gradient directly on the canvas, curves adjustment by dragging in the image (targeted adjustment).
+- **Scrubby sliders:** dragging on any number field label changes the value; Shift = fine, Ctrl = coarse. Values can also be entered as an expression (`120*2`).
+- **Live preview on hover:** blend modes, filter presets, LUTs – preview without clicking.
+- **No spinner in normal operation.** If something takes longer: progressive preview + subtle progress indicator, cancellable at any time.
+- Smooth animations (zoom with inertia, panel transitions) – but can be switched off at any time.
+- Tabs + fast document switching, **crash recovery and autosave** (incremental, costs nothing).
+- Consistent, honest error messages; never data loss.
+- Tooltips with shortcut, "What's this?" hover explanations.
+- Accessibility: scalable UI (fractional scaling), contrast theme, everything reachable by keyboard.
 
 ---
 
-## 7. Performance-Budgets (Referenz: RX 6700 XT, Ryzen-Desktop)
+## 6. Native file format (`.mosaix`)
 
-| Szenario | Budget |
+- Container with manifest (document tree, JSON/CBOR) + tile blobs (zstd).
+- **Append-only/incremental:** saving writes only changed tiles → saving large files in milliseconds. Occasional compaction in the background.
+- Embedded preview (for file manager thumbnailers, ship a `.thumbnailer` file).
+- Versioned, with forward-compatibility rules.
+- Export to OpenRaster (`.ora`) for interop with Krita/GIMP.
+
+---
+
+## 7. Performance budgets (reference: RX 6700 XT, Ryzen desktop)
+
+| Scenario | Budget |
 |---|---|
-| Kaltstart bis bedienbar | < 400 ms |
-| 50-MP-JPEG öffnen → erste Pixel sichtbar | < 300 ms (volle Auflösung < 800 ms) |
-| Pan/Zoom/Rotation, 100 Ebenen, 8K-Dokument | Bildschirm-Refreshrate (bis 165 Hz), keine Frame-Drops |
-| Pinsel: Input → Pixel im Swapchain-Bild | < 1 Frame (+ Compositor) |
-| Slider an Korrektur-Ebene (24 MP) | Vorschau im selben Frame |
-| Gauß 100 px auf 24 MP, volle Auflösung | < 30 ms |
-| Inhaltsbasiertes Füllen, 1 MP Loch | < 1 s (progressive Vorschau sofort) |
-| Speichern (inkrementell) nach Pinselstrich | < 50 ms |
-| RAM bei 8K × 8K × 50 Ebenen (16F) | Bleibt im Budget dank Sparse-Tiles + Swap |
+| Cold start until usable | < 400 ms |
+| Open 50 MP JPEG → first pixels visible | < 300 ms (full resolution < 800 ms) |
+| Pan/zoom/rotation, 100 layers, 8K document | Screen refresh rate (up to 165 Hz), no frame drops |
+| Brush: input → pixels in the swapchain image | < 1 frame (+ compositor) |
+| Slider on an adjustment layer (24 MP) | Preview in the same frame |
+| Gaussian 100 px on 24 MP, full resolution | < 30 ms |
+| Content-aware fill, 1 MP hole | < 1 s (progressive preview immediately) |
+| Save (incremental) after a brush stroke | < 50 ms |
+| RAM at 8K × 8K × 50 layers (16F) | Stays within budget thanks to sparse tiles + swap |
 
-Gemessen in einer **Benchmark-Suite** (criterion + GPU-Timestamps), Regressionen > 5 % brechen den Build.
+Measured in a **benchmark suite** (criterion + GPU timestamps); regressions > 5 % break the build.
 
 ---
 
-## 8. Crate-Struktur
+## 8. Crate structure
 
 ```
 mosaix/
 ├── crates/
-│   ├── mosaix-core     # Dokumentmodell, Commands, Undo (kein GPU-Code)
-│   ├── mosaix-tiles    # Tile-Speicher, CoW, Swap, Kompression
-│   ├── mosaix-gpu      # Device, Tile-Pool, Residency, Uploads
-│   ├── mosaix-render   # Render-Graph, Scheduler, LOD, Caches
-│   ├── mosaix-ops      # WGSL-Shader: Blend, Filter, Korrekturen
-│   ├── mosaix-brush    # Pinsel-Engine, Stroke-Verarbeitung, Stabilisator
-│   ├── mosaix-select   # Auswahl-Algorithmen
-│   ├── mosaix-color    # ICC, LUTs, Farbräume
-│   ├── mosaix-io       # Formate (PSD, JXL, EXR, …), natives Format
-│   ├── mosaix-ui       # egui-Panels, Widgets, Theme, Palette
-│   ├── mosaix-app      # Binary: Fenster, Wayland, Input, Glue
-│   └── mosaix-cli      # Headless Batch-Verarbeitung
-├── shaders/             # WGSL, Hot-Reload im Debug-Build
+│   ├── mosaix-core     # document model, commands, undo (no GPU code)
+│   ├── mosaix-tiles    # tile storage, CoW, swap, compression
+│   ├── mosaix-gpu      # device, tile pool, residency, uploads
+│   ├── mosaix-render   # render graph, scheduler, LOD, caches
+│   ├── mosaix-ops      # WGSL shaders: blend, filters, adjustments
+│   ├── mosaix-brush    # brush engine, stroke processing, stabiliser
+│   ├── mosaix-select   # selection algorithms
+│   ├── mosaix-color    # ICC, LUTs, color spaces
+│   ├── mosaix-io       # formats (PSD, JXL, EXR, …), native format
+│   ├── mosaix-ui       # egui panels, widgets, theme, palette
+│   ├── mosaix-app      # binary: window, Wayland, input, glue
+│   └── mosaix-cli      # headless batch processing
+├── shaders/             # WGSL, hot reload in debug build
 ├── benches/
-└── tests/golden/        # Referenzbilder für Pixel-Tests
+└── tests/golden/        # reference images for pixel tests
 ```
 
 ---
 
-## 9. Qualitätssicherung
+## 9. Quality assurance
 
-- **Golden-Image-Tests:** Jede Operation gegen Referenzbilder (mit Toleranz, ΔE-Metrik). Blend-Modi zusätzlich gegen Photoshop-Referenzexporte.
-- **Fuzzing** aller Datei-Parser (`cargo-fuzz`) – PSD und RAW sind Minenfelder.
-- Property-Tests für Undo/Redo (zufällige Command-Folgen → Undo-alles = Ursprungszustand).
-- **Shader-Hot-Reload** und ein Debug-Overlay (Tile-Grenzen, Dirty-Regionen, Residency, Frame-Timing).
-- CI: Build + Tests + Benchmarks; GPU-Tests auf lavapipe (CPU-Vulkan) in CI, echte GPU lokal.
+- **Golden image tests:** every operation against reference images (with tolerance, ΔE metric). Blend modes additionally against Photoshop reference exports.
+- **Fuzzing** of all file parsers (`cargo-fuzz`) – PSD and RAW are minefields.
+- Property tests for undo/redo (random command sequences → undo everything = original state).
+- **Shader hot reload** and a debug overlay (tile boundaries, dirty regions, residency, frame timing).
+- CI: build + tests + benchmarks; GPU tests on lavapipe (CPU Vulkan) in CI, real GPU locally.
 
 ---
 
 ## 10. Roadmap
 
-| Phase | Dauer (grob, 1 Person) | Ergebnis |
+| Phase | Duration (rough, 1 person) | Result |
 |---|---|---|
-| **0 – Spike** | 2–4 Wochen | Fenster auf Wayland, wgpu-Device, **Tablet-Input mit Druck**, sparse Tile-Canvas, riesiges Bild öffnen, Pan/Zoom/Rotate, Tracy. *Go/No-Go für den Stack.* |
-| **1 – Kern** | 6–8 Wochen | Dokumentmodell, Ebenen/Gruppen, Blend-Modi, Undo, Render-Graph mit Dirty-Tracking & LOD, natives Format, PNG/JPEG/WebP |
-| **2 – Malen & Auswählen** | 6–8 Wochen | Pinsel-Engine v1, Radierer, Füllen, Verlauf, Auswahl-Werkzeuge, Masken, Transform, Crop |
-| **3 – UI-Politur (MVP)** | 4 Wochen | Docking-Layout, Command-Palette, Keymaps, HUDs, Scrubby-Slider, Autosave → **erstes benutzbares Release** |
-| **4 – Nicht-destruktiv** | 6–8 Wochen | Korrektur- & Filter-Ebenen, Liquify, Farbmanagement komplett |
-| **5 – Retusche** | 6 Wochen | Stempel, Reparaturpinsel, inhaltsbasiertes Füllen |
-| **6 – Text & Vektor** | 6 Wochen | vello-Integration, Text-Ebenen, Formen, Pfade, Ebenenstile |
-| **7 – Interop** | 6 Wochen | PSD Import/Export, TIFF/EXR/JXL/AVIF komplett, ABR-Pinsel |
-| **8 – Erweiterbarkeit & Kür** | fortlaufend | Makros, CLI-Batch, WASM-Plugins, RAW, lokale KI |
+| **0 – Spike** | 2–4 weeks | Window on Wayland, wgpu device, **tablet input with pressure**, sparse tile canvas, open a huge image, pan/zoom/rotate, Tracy. *Go/no-go for the stack.* |
+| **1 – Core** | 6–8 weeks | Document model, layers/groups, blend modes, undo, render graph with dirty tracking & LOD, native format, PNG/JPEG/WebP |
+| **2 – Painting & selecting** | 6–8 weeks | Brush engine v1, eraser, fill, gradient, selection tools, masks, transform, crop |
+| **3 – UI polish (MVP)** | 4 weeks | Docking layout, command palette, keymaps, HUDs, scrubby sliders, autosave → **first usable release** |
+| **4 – Non-destructive** | 6–8 weeks | Adjustment & filter layers, Liquify, complete color management |
+| **5 – Retouching** | 6 weeks | Clone stamp, healing brush, content-aware fill |
+| **6 – Text & vector** | 6 weeks | vello integration, text layers, shapes, paths, layer styles |
+| **7 – Interop** | 6 weeks | PSD import/export, complete TIFF/EXR/JXL/AVIF, ABR brushes |
+| **8 – Extensibility & extras** | ongoing | Macros, CLI batch, WASM plugins, RAW, local AI |
 
-Realistisch: **MVP nach ~5–6 Monaten**, „ernsthafter Photoshop-Ersatz für Foto/Retusche“ nach ~12–18 Monaten Vollzeit.
+Realistically: **MVP after ~5–6 months**, "serious Photoshop replacement for photo/retouching" after ~12–18 months full-time.
 
 ---
 
-## 11. Risiken & Gegenmaßnahmen
+## 11. Risks & countermeasures
 
-| Risiko | Gegenmaßnahme |
+| Risk | Countermeasure |
 |---|---|
-| Tablet-Support auf Wayland (winit) unvollständig | Phase 0 klärt das zuerst; direkte `tablet-v2`-Anbindung über eine zweite Event-Queue auf derselben Wayland-Verbindung |
-| wgpu-Limits (kein Sparse-Binding, f16-Storage) | Indirektes Tile-Addressing statt Sparse; `wgpu-hal`/`ash` als Ausweg für einzelne Passes |
-| PSD-Kompatibilität ist endlos | Klarer Kompatibilitätsumfang, Fallback: gerasterte Ebene + Warnung, Testkorpus realer Dateien |
-| egui wirkt „wie ein Dev-Tool“ | Früh in eigenes Theme/Widgets investieren; UI hinter eigener Schicht kapseln, damit ein Wechsel möglich bliebe |
-| Scope-Explosion (Photoshop hat 35 Jahre Vorsprung) | Strenge Priorisierung (P0/P1/P2), Fokus auf Foto/Retusche/Painting; jede Phase endet mit etwas Benutzbarem |
-| Treiberbugs (RADV ist gut, aber …) | Golden-Tests auf mehreren Treibern (RADV, NVIDIA proprietär, Intel ANV, lavapipe) |
+| Tablet support on Wayland (winit) incomplete | Phase 0 settles this first; direct `tablet-v2` binding via a second event queue on the same Wayland connection |
+| wgpu limits (no sparse binding, f16 storage) | Indirect tile addressing instead of sparse; `wgpu-hal`/`ash` as a way out for individual passes |
+| PSD compatibility is endless | Clear compatibility scope, fallback: rasterised layer + warning, test corpus of real files |
+| egui feels "like a dev tool" | Invest early in own theme/widgets; encapsulate the UI behind its own layer so a switch would remain possible |
+| Scope explosion (Photoshop has a 35-year head start) | Strict prioritisation (P0/P1/P2), focus on photo/retouching/painting; every phase ends with something usable |
+| Driver bugs (RADV is good, but …) | Golden tests on several drivers (RADV, NVIDIA proprietary, Intel ANV, lavapipe) |
 
 ---
 
-## 12. Offene Entscheidungen
+## 12. Open decisions
 
-1. **UI-Toolkit:** egui (empfohlen, schnellster Weg, ein GPU-Kontext) vs. eigenes Retained-UI vs. Qt/QML-Shell mit Rust-Kern (bestes Tablet/IME-Handling, aber zwei Sprachen).
-2. **Standard-Blending:** linear (korrekt) oder Gamma (PS-kompatibel) als Default?
-3. **X11-Support:** komplett weglassen oder später via winit als Fallback?
-4. **Lizenz:** GPL-3 (wie GIMP/Krita) oder MPL-2/Apache-2?
+1. **UI toolkit:** egui (recommended, fastest route, one GPU context) vs. own retained UI vs. Qt/QML shell with Rust core (best tablet/IME handling, but two languages).
+2. **Default blending:** linear (correct) or gamma (PS-compatible) as the default?
+3. **X11 support:** drop entirely or later via winit as a fallback?
+4. **License:** GPL-3 (like GIMP/Krita) or MPL-2/Apache-2?
 
 ---
 
-## Stand Phase 0 (20.11.2026)
+## Status Phase 0 (20.11.2026)
 
-Umgesetzt und gemessen auf RX 6700 XT / RADV / niri, 1872×2046-px-Fenster:
+Implemented and measured on RX 6700 XT / RADV / niri, 1872×2046 px window:
 
-- Sparse Kachel-Canvas (256², RGBA16F linear, premultiplied) in einem wachsenden GPU-Texture-Array mit kompletter Mip-Kette pro Kachel; Mips per Compute nur für geänderte Kacheln
-- Pinsel/Radierer per Hardware-Blending direkt in die Kacheln, Druck → Größe/Deckkraft, Glättung, gleichmäßiger Dab-Abstand
-- Tablet über `tablet-v2` (Druck, Neigung, Stifttasten, Radierer-Ende), Fractional Scaling, Frame-Callback-getriebenes Rendering (Mailbox)
-- Streaming-Laden: Dokumentgröße sofort, Kacheln parallel konvertiert, von der Mitte nach außen hochgeladen
-- Benchmark eingebaut (`--bench`, F12)
+- Sparse tile canvas (256², RGBA16F linear, premultiplied) in a growing GPU texture array with a complete mip chain per tile; mips via compute only for changed tiles
+- Brush/eraser via hardware blending directly into the tiles, pressure → size/opacity, smoothing, even dab spacing
+- Tablet via `tablet-v2` (pressure, tilt, stylus buttons, eraser end), fractional scaling, frame-callback-driven rendering (mailbox)
+- Streaming load: document size immediately, tiles converted in parallel, uploaded from the centre outwards
+- Benchmark built in (`--bench`, F12)
 
-| Messung | Ergebnis | Budget |
+| Measurement | Result | Budget |
 |---|---|---|
-| 100 MP (10000², 1600 Kacheln), Zoom/Rotation/Pan | 144 fps (= Monitor), CPU Ø 0,07–0,2 ms/Frame | Refreshrate ✅ |
-| 48-MP-JPEG (38 MB, Worst-Case-Rauschen) | dekodiert 271 ms, komplett 354 ms | < 300 / < 800 ms ✅ |
+| 100 MP (10000², 1600 tiles), zoom/rotation/pan | 144 fps (= monitor), CPU avg 0.07–0.2 ms/frame | Refresh rate ✅ |
+| 48 MP JPEG (38 MB, worst-case noise) | decoded 271 ms, complete 354 ms | < 300 / < 800 ms ✅ |
 
-**Bekannte Grenzen (bewusst, für Phase 1):** ein einziges Texture-Array → max. 2048 Kacheln (~130 MP voll belegt; leere Dokumente beliebig groß); keine Ebenen, kein Undo; Strich-Deckkraft akkumuliert (kein Stroke-Buffer); Rendering noch im UI-Thread; Tablet-Druck erst mit echtem Stift verifizieren.
+**Known limits (deliberate, for Phase 1):** a single texture array → max. 2048 tiles (~130 MP fully occupied; empty documents any size); no layers, no undo; stroke opacity accumulates (no stroke buffer); rendering still on the UI thread; tablet pressure still to be verified with a real stylus.
 
-## Stand Phase 1 (20.11.2026) – Engine
+## Status Phase 1 (20.11.2026) – Engine
 
-Umgesetzt (Bedienung noch per Tastatur, Ebenenliste im Terminal – das UI kommt in Phase 3):
+Implemented (operation still via keyboard, layer list in the terminal – the UI comes in Phase 3):
 
-- **Dokumentmodell:** Ebenen, Gruppen (isoliert, beliebig tief bis 7), Deckkraft, Sichtbarkeit, 19 Füllmethoden (W3C/Photoshop-Formeln) mit CPU-Referenz; GPU weicht max. 7,6·10⁻⁴ ab
-- **Blend-Raum pro Dokument:** sRGB (Photoshop-kompatibel, Standard) oder linear – F7. *Offene Entscheidung 2 damit vorläufig entschieden.*
-- **Undo/Redo auf der GPU:** Dokument-Schnappschüsse mit geteilten, ref-gezählten Kacheln; ein Schritt kostet nur die geänderten Kacheln; Ebene duplizieren kostet nichts
-- **Strich-Puffer:** Fluss baut innerhalb eines Strichs auf, Deckkraft begrenzt ihn (wie Photoshop); Radierer über denselben Mechanismus
-- **Kachel-Pools in Blöcken** (256 Kacheln/Block, Binding-Arrays): kein Kopieren beim Wachsen, bis 16 384 Ebenen- + 16 384 Bildkacheln – das 130-MP-Limit aus Phase 0 ist weg
-- **Composite-Cache mit Signaturen:** pro Kachel wird das Ebenen-Programm gehasht; nur Kacheln mit geänderter Signatur werden neu zusammengesetzt – sichtbare zuerst, im Budget pro Frame
-- **Natives Format `.mosaix`:** zstd-Kacheln + JSON-Manifest, append-only (Speichern schreibt nur geänderte Kacheln), Wiederherstellung nach Absturz beim Anhängen, Kompaktierung bei viel totem Platz
-- **Export** PNG/JPEG/WebP/TIFF; **Headless-CLI** (`--save`, `--export`, `--bench-offscreen`)
+- **Document model:** layers, groups (isolated, nestable up to 7 deep), opacity, visibility, 19 blend modes (W3C/Photoshop formulas) with a CPU reference; GPU deviates by at most 7.6·10⁻⁴
+- **Blend space per document:** sRGB (Photoshop-compatible, default) or linear – F7. *Open decision 2 is thus provisionally decided.*
+- **Undo/redo on the GPU:** document snapshots with shared, ref-counted tiles; a step costs only the changed tiles; duplicating a layer costs nothing
+- **Stroke buffer:** flow builds up within a stroke, opacity caps it (like Photoshop); eraser via the same mechanism
+- **Tile pools in blocks** (256 tiles/block, binding arrays): no copying when growing, up to 16 384 layer + 16 384 image tiles – the 130 MP limit from Phase 0 is gone
+- **Composite cache with signatures:** the layer program is hashed per tile; only tiles with a changed signature are recomposited – visible ones first, within a per-frame budget
+- **Native format `.mosaix`:** zstd tiles + JSON manifest, append-only (saving writes only changed tiles), recovery after a crash while appending, compaction when there is a lot of dead space
+- **Export** PNG/JPEG/WebP/TIFF; **headless CLI** (`--save`, `--export`, `--bench-offscreen`)
 
-| Messung (RX 6700 XT) | Ergebnis |
+| Measurement (RX 6700 XT) | Result |
 |---|---|
-| Darstellung 100 MP / 192 MP, 2560×1440, inkl. GPU-Wartezeit | Ø 0,14 / 0,17 ms pro Frame |
-| Füllmethode ändern → 100 MP, 2 Ebenen komplett neu zusammensetzen (inkl. Mips) | 10–11 ms |
-| 100 MP `.mosaix` speichern (komplett) / laden | 457 ms / 96 ms |
-| inkrementell speichern nach Pinselstrich | nur berührte Kacheln (Test: 1 von 16) |
-| PNG → .mosaix → PNG | bitgenau identisch |
+| Display 100 MP / 192 MP, 2560×1440, incl. GPU wait time | avg 0.14 / 0.17 ms per frame |
+| Change blend mode → recomposite 100 MP, 2 layers completely (incl. mips) | 10–11 ms |
+| Save (complete) / load 100 MP `.mosaix` | 457 ms / 96 ms |
+| Incremental save after a brush stroke | only touched tiles (test: 1 of 16) |
+| PNG → .mosaix → PNG | bit-exact identical |
 
-**Bekannte Grenzen:** kein UI (Phase 3), kein Datei-Dialog (Speichern neben die Quelldatei); Speichern läuft noch im UI-Thread (erstes Speichern 100 MP ≈ 0,5 s Pause, danach inkrementell); Pinsel-Kanten werden linear geblendet; Pass-Through-Gruppen fehlen; Kacheln liegen komplett im VRAM (Auslagerung = Residency-Manager, später); Fenster-Benchmark braucht ein sichtbares Fenster (niri drosselt verdeckte Fenster) – dafür gibt es `--bench-offscreen`.
+**Known limits:** no UI (Phase 3), no file dialog (saves next to the source file); saving still runs on the UI thread (first save of 100 MP ≈ 0.5 s pause, incremental afterwards); brush edges are blended linearly; pass-through groups are missing; tiles live entirely in VRAM (paging out = residency manager, later); the window benchmark needs a visible window (niri throttles hidden windows) – that's what `--bench-offscreen` is for.
 
-## Agenten-Schnittstelle (seit 20.11.2026)
+## Agent interface (since 20.11.2026)
 
-Querschnittsthema neben den Phasen; Details in [docs/agenten.md](docs/agenten.md).
+Cross-cutting topic alongside the phases; details in [docs/agents.md](docs/agents.md).
 
-- Gemeinsame Befehlsschicht (22 Befehle: Dokument, Ebenen, Malen, Füllen, Bild platzieren, Farbe abfragen, Vorschau, Verlauf, Speichern/Export) mit strikter Parameterprüfung
-- **MCP-Server** über stdio (`mosaix mcp`), Vorschau als Bild-Content
-- **Live-Modus** `--attach`: Unix-Socket pro Fenster, Agent und Mensch teilen Dokument und Undo-Verlauf
-- **JSON-Lines-Skripte** (`mosaix run`) für Shell-Agenten und Batch
-- Getestet: Protokoll-Handshake, Tool↔Befehl-Konsistenz, kompletter Agenten-Ablauf gegen die echte GPU-Engine, Live-Steuerung eines Fensters, Aufräumen verwaister Sockets
+- Shared command layer (22 commands: document, layers, painting, filling, placing an image, querying colors, preview, history, save/export) with strict parameter validation
+- **MCP server** over stdio (`mosaix mcp`), preview as image content
+- **Live mode** `--attach`: Unix socket per window, agent and human share the document and undo history
+- **JSON Lines scripts** (`mosaix run`) for shell agents and batch
+- Tested: protocol handshake, tool↔command consistency, complete agent flow against the real GPU engine, live control of a window, cleanup of orphaned sockets
 
-**Regel für alle folgenden Phasen:** Jedes neue Werkzeug bekommt sofort seinen Befehl und sein MCP-Tool. Die Tastaturkürzel der App laufen mittelfristig ebenfalls über die Befehlsschicht, dann gibt es Makros und Aufzeichnung gratis.
+**Rule for all following phases:** every new tool immediately gets its command and its MCP tool. In the medium term the app's keyboard shortcuts will also go through the command layer; then macros and recording come for free.
 
-## Stand Phase 2a (20.11.2026) – Auswahl & Masken
+## Status Phase 2a (20.11.2026) – Selection & masks
 
-- **Masken-Infrastruktur:** eigener R8-Kachel-Pool; einheitliche Kacheln bleiben `Solid` (kein Speicher) – eine Rechteckauswahl über 100 MP belegt nur die Randkacheln
-- **Auswahl:** Rechteck, Ellipse, Lasso/Polygon mit Kantenglättung (4× vertikal, analytisch horizontal); hinzufügen/abziehen/Schnittmenge (Photoshop-Modifier), alles/nichts/umkehren, weiche Kante (3× Box ≈ Gauß); Ameisenlinie über eine Bildschirm-Maske (immer 1 px scharf, animiert), Maskierungsmodus-Ansicht
-- **Auswahl begrenzt alles:** Pinsel (schon in der Live-Vorschau), Füllen, Löschen, Verlauf – auch weiche Auswahlkanten
-- **Ebenenmasken** für Ebenen und Gruppen: anlegen (aus Auswahl), bemalen (Live-Vorschau), ein/aus, anwenden; im Zusammensetz-Programm, Masken-Tile mit Wert 0 überspringt die Ebene ganz
-- **Apply-Kernel:** ein GPU-Pfad für Strich übernehmen, Füllen, Verlauf (sRGB-Interpolation wie Photoshop), Löschen, Verschieben (Pixel + Maske), Maske anwenden – immer als neue Kacheln, also ein Undo-Schritt
-- **Werkzeuge im Fenster:** M/L/G/V/B/E, Overlays für Rahmen, Lasso, Verlaufslinie und Verschiebe-Umriss
-- **Speichern im Hintergrund:** Schnappschuss + asynchroner GPU-Readback, Komprimieren/Schreiben im Worker-Thread; Weiterarbeiten währenddessen
-- **Format v2:** Ebenenmasken und Auswahl werden gespeichert (v1-Dateien bleiben lesbar)
-- **Agenten:** 15 neue Befehle (Auswahl, Füllen, Verlauf, Masken, Verschieben), Vorschau mit Auswahl-Einfärbung
+- **Mask infrastructure:** own R8 tile pool; uniform tiles stay `Solid` (no memory) – a rectangular selection over 100 MP occupies only the edge tiles
+- **Selection:** rectangle, ellipse, lasso/polygon with anti-aliasing (4× vertical, analytic horizontal); add/subtract/intersect (Photoshop modifiers), all/none/invert, feather (3× box ≈ Gaussian); marching ants via a screen mask (always 1 px sharp, animated), quick mask view
+- **Selection constrains everything:** brush (already in the live preview), fill, delete, gradient – soft selection edges too
+- **Layer masks** for layers and groups: create (from selection), paint on (live preview), on/off, apply; in the compositing program, a mask tile with value 0 skips the layer entirely
+- **Apply kernel:** one GPU path for committing a stroke, fill, gradient (sRGB interpolation like Photoshop), delete, move (pixels + mask), apply mask – always as new tiles, hence one undo step
+- **Tools in the window:** M/L/G/V/B/E, overlays for the marquee, lasso, gradient line and move outline
+- **Background saving:** snapshot + asynchronous GPU readback, compression/writing in a worker thread; keep working in the meantime
+- **Format v2:** layer masks and selection are saved (v1 files remain readable)
+- **Agents:** 15 new commands (selection, fill, gradient, masks, move), preview with selection tint
 
-| Messung (100 MP, RX 6700 XT, headless) | Ergebnis |
+| Measurement (100 MP, RX 6700 XT, headless) | Result |
 |---|---|
-| Füllen / Verlauf (1600 Kacheln) | 27 ms / 19 ms |
-| Ellipse auswählen / Rechteck abziehen | 49 ms / 15 ms |
-| Weiche Kante 40 px | 428 ms (CPU) |
-| Ebene samt Maske verschieben | 27 ms |
-| Darstellung (Regression) | Ø 0,14 ms/Frame, unverändert |
+| Fill / gradient (1600 tiles) | 27 ms / 19 ms |
+| Select ellipse / subtract rectangle | 49 ms / 15 ms |
+| Feather 40 px | 428 ms (CPU) |
+| Move layer including mask | 27 ms |
+| Display (regression) | avg 0.14 ms/frame, unchanged |
 
-**Bekannte Grenzen:** ~~Verschieben zeigt beim Ziehen nur den Umriss~~ (inzwischen Live-Vorschau des Inhalts); weiche Kante und Auswahl-Kombination laufen auf der CPU; Inhalte, die über den Rand geschoben werden, werden abgeschnitten; Ameisen und Werkzeug-Overlays sind nur per Offscreen-Test abgesichert (niri zeigt das Testfenster nicht an) – bitte von Hand ausprobieren.
+**Known limits:** ~~moving only shows the outline while dragging~~ (now a live preview of the content); feather and selection combination run on the CPU; content moved beyond the edge is clipped; marching ants and tool overlays are only covered by an offscreen test (niri doesn't show the test window) – please try them by hand.
 
-## Stand Phase 2b (20.11.2026) – Transformieren, Zauberstab, Pinsel
+## Status Phase 2b (20.11.2026) – Transform, magic wand, brushes
 
-- **Warp-Kernel:** affines Resampling ganzer Ebenen auf der GPU (nächster Nachbar / bilinear / bikubisch Catmull-Rom; beim Verkleinern Supersampling). Quellkacheln werden über eine Nachschlagetabelle gefunden, Zielkacheln über einen exakten Parallelogramm-Kachel-Test bestimmt. Ersetzt den alten Verschiebe-Pfad.
-- **Schwebende Auswahl:** Mit Auswahl bewegen/transformieren V und Strg+T nur die ausgewählten Pixel. Die Auswahl wandert mit, das Loch bleibt zurück (wie Photoshop).
-- **Live-Vorschau:** Beim Verschieben und Transformieren wird nur der sichtbare Bereich (plus Rand) neu berechnet, ohne Undo-Schritt. Bei Ansichtswechsel wird nachgerechnet.
-- **Inhalt außerhalb der Leinwand bleibt erhalten** (wird nur nicht angezeigt). Zuschneiden ist damit verlustfrei, das Vergrößern der Arbeitsfläche holt alles zurück. Zuschneiden auf Kachelgrenzen nummeriert nur Kacheln um.
-- **Frei transformieren (Strg+T):** Rahmen mit 8 Anfassern. Ecken skalieren proportional (Umschalt = frei), Kanten strecken, Alt = um die Mitte, außen drehen (Umschalt = 15°), innen verschieben, Enter/Esc. Inhaltsgrenzen pixelgenau per GPU-Reduktion.
-- **Zuschneiden (C)**, Arbeitsfläche und Bildgröße (Agenten), alle Ebenen und Masken.
-- **Zauberstab (W) und Farbbereich:** GPU-Ähnlichkeitskarte (aktive Ebene oder Gesamtbild), Scanline-Füllung auf der CPU mit weichem 1-px-Rand, Toleranz wie Photoshop in 8-Bit-Stufen.
-- **Pinsel-Engine v1:** fünf prozedurale Textur-Spitzen (Kreide, Borsten, Spray, rau, Kohle) mit Mipmaps; Winkel, Rundheit, Richtung folgen; Zufall für Größe, Winkel, Fluss und Streuung (deterministisch pro Strich).
-- **Wischfinger (U):** Strich-Kacheln starten als Kopie der Ebene. Je Tupfer nimmt ein 128²-Puffer Farbe auf und wird durch die Spitze gestempelt (Tupfer nacheinander, voneinander abhängig).
-- **UI bleibt bedienbar:** weiche Kante, Zauberstab-Füllung und Export-Kodierung laufen in Worker-Threads, der Export liest asynchron zurück. Ergebnisse auf veralteter Auswahl werden verworfen.
-- **Agenten:** `layer_transform`, `layer_bounds`, `crop`, `canvas_size`, `image_resize`, `select_magic_wand`, `select_color_range`; `paint_stroke` mit Spitzen, Dynamik und `smudge`.
+- **Warp kernel:** affine resampling of whole layers on the GPU (nearest neighbour / bilinear / bicubic Catmull-Rom; supersampling when downscaling). Source tiles are found via a lookup table, target tiles are determined via an exact parallelogram-tile test. Replaces the old move path.
+- **Floating selection:** with a selection, V and Ctrl+T move/transform only the selected pixels. The selection moves along, the hole stays behind (like Photoshop).
+- **Live preview:** when moving and transforming, only the visible area (plus margin) is recomputed, without an undo step. On a view change it is recomputed.
+- **Content outside the canvas is preserved** (just not displayed). Cropping is therefore lossless; enlarging the canvas brings everything back. Cropping on tile boundaries only renumbers tiles.
+- **Free transform (Ctrl+T):** frame with 8 handles. Corners scale proportionally (Shift = free), edges stretch, Alt = around the centre, outside rotates (Shift = 15°), inside moves, Enter/Esc. Content bounds pixel-exact via GPU reduction.
+- **Crop (C)**, canvas size and image size (agents), all layers and masks.
+- **Magic wand (W) and color range:** GPU similarity map (active layer or whole image), scanline fill on the CPU with a soft 1 px edge, tolerance like Photoshop in 8-bit steps.
+- **Brush engine v1:** five procedural texture tips (chalk, bristles, spray, rough, charcoal) with mipmaps; angle, roundness, follow direction; jitter for size, angle, flow and scatter (deterministic per stroke).
+- **Smudge (U):** stroke tiles start as a copy of the layer. Per dab, a 128² buffer picks up color and is stamped through the tip (dabs sequential, dependent on each other).
+- **UI stays responsive:** feather, magic wand fill and export encoding run in worker threads, export reads back asynchronously. Results on an outdated selection are discarded.
+- **Agents:** `layer_transform`, `layer_bounds`, `crop`, `canvas_size`, `image_resize`, `select_magic_wand`, `select_color_range`; `paint_stroke` with tips, dynamics and `smudge`.
 
-| Messung (100 MP, RX 6700 XT, headless) | Ergebnis |
+| Measurement (100 MP, RX 6700 XT, headless) | Result |
 |---|---|
-| Drehen 17° bikubisch | ≈ 40 ms |
-| Skalieren ×1,3 bikubisch (→ 169 MP) | ≈ 73 ms |
-| Ganzpixliges Verschieben (exakt) | ≈ 20 ms |
-| Zuschneiden außerhalb / auf Kachelgrenzen | ≈ 20 ms / < 1 ms |
-| Inhaltsgrenzen (GPU-Reduktion) | ≈ 19 ms |
-| Zauberstab zusammenhängend / überall | 120–190 ms / 70 ms |
-| Farbbereich | 70 ms |
+| Rotate 17° bicubic | ≈ 40 ms |
+| Scale ×1.3 bicubic (→ 169 MP) | ≈ 73 ms |
+| Whole-pixel move (exact) | ≈ 20 ms |
+| Crop outside / on tile boundaries | ≈ 20 ms / < 1 ms |
+| Content bounds (GPU reduction) | ≈ 19 ms |
+| Magic wand contiguous / everywhere | 120–190 ms / 70 ms |
+| Color range | 70 ms |
 
-**Entscheidung Render-Thread:** Ein eigener Render-Thread hätte das eigentliche Problem nicht gelöst. Die GPU-Arbeit ist bereits asynchron, und Eingaben laufen ohnehin über den UI-Thread. Gehakt hat es bei schwerer CPU-Arbeit auf dem UI-Thread, die jetzt in Worker-Threads läuft. Ein echter Render-Thread wird wieder interessant, wenn egui (Phase 3) Layout-Zeit kostet.
+**Render thread decision:** a dedicated render thread would not have solved the actual problem. The GPU work is already asynchronous, and input goes through the UI thread anyway. The stutter came from heavy CPU work on the UI thread, which now runs in worker threads. A real render thread becomes interesting again when egui (Phase 3) costs layout time.
 
-**Bekannte Grenzen:**
-- Die Vorschau beim Transformieren rechnet bei 100 MP in eingepasster Ansicht alle sichtbaren Kacheln in voller Auflösung, das sind etwa 40 ms je Änderung. Eine Vorschau in reduzierter Auflösung fehlt noch.
-- ~~Gruppen lassen sich noch nicht transformieren.~~ Erledigt 2026-11-20: Verschieben und Frei transformieren wirken auf ganze Gruppen (alle Ebenen, Masken, Text/Formen bleiben editierbar).
-- Der Wischfinger nimmt nur von der aktiven Ebene auf.
-- Pinselspitzen sind fest eingebaut (eigene Spitzen und ABR kommen mit Phase 7).
-- Neue Fensterwerkzeuge (Strg+T, C, W, U, Umschalt+B, J) sind nur über Engine-, Agenten- und Geometrie-Tests abgesichert und brauchen den Handtest.
+**Known limits:**
+- At 100 MP in fit-to-screen view, the transform preview computes all visible tiles at full resolution, that's about 40 ms per change. A reduced-resolution preview is still missing.
+- ~~Groups can't be transformed yet.~~ Done 2026-11-20: Move and Free Transform act on whole groups (all layers, masks, text/shapes stay editable).
+- Smudge only picks up from the active layer.
+- Brush tips are built in (custom tips and ABR come with Phase 7).
+- New window tools (Ctrl+T, C, W, U, Shift+B, J) are only covered by engine, agent and geometry tests and need hand testing.
 
-## Stand Phase 3 (20.11.2026) – Oberfläche (MVP)
+## Status Phase 3 (20.11.2026) – User interface (MVP)
 
-- **egui** (0.37, egui-wgpu auf derselben wgpu-30-Instanz), ohne winit: Wayland-Eingaben (Maus, Stift, Tastatur, Modifier, Tastenwiederholung) werden selbst übersetzt. Die Oberfläche wird nach der Leinwand im selben Frame gezeichnet.
-- **Eingabe-Routing:** Klicks über Panels oder Fenstern gehen an die Oberfläche, auf der Leinwand begonnene Striche bleiben bei der Leinwand. Auch der Stift bedient die Oberfläche. Textfelder und die Palette bekommen die Tastatur, sonst gelten die Tastenkürzel.
-- **Layout:** Menüleiste (alle Befehle mit Kürzeln), Werkzeugleiste mit selbst gezeichneten Vektor-Symbolen, rechte Seitenleiste mit Farbwähler (eigenes HSV-Feld, Farbfelder, Hex), kontextabhängigen Werkzeug-Einstellungen (Pinsel inkl. Spitze und Dynamik, Wischfinger, Zauberstab, Verlauf), Ebenen (Sichtbarkeit, Füllmethode, Deckkraft mit einem Undo-Schritt pro Ziehen, Drag & Drop inkl. in Gruppen, Umbenennen, Masken-Symbol) und Verlaufsliste mit Sprüngen. Statusleiste mit Zoom, Größe, Cursor-Position, Hintergrund-Arbeit und der letzten Meldung (alle `tracing`-Meldungen landen im Meldungsfenster).
-- **Befehlspalette** (Strg+K / Strg+Umschalt+P) und Menüs nutzen eine Befehlsliste, die die Tastenkürzel abspielt. Menü, Palette und Tastatur können so nicht auseinanderlaufen.
-- **Dialoge:** Arbeitsfläche (mit Anker) und Bildgröße (Seitenverhältnis).
-- **Automatisches Sichern:** alle 3 min bei Änderungen eine vollständige Kopie im Hintergrund nach `~/.local/state/mosaix/autosave/`. Die eigene Datei und das inkrementelle Speichern bleiben unberührt. Nach dem Speichern bzw. Beenden wird die Kopie gelöscht, verwaiste Kopien werden beim Start gemeldet.
-- **Einpassen** berücksichtigt die Panels. `Tab` blendet die Oberfläche aus.
-- **Kosten:** etwa 0,4 ms pro UI-Durchlauf inkl. GPU. Ohne Eingabe und ohne Modelländerung wird das letzte UI-Bild wiederverwendet, beim Malen läuft also kein UI-Durchlauf pro Frame.
-- **Prüfung ohne Fenster:** `mosaix --ui-snapshot OUT.png [DATEI]` rendert Leinwand und Oberfläche offscreen (Layout-Kontrolle per Bild).
+- **egui** (0.37, egui-wgpu on the same wgpu 30 instance), without winit: Wayland input (mouse, stylus, keyboard, modifiers, key repeat) is translated by us. The UI is drawn after the canvas in the same frame.
+- **Input routing:** clicks over panels or windows go to the UI, strokes started on the canvas stay with the canvas. The stylus also operates the UI. Text fields and the palette get the keyboard, otherwise the keyboard shortcuts apply.
+- **Layout:** menu bar (all commands with shortcuts), toolbar with self-drawn vector icons, right sidebar with color picker (own HSV field, swatches, hex), context-dependent tool options (brush incl. tip and dynamics, smudge, magic wand, gradient), layers (visibility, blend mode, opacity with one undo step per drag, drag & drop incl. into groups, rename, mask icon) and history list with jumps. Status bar with zoom, size, cursor position, background work and the last message (all `tracing` messages land in the message window).
+- **Command palette** (Ctrl+K / Ctrl+Shift+P) and menus use a command list that replays the keyboard shortcuts. Menu, palette and keyboard thus can't drift apart.
+- **Dialogs:** canvas size (with anchor) and image size (aspect ratio).
+- **Autosave:** every 3 min when there are changes, a full copy in the background to `~/.local/state/mosaix/autosave/`. The document's own file and incremental saving stay untouched. After saving or quitting the copy is deleted; orphaned copies are reported at startup.
+- **Fit to screen** takes the panels into account. `Tab` hides the UI.
+- **Cost:** about 0.4 ms per UI pass incl. GPU. Without input and without a model change, the last UI image is reused, so no UI pass runs per frame while painting.
+- **Checking without a window:** `mosaix --ui-snapshot OUT.png [FILE]` renders canvas and UI offscreen (layout check via image).
 
-- **Nachgereicht:**
-  - Dateidialoge (Öffnen mit „Zuletzt geöffnet“, Speichern unter, Exportieren unter) und Neu-Dialog (Vorgaben, weiß/transparent), Dokumente zur Laufzeit wechseln.
-  - Rückfrage bei ungespeicherten Änderungen (Speichern / Verwerfen / Abbrechen), auch beim Beenden. Speichern ohne eigene Datei fragt nach dem Ort.
-  - Einstellungen in `~/.config/mosaix/settings.json` (Pinsel, Farbe, Werkzeug, Zauberstab, Wischfinger, zuletzt geöffnet, letzter Ordner).
-  - Pinsel-HUD per Alt+Rechtsziehen.
+- **Added later:**
+  - File dialogs (Open with "Open Recent", Save As, Export As) and New dialog (presets, white/transparent), switching documents at runtime.
+  - Prompt on unsaved changes (Save / Discard / Cancel), also when quitting. Saving without an own file asks for the location.
+  - Settings in `~/.config/mosaix/settings.json` (brush, color, tool, magic wand, smudge, recently opened, last folder).
+  - Brush HUD via Alt+right-drag.
 
-- **Ebenen-Vorschaubilder:** GPU-verkleinert (Warp-Kernel, bis 8×8 Supersampling) in ein 64²-Textur-Array, nur bei geänderten Kacheln neu, höchstens 4 pro Frame und nie während eines Strichs.
+- **Layer thumbnails:** GPU-downscaled (warp kernel, up to 8×8 supersampling) into a 64² texture array, only regenerated for changed tiles, at most 4 per frame and never during a stroke.
 
-**Phase 3 abgeschlossen** (2026-11-20): zuletzt Vorschaubilder für Gruppen (gestapelte Ebenen-Vorschauen) und Masken (auf der GPU verkleinert, grau, rotes Kreuz wenn aus). (Frei belegbare Tastenkürzel: erledigt 2026-11-20 – Bearbeiten › Tastaturbefehle, Strg+Alt+Umschalt+K; gespeichert in den Einstellungen; Konflikte wie Photoshop.) (Docking/abtrennbare Panels: erledigt 2026-11-20 mit egui_dock, Layout wird gespeichert.)
+**Phase 3 completed** (2026-11-20): finally thumbnails for groups (stacked layer thumbnails) and masks (downscaled on the GPU, grey, red cross when off). (Customisable keyboard shortcuts: done 2026-11-20 – Edit › Keyboard Shortcuts, Ctrl+Alt+Shift+K; stored in the settings; conflicts like Photoshop.) (Docking/detachable panels: done 2026-11-20 with egui_dock, layout is saved.)
 
-## Stand Phase 4 (20.11.2026) – Nicht-destruktiv, Filter, Farbe (erster Teil)
+## Status Phase 4 (20.11.2026) – Non-destructive, filters, color (first part)
 
-- **Einstellungsebenen:** Helligkeit/Kontrast, Tonwertkorrektur, Gradationskurven (monoton-kubisch), Belichtung (linear), Dynamik, Farbton/Sättigung (inkl. Färben), Schwarzweiß, Umkehren, Tontrennung, Schwellenwert.
-  - Kanalweise Arten werden zu einer 256er-Tabelle gebacken, die übrigen rechnet der Flatten-Shader direkt. Eine CPU-Referenz prüft jede Art auf der GPU.
-  - Jede Einstellungsebene hat eine Maske (aus der Auswahl), die live bemalt werden kann. Deckkraft mischt.
-  - Füllmethoden wirken wie bei einer Ebene, die das eingestellte Bild enthält und auf das Darunterliegende beschnitten ist (z. B. Kurven im Modus Luminanz).
-  - Eigenschaften-Panel mit Kurven-Editor, Dateiformat v3.
-- **Filter (GPU):** Gaußscher Weichzeichner (separabel; ab 10 px Radius auf einer verkleinerten Kopie, deckungsgleich mit der analytischen Sprungantwort), Unscharf maskieren, Hochpass, Rauschen. Sie wirken durch die Auswahl, als ein Undo-Schritt, mit Live-Vorschau des sichtbaren Bereichs.
-- **Farbmanagement beim Import:** Eingebettete ICC-Profile (z. B. Display P3, Adobe RGB) werden mit moxcms nach linearem sRGB im erweiterten Bereich umgerechnet. Farben außerhalb von sRGB bleiben in f16 erhalten, statt abgeschnitten zu werden.
-- **Histogramm** in Tonwertkorrektur (mit ziehbaren Reglern für Tiefen, Gamma, Lichter) und Kurven. Es zeigt das Bild unterhalb der Einstellungsebene: Dieser Teil wird stapelweise in temporäre Kacheln geflattet, eine Mip-Stufe gelesen und gezählt; zwischengespeichert, bis sich darunter etwas ändert.
-- **Smart-Filter:** Filter können nicht-destruktiv an einer Pixelebene hängen (Option im Filterdialog). Sie stehen unter der Ebene in der Ebenenliste, lassen sich ein- und ausschalten, per Klick bearbeiten (mit Live-Vorschau), entfernen oder in die Pixel übernehmen. Die Engine rechnet die Filterkette einmal pro Änderung über die ganze Ebene und speichert das Ergebnis zwischen. Composite, Histogramm, Pipette und Export sehen das gefilterte Bild; Dateiformat v4.
-- **Verflüssigen** (Strg+Umschalt+X): Schieben, Rekonstruieren, Strudel, Zusammenziehen, Aufblähen. Ein Verschiebungsfeld (alle 8 px ein Stützpunkt, bei Riesenbildern gröber) wird auf der CPU bemalt; die GPU tastet immer die unveränderte Ebene bikubisch an der verschobenen Stelle ab, also kein Schärfeverlust durch wiederholtes Neuabtasten. Die Vorschau rechnet nur berührte, sichtbare Kacheln. Strg+Z nimmt innerhalb der Sitzung Striche zurück; Übernehmen ist ein Undo-Schritt.
-- **Export mit Farbprofil:** sRGB, Display P3, Adobe RGB oder Rec. 2020, 8 oder 16 Bit (PNG/TIFF), JPEG-Qualität. Weite Farbräume betten ihr ICC-Profil ein (PNG, JPEG, WebP, TIFF), die Umrechnung geht vom linearen Arbeitsfarbraum aus, also bleiben P3-Farben aus dem Import erhalten. Die Einstellungen merkt sich das Programm.
-- **Agenten:** `adjustment_add`, `adjustment_set`, `filter_apply`, `histogram`; `export` mit `color_space`, `bit_depth`, `quality`; `filter_apply` mit `smart`, `smart_filter_set`, `liquify`.
+- **Adjustment layers:** Brightness/Contrast, Levels, Curves (monotone cubic), Exposure (linear), Vibrance, Hue/Saturation (incl. Colorize), Black & White, Invert, Posterize, Threshold.
+  - Per-channel kinds are baked into a 256-entry table, the flatten shader computes the rest directly. A CPU reference checks every kind on the GPU.
+  - Every adjustment layer has a mask (from the selection) that can be painted live. Opacity mixes.
+  - Blend modes act as for a layer that contains the adjusted image and is clipped to what lies below (e.g. Curves in Luminosity mode).
+  - Properties panel with curves editor, file format v3.
+- **Filters (GPU):** Gaussian Blur (separable; from 10 px radius on a downscaled copy, matching the analytic step response), Unsharp Mask, High Pass, Noise. They act through the selection, as one undo step, with a live preview of the visible area.
+- **Color management on import:** embedded ICC profiles (e.g. Display P3, Adobe RGB) are converted with moxcms to linear sRGB in the extended range. Colors outside sRGB are preserved in f16 instead of being clipped.
+- **Histogram** in Levels (with draggable sliders for shadows, gamma, highlights) and Curves. It shows the image below the adjustment layer: that part is flattened in batches into temporary tiles, one mip level is read and counted; cached until something below changes.
+- **Smart filters:** filters can hang non-destructively on a pixel layer (option in the filter dialog). They appear under the layer in the layer list, can be switched on and off, edited by clicking (with live preview), removed or applied to the pixels. The engine computes the filter chain once per change over the whole layer and caches the result. Composite, histogram, eyedropper and export see the filtered image; file format v4.
+- **Liquify** (Ctrl+Shift+X): push, reconstruct, twirl, pucker, bloat. A displacement field (one control point every 8 px, coarser for huge images) is painted on the CPU; the GPU always samples the unchanged layer bicubically at the displaced position, so no loss of sharpness from repeated resampling. The preview computes only touched, visible tiles. Ctrl+Z undoes strokes within the session; applying is one undo step.
+- **Export with color profile:** sRGB, Display P3, Adobe RGB or Rec. 2020, 8 or 16 bit (PNG/TIFF), JPEG quality. Wide color spaces embed their ICC profile (PNG, JPEG, WebP, TIFF); the conversion starts from the linear working color space, so P3 colors from the import are preserved. The program remembers the settings.
+- **Agents:** `adjustment_add`, `adjustment_set`, `filter_apply`, `histogram`; `export` with `color_space`, `bit_depth`, `quality`; `filter_apply` with `smart`, `smart_filter_set`, `liquify`.
 
-| Messung (100 MP, RX 6700 XT) | Ergebnis |
+| Measurement (100 MP, RX 6700 XT) | Result |
 |---|---|
-| Gauß r = 2 / 10 / 40 / 200 | 52 / 114 / 64 / 29 ms |
-| Unscharf maskieren r = 2 | 51 ms |
-| Rauschen | 17 ms |
-| Kurven-Einstellungsebene (kompletter Neuaufbau) | 42 ms |
-| 24-MP-PNG mit Display-P3-Profil laden | 133 ms (ohne Profil 67 ms) |
-| Verflüssigen 100 MP: Tupfer r = 300 / Übernehmen | 0,09 ms / 21 ms |
-| Histogramm unter einer Ebene | 36 ms, danach aus dem Cache 0,08 ms |
-| 24-MP-TIFF exportieren: sRGB / Display P3 / P3 16 Bit | 65 / 112 / 118 ms |
+| Gaussian r = 2 / 10 / 40 / 200 | 52 / 114 / 64 / 29 ms |
+| Unsharp Mask r = 2 | 51 ms |
+| Noise | 17 ms |
+| Curves adjustment layer (complete rebuild) | 42 ms |
+| Load 24 MP PNG with Display P3 profile | 133 ms (without profile 67 ms) |
+| Liquify 100 MP: dab r = 300 / apply | 0.09 ms / 21 ms |
+| Histogram under a layer | 36 ms, afterwards from cache 0.08 ms |
+| Export 24 MP TIFF: sRGB / Display P3 / P3 16 bit | 65 / 112 / 118 ms |
 
-**Noch offen in Phase 4:**
-- Monitorprofil: zurückgestellt (niri kann kein Wayland-Farbmanagement, der Nutzer hat kein Profil)
+**Still open in Phase 4:**
+- Monitor profile: deferred (niri can't do Wayland color management, the user has no profile)
 
-## Stand Phase 5 (20.11.2026) – Retusche (begonnen)
+## Status Phase 5 (20.11.2026) – Retouching (started)
 
-- **Kopierstempel** (`S`): Alt+Klick setzt die Quelle, ein Kreuz zeigt beim Malen, woher kopiert wird. Ausgerichtet (Abstand bleibt) oder nicht; Quelle ist die Ebene oder das ganze Bild (dann auch auf eine leere Ebene). Läuft über die Arbeitskopie des Wischfingers, jeder Tupfer kopiert pixelgenau mit ganzzahligem Versatz (kein Weichzeichnen durch Neuabtasten). Agent: `paint_stroke` mit `clone_offset`, `clone_all_layers`.
-- **Reparaturpinsel** (`J`): malt wie der Stempel; beim Loslassen wird der Bereich (Vereinigung der Pinseltupfer) per Poisson-Angleich in die Umgebung eingepasst – Struktur von der Quelle, Farbe/Helligkeit vom Rand. Löser auf der CPU: kaskadisches Multigrid mit rot-schwarzem SOR, parallel über Zeilen (4 MP Bereich: 97 ms, 0,25 MP: 10 ms). Agent: `paint_stroke` mit `heal: true`.
-- **Bereichsreparatur** (`J`, nochmal `J` wechselt zum Reparaturpinsel): über den Fleck malen, beim Loslassen sucht die Engine selbst eine Quelle – 64 Kandidaten-Versätze (16 Richtungen × 4 Abstände) werden über die Gradienten im Ring um die Stelle verglichen – und heilt von dort. Agent: `paint_stroke` mit `spot_heal: true`.
-- **Inhaltsbasiert füllen** (Umschalt+Rücktaste; Strg+Umschalt+Rücktaste lernt aus allen Ebenen): füllt die Auswahl mit Struktur aus der Umgebung (Wexler/PatchMatch, mehrstufig). Gröbste Stufe: „Zwiebelschalen“-Füllen von außen nach innen; pro Stufe PatchMatch (Weitergabe + Zufallssuche, parallel) und gewichtete Abstimmung (Ähnlichkeit × Randnähe 1,3^−d); im ersten Durchgang jeder Stufe vergleichen Randausschnitte nur bekannte Pixel. Rechnet im Hintergrund, Ergebnis als ein Undo-Schritt (verworfen, falls die Ebene inzwischen geändert wurde). Agent: `content_aware_fill`.
-  - Große Stufen (ab 4000 Zielpixeln) laufen auf der GPU (Compute-Shader `cafill.wgsl`: Bewerten, PatchMatch mit Sprungweiten 8/4/2/1 und lokaler Zufallssuche, Histogramm für σ², Gewichte, Abstimmung als Gather), die kleinen und der Zwiebelschalen-Start auf der CPU. Alles auf dem Worker-Thread.
-  - Zeiten: 0,07-MP-Loch 0,1 s (CPU 0,25 s), 1-MP-Loch 0,77 s inkl. Lesen (CPU 3,6 s) – im Budget (< 1 s).
-  - Schwäche: streng periodische Muster (Ziegel) in Bildecken können versetzt weiterlaufen; frei im Bild und bei Fotostrukturen gut.
-- Pinsel-Glättung wechselt jetzt mit Umschalt+S (vorher S), Pinsel-Dynamik mit Umschalt+J (vorher J).
+- **Clone Stamp** (`S`): Alt+click sets the source, a cross shows while painting where it copies from. Aligned (offset is kept) or not; the source is the layer or the whole image (then also onto an empty layer). Runs via smudge's working copy; every dab copies pixel-exactly with an integer offset (no blurring from resampling). Agent: `paint_stroke` with `clone_offset`, `clone_all_layers`.
+- **Healing Brush** (`J`): paints like the stamp; on release the area (union of the brush dabs) is fitted into its surroundings via Poisson matching – structure from the source, color/brightness from the edge. Solver on the CPU: cascadic multigrid with red-black SOR, parallel over rows (4 MP area: 97 ms, 0.25 MP: 10 ms). Agent: `paint_stroke` with `heal: true`.
+- **Spot Healing** (`J`, pressing `J` again switches to the Healing Brush): paint over the blemish; on release the engine finds a source itself – 64 candidate offsets (16 directions × 4 distances) are compared via the gradients in the ring around the spot – and heals from there. Agent: `paint_stroke` with `spot_heal: true`.
+- **Content-Aware Fill** (Shift+Backspace; Ctrl+Shift+Backspace learns from all layers): fills the selection with structure from the surroundings (Wexler/PatchMatch, multi-scale). Coarsest level: "onion peel" filling from outside in; per level PatchMatch (propagation + random search, parallel) and weighted voting (similarity × edge proximity 1.3^−d); in the first pass of each level, edge patches compare only known pixels. Computes in the background, result as one undo step (discarded if the layer has been changed in the meantime). Agent: `content_aware_fill`.
+  - Large levels (from 4000 target pixels) run on the GPU (compute shader `cafill.wgsl`: scoring, PatchMatch with jump distances 8/4/2/1 and local random search, histogram for σ², weights, voting as gather), the small ones and the onion-peel start on the CPU. Everything on the worker thread.
+  - Timings: 0.07 MP hole 0.1 s (CPU 0.25 s), 1 MP hole 0.77 s incl. readback (CPU 3.6 s) – within budget (< 1 s).
+  - Weakness: strictly periodic patterns (bricks) in image corners can continue offset; good in the open image and with photo textures.
+- Brush smoothing now toggles with Shift+S (previously S), brush dynamics with Shift+J (previously J).
 
-Phase 5 ist bis auf eine progressive Vorschau beim inhaltsbasierten Füllen fertig.
+Phase 5 is finished except for a progressive preview for Content-Aware Fill.
 
-## Stand Phase 6 (20.11.2026) – Text & Vektor (erster Teil)
+## Status Phase 6 (20.11.2026) – Text & vector (first part)
 
-- **Text- und Formebenen** (`Content::Vector`): Die Beschreibung bleibt erhalten (Text mit Schrift, Größe, Schnitt, Farbe, Ausrichtung, Zeilenabstand, Laufweite, optional Absatzbreite; Formen: Rechteck mit Eckenradius, Ellipse, Polygon, SVG-Pfad, mit Fläche und Kontur), plus eine Transformation.
-  - Neues Crate `mosaix-vector`: Layout mit parley (Systemschriften über fontique), Rastern mit vello_cpu in parallelen 4×4-Kachel-Blöcken direkt in lineare f16-Kacheln – nur dort, wo Inhalt ist.
-  - Die Engine rastert geänderte Vektorebenen und setzt die Kacheln ins Render-Dokument ein (wie Smart-Filter, die auch auf Textebenen wirken). Strg+T und Verschieben verändern nur die Transformation: Text bleibt scharf. Ebene › Rastern (Strg+Alt+R) macht Pixel daraus; Malen auf einer Textebene wird mit Hinweis abgelehnt. Dateiformat v5.
-- **Werkzeuge:** Text (`T`: Klick legt Text an bzw. wählt vorhandenen zum Bearbeiten), Form (Umschalt+`U`: Rechteck/Ellipse aufziehen, Umschalt quadratisch, Alt von der Mitte; Fläche in Pinselfarbe). Eigenschaften-Panel mit Textfeld, Schriftliste mit Suche, Größe, Fett/Kursiv, Ausrichtung, Farbe, Zeilenabstand, Laufweite, Absatz; bei Formen Ecken, Fläche, Kontur. Tippen und Regler ergeben je einen Undo-Schritt.
-- **Agenten:** `text_add`, `shape_add`, `vector_set` (JSON-Merge in die Beschreibung, auch `transform`), `layer_rasterize`; `document_info` zeigt Vektorebenen mit Beschreibung und Grenzen.
+- **Text and shape layers** (`Content::Vector`): the description is preserved (text with font, size, style, color, alignment, line spacing, tracking, optional paragraph width; shapes: rectangle with corner radius, ellipse, polygon, SVG path, with fill and stroke), plus a transformation.
+  - New crate `mosaix-vector`: layout with parley (system fonts via fontique), rasterising with vello_cpu in parallel 4×4 tile blocks directly into linear f16 tiles – only where there is content.
+  - The engine rasterises changed vector layers and inserts the tiles into the render document (like smart filters, which also work on text layers). Ctrl+T and Move change only the transformation: text stays sharp. Layer › Rasterize (Ctrl+Alt+R) turns it into pixels; painting on a text layer is refused with a hint. File format v5.
+- **Tools:** Text (`T`: click creates text or selects existing text for editing), Shape (Shift+`U`: drag out a rectangle/ellipse, Shift square, Alt from the centre; fill in the brush color). Properties panel with text field, font list with search, size, bold/italic, alignment, color, line spacing, tracking, paragraph; for shapes corners, fill, stroke. Typing and sliders each produce one undo step.
+- **Agents:** `text_add`, `shape_add`, `vector_set` (JSON merge into the description, also `transform`), `layer_rasterize`; `document_info` shows vector layers with description and bounds.
 
-- **Drehen auffindbar gemacht:** Transformieren-Panel mit Winkelfeld, 90°/180°-Knöpfen und Spiegeln; Menüs Bild › drehen/spiegeln (exakt, Arbeitsfläche tauscht Breite/Höhe) und Ebene › drehen/spiegeln (um die Inhaltsmitte, 90°-Schritte pixelgenau). Behoben: Arbeitsfläche/Zuschneiden um ganze Kacheln verschob Vektorebenen nicht mit.
+- **Rotation made discoverable:** Transform panel with angle field, 90°/180° buttons and flipping; menus Image › rotate/flip (exact, the canvas swaps width/height) and Layer › rotate/flip (around the content centre, 90° steps pixel-exact). Fixed: canvas size/crop by whole tiles didn't move vector layers along.
 
-- **Ebenenstile** (an Pixel-, Text- und Formebenen; Panel „Ebenenstile“, „fx“ in der Ebenenliste): Kontur (außen/mittig/innen), Schlagschatten, Schatten nach innen, Schein nach außen/innen, Farbüberlagerung, Abgeflachte Kante & Relief (Kante innen, Relief, Kissen; Lichtwinkel und -höhe, Tiefe, Weichheit).
-  - Berechnung auf der CPU aus dem Alpha der Ebene (nach Smart-Filtern bzw. Rastern): exakte euklidische Distanzfelder (Felzenszwalb–Huttenlocher), dreifacher Box-Blur ≈ Gauß, beleuchtetes Höhenfeld. Zwischengespeichert, bis sich Pixel oder Stil ändern; über 24 MP wird übersprungen.
-  - Effekte außerhalb der Form (Schatten: Multiplizieren, Schein: Negativ multiplizieren, äußere Kontur) werden im Render-Dokument als eigene Ebenen direkt unter die Ebene gesetzt – mit deren Deckkraft, Maske und Sichtbarkeit – und wirken so wirklich auf das Darunterliegende; Effekte innen werden in die Ebene eingerechnet. Dateiformat v6. Agent: `layer_effects_set`.
+- **Layer styles** (on pixel, text and shape layers; "Layer Styles" panel, "fx" in the layer list): Stroke (outside/centre/inside), Drop Shadow, Inner Shadow, Outer/Inner Glow, Color Overlay, Bevel & Emboss (inner bevel, emboss, pillow emboss; light angle and altitude, depth, softness).
+  - Computed on the CPU from the layer's alpha (after smart filters or rasterising): exact Euclidean distance fields (Felzenszwalb–Huttenlocher), triple box blur ≈ Gaussian, lit height field. Cached until pixels or style change; skipped above 24 MP.
+  - Effects outside the shape (shadow: Multiply, glow: Screen, outer stroke) are placed in the render document as separate layers directly below the layer – with its opacity, mask and visibility – and thus really act on what lies below; inner effects are baked into the layer. File format v6. Agent: `layer_effects_set`.
 
-- **Schriftwahl:** Fenster mit Suche, Filter nach Art (Sans, Serif, Mono, Schreibschrift, Display, Symbole – aus OS/2-Familienklasse, PANOSE und Festbreite, Name als Rückfall), Favoriten (Stern) und zuletzt verwendet (beide in den Einstellungen gespeichert); Schriften ohne lateinische Buchstaben ausgeblendet (zuschaltbar). Jede Familie mit dem eigenen Text als Vorschau; Pfeiltasten/Klick zeigen die Schrift live im Bild (Engine-Vorschau, Dokument unverändert), Enter übernimmt, Esc stellt zurück. Familien mit Schnitten als einzelne Systemfamilien (Plex: „… Medm“, „… SmBld“) werden zu einer Familie mit Schnitt-Auswahl zusammengefasst (937 → 294).
-- Konturkanten der Ebenenstile subpixelgenau (Abstand zu Kantenpunkten aus Deckung und Gradient), keine Pixeltreppen mehr.
+- **Font picker:** window with search, filter by kind (Sans, Serif, Mono, Script, Display, Symbols – from the OS/2 family class, PANOSE and fixed pitch, name as a fallback), favourites (star) and recently used (both stored in the settings); fonts without Latin letters hidden (can be switched on). Each family with your own text as a preview; arrow keys/click show the font live in the image (engine preview, document unchanged), Enter applies, Esc reverts. Families with styles as separate system families (Plex: "… Medm", "… SmBld") are merged into one family with a style selection (937 → 294).
+- Layer style stroke edges subpixel-accurate (distance to edge points from coverage and gradient), no more pixel staircases.
 
-- **Text direkt im Bild bearbeiten:** Cursor, Markieren mit Maus (Klick, Doppel-/Dreifachklick, Ziehen, Umschalt+Klick) und Tastatur (Pfeile, Wortweise mit Strg, Pos1/Ende, Strg+A), Tippen, Rück-/Entf-Taste (mit Strg wortweise), Enter = neue Zeile, Esc/Strg+Enter beendet; leer gelassene Textebenen verschwinden. Arbeitet mit parleys Selection auf demselben Layout wie das Rendern, auch auf gedrehtem Text; Markierung und Cursor zeichnet die Oberfläche über die Leinwand. Eine Sitzung = ein Undo-Schritt.
+- **Edit text directly in the image:** cursor, selecting with the mouse (click, double/triple click, drag, Shift+click) and keyboard (arrows, word-wise with Ctrl, Home/End, Ctrl+A), typing, Backspace/Del (word-wise with Ctrl), Enter = new line, Esc/Ctrl+Enter finishes; text layers left empty disappear. Works with parley's Selection on the same layout as the rendering, also on rotated text; the UI draws the selection and cursor over the canvas. One session = one undo step.
 
-- **Zwischenablage** (Wayland-Data-Device über SCTK, funktioniert in jedem Compositor): Text beim Bearbeiten und in Textfeldern; Pixel der Ebene bzw. aller Ebenen in der Auswahl als PNG (weiche Kanten → Alpha, auf den Inhalt beschnitten); Einfügen als neue Ebene (aus mosaix an der alten Stelle, von außen mittig) oder als Textebene. Lesen und Schreiben auf eigenen Threads. Offener Frei-Transformieren-Rahmen wird beim Ändern anderer Dinge übernommen (wie Photoshop).
+- **Clipboard** (Wayland data device via SCTK, works in every compositor): text while editing and in text fields; pixels of the layer or of all layers in the selection as PNG (soft edges → alpha, cropped to the content); paste as a new layer (from mosaix at the old position, from outside centred) or as a text layer. Reading and writing on separate threads. An open Free Transform frame is committed when other things are changed (like Photoshop).
 
-- **Zeichenstift** (`P`): Bézier-Pfade zeichnen (Ecke/Kurve, Schließen am Startpunkt → gefüllte Form, offen → Linie) und Punkte/Griffe bearbeiten (Alt: Ecke↔Kurve, Griffe einzeln), auch auf transformierten Pfaden. Neue Geometrie `Bezier` mit Knoten; Overlay über der Leinwand. Palettenfarbe wechselt jetzt mit Umschalt+P.
+- **Pen** (`P`): draw Bézier paths (corner/curve, closing at the start point → filled shape, open → line) and edit points/handles (Alt: corner↔curve, handles individually), also on transformed paths. New geometry `Bezier` with nodes; overlay above the canvas. Palette color now toggles with Shift+P.
 
-- **Ebenenstile erweitert** (2026-11-20): Füllmethode je Effekt (Standard wie Photoshop), Verlaufsüberlagerung (zwei Farben, linear/radial, Winkel, Skalierung, umkehren), „Globalen Lichteinfall verwenden“ für Schatten und Abgeflachte Kante (ein Winkel für alle Ebenen, ein Rückgängig-Schritt). Überlagerungen behalten weiche Kanten.
+- **Layer styles extended** (2026-11-20): blend mode per effect (defaults like Photoshop), Gradient Overlay (two colors, linear/radial, angle, scale, reverse), "Use Global Light" for shadows and Bevel & Emboss (one angle for all layers, one undo step). Overlays keep soft edges.
 
-- **OpenType-Features** (Ligaturen, Kapitälchen, Mediäval-/Tabellenziffern, Brüche, Ordinalzeichen, Schwungschrift, Stilvarianten, Hoch-/Tiefstellung, Kerning); was die Schrift nicht hat, ist ausgegraut; PSD-Import übernimmt Photoshops Schalter.
-- **Text auf Pfad:** Eigenschaften › Pfad wählt eine Pfadebene (Zeichenstift), Pfadanfang und Spiegeln; jede Glyphe wird auf der Kurve platziert und gedreht, offene Pfade schneiden überstehenden Text ab, geschlossene laufen herum. Bearbeitet wird im Textfeld der Eigenschaften (kein Cursor auf der Kurve).
+- **OpenType features** (ligatures, small caps, oldstyle/tabular figures, fractions, ordinals, swashes, stylistic alternates, superscript/subscript, kerning); whatever the font lacks is greyed out; PSD import takes over Photoshop's switches.
+- **Text on path:** Properties › Path selects a path layer (Pen), path start and flip; every glyph is placed and rotated on the curve, open paths clip overflowing text, closed ones wrap around. Editing happens in the Properties text field (no cursor on the curve).
 
-- **Ebenenstile in PSD** (2026-11-20): Import und Export von Photoshops `lfx2`/`lmfx` – Schlagschatten, Schatten nach innen, Schein außen/innen (mit „Bereich“), Abgeflachte Kante & Relief, Farb- und Verlaufsüberlagerung, Kontur (Farbe); Füllmethoden (auch die ausgeschriebenen Namen neuer Versionen), Globaler Lichteinfall (Ressourcen 1037/1049), mehrere Effekte gleicher Art (CC-Listen), ausgeschaltete Effekte. PSD-Export schreibt die Ebenen ungerendert plus Stil (wie Photoshop), keine „– Effekt“-Ebenen mehr; Rundreise pixelgleich. Nicht übernommen (Warnung): Glanz, Musterüberlagerung, Kontur mit Verlauf/Muster, Abgeflachte Kante außen, Verläufe mit mehr als zwei Farben. Kantenprofil der Abgeflachten Kante jetzt rund (steil an der Kante) – dünne Schrift zeigt das Relief wie in Photoshop.
+- **Layer styles in PSD** (2026-11-20): import and export of Photoshop's `lfx2`/`lmfx` – Drop Shadow, Inner Shadow, Outer/Inner Glow (with "Range"), Bevel & Emboss, Color and Gradient Overlay, Stroke (color); blend modes (also the spelled-out names of newer versions), Global Light (resources 1037/1049), several effects of the same kind (CC lists), disabled effects. PSD export writes the layers unrendered plus style (like Photoshop), no more "– Effect" layers; round trip pixel-identical. Not carried over (warning): Satin, Pattern Overlay, stroke with gradient/pattern, outer bevel, gradients with more than two colors. Bevel & Emboss edge profile now round (steep at the edge) – thin type shows the emboss like in Photoshop.
 
-- **Form- und Füllebenen aus PSD** (2026-11-20): Volltonfarbe-Füllebenen (`SoCo`/`vscg`) mit Vektormaske (`vmsk`/`vsms`) und Kontur (`vstk`) werden editierbare Formebenen; ein Pfad bleibt ein Bézier-Pfad (Zeichenstift), mehrere werden mit Photoshops Pfadoperationen (Vereinigen, Subtrahieren, Schnittmenge, Ausschließen, auch Formgruppen) über i_overlay zu einer Kontur verrechnet. Füllebenen ohne Pfad: Rechteck über die Fläche. Konturen jetzt innen/mittig/außen mit Gehrungs-/Rund-/Abgeflachten Ecken und Linienenden (auch im Formen-Panel und für Agenten: `stroke_align`). Verlaufs- und Musterfüllungen siehe unten.
-- **Fläche (Fill)** (2026-11-20): Deckkraft nur der Ebenenpixel, der Ebenenstil bleibt voll sichtbar (Ebenen-Panel neben Deckkraft, Agent `layer_set fill_opacity`, PSD `iOpa` in beide Richtungen, Dateiformat v7). Überlagerungen werden „in der Form“ verrechnet und wirken auch bei 0 % Fläche.
+- **Shape and fill layers from PSD** (2026-11-20): solid color fill layers (`SoCo`/`vscg`) with vector mask (`vmsk`/`vsms`) and stroke (`vstk`) become editable shape layers; a single path stays a Bézier path (Pen), several are combined into one outline with Photoshop's path operations (combine, subtract, intersect, exclude, also shape groups) via i_overlay. Fill layers without a path: rectangle over the area. Strokes now inside/centre/outside with miter/round/bevel corners and line caps (also in the Shapes panel and for agents: `stroke_align`). Gradient and pattern fills see below.
+- **Fill** (2026-11-20): opacity of the layer pixels only, the layer style stays fully visible (Layers panel next to Opacity, agent `layer_set fill_opacity`, PSD `iOpa` in both directions, file format v7). Overlays are computed "inside the shape" and work even at 0 % Fill.
 
-- **Ebenenmaske vor Ebenenstil** (2026-11-20): wie in Photoshop werden die Effekte aus dem maskierten Inhalt berechnet – eine Kontur läuft an der Maskenkante entlang, statt von der Maske abgeschnitten zu werden.
+- **Layer mask before layer style** (2026-11-20): as in Photoshop, the effects are computed from the masked content – a stroke runs along the mask edge instead of being cut off by the mask.
 
-- **Formebenen im PSD-Export** (2026-11-20): Formebenen werden als Photoshop-Formen geschrieben (Volltonfüllung `SoCo`, Vektormaske `vsms`, Kontur `vstk` mit Ausrichtung/Ecken/Enden, Konturbreite mit der Transformation skaliert) – in Photoshop weiter editierbar; Rundreise pixelgleich. Ellipsen-Pfade sind jetzt geschlossen (Kontur innen/außen wirkte bei Ellipsen bisher mittig).
+- **Shape layers in PSD export** (2026-11-20): shape layers are written as Photoshop shapes (solid fill `SoCo`, vector mask `vsms`, stroke `vstk` with alignment/corners/caps, stroke width scaled with the transformation) – still editable in Photoshop; round trip pixel-identical. Ellipse paths are now closed (inside/outside strokes on ellipses previously acted as centred).
 
-- **Editierbarer Text im PSD-Export** (2026-11-20): Textebenen werden als Photoshop-Text (`TySh`) geschrieben – Punkt- und Absatztext, Schrift (PostScript-Name der tatsächlich verwendeten Schrift), Größe, Farbe, Ausrichtung je Absatz, Zeilenabstand, Laufweite, OpenType-Schalter, Transformation. Die EngineData basiert auf Photoshops eigener (Schreiber erzeugt sie byte-gleich neu). Rundreise pixelgleich (auch gedreht); Text auf Pfad bleibt Pixel. Beim Import sitzt Text jetzt auf Photoshops Grundlinie (Abweichung zu Photoshops Rendering 0,036 → 0,0095 RMSE).
+- **Editable text in PSD export** (2026-11-20): text layers are written as Photoshop text (`TySh`) – point and paragraph text, font (PostScript name of the font actually used), size, color, alignment per paragraph, line spacing, tracking, OpenType switches, transformation. The EngineData is based on Photoshop's own (the writer regenerates it byte-identically). Round trip pixel-identical (also rotated); text on path stays pixels. On import, text now sits on Photoshop's baseline (deviation from Photoshop's rendering 0.036 → 0.0095 RMSE).
 
-- **Wide-Gamut AVIF/JPEG XL** (2026-11-21): JPEG XL in allen Export-Farbräumen (Display P3, Adobe RGB, Rec. 2020; als Farbcodierung signalisiert, 8/16 Bit, verlustfrei bitgenau), AVIF in Display P3 und Rec. 2020 (10 Bit, CICP-Codes im `nclx`-Kasten; Adobe RGB hat keinen Code). Beim Öffnen werden AVIF-`nclx`-Angaben ausgewertet; Profile wie „…_P3_Srgb“ werden nicht mehr fälschlich als sRGB behandelt.
+- **Wide-gamut AVIF/JPEG XL** (2026-11-21): JPEG XL in all export color spaces (Display P3, Adobe RGB, Rec. 2020; signalled as color encoding, 8/16 bit, lossless bit-exact), AVIF in Display P3 and Rec. 2020 (10 bit, CICP codes in the `nclx` box; Adobe RGB has no code). On opening, AVIF `nclx` data is evaluated; profiles like "…_P3_Srgb" are no longer wrongly treated as sRGB.
 
-- **Musterüberlagerung** (2026-11-21): Ebenenstil mit Muster, Deckkraft, Skalierung, Versatz (am Dokument ausgerichtet, Füllmethode wie alle Effekte). Musterbibliothek: sechs eingebaute Muster plus PNGs in `$XDG_DATA_HOME/mosaix/patterns`; Bearbeiten › Muster festlegen (Strg+Alt+Umschalt+D, sichtbare Pixel der Auswahl) und Muster importieren (Strg+Alt+Umschalt+Y: Bilder, GIMP-.pat). Das Muster steckt im Effekt, Dokumente bleiben vollständig. PSD: Musterblock (`Patt`/`Pat2`/`Pat3`) lesen und schreiben, `patternFill` im Ebenenstil – Photoshops „Wasser“-Muster kommt an, Rundreise pixelgleich. Agent: `pattern_list`, `pattern_import`, `pattern_define`, Muster per Name in `layer_effects_set`. Übersetzungen mit Kontext (`msgctxt`, `tr_ctx`) für mehrdeutige Wörter („Fill“ = Füllen / Fläche).
+- **Pattern Overlay** (2026-11-21): layer style with pattern, opacity, scale, offset (aligned to the document, blend mode like all effects). Pattern library: six built-in patterns plus PNGs in `$XDG_DATA_HOME/mosaix/patterns`; Edit › Define Pattern (Ctrl+Alt+Shift+D, visible pixels of the selection) and Import Patterns (Ctrl+Alt+Shift+Y: images, GIMP .pat). The pattern lives in the effect, documents stay self-contained. PSD: read and write the pattern block (`Patt`/`Pat2`/`Pat3`), `patternFill` in the layer style – Photoshop's "Water" pattern arrives, round trip pixel-identical. Agent: `pattern_list`, `pattern_import`, `pattern_define`, patterns by name in `layer_effects_set`. Translations with context (`msgctxt`, `tr_ctx`) for ambiguous words ("Fill" = Füllen / Fläche).
 
-- **Verlaufs- und Musterfüllungen** (2026-11-21): Formebenen füllen wahlweise mit Farbe, Verlauf oder Muster (Formen-Panel: „Füllung“). Verläufe mit beliebig vielen Farb- und Deckkraftunterbrechungen, Mittelpunkten und Glättung; Stile Linear, Radial, Winkel, Reflektiert, Raute; Winkel, Skalierung, Umkehren. Neuer Verlaufseditor (Balken mit Unterbrechungen: klicken wählt, ziehen verschiebt, neben den Balken klicken fügt hinzu, wegziehen oder Papierkorb löscht), auch in der Verlaufsüberlagerung (die jetzt ebenfalls mehrere Farben und alle Stile kann). Geometrie und Glättung an Photoshops gespeicherten Pixeln vermessen (Länge = Mitte bis Kante entlang des Winkels, Winkelverlauf im Uhrzeigersinn, 100 % Glättung = halb Smoothstep): Linear/Radial 0,003–0,011 RMSE. PSD: Verlaufs- (`GdFl`) und Musterfüllebenen (`PtFl`, auch in `vscg`) werden editierbare Formebenen, auch Füllebenen mit leerer Vektormaske; Export schreibt sie zurück (Muster in den Musterblock), Rundreise pixelgleich. Nur Rauschverläufe bleiben Pixel. Agent: `shape_add gradient/gradient_style/gradient_angle/pattern/pattern_scale`, `vector_set {"paint": …}`, `gradient_overlay` mit `gradient`. Dateiformat v8.
+- **Gradient and pattern fills** (2026-11-21): shape layers fill with color, gradient or pattern as desired (Shapes panel: "Fill"). Gradients with any number of color and opacity stops, midpoints and smoothness; styles Linear, Radial, Angle, Reflected, Diamond; angle, scale, reverse. New gradient editor (bar with stops: click selects, drag moves, clicking next to the bar adds, dragging away or the trash can deletes), also in Gradient Overlay (which now also supports multiple colors and all styles). Geometry and smoothness measured against Photoshop's stored pixels (length = centre to edge along the angle, angle gradient clockwise, 100 % smoothness = half smoothstep): Linear/Radial 0.003–0.011 RMSE. PSD: gradient (`GdFl`) and pattern fill layers (`PtFl`, also in `vscg`) become editable shape layers, also fill layers with an empty vector mask; export writes them back (patterns into the pattern block), round trip pixel-identical. Only noise gradients stay pixels. Agent: `shape_add gradient/gradient_style/gradient_angle/pattern/pattern_scale`, `vector_set {"paint": …}`, `gradient_overlay` with `gradient`. File format v8.
 
-- **Glanz (Satin)** (2026-11-21): letzter fehlender Photoshop-Ebenenstil. Form weichgezeichnet, zwei um ±Abstand entlang des Winkels verschobene Kopien, Betrag der Differenz, Umkehren, auf die Form begrenzt (Standard Multiplizieren). An Photoshops eigener Darstellung vermessen (`fxcmp`: Effekte auf Photoshops gespeicherten Ebenenpixeln gegen das Composite): Weichzeichnen vor dem Vergleich, Stärke 0,8 × Größe – RMSE 0,0049 (vorher fehlend). Innere Effekte jetzt in Photoshops fester Stapelreihenfolge (Muster, Verlauf, Farbe, Glanz, Schein innen, Schatten innen). PSD lesen/schreiben (`ChFX`/`satinMulti`, lineare Kontur), Rundreise pixelgleich; Agent `satin` in `layer_effects_set`.
+- **Satin** (2026-11-21): the last missing Photoshop layer style. Shape blurred, two copies shifted by ±distance along the angle, absolute difference, invert, limited to the shape (default Multiply). Measured against Photoshop's own rendering (`fxcmp`: effects on Photoshop's stored layer pixels against the composite): blurring before the comparison, strength 0.8 × size – RMSE 0.0049 (previously missing). Inner effects now in Photoshop's fixed stacking order (pattern, gradient, color, satin, inner glow, inner shadow). PSD read/write (`ChFX`/`satinMulti`, linear contour), round trip pixel-identical; agent `satin` in `layer_effects_set`.
 
-- **Text auf Pfad direkt bearbeiten** (2026-11-21): Klicks werden auf die Kurve projiziert (Bogenlänge + Abstand → Koordinaten der flachen Zeile), Cursor und Auswahl laufen gebogen entlang der Kurve; Tippen, Markieren, Doppel-/Dreifachklick wie bei normalem Text.
+- **Edit text on path directly** (2026-11-21): clicks are projected onto the curve (arc length + distance → coordinates of the flat line), cursor and selection run curved along the curve; typing, selecting, double/triple click as with normal text.
 
-### Phase 7 – Interop (begonnen 2026-11-20)
+### Phase 7 – Interop (started 2026-11-20)
 
-- **PSD/PSB-Import** (eigener Leser, `mosaix-io/psd.rs`): Ebenen mit Namen (Unicode), Deckkraft (inkl. Flächendeckkraft), Füllmethoden, Sichtbarkeit, Gruppen (Abschnittstrenner), Ebenenmasken; 8/16/32 Bit; RGB, Graustufen, CMYK (naiv); roh/RLE/ZIP/ZIP mit Vorhersage; eingebettetes ICC-Profil; zusammengefügtes Bild als Rückfall. Ebenen werden kachelweise parallel gestreamt (619-MB-PSD mit 4 Ebenen: 1,4 s bis zum Export). Hinweise für Schnittmasken, Text-/Smart-/Einstellungs-/Füllebenen (nur Pixel) und fremde Füllmethoden. Getestet mit Dateien aus GIMP 3 und ImageMagick.
+- **PSD/PSB import** (own reader, `mosaix-io/psd.rs`): layers with names (Unicode), opacity (incl. fill opacity), blend modes, visibility, groups (section dividers), layer masks; 8/16/32 bit; RGB, grayscale, CMYK (naive); raw/RLE/ZIP/ZIP with prediction; embedded ICC profile; merged image as a fallback. Layers are streamed tile by tile in parallel (619 MB PSD with 4 layers: 1.4 s until export). Notices for clipping masks, text/smart/adjustment/fill layers (pixels only) and unknown blend modes. Tested with files from GIMP 3 and ImageMagick.
 
-- **PSD/PSB-Export** (Exportieren unter … `.psd`/`.psb`, auch für Agenten): Ebenen, Gruppen (isoliert = „Normal“), Masken, Deckkraft, Füllmethoden, Sichtbarkeit, Unicode-Namen; Text, Formen und Smartfilter werden wie angezeigt gerastert, Ebenenstile bleiben als Photoshop-Ebenenstil editierbar; 8/16 Bit, RLE; eingebettetes ICC-Profil des gewählten Farbraums; zusammengefügtes Bild; PSB automatisch über 30 000 px. Einstellungsebenen fehlen noch als Ebene (nur im zusammengefügten Bild). Geprüft: Rundreise pixelgleich, GIMP 3 und ImageMagick lesen die Dateien.
+- **PSD/PSB export** (Export As … `.psd`/`.psb`, also for agents): layers, groups (isolated = "Normal"), masks, opacity, blend modes, visibility, Unicode names; text, shapes and smart filters are rasterised as displayed, layer styles stay editable as Photoshop layer styles; 8/16 bit, RLE; embedded ICC profile of the chosen color space; merged image; PSB automatically above 30 000 px. Adjustment layers are still missing as layers (only in the merged image). Checked: round trip pixel-identical, GIMP 3 and ImageMagick read the files.
 
-- **Schnittmasken** (Strg+Alt+G, Ebene-Menü, Agenten `layer_set clip`): eine Ebene zeigt sich nur, wo die Basisebene darunter Pixel hat; Basis plus geschnittene Ebenen werden als eigene Gruppe berechnet (geschnittene Ebenen „atop“), Deckkraft und Füllmethode der Basis gelten für die Gruppe, ausgeblendete Basis blendet alle aus. Auch Gruppen, Text, Formen und Einstellungsebenen können Basis oder geschnitten sein; Effektebenen erben das. PSD-Import und -Export übernehmen Schnittmasken, `.mosaix` speichert sie.
+- **Clipping masks** (Ctrl+Alt+G, Layer menu, agents `layer_set clip`): a layer only shows where the base layer below has pixels; base plus clipped layers are computed as their own group (clipped layers "atop"), opacity and blend mode of the base apply to the group, a hidden base hides all of them. Groups, text, shapes and adjustment layers can also be the base or clipped; effect layers inherit this. PSD import and export carry clipping masks over, `.mosaix` saves them.
 
-- **Gruppen „Hindurchwirken“** (Photoshops Standard, jetzt auch für neue Gruppen): die Ebenen der Gruppe wirken direkt auf alles darunter (Füllmethoden, Einstellungsebenen), Deckkraft und Maske der Gruppe blenden das Ergebnis über. Im Füllmethoden-Menü einer Gruppe ganz oben; eine andere Füllmethode macht die Gruppe isoliert. Ältere `.mosaix`-Dateien bleiben isoliert (unverändertes Aussehen). PSD-Import/-Export übernehmen es; Agenten: `layer_set pass_through`.
+- **"Pass Through" groups** (Photoshop's default, now also for new groups): the group's layers act directly on everything below (blend modes, adjustment layers), the group's opacity and mask fade the result. At the very top of a group's blend mode menu; a different blend mode makes the group isolated. Older `.mosaix` files stay isolated (unchanged appearance). PSD import/export carry it over; agents: `layer_set pass_through`.
 
-- **PSD: Einstellungsebenen und Text.** Import und Export von Einstellungsebenen als echte Photoshop-Einstellungsebenen (Tonwertkorrektur, Gradationskurven, Helligkeit/Kontrast modern und „Früheren Wert“, Farbton/Sättigung inkl. Färben, Belichtung, Dynamik, Schwarzweiß, Umkehren, Tontrennung, Schwellenwert); Deskriptoren lesen/schreiben (`psd_data.rs`). Textebenen werden editierbar importiert (Text, Schrift aus PostScript-Name, Größe, Farbe, Ausrichtung, Zeilenabstand, Laufweite, Absatzbreite, Transformation; Lage an Photoshops Pixeln ausgerichtet); fehlende Arial/Helvetica/Times/Courier/Calibri/Cambria/Georgia werden durch metrisch gleiche freie Schriften ersetzt, sonst bleiben die Pixel. Text-Export bleibt Pixel (Photoshops EngineData lässt sich hier ohne Photoshop nicht prüfen).
-- **Einstellungen rechnen wie Photoshop** (gemessen an Photoshops eigenen Renderings, `scripts/psd-reference.sh`): Kurven als natürlicher kubischer Spline, Kanal vor Gesamt bei Tonwert/Kurven, Helligkeit/Kontrast nach psd-tools (modern) bzw. Gerade (Legacy), Farbton/Sättigung in Photoshops Reihenfolge, Schwellenwert/Tontrennung in 8-Bit-Schritten. Abweichung (RMSE) jetzt 0,001–0,004, modern Helligkeit/Kontrast 0,013. Farbton/Sättigung für einzelne Farbbereiche fehlt noch (Hinweis beim Import).
-- PSD-Masken mit Vektormaske (Kanal −3) werden gelesen.
+- **PSD: adjustment layers and text.** Import and export of adjustment layers as real Photoshop adjustment layers (Levels, Curves, Brightness/Contrast modern and "Use Legacy", Hue/Saturation incl. Colorize, Exposure, Vibrance, Black & White, Invert, Posterize, Threshold); reading/writing descriptors (`psd_data.rs`). Text layers are imported editable (text, font from PostScript name, size, color, alignment, line spacing, tracking, paragraph width, transformation; position aligned to Photoshop's pixels); missing Arial/Helvetica/Times/Courier/Calibri/Cambria/Georgia are replaced by metrically identical free fonts, otherwise the pixels stay. Text export stays pixels (Photoshop's EngineData can't be verified here without Photoshop).
+- **Adjustments compute like Photoshop** (measured against Photoshop's own renderings, `scripts/psd-reference.sh`): curves as a natural cubic spline, channel before composite for Levels/Curves, Brightness/Contrast after psd-tools (modern) or a straight line (legacy), Hue/Saturation in Photoshop's order, Threshold/Posterize in 8-bit steps. Deviation (RMSE) now 0.001–0.004, modern Brightness/Contrast 0.013. Hue/Saturation for individual color ranges is still missing (notice on import).
+- PSD masks with a vector mask (channel −3) are read.
 
-- **Farbton/Sättigung mit Farbbereichen** (Rottöne … Magentatöne, wie Photoshop: Trapez-Gewichtung auf dem Farbton, Helligkeit in HSV, Sättigungen über Photoshops gemessene Kombinationstabelle von psd-tools), CPU und GPU identisch; PSD liest und schreibt die Bereiche. Abweichung zu Photoshop jetzt 0,002–0,007 (vorher bis 0,085).
+- **Hue/Saturation with color ranges** (Reds … Magentas, like Photoshop: trapezoid weighting on the hue, lightness in HSV, saturations via Photoshop's measured combination table from psd-tools), CPU and GPU identical; PSD reads and writes the ranges. Deviation from Photoshop now 0.002–0.007 (previously up to 0.085).
 
-- **AVIF und JPEG XL:** Öffnen (AVIF über dav1d, JPEG XL über jxl-oxide, auch HDR/ICC) und Exportieren (AVIF über ravif; JPEG XL über libjxl, 8/16 Bit, Qualität 100 = verlustfrei – geprüft bitgleich mit dem PNG-Export). Export vorerst nur sRGB.
+- **AVIF and JPEG XL:** opening (AVIF via dav1d, JPEG XL via jxl-oxide, also HDR/ICC) and exporting (AVIF via ravif; JPEG XL via libjxl, 8/16 bit, quality 100 = lossless – verified bit-identical with the PNG export). Export only sRGB for now.
 
-- **Eigene Pinselspitzen und ABR-Import:** Bearbeiten › Pinsel importieren … (Strg+Alt+Umschalt+B, auch im Spitzen-Menü): Photoshop-ABR (v1/v2 und v6–10, Namen aus dem `desc`-Abschnitt; geprüft mit einer echten 6.2-Datei aus Kritas Testdaten) oder ein beliebiges Bild (Transparenz bzw. dunkel = Farbe). Spitzen liegen als graue PNGs in `~/.local/share/mosaix/brushes`, bis zu 59 im Pinsel; Umschalt+B schaltet durch alle.
+- **Custom brush tips and ABR import:** Edit › Import Brushes … (Ctrl+Alt+Shift+B, also in the tip menu): Photoshop ABR (v1/v2 and v6–10, names from the `desc` section; verified with a real 6.2 file from Krita's test data) or any image (transparency or dark = color). Tips are stored as grey PNGs in `~/.local/share/mosaix/brushes`, up to 59 in the brush; Shift+B cycles through all of them.
 
-**Noch offen in Phase 7:** editierbarer Text im PSD-Export, AVIF/JPEG XL in weiten Farbräumen, Pinsel-Dynamik aus ABR.
+**Still open in Phase 7:** editable text in PSD export, AVIF/JPEG XL in wide color spaces, brush dynamics from ABR.
 
-### Phase 8 – Erweiterbarkeit & Kür (begonnen 2026-11-21)
+### Phase 8 – Extensibility & extras (started 2026-11-21)
 
-- **Kamera-RAW** (2026-11-21): CR2/CR3, NEF, ARW, RAF (auch X-Trans), ORF, RW2, PEF, DNG … über `rawler` (Dekodieren, Demosaicing PPG/X-Trans bilinear, Zuschnitt); eigener Farbschritt in `mosaix-io/raw.rs`: Weißabgleich (Wie Aufnahme, Automatisch = Grauwelt, Tageslicht, Temperatur/Tönung über die Planck-Kurve), Kameramatrix nach linearem sRGB ohne Gamut-Beschneidung (szenenlinear, Farben außerhalb sRGB bleiben), ausgefressene Lichter neutral, Belichtung, Ausrichtung. Beim Öffnen erscheint „RAW entwickeln“ mit Vorschau (1400 px, Regler live); Kommandozeile/`--export` entwickeln mit „Wie Aufnahme“. 24 MP in 0,3–0,4 s. Geprüft gegen LibRaw (`dcraw_emu -w -o 1 -4`) mit Canon 6D, Nikon D750, Sony A7 III, Fuji X-T2, iPhone-DNG: deckungsgleich bis auf die Canon, bei der rawler die Kamera-Automatik statt „Wie Aufnahme“ (1,1,1) liest. Agent: `document_open raw: {white_balance, exposure}`, `raw_info`. Werkzeug: `cargo run --example rawdev`.
-- **RAW-Ebenen** (2026-11-21): eine geöffnete oder platzierte RAW-Datei bleibt eine RAW-Ebene – die Originaldatei steckt im Dokument (`.mosaix` speichert sie einmal, inkrementelle Speicherungen verwenden sie weiter; Dateiformat v9), Weißabgleich/Belichtung bleiben im Eigenschaften-Panel änderbar (24 MP neu entwickeln ≈ 80 ms, das demosaizierte Bild der zuletzt entwickelten Datei bleibt im Speicher). Verschieben, Strg+T, Zuschneiden, Arbeitsfläche ändern wirken verlustfrei über eine eigene Transformation (bilinear mit geglätteten Kanten, starkes Verkleinern über vorab gemittelte Kopie). Rastern macht Pixel daraus, PSD-Export schreibt Pixel. Ebenen-Miniaturen jetzt auch für Text-, Form- und RAW-Ebenen. Crate `mosaix-raw` (rawler + Farbschritt). Agent: `raw_set`, `place_image` mit RAW.
-- **Lichter-Rekonstruktion und Rauschreduzierung** (2026-11-21): ausgefressene Kanäle werden aus den übrigen plus der Farbe am Rand der Fläche geschätzt („inpaint opposed“-artig), ganz ausgefressen bleibt neutral; Werte über 1 bleiben erhalten, Belichtung herunter holt Himmel mit Farbe und Verlauf zurück (Standard; „Beschneiden“ wie bisher). Wavelet-Rauschreduzierung (à trous, B3-Spline, weiche Schwelle) auf Wurzel-Werten (Schrotrauschen gleichmäßig), Rauschpegel aus der feinsten Ebene gemessen; Luminanz und Farbe getrennt (Farbe ab der zweiten Ebene auf halber Größe), Standard Farbe 25. 24 MP: 0,2 s (nur Farbe) bis 0,5 s. Regler wirken beim Loslassen; Weißabgleich/Belichtung bleiben schnell (entrauschtes Bild im Cache). Agent: `raw_set highlights/noise`.
-- **Objektivkorrektur** (2026-11-21): Profile aus der lensfun-Datenbank des Systems (`/usr/share/lensfun`, Aktualisierungen von `lensfun-update-data` haben Vorrang; nichts wird mitgeliefert). Kamera und Objektiv werden über normalisierte Namen gefunden (alle Testdateien außer iPhone-DNG: richtiges Profil), Verzeichnung (ptlens/poly3/poly5) und Farbsäume (TCA linear/poly3) nach Brennweite, Vignettierung (pa) nach Brennweite und Blende interpoliert; Crop-Faktor- und Seitenverhältnis-Unterschiede zum Kalibriersensor werden umgerechnet. Automatischer Zoom ohne leere Ränder. Im Entwickeln-Schritt (Abtasten je Farbkanal), praktisch ohne Mehrkosten. Standard an; Schalter in Dialog/Eigenschaften, Agent `raw_set lens`, `raw_info lens_profile`.
-- **Tonwert und Farbe** (2026-11-21): Kontrast, Lichter, Tiefen, Dynamik, Sättigung (−100…100, live). Kontrast/Tiefen in Blendenstufen um Mittelgrau (monoton), Lichter negativ = weiche Schulter auf dem größten Kanal (rekonstruierte Lichter über 1 werden sichtbar, Farben bleiben im Bereich), Dynamik wirkt vor allem auf blasse Farben. Rekonstruktions-Auswahl heißt jetzt „Ausgefressene Lichter“. Agent: `raw_set tone`.
-- **X-Trans und DNG-Korrekturen** (2026-11-21): eigener Ablauf nach rawlers Skalierung – Bayer weiter PPG (bitgleich zu vorher), X-Trans jetzt Markesteijn (1 Durchgang; gegen LibRaw: RMSE 0,0131 → 0,0123, Schärfe +25 %, 3 Durchgänge brachten nichts bei doppelter Zeit; 0,65 s für 24 MP). DNG-Opcodes von Handys: GainMap (Objektivabschattung, bis 3,4× in den Ecken beim Pixel 4a) auf das Mosaik vor dem Demosaicing, WarpRectilinear (Verzeichnung/Farbsäume je Ebene, tangential) und FixVignetteRadial im Entwickeln-Schritt – Vorrang vor lensfun, Profilname „in der DNG enthalten“.
+- **Camera RAW** (2026-11-21): CR2/CR3, NEF, ARW, RAF (also X-Trans), ORF, RW2, PEF, DNG … via `rawler` (decoding, demosaicing PPG/X-Trans bilinear, crop); own color step in `mosaix-io/raw.rs`: white balance (As Shot, Auto = gray world, Daylight, temperature/tint via the Planckian locus), camera matrix to linear sRGB without gamut clipping (scene-linear, colors outside sRGB are kept), blown highlights neutral, exposure, orientation. On opening, "Develop RAW" appears with a preview (1400 px, sliders live); command line/`--export` develop with "As Shot". 24 MP in 0.3–0.4 s. Checked against LibRaw (`dcraw_emu -w -o 1 -4`) with Canon 6D, Nikon D750, Sony A7 III, Fuji X-T2, iPhone DNG: matching except for the Canon, where rawler reads the camera's auto setting instead of "As Shot" (1,1,1). Agent: `document_open raw: {white_balance, exposure}`, `raw_info`. Tool: `cargo run --example rawdev`.
+- **RAW layers** (2026-11-21): an opened or placed RAW file stays a RAW layer – the original file lives in the document (`.mosaix` stores it once, incremental saves keep reusing it; file format v9), white balance/exposure stay adjustable in the Properties panel (redeveloping 24 MP ≈ 80 ms, the demosaiced image of the most recently developed file stays in memory). Move, Ctrl+T, crop, canvas size changes act losslessly via an own transformation (bilinear with smoothed edges, strong downscaling via a pre-averaged copy). Rasterize turns it into pixels, PSD export writes pixels. Layer thumbnails now also for text, shape and RAW layers. Crate `mosaix-raw` (rawler + color step). Agent: `raw_set`, `place_image` with RAW.
+- **Highlight reconstruction and noise reduction** (2026-11-21): clipped channels are estimated from the remaining ones plus the color at the edge of the area ("inpaint opposed"-like), fully clipped stays neutral; values above 1 are preserved, lowering exposure brings back skies with color and gradient (default; "Clip" as before). Wavelet noise reduction (à trous, B3 spline, soft threshold) on square-root values (shot noise uniform), noise level measured from the finest level; luminance and color separate (color from the second level at half size), default color 25. 24 MP: 0.2 s (color only) to 0.5 s. Sliders take effect on release; white balance/exposure stay fast (denoised image in the cache). Agent: `raw_set highlights/noise`.
+- **Lens correction** (2026-11-21): profiles from the system's lensfun database (`/usr/share/lensfun`, updates from `lensfun-update-data` take precedence; nothing is bundled). Camera and lens are found via normalised names (all test files except the iPhone DNG: correct profile), distortion (ptlens/poly3/poly5) and color fringes (TCA linear/poly3) interpolated by focal length, vignetting (pa) by focal length and aperture; crop factor and aspect ratio differences to the calibration sensor are converted. Automatic zoom without empty borders. In the develop step (sampling per color channel), practically without extra cost. On by default; switch in dialog/Properties, agent `raw_set lens`, `raw_info lens_profile`.
+- **Tone and color** (2026-11-21): contrast, highlights, shadows, vibrance, saturation (−100…100, live). Contrast/shadows in stops around middle grey (monotone), negative highlights = soft shoulder on the largest channel (reconstructed highlights above 1 become visible, colors stay in range), vibrance mainly affects pale colors. The reconstruction option is now called "Clipped Highlights". Agent: `raw_set tone`.
+- **X-Trans and DNG corrections** (2026-11-21): own pipeline after rawler's scaling – Bayer still PPG (bit-identical to before), X-Trans now Markesteijn (1 pass; against LibRaw: RMSE 0.0131 → 0.0123, sharpness +25 %, 3 passes brought nothing at double the time; 0.65 s for 24 MP). DNG opcodes from phones: GainMap (lens shading, up to 3.4× in the corners on the Pixel 4a) on the mosaic before demosaicing, WarpRectilinear (distortion/color fringes per plane, tangential) and FixVignetteRadial in the develop step – precedence over lensfun, profile name "embedded in the DNG".
 
-- **Filter-Plugins in WGSL** (2026-11-21, statt WASM: Pixel-Plugins gehören auf die GPU): `.wgsl`-Datei mit Kopfzeilen (`@name`, `@param` Zahl/bool/Farbe, `@reach`, `@canvas`) und `fn process(p) -> vec4<f32>`; mosaix setzt ein Präludium davor (Quellpixel über Kachelgrenzen, `sample`, sRGB, Zufall, eine Funktion je Parameter) und übersetzt eine eigene Pipeline (Cache nach Quelltext). Prüfung vorab mit naga, Fehler mit Zeile der Plugin-Datei. Läuft wie eingebaute Filter: Vorschau, Smart-Filter (Shader steckt im Dokument), Undo, Auswahl; 24 MP < 20 ms. Ordner `~/.local/share/mosaix/filters`, Menü Bild › Filter › Plugins (+ neu laden), vier Beispiele (Vignette, Pixelate, Chromatic Aberration, Clouds). Agenten: `filter_plugin_list`, `filter_plugin_install` (Agenten schreiben eigene Filter), `filter_apply {kind: plugin}`. Doku: `docs/filter-plugins.md`.
-- **Aktionen, Skripte, Stapelverarbeitung** (2026-11-21): Datei › Aktionen – Aufnahme übersetzt UI-Aktionen in Agenten-Befehle (Filter, Korrekturen, Stile, RAW, Ebenen- und Auswahlbefehle, Marquee/Lasso, Verschieben, Bildgröße …; ohne Ebenen-IDs, wirkt auf die aktive Ebene), gespeichert als `NAME.jsonl` in `~/.local/share/mosaix/actions`; Abspielen schrittweise mit Abbruch beim ersten Fehler. Ausführbare Dateien im Ordner sind Skripte (beliebige Sprache, gestartet mit `MOSAIX_SOCKET`). `mosaix batch AKTION DATEIEN… [--out] [--format]`. Agenten: `action_list`, `action_run`. Doku: `docs/aktionen.md`.
+- **Filter plugins in WGSL** (2026-11-21, instead of WASM: pixel plugins belong on the GPU): `.wgsl` file with header lines (`@name`, `@param` number/bool/color, `@reach`, `@canvas`) and `fn process(p) -> vec4<f32>`; mosaix prepends a prelude (source pixels across tile boundaries, `sample`, sRGB, random, one function per parameter) and compiles a separate pipeline (cached by source text). Checked beforehand with naga, errors with the line of the plugin file. Runs like built-in filters: preview, smart filter (the shader lives in the document), undo, selection; 24 MP < 20 ms. Folder `~/.local/share/mosaix/filters`, menu Image › Filter › Plugins (+ reload), four examples (Vignette, Pixelate, Chromatic Aberration, Clouds). Agents: `filter_plugin_list`, `filter_plugin_install` (agents write their own filters), `filter_apply {kind: plugin}`. Docs: `docs/filter-plugins.md`.
+- **Actions, scripts, batch processing** (2026-11-21): File › Actions – recording translates UI actions into agent commands (filters, adjustments, styles, RAW, layer and selection commands, marquee/lasso, move, image size …; without layer IDs, acts on the active layer), saved as `NAME.jsonl` in `~/.local/share/mosaix/actions`; playback step by step, aborting at the first error. Executable files in the folder are scripts (any language, started with `MOSAIX_SOCKET`). `mosaix batch ACTION FILES… [--out] [--format]`. Agents: `action_list`, `action_run`. Docs: `docs/actions.md`.
 
-- **Lokale KI: Auswahl** (2026-11-21): Crate `mosaix-ai` mit ONNX Runtime aus dem System (zur Laufzeit geladen, Arch: `onnxruntime-cpu`; fehlt sie, sagen die Funktionen das). Modelle werden nach Rückfrage einmalig von huggingface.co nach `~/.local/share/mosaix/models` geladen: SAM 2.1 small (Apache-2.0, 184 MB) und BiRefNet lite (MIT, 224 MB). Objektauswahl-Werkzeug (Umschalt+W; Klick wählt, Umschalt/Alt kombinieren): Bild einmal analysieren 0,8–1,7 s, jeder weitere Klick ~0,1 s (Einbettung im Cache). Auswahl › Motiv (Strg+Alt+S, ~5 s), Ebene › Hintergrund entfernen (Strg+Alt+B, Ebenenmaske). Rechnet auf der CPU (Ryzen 9700X); läuft im Hintergrund. Agenten: `select_subject`, `select_object`, `remove_background`, `ai_model_download`.
-- **Lokale KI: Entfernen** (2026-11-21): LaMa (Apache-2.0, 208 MB, ONNX-Export von Carve, feste 512²). Entfernen-Werkzeug (J schaltet Bereichsreparatur → Entfernen → Reparaturpinsel): über das Störende malen (rosa Vorschau), beim Loslassen füllt LaMa es auf. Mit Auswahl: Bearbeiten › Entfernen (KI), Umschalt+Alt+Rücktaste (Auswahl +4 px). Läuft über die Inhaltsbasierte-Füllung-Maschinerie (`FillJob::run_with`, ein Rückgängig-Schritt, Ebene-geändert-Schutz); Kontext mind. 512 px je Seite bzw. ¾ der Lochgröße, größere Bereiche werden für das Modell verkleinert, nur das Loch übernimmt das Ergebnis. ~1–1,5 s auf der CPU. „Alle Ebenen aufnehmen“ wie bei der Bereichsreparatur. Nebenbei: SAM mit mehreren Punkten nimmt jetzt den bestbewerteten Vorschlag (vorher Index 0 – unbrauchbar bei diesem Export). Agent: `remove_area {all_layers, expand}`.
-- **Lokale KI: Hochskalieren** (2026-11-21): Bild › Hochskalieren (KI) 2×/4× mit Real-ESRGAN General x4v3 (BSD-3, 5 MB; Qualcomm-AI-Hub-Export, Gewichte byte-gleich mit deren Release, HF-Spiegel). Feste 128er-Kacheln mit 12 px Überlappung, leere Kacheln übersprungen; 2× = 4× + Box-Verkleinerung. Alle Pixelebenen (auch außerhalb der Arbeitsfläche, transparente Ränder per Farb-„Bleed“), der Rest wie Bildgröße – ein Rückgängig-Schritt (`UpscaleJob`/`apply_upscale`). ~10 s je MP Ausgangsbild auf der CPU (x4plus wäre ~7× langsamer bei kaum sichtbarem Gewinn). Agent: `image_upscale {factor}`.
-  Weiter: Entfernen-Werkzeug (LaMa), Hochskalieren (Real-ESRGAN), KI-Entrauschen; generatives Füllen über OpenAI-API (Anbieter austauschbar).
+- **Local AI: selection** (2026-11-21): crate `mosaix-ai` with ONNX Runtime from the system (loaded at runtime, Arch: `onnxruntime-cpu`; if it's missing, the functions say so). After confirmation, models are downloaded once from huggingface.co to `~/.local/share/mosaix/models`: SAM 2.1 small (Apache-2.0, 184 MB) and BiRefNet lite (MIT, 224 MB). Object Selection tool (Shift+W; click selects, Shift/Alt combine): analysing the image once 0.8–1.7 s, every further click ~0.1 s (embedding in the cache). Select › Subject (Ctrl+Alt+S, ~5 s), Layer › Remove Background (Ctrl+Alt+B, layer mask). Computes on the CPU (Ryzen 9700X); runs in the background. Agents: `select_subject`, `select_object`, `remove_background`, `ai_model_download`.
+- **Local AI: remove** (2026-11-21): LaMa (Apache-2.0, 208 MB, ONNX export by Carve, fixed 512²). Remove tool (J cycles Spot Healing → Remove → Healing Brush): paint over the distraction (pink preview), on release LaMa fills it in. With a selection: Edit › Remove (AI), Shift+Alt+Backspace (selection +4 px). Runs via the Content-Aware Fill machinery (`FillJob::run_with`, one undo step, layer-changed guard); context at least 512 px per side or ¾ of the hole size, larger areas are downscaled for the model, only the hole takes the result. ~1–1.5 s on the CPU. "Sample All Layers" as with Spot Healing. Along the way: SAM with several points now takes the best-scored proposal (previously index 0 – unusable with this export). Agent: `remove_area {all_layers, expand}`.
+- **Local AI: upscaling** (2026-11-21): Image › Upscale (AI) 2×/4× with Real-ESRGAN General x4v3 (BSD-3, 5 MB; Qualcomm AI Hub export, weights byte-identical with their release, HF mirror). Fixed 128 tiles with 12 px overlap, empty tiles skipped; 2× = 4× + box downscale. All pixel layers (also outside the canvas, transparent borders via color "bleed"), the rest like Image Size – one undo step (`UpscaleJob`/`apply_upscale`). ~10 s per MP of source image on the CPU (x4plus would be ~7× slower with barely visible gain). Agent: `image_upscale {factor}`.
+  Next: Remove tool (LaMa), upscaling (Real-ESRGAN), AI denoising; generative fill via the OpenAI API (provider interchangeable).
 
-## Nächster konkreter Schritt
+## Next concrete step
 
-Phase 6 weiter: Zeichenstift, Text direkt im Bild bearbeiten.
+Continue Phase 6: Pen, edit text directly in the image.
 
-## Nächster konkreter Schritt (Phase 0, erledigt)
+## Next concrete step (Phase 0, done)
 
-**Phase 0 starten:** Cargo-Workspace anlegen, wgpu + winit-Fenster, Tablet-Events über `tablet-v2` auslesen und mit Druck auf eine sparse Tile-Canvas malen, ein 100-MP-Bild öffnen und mit 165 Hz schwenken/zoomen/drehen. Wenn das sitzt, steht der Stack.
+**Start Phase 0:** create the Cargo workspace, wgpu + winit window, read tablet events via `tablet-v2` and paint with pressure onto a sparse tile canvas, open a 100 MP image and pan/zoom/rotate at 165 Hz. Once that works, the stack is settled.
