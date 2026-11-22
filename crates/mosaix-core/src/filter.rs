@@ -26,6 +26,25 @@ pub enum Filter {
         #[serde(default = "sh_radius")]
         radius: f32,
     },
+    /// Blur along a line: angle in degrees (0 = horizontal, counter-
+    /// clockwise like Photoshop), distance in px (1…1000).
+    MotionBlur {
+        #[serde(default)]
+        angle: f32,
+        #[serde(default = "ten")]
+        distance: f32,
+    },
+    /// Each pixel becomes the median of its surroundings (radius 1…10 px):
+    /// removes specks and dust, keeps edges.
+    Median {
+        #[serde(default = "two")]
+        radius: f32,
+    },
+    /// Mosaic: square cells of `size` px (2…500) filled with their average.
+    Pixelate {
+        #[serde(default = "ten")]
+        size: f32,
+    },
     /// amount in % (0…100) of the value range.
     AddNoise {
         amount: f32,
@@ -99,6 +118,12 @@ impl SmartFilter {
 fn yes() -> bool {
     true
 }
+fn ten() -> f32 {
+    10.0
+}
+fn two() -> f32 {
+    2.0
+}
 fn shadows_default() -> f32 {
     35.0
 }
@@ -117,6 +142,9 @@ impl Filter {
             },
             Filter::HighPass { radius: 10.0 },
             Filter::ShadowsHighlights { shadows: 35.0, highlights: 0.0, radius: 30.0 },
+            Filter::MotionBlur { angle: 0.0, distance: 20.0 },
+            Filter::Median { radius: 2.0 },
+            Filter::Pixelate { size: 10.0 },
             Filter::AddNoise {
                 amount: 10.0,
                 monochrome: false,
@@ -132,6 +160,9 @@ impl Filter {
             Filter::UnsharpMask { .. } => crate::tr("Unsharp Mask").into(),
             Filter::HighPass { .. } => crate::tr("High Pass").into(),
             Filter::ShadowsHighlights { .. } => crate::tr("Shadows/Highlights").into(),
+            Filter::MotionBlur { .. } => crate::tr("Motion Blur").into(),
+            Filter::Median { .. } => crate::tr("Median").into(),
+            Filter::Pixelate { .. } => crate::tr("Mosaic").into(),
             Filter::AddNoise { .. } => crate::tr("Add Noise").into(),
             Filter::Plugin { name, .. } => name.clone().into(),
         }
@@ -154,7 +185,11 @@ impl Filter {
             | Filter::UnsharpMask { radius, .. }
             | Filter::HighPass { radius }
             | Filter::ShadowsHighlights { radius, .. } => radius.clamp(0.1, 1000.0),
-            Filter::AddNoise { .. } | Filter::Plugin { .. } => 0.0,
+            Filter::AddNoise { .. }
+            | Filter::Plugin { .. }
+            | Filter::MotionBlur { .. }
+            | Filter::Median { .. }
+            | Filter::Pixelate { .. } => 0.0,
         }
     }
 }

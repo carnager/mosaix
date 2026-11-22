@@ -581,7 +581,7 @@ pub fn tools() -> Vec<Value> {
             "filter_apply",
             "Apply a pixel filter to a layer (within the selection, if any). filter is an object with \"kind\": \
              gaussian_blur {radius px}; unsharp_mask {amount % 1…500, radius px, threshold 0…255}; \
-             high_pass {radius px}; shadows_highlights {shadows %, highlights %, radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}; \
+             high_pass {radius px}; shadows_highlights {shadows %, highlights %, radius px}; motion_blur {angle °, distance px}; median {radius 1…10}; pixelate {size px}; add_noise {amount % 0…100, monochrome, gaussian, seed}; \
              plugin {name, values: {param: number | bool | \"#rrggbb\"}} for a filter plugin (see filter_plugin_list). \
              With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
              listed under smart_filters in document_info and editable with smart_filter_set.",

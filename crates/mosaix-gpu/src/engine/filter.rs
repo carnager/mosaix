@@ -34,6 +34,9 @@ const UNSHARP: u32 = 1;
 const HIGH_PASS: u32 = 2;
 const NOISE: u32 = 3;
 const SHADOWS_HIGHLIGHTS: u32 = 4;
+const MOTION: u32 = 5;
+const MEDIAN: u32 = 6;
+const PIXELATE: u32 = 7;
 /// Above this sigma the blur runs on a downscaled copy.
 const DIRECT_SIGMA: f32 = 10.0;
 
@@ -160,12 +163,12 @@ impl Engine {
             }
             return out;
         }
-        let spread = (3.0 * f.radius()).ceil() as i32;
-        let reach = if matches!(f, Filter::GaussianBlur { .. }) {
-            (spread + TILE_SIZE as i32 - 1) / TILE_SIZE as i32
-        } else {
-            0
+        let spread = match f {
+            Filter::GaussianBlur { .. } => (3.0 * f.radius()).ceil() as i32,
+            Filter::MotionBlur { distance, .. } => (distance.clamp(1.0, 1000.0) * 0.5).ceil() as i32 + 1,
+            _ => 0,
         };
+        let reach = (spread + TILE_SIZE as i32 - 1) / TILE_SIZE as i32;
         dilate(src.keys().copied(), reach)
     }
 
@@ -202,6 +205,33 @@ impl Engine {
                         p,
                         ..Self::fjob(c, g, kind)
                     })
+                    .collect();
+                let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
+                dest.into_iter().zip(tiles).collect()
+            }
+            Filter::MotionBlur { .. } | Filter::Median { .. } | Filter::Pixelate { .. } if !src.is_empty() => {
+                let (kind, radius, p) = match f {
+                    Filter::MotionBlur { angle, distance } => {
+                        let d = distance.clamp(1.0, 1000.0);
+                        let a = angle.to_radians();
+                        // Screen y points down: counter-clockwise angles go up.
+                        (MOTION, (d * 0.5).ceil() as u32, [a.cos(), -a.sin(), d * 0.5, 0.0])
+                    }
+                    Filter::Median { radius } => (MEDIAN, radius.clamp(1.0, 10.0).round() as u32, [0.0; 4]),
+                    Filter::Pixelate { size } => (PIXELATE, 0, [size.clamp(2.0, 500.0).round(), 0.0, 0.0, 0.0]),
+                    _ => unreachable!(),
+                };
+                // Motion blur spreads beyond the layer; the others stay on it.
+                let dest: Vec<TileCoord> = if kind == MOTION {
+                    dest
+                } else {
+                    dest.into_iter().filter(|c| src.contains_key(c)).collect()
+                };
+                let mut grids = Grids::default();
+                let g = grids.layer(src);
+                let jobs: Vec<FilterJob> = dest
+                    .iter()
+                    .map(|&c| FilterJob { radius, p, ..Self::fjob(c, g, kind) })
                     .collect();
                 let tiles = self.filter_jobs(&jobs, &grids.data).ok_or(full)?;
                 dest.into_iter().zip(tiles).collect()

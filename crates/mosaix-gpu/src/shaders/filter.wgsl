@@ -5,6 +5,9 @@
 //   kind 2: high pass      out = src − blur + 0.5 grey
 //   kind 3: add noise      amount, monochrome, gaussian; seeded by pixel position
 //   kind 4: shadows/highlights  lifts dark / lowers bright areas by the blurred luminance
+//   kind 5: motion blur    direction p.xy, half length p.z (taps every pixel)
+//   kind 6: median         by luminance within `radius`
+//   kind 7: mosaic         cells of p.x px averaged
 
 enable wgpu_binding_array;
 
@@ -136,6 +139,75 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             }
             let o = s + d * job.p.x;
             return vec4<f32>(clamp(o.rgb, vec3<f32>(0.0), vec3<f32>(max(s.a, 0.0)) * 4.0), s.a);
+        }
+        case 5u: {
+            let n = i32(job.radius);
+            let dir = job.p.xy;
+            var acc = vec4<f32>(0.0);
+            var cnt = 0.0;
+            for (var i = -n; i <= n; i++) {
+                let t = clamp(f32(i), -job.p.z, job.p.z);
+                let q = vec2<f32>(p) + dir * t;
+                let f = floor(q);
+                let w = q - f;
+                let b = vec2<i32>(f);
+                let s = mix(mix(texel(job.src, b), texel(job.src, b + vec2<i32>(1, 0)), w.x),
+                            mix(texel(job.src, b + vec2<i32>(0, 1)), texel(job.src, b + vec2<i32>(1, 1)), w.x), w.y);
+                acc += s;
+                cnt += 1.0;
+            }
+            return acc / cnt;
+        }
+        case 6u: {
+            // The median luminance by bisection, then the closest pixel.
+            let r = i32(job.radius);
+            let n = f32((2 * r + 1) * (2 * r + 1));
+            var lo = 0.0;
+            var hi = 1.0;
+            for (var it = 0; it < 10; it++) {
+                let mid = (lo + hi) * 0.5;
+                var below = 0.0;
+                for (var y = -r; y <= r; y++) {
+                    for (var x = -r; x <= r; x++) {
+                        let c = texel(job.src, p + vec2<i32>(x, y));
+                        let l = dot(c.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) + c.a * 1e-3;
+                        below += select(0.0, 1.0, l < mid);
+                    }
+                }
+                if below >= n * 0.5 {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            let m = (lo + hi) * 0.5;
+            var best = texel(job.src, p);
+            var bd = 1e9;
+            for (var y = -r; y <= r; y++) {
+                for (var x = -r; x <= r; x++) {
+                    let c = texel(job.src, p + vec2<i32>(x, y));
+                    let d = abs(dot(c.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) + c.a * 1e-3 - m) + f32(abs(x) + abs(y)) * 1e-6;
+                    if d < bd {
+                        bd = d;
+                        best = c;
+                    }
+                }
+            }
+            return best;
+        }
+        case 7u: {
+            // Average of the cell (sampled on a grid of at most 16 × 16).
+            let size = i32(job.p.x);
+            let cell = vec2<i32>(floor(vec2<f32>(p) / f32(size))) * size;
+            let steps = min(size, 16);
+            var acc = vec4<f32>(0.0);
+            for (var y = 0; y < steps; y++) {
+                for (var x = 0; x < steps; x++) {
+                    let o = vec2<i32>((vec2<f32>(f32(x), f32(y)) + 0.5) * f32(size) / f32(steps));
+                    acc += texel(job.src, cell + o);
+                }
+            }
+            return acc / f32(steps * steps);
         }
         case 4u: {
             let s = texel(job.src, p);

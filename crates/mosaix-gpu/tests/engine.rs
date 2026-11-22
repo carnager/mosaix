@@ -3096,3 +3096,36 @@ fn tone_brushes_dodge_burn_sponge_blur_sharpen() {
     stroke(&mut e, DVec2::new(128.0, 64.0), StrokeParams { tone: Some(Tone { kind: ToneKind::Sharpen, range: 1, amount: 1.0 }), ..Default::default() });
     assert!(edge(&mut e) > e0 + 0.03, "sharpen: {e0} → {}", edge(&mut e));
 }
+
+#[test]
+fn motion_blur_median_and_mosaic() {
+    use mosaix_core::Filter;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 256));
+    // White right half (x ≥ 256) on transparent, plus a 2 px white speck at (100, 100).
+    let white = |e: &mut Engine, x: f64, y: f64, w: f64, h: f64| {
+        e.select_shape(&Shape::Rect { x, y, w, h }, CombineOp::Replace, "Selection").unwrap();
+        e.fill(StrokeTarget::Pixels, [1.0; 4], 1.0, "White").unwrap();
+        e.deselect("x").unwrap();
+    };
+    white(&mut e, 256.0, 0.0, 256.0, 256.0);
+    white(&mut e, 100.0, 100.0, 2.0, 2.0);
+    // Horizontal motion blur smears the vertical edge sideways; vertical does not.
+    e.apply_filter(&Filter::MotionBlur { angle: 0.0, distance: 40.0 }, "Motion").unwrap();
+    let a = alpha_at(&mut e, 246, 50);
+    assert!(a > 0.15 && a < 0.5, "smeared edge: {a}");
+    assert!(alpha_at(&mut e, 200, 50) < 0.01);
+    e.undo();
+    e.apply_filter(&Filter::MotionBlur { angle: 90.0, distance: 40.0 }, "Motion").unwrap();
+    assert!(alpha_at(&mut e, 250, 50) < 0.01 && alpha_at(&mut e, 260, 50) > 0.99);
+    e.undo();
+    // Median: the speck goes, the edge stays.
+    e.apply_filter(&Filter::Median { radius: 2.0 }, "Median").unwrap();
+    assert!(alpha_at(&mut e, 100, 100) < 0.01, "speck removed");
+    assert!(alpha_at(&mut e, 255, 50) < 0.01 && alpha_at(&mut e, 256, 50) > 0.99, "edge kept");
+    e.undo();
+    // Mosaic 100 px: the cell 200…300 straddles the edge → 44 % covered.
+    e.apply_filter(&Filter::Pixelate { size: 100.0 }, "Mosaic").unwrap();
+    let (l, r) = (alpha_at(&mut e, 210, 10), alpha_at(&mut e, 290, 10));
+    assert!((l - 0.44).abs() < 0.05 && (l - r).abs() < 1e-3, "{l} {r}");
+}
