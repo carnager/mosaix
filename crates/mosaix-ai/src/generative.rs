@@ -50,21 +50,31 @@ pub fn fill(p: &Provider, w: usize, h: usize, rgb: &mut [[f32; 3]], hole: &[bool
     };
     // Where the result is (partly) transparent the original shows through:
     // its colour there is meaningless (often black).
-    let (mut seen, mut clear) = (0usize, 0usize);
-    for (i, c) in rgb.iter_mut().enumerate() {
+    let (mut seen, mut clear, mut dark, mut was_dark) = (0usize, 0usize, 0usize, 0usize);
+    let black = |c: [f32; 3]| c.iter().all(|&v| v < 0.03);
+    let mut filled = rgb.to_vec();
+    for (i, c) in filled.iter_mut().enumerate() {
         if hole[i] {
             let p = out.get_pixel((i % w) as u32, (i / w) as u32);
             let a = p[3] as f32 / 255.0;
             seen += 1;
-            if a < 0.5 {
-                clear += 1;
-            }
+            clear += (a < 0.5) as usize;
+            was_dark += black(*c) as usize;
             for k in 0..3 {
                 c[k] = p[k] as f32 / 255.0 * a + c[k] * (1.0 - a);
             }
+            dark += black(*c) as usize;
         }
     }
-    ensure!(clear * 2 < seen.max(1), "the provider returned an empty (transparent) result");
+    let seen = seen.max(1);
+    ensure!(clear * 2 < seen, "the provider returned an empty (transparent) result");
+    // A hole that comes back black where the picture was not: the model
+    // blanked it instead of painting it.
+    ensure!(
+        dark * 10 < seen * 9 || was_dark * 2 > seen,
+        "the provider returned the selection blank (black) – try again or another model"
+    );
+    rgb.copy_from_slice(&filled);
     Ok(())
 }
 
@@ -86,19 +96,22 @@ fn model_size(w: usize, h: usize) -> (u32, u32) {
     }
 }
 
+fn openai_mask(w: usize, h: usize, hole: &[bool]) -> RgbaImage {
+    RgbaImage::from_fn(w as u32, h as u32, |x, y| {
+        if hole[y as usize * w + x as usize] { Rgba([255, 255, 255, 255]) } else { Rgba([0, 0, 0, 0]) }
+    })
+}
+
 fn openai(model: &str, key: &str, img: &RgbaImage, hole: &[bool], prompt: &str) -> Result<RgbaImage> {
     ensure!(!key.trim().is_empty(), "no OpenAI API key (set OPENAI_API_KEY)");
     let (w, h) = (img.width() as usize, img.height() as usize);
     let (mw, mh) = model_size(w, h);
     let scaled = image::imageops::resize(img, mw, mh, FilterType::CatmullRom);
-    // The mask: transparent where the model paints.
-    let mut mask = RgbaImage::from_pixel(w as u32, h as u32, Rgba([0, 0, 0, 255]));
-    for (i, &hl) in hole.iter().enumerate() {
-        if hl {
-            mask.put_pixel((i % w) as u32, (i / w) as u32, Rgba([0, 0, 0, 0]));
-        }
-    }
-    let mask = image::imageops::resize(&mask, mw, mh, FilterType::Nearest);
+    // The mask as OpenAI's guide builds it (grey as colour and alpha): white
+    // and opaque where the model paints, black and transparent elsewhere.
+    // The old DALL·E convention (transparent = paint) makes the newer models
+    // paint outside and leave the hole black.
+    let mask = image::imageops::resize(&openai_mask(w, h, hole), mw, mh, FilterType::Nearest);
     let boundary = "----mosaix-generative-fill";
     let mut body = Vec::new();
     let mut field = |name: &str, value: &[u8], file: Option<&str>| {
@@ -218,6 +231,34 @@ mod tests {
         fill(&p, w, h, &mut rgb, &hole, "something red").unwrap();
         assert!((rgb[0][0] - 1.0).abs() < 0.02 && rgb[0][2] < 0.02, "hole painted: {:?}", rgb[0]);
         assert_eq!(rgb[5], [0.0, 0.0, 1.0], "the rest stays");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn openai_mask_is_white_where_it_paints() {
+        let hole = [true, false];
+        let m = openai_mask(2, 1, &hole);
+        assert_eq!(m.get_pixel(0, 0).0, [255, 255, 255, 255]);
+        assert_eq!(m.get_pixel(1, 0).0, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_black_result_is_refused() {
+        let dir = std::env::temp_dir().join(format!("mosaix-fill-black-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("black.sh");
+        std::fs::write(&script, "#!/bin/sh\npython3 -c \"from PIL import Image; Image.new('RGB', Image.open('$1').size, (0,0,0)).save('$4')\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (w, h) = (8, 4);
+        let mut rgb = vec![[0.9, 0.4, 0.1]; w * h];
+        let hole = vec![true; w * h];
+        let p = Provider::Command { program: script.display().to_string() };
+        assert!(fill(&p, w, h, &mut rgb, &hole, "birds").is_err());
+        assert_eq!(rgb[0], [0.9, 0.4, 0.1], "the picture stays");
+        // A night sky may well be filled with black.
+        let mut night = vec![[0.0, 0.0, 0.01]; w * h];
+        fill(&p, w, h, &mut night, &hole, "more night").unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
