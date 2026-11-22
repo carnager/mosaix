@@ -60,6 +60,9 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `layer_align`, `layer_distribute` | Align the selected layers (`edge` left/center_x/right/top/center_y/bottom; one layer: to the canvas) or space three or more evenly (`direction`) |
 | `stroke_selection` | Edit › Stroke: `width`, `position` inside/center/outside, `color`, `opacity` |
 | `layer_set` with `lock` | `{transparency, pixels, position}` |
+| `select_refine` | Select and Mask: `radius` (edge follows the image: hair, fur), `contrast`, `shift`, `feather`, `output` selection/mask |
+| `select_transform` | Transform the selection outline only: `scale`, `scale_x/y`, `rotate`, `dx`, `dy` |
+| `paint_stroke` with `pencil` / `history` | Pencil (no anti-aliasing); History Brush, painting back the state set with `history_source {position}` |
 | `layer_merge` | Merge layers as they look (blend modes, masks, styles, text baked in; pixels outside the canvas are kept): `mode` `down` (the active layer onto the one below, default), `visible` (all visible top-level layers; hidden ones stay), `flatten` (everything into one layer; hidden layers are dropped) |
 | `layer_place`, `layer_convert_smart`, `smart_replace` | Smart objects: embed an image, convert a pixel layer, replace the contents; transforms stay lossless |
 | `guide_add`, `guide_list`, `guide_delete`, `guide_clear` | Guides (`orientation` vertical/horizontal, `position` in px) |

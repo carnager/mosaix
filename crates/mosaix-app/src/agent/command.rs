@@ -324,6 +324,14 @@ pub enum Command {
         antialias: Option<bool>,
         sample: Option<String>,
     },
+    /// Select › Select and Mask.
+    SelectRefine {
+        radius: Option<f64>,
+        contrast: Option<f32>,
+        shift: Option<f64>,
+        feather: Option<f64>,
+        output: Option<String>,
+    },
     /// Which history state the History Brush paints from (0 = as opened).
     HistorySource {
         position: usize,
@@ -673,6 +681,7 @@ impl Command {
             Self::LayerAlign { .. } => "layer_align",
             Self::SelectTransform { .. } => "select_transform",
             Self::HistorySource { .. } => "history_source",
+            Self::SelectRefine { .. } => "select_refine",
             Self::LayerDistribute { .. } => "layer_distribute",
             Self::AdjustmentApply { .. } => "adjustment_apply",
             Self::SmartReplace { .. } => "smart_replace",
@@ -1734,6 +1743,27 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 )
                 .map_err(engine_err)?;
             Ok(Output::json(json!({ "ok": true, "tiles": n })))
+        }
+        Command::SelectRefine { radius, contrast, shift, feather, output } => {
+            let to_mask = match output.as_deref() {
+                None | Some("selection") => false,
+                Some("mask") => true,
+                Some(o) => bail!("unknown output {o:?} (selection, mask)"),
+            };
+            if to_mask {
+                target_layer(s, None)?;
+            }
+            s.engine
+                .select_and_mask(
+                    radius.unwrap_or(10.0).clamp(0.0, 500.0),
+                    contrast.unwrap_or(0.0).clamp(0.0, 1.0),
+                    shift.unwrap_or(0.0).clamp(-500.0, 500.0),
+                    feather.unwrap_or(0.0).clamp(0.0, 500.0),
+                    to_mask,
+                    tr("Select and Mask"),
+                )
+                .map_err(engine_err)?;
+            ok(s)
         }
         Command::HistorySource { position } => {
             let (labels, _) = s.engine.history_labels();

@@ -44,7 +44,7 @@ Shortcuts follow Photoshop.
 
 | Action | Input |
 |---|---|
-| Tools | `B` Brush, `U` Smudge, `E` Eraser, `M` Rectangular/Elliptical Marquee, `L` Lasso / Polygonal Lasso, `W` Magic Wand, `G` Gradient linear/radial / Paint Bucket, `V` Move, `C` Crop |
+| Tools | `B` Brush / Pencil, `Y` History Brush, `U` Smudge, `E` Eraser, `M` Rectangular/Elliptical Marquee, `L` Lasso / Polygonal Lasso, `W` Magic Wand, `G` Gradient linear/radial / Paint Bucket, `V` Move, `C` Crop |
 | Painting | left mouse button / pen; eraser end of the pen; `[` `]` size, digits opacity (Smudge: strength), `H` hardness, Shift+`S` smoothing, Shift+`B` tip, Shift+`J` dynamics, Shift+`P` palette color, `X` swap foreground/background color, `D` black/white, `I` eyedropper (also Alt+click while painting; 1 px up to a 31×31 average, layer or all layers) |
 | Clone Stamp / Healing | `S` Clone Stamp; `J` Spot Healing (just paint over the spot, the source is found automatically), `J` again: Healing Brush. Clone Stamp and Healing Brush: Alt+click sets the source, then paint. On release the Healing Brush matches color and brightness to the surroundings. Options: sample all layers (stamp onto an empty layer), aligned. A cross shows where pixels are copied from |
 | Dodge, Burn, Sponge | `O` (again: next): Dodge lightens, Burn darkens (range shadows/midtones/highlights, exposure), Sponge raises or lowers saturation. One stroke acts at most once; more strokes add up |
@@ -53,7 +53,10 @@ Shortcuts follow Photoshop.
 | Text & shapes | `T` Text: click into the image to create a text and type right away; click into a text to place the cursor (double-click word, triple-click line, Shift extends, drag selects). Arrows/Home/End (with Ctrl by word, with Shift selecting), Ctrl+A all, Enter new line, Esc or Ctrl+Enter finishes. Font, size, color under Properties. Shift+`U` Shape: drag a rectangle/ellipse. Both stay sharp and editable, also after Ctrl+`T`; Ctrl+Alt+`R` rasterizes |
 | Pen | `P`: click = corner, drag = curve with handles, click the start point to close (filled shape), Enter/Esc finishes open (line), Backspace removes the last point. On a path: drag points and handles, Alt+click corner ↔ curve, Alt+drag a single handle, `Del` deletes the point. Color = brush color, later under Properties (fill/stroke). Shift+`P` cycles the palette color |
 | Layer styles | Panel "Styles" on the right: stroke, drop shadow, inner/outer shadow and glow, color overlay, bevel & emboss – on/off, adjust, remove; they stay editable |
-| View | Mouse wheel pans (Shift: sideways), Alt+wheel zooms (as in Photoshop), Alt+Shift+wheel rotates, Space+drag pans; zooming out stops at ~128 px image size, `R`+drag rotates, Ctrl+`0` fit, Ctrl+`1` 100 %, `Q` Quick Mask view |
+| Pencil & History Brush | `B` twice: the Pencil paints hard pixels without anti-aliasing (pixel art, crisp masks). `Y` History Brush: paints the layer back as it was at a history state – pick the state with the brush marker in the History panel (default: as opened) |
+| Quick Mask | `Q`: the selection becomes a red layer (red = not selected); paint, fill or use gradients – black/dark masks, white or the eraser reveals. `Q` again turns it back into the selection |
+| Transform Selection & Select and Mask | Select › Transform Selection: the free-transform box on the selection outline only. Select › Select and Mask …: within the edge radius the selection follows the image (hair, fur), then contrast, shift edge and feather; output to the selection or a layer mask, with a live preview |
+| View | Mouse wheel pans (Shift: sideways), Alt+wheel zooms (as in Photoshop), Alt+Shift+wheel rotates, Space+drag pans; zooming out stops at ~128 px image size, `R`+drag rotates, Ctrl+`0` fit, Ctrl+`1` 100 %, `Q` Quick Mask |
 | Selection | Drag with Shift/Alt/both = add/subtract/intersect; Ctrl+`A` / Ctrl+`D` / Ctrl+Shift+`I`; Shift+`F6` feather (dialog) |
 | Rulers & guides | Ctrl+`R` rulers. Drag a guide out of a ruler (Shift: onto the ticks), move it with the Move tool or Ctrl, drag it back into the ruler to delete it. View › New Guide … for exact positions. Ctrl+`;` show/hide, Ctrl+Alt+`;` clear all. Guides belong to the document (undo, `.mosaix`) |
 | Grid & snapping | Ctrl+`'` grid (View › Grid Settings: spacing, subdivisions). Ctrl+Shift+`;` snap: moving, marquee, shapes, crop and transform snap to guides, image edges, image center and the (visible) grid |
@@ -88,6 +91,7 @@ Shortcuts follow Photoshop.
 | Keyboard shortcuts | Edit › Keyboard Shortcuts … (Ctrl+Alt+Shift+`K`): rebind any menu command (click the shortcut, press the keys; Backspace removes, Esc cancels); a shortcut another command had is removed there; "Default" or "Reset All" |
 | Brush tips | Edit › Import Brushes … (Ctrl+Alt+Shift+`B`): Photoshop brushes (.abr), GIMP brushes (.gbr/.gih) or an image become your own tips (folder `~/.local/share/mosaix/brushes`); pick them in the tip menu of the options bar, Shift+`B` cycles through all |
 | Navigator & Info | Panels on the right (or the Window menu): the Navigator shows the whole image with the visible area (click or drag to look elsewhere, zoom slider); Info shows the histogram, position and color under the pointer |
+| Preferences | Edit › Preferences …: language, recovery-copy interval, undo steps, system or built-in file dialog, keyboard shortcuts, reset panel layout, clear recent files |
 | Other | `F12` benchmark, `F1` help, Ctrl+`Q` quit |
 
 ## Layout

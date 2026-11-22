@@ -25,6 +25,15 @@ impl<S> History<S> {
         }
     }
 
+    /// Keeps at most `limit` undo steps (the oldest go first).
+    pub fn set_limit(&mut self, limit: usize) {
+        self.limit = limit.max(1);
+        if self.undo.len() > self.limit {
+            let extra = self.undo.len() - self.limit;
+            self.undo.drain(..extra);
+        }
+    }
+
     /// Folds the actions recorded since there were `n` into one step
     /// starting at `before`.
     pub fn squash_since(&mut self, n: usize, before: S, label: impl Into<String>) {

@@ -3651,3 +3651,32 @@ fn history_brush_paints_back_an_earlier_state() {
     let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
     assert!(px(&t, 200, 200)[3] < 0.01, "back to the empty layer");
 }
+
+#[test]
+fn select_and_mask_snaps_to_the_image_edge() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    let mut t = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS {
+            let v = if x < 128 { 1.0 } else { 0.05 };
+            t[(y * TS + x) * 4..][..4].copy_from_slice(&[v, v, v, 1.0].map(f16::from_f32));
+        }
+    }
+    e.upload_tile(layer, TileCoord::new(0, 0), &t);
+    e.flush();
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 110.0, h: 256.0 }, CombineOp::Replace, "Rough").unwrap();
+    e.select_and_mask(30.0, 0.5, 0.0, 0.0, false, "Select and Mask").unwrap();
+    let sel = e.selection_cpu().unwrap();
+    let at = |x: usize, y: usize| sel.tiles.get(&TileCoord::new(0, 0)).map_or(sel.default, |m| m.get(x, y));
+    assert!(at(122, 100) > 200, "grew to the edge: {}", at(122, 100));
+    assert!(at(134, 100) < 60, "stops at it: {}", at(134, 100));
+    // Into the layer mask: the selection goes, one undo step.
+    e.undo();
+    e.select_and_mask(30.0, 0.5, 0.0, 0.0, true, "Select and Mask").unwrap();
+    assert!(!e.has_selection());
+    assert!(e.doc().find(layer).unwrap().mask.is_some());
+    e.undo();
+    assert!(e.has_selection() && e.doc().find(layer).unwrap().mask.is_none());
+}

@@ -191,6 +191,25 @@ pub struct Settings {
     pub view: ViewOpts,
     pub tone: ToneOpts,
     pub generative: GenSettings,
+    pub prefs: Prefs,
+}
+
+/// Edit › Preferences.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Prefs {
+    /// Recovery copies every so many minutes (0 = off).
+    pub autosave_minutes: u32,
+    /// Undo steps kept per document.
+    pub history_limit: usize,
+    /// The built-in file dialog instead of the system one.
+    pub builtin_dialog: bool,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self { autosave_minutes: 3, history_limit: 100, builtin_dialog: false }
+    }
 }
 
 impl Default for Settings {
@@ -215,6 +234,7 @@ impl Default for Settings {
             view: ViewOpts::default(),
             tone: ToneOpts::default(),
             generative: GenSettings::default(),
+            prefs: Prefs::default(),
         }
     }
 }

@@ -176,6 +176,9 @@ pub struct Model {
     pub tabs: Vec<(String, bool)>,
     /// History position the History Brush paints from.
     pub history_source: usize,
+    pub prefs: crate::settings::Prefs,
+    /// "auto", "en", "de".
+    pub language: String,
     pub tab: usize,
     pub zoom: f64,
     pub rotation_deg: f64,
@@ -285,6 +288,12 @@ pub enum Action {
     SetLock(mosaix_core::doc::Lock),
     /// The History Brush's source state.
     HistorySource(usize),
+    /// Edit › Preferences.
+    SetPrefs(crate::settings::Prefs),
+    SetLanguage(String),
+    ClearRecent,
+    ResetLayout,
+    OpenShortcuts,
     /// Document tabs: make one active, close one.
     SwitchTab(usize),
     CloseTab(usize),
@@ -514,6 +523,10 @@ pub struct State {
 }
 
 enum Dialog {
+    /// Edit › Preferences (a draft until OK).
+    Prefs { p: crate::settings::Prefs, language: String },
+    /// Select › Select and Mask.
+    Refine { radius: f64, contrast: f32, shift: f64, feather: f64, to_mask: bool },
     /// Edit › Stroke.
     Stroke { width: f64, position: &'static str, opacity: f32 },
     /// Image › Adjustments: an adjustment for the pixels, previewed live.
@@ -580,6 +593,11 @@ impl State {
         self.dialog = None;
         self.filter = None;
         self.rename = None;
+    }
+
+    /// Opens Edit › Preferences (UI snapshots).
+    pub fn open_prefs(&mut self) {
+        self.dialog = Some(Dialog::Prefs { p: Default::default(), language: "auto".into() });
     }
 
     /// Opens Edit › Stroke (UI snapshots).
@@ -1188,6 +1206,8 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         ("Select", S::LayerPixels, "Layer Pixels", None),
         ("File", S::OpenAsLayers, "Open as Layers …", None),
         ("Select", S::TransformSelection, "Transform Selection", sel(m.has_selection)),
+        ("Select", S::SelectAndMask, "Select and Mask …", sel(m.has_selection)),
+        ("Edit", S::Preferences, "Preferences …", None),
         ("File", S::Revert, "Revert", (!m.can_revert).then_some(tr("The image was never saved"))),
         ("Edit", S::StrokeSelection, "Stroke …", (!(m.has_selection && pixel_active(m))).then_some(tr("Needs a selection on a pixel layer"))),
     ] {
@@ -1248,6 +1268,11 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
             S::OpenAsLayers => out.push(Action::PickFile(super::files::FileMode::OpenAsLayer)),
             S::Revert => out.push(Action::Revert),
             S::TransformSelection => out.push(Action::TransformSelection),
+            S::Preferences => st.dialog = Some(Dialog::Prefs { p: m.prefs.clone(), language: m.language.clone() }),
+            S::SelectAndMask => {
+                st.dialog = Some(Dialog::Refine { radius: 10.0, contrast: 0.0, shift: 0.0, feather: 0.0, to_mask: false });
+                st.dialog_new = true;
+            }
             S::StrokeSelection => st.dialog = Some(Dialog::Stroke { width: 4.0, position: "outside", opacity: 1.0 }),
             S::LayerPixels => out.push(Action::SelectLayerPixels { layer: m.active, mode: "replace" }),
             _ => {}
@@ -1479,6 +1504,19 @@ fn special_entry(
         Special::Revert => {
             let r = ui.add_enabled(m.can_revert, egui::Button::new((icon, tr("Revert"))));
             if r.on_disabled_hover_text(tr("The image was never saved")).on_hover_text(tr("Reload the last saved version")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
+        Special::Preferences => {
+            if ui.button((icon, tr("Preferences …"))).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
+        Special::SelectAndMask => {
+            let r = ui.add_enabled(m.has_selection, egui::Button::new((icon, tr("Select and Mask …"))));
+            if r.on_disabled_hover_text(tr("Needs a selection")).on_hover_text(tr("Refine the selection's edge along the image: hair, fur, soft edges")).clicked() {
                 run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
@@ -3122,6 +3160,121 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
     let mut open = true;
     let mut done = false;
     match d {
+        Dialog::Prefs { p, language } => {
+            let mut ok = false;
+            egui::Window::new(tr("Preferences"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    egui::Grid::new("prefs").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
+                        ui.label(tr("Language"));
+                        egui::ComboBox::from_id_salt("language")
+                            .selected_text(match language.as_str() {
+                                "en" => "English".to_string(),
+                                "de" => "Deutsch".to_string(),
+                                _ => tr("From the system").to_string(),
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(language, "auto".to_string(), tr("From the system"));
+                                ui.selectable_value(language, "en".to_string(), "English");
+                                ui.selectable_value(language, "de".to_string(), "Deutsch");
+                            });
+                        ui.end_row();
+                        ui.label(tr("Recovery copy"));
+                        egui::ComboBox::from_id_salt("autosave")
+                            .selected_text(if p.autosave_minutes == 0 { tr("Off").to_string() } else { tr!("every {n} min", n = p.autosave_minutes).to_string() })
+                            .show_ui(ui, |ui| {
+                                for n in [0u32, 1, 3, 5, 10, 30] {
+                                    let label = if n == 0 { tr("Off").to_string() } else { tr!("every {n} min", n = n).to_string() };
+                                    ui.selectable_value(&mut p.autosave_minutes, n, label);
+                                }
+                            })
+                            .response
+                            .on_hover_text(tr("Of documents with unsaved changes, in ~/.local/state/mosaix/autosave; offered after a crash"));
+                        ui.end_row();
+                        ui.label(tr("Undo steps"));
+                        ui.add(egui::DragValue::new(&mut p.history_limit).range(10..=1000));
+                        ui.end_row();
+                        ui.label(tr("File dialog"));
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(&mut p.builtin_dialog, false, tr("System"));
+                            ui.selectable_value(&mut p.builtin_dialog, true, tr("Built-in"));
+                        });
+                        ui.end_row();
+                    });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button(tr("Keyboard Shortcuts …")).clicked() {
+                            out.push(Action::OpenShortcuts);
+                        }
+                        if ui.button(tr("Reset Panel Layout")).clicked() {
+                            out.push(Action::ResetLayout);
+                        }
+                        if ui.add_enabled(!m.recent.is_empty(), egui::Button::new(tr("Clear Recent Files"))).clicked() {
+                            out.push(Action::ClearRecent);
+                        }
+                    });
+                    ui.separator();
+                    ok = ui.button("OK").clicked();
+                });
+            if ok {
+                out.push(Action::SetPrefs(p.clone()));
+                if *language != m.language {
+                    out.push(Action::SetLanguage(language.clone()));
+                }
+                done = true;
+            }
+        }
+        Dialog::Refine { radius, contrast, shift, feather, to_mask } => {
+            let mut changed = first_frame;
+            let mut ok = false;
+            egui::Window::new(tr("Select and Mask"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    // Only when a slider is let go: refining is not instant on big selections.
+                    let done = |r: egui::Response| r.drag_stopped() || (r.changed() && !r.dragged());
+                    egui::Grid::new("refine").num_columns(2).show(ui, |ui| {
+                        ui.label(tr("Edge radius")).on_hover_text(tr("How far from the selection's edge the image decides (hair, fur)"));
+                        changed |= done(ui.add(egui::Slider::new(radius, 0.0..=100.0).suffix(" px").max_decimals(0)));
+                        ui.end_row();
+                        ui.label(tr("Contrast"));
+                        let mut c = *contrast * 100.0;
+                        let r = ui.add(egui::Slider::new(&mut c, 0.0..=100.0).suffix(" %").max_decimals(0));
+                        *contrast = c / 100.0;
+                        changed |= done(r);
+                        ui.end_row();
+                        ui.label(tr("Shift Edge"));
+                        changed |= done(ui.add(egui::Slider::new(shift, -50.0..=50.0).suffix(" px").max_decimals(0)));
+                        ui.end_row();
+                        ui.label(tr("Feather"));
+                        changed |= done(ui.add(egui::Slider::new(feather, 0.0..=100.0).suffix(" px").max_decimals(1)));
+                        ui.end_row();
+                        ui.label(tr("Output"));
+                        ui.horizontal(|ui| {
+                            changed |= ui.selectable_value(to_mask, false, tr("Selection")).changed();
+                            changed |= ui.selectable_value(to_mask, true, tr("Layer Mask")).changed();
+                        });
+                        ui.end_row();
+                    });
+                    ui.label(RichText::new(tr("Select the subject roughly first (e.g. Select › Subject), then widen the edge radius over hair until it is caught.")).weak().small());
+                    ok = ui.button("OK").clicked();
+                });
+            let cmd = serde_json::json!({
+                "cmd": "select_refine", "radius": *radius, "contrast": *contrast, "shift": *shift,
+                "feather": *feather, "output": if *to_mask { "mask" } else { "selection" },
+            });
+            if ok {
+                out.push(Action::ColorRange { cmd, phase: RangePhase::Commit });
+                done = true;
+            } else if !open {
+                out.push(Action::ColorRange { cmd, phase: RangePhase::Cancel });
+            } else if changed {
+                out.push(Action::ColorRange { cmd, phase: RangePhase::Preview });
+            }
+        }
         Dialog::Stroke { width, position, opacity } => {
             egui::Window::new(tr("Stroke"))
                 .open(&mut open)

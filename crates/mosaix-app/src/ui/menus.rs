@@ -32,6 +32,8 @@ pub enum Special {
     /// Edit › Stroke.
     StrokeSelection,
     TransformSelection,
+    SelectAndMask,
+    Preferences,
     ConvertToSmart,
     NewGuide,
     GridSettings,
@@ -115,6 +117,7 @@ const EDIT: &[Item] = &[
     C("Import Patterns …", G(g::GRID_FOUR)),
     Sep,
     C("Keyboard Shortcuts …", G(g::KEYBOARD)),
+    S(Special::Preferences, G(g::SLIDERS_HORIZONTAL)),
 ];
 
 const IMAGE: &[Item] = &[
@@ -181,6 +184,7 @@ const SELECT: &[Item] = &[
     Sep,
     S(Special::Modify, G(g::SELECTION_PLUS)),
     S(Special::TransformSelection, G(g::BOUNDING_BOX)),
+    S(Special::SelectAndMask, G(g::USER_FOCUS)),
     C("Feather …", G(g::SELECTION_FOREGROUND)),
     Sep,
     S(Special::SaveSelection, G(g::FLOPPY_DISK)),

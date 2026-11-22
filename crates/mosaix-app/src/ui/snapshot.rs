@@ -72,6 +72,8 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         tabs: std::env::var("MOSAIX_SNAPSHOT_TABS").map(|v| v.split(',').map(|n| (n.to_string(), n.starts_with('*'))).collect()).unwrap_or_default(),
         tab: 0,
         history_source: 0,
+        prefs: Default::default(),
+        language: "auto".into(),
         zoom: view.zoom,
         rotation_deg: 0.0,
         cursor_doc: Some((dw as f64 * 0.4, dh as f64 * 0.3)),
@@ -219,6 +221,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         Ok("confirm") => state.confirm = Some(tr("They will be lost when quitting.").into()),
         Ok("generative") => state.open_generative(),
         Ok("stroke") => state.open_stroke(),
+        Ok("prefs") => state.open_prefs(),
         Ok("adjust") => state.open_adjust(mosaix_core::Adjustment::defaults().into_iter().find(|a| a.key() == "hue_saturation").unwrap()),
         Ok("filter") => state.open_filter(mosaix_core::Filter::GaussianBlur { radius: 25.0 }),
         Ok(d) if d.starts_with("filter:") => {

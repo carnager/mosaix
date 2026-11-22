@@ -225,6 +225,69 @@ impl Engine {
         self.set_selection(Some(result), label)
     }
 
+    /// Select › Select and Mask: the edge follows the image within `radius`
+    /// px (hair, fur), then `contrast` (0…1), `shift` (px, + grows) and
+    /// `feather` (px). Result: the selection, or with `to_mask` the active
+    /// layer's mask (the selection then goes).
+    pub fn select_and_mask(
+        &mut self,
+        radius: f64,
+        contrast: f32,
+        shift: f64,
+        feather_px: f64,
+        to_mask: bool,
+        label: &str,
+    ) -> Result<(), &'static str> {
+        use mosaix_core::color::linear_to_srgb;
+        use mosaix_core::mask::{Modify, modify, refine_edge};
+        let sel = self.selection_cpu().ok_or(mosaix_core::tr("nothing is selected"))?;
+        let (w, h) = self.size();
+        let mut m = if radius >= 1.0 {
+            refine_edge(
+                &sel,
+                radius,
+                contrast,
+                |x0, y0, rw, rh| {
+                    let (px, _) = self.read_region(None, x0, y0, rw, rh);
+                    px.iter()
+                        .map(|p| {
+                            if p[3] <= 1e-6 {
+                                return 0.0;
+                            }
+                            linear_to_srgb((0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / p[3])
+                        })
+                        .collect()
+                },
+                w,
+                h,
+            )
+        } else {
+            sel
+        };
+        if shift >= 0.5 {
+            m = modify(&m, Modify::Expand(shift), w, h);
+        } else if shift <= -0.5 {
+            m = modify(&m, Modify::Contract(-shift), w, h);
+        }
+        if feather_px >= 0.5 {
+            m = feather(&m, feather_px, w, h);
+        }
+        if to_mask {
+            let layer = self.doc.active;
+            let n = self.history.undo_len();
+            let before = self.doc.clone();
+            self.set_layer_mask(layer, Some(m), label)?;
+            self.edit(label, |d| {
+                d.selection = None;
+                true
+            });
+            self.history.squash_since(n, before, label);
+            Ok(())
+        } else {
+            self.set_selection(Some(m), label)
+        }
+    }
+
     /// Pixel bounds of the selected area (x0, y0, x1, y1; exclusive).
     pub fn selection_bounds(&self) -> Option<(i64, i64, i64, i64)> {
         let sel = self.selection_cpu()?;

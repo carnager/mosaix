@@ -391,6 +391,104 @@ fn scatter_region(r: &Region, default: u8) -> CpuMask {
     out
 }
 
+/// Mean over a (2r+1)² window (clipped at the borders), via an integral image.
+fn box_mean(img: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let mut sum = vec![0f64; (w + 1) * (h + 1)];
+    for y in 0..h {
+        let mut row = 0f64;
+        for x in 0..w {
+            row += img[y * w + x] as f64;
+            sum[(y + 1) * (w + 1) + x + 1] = sum[y * (w + 1) + x + 1] + row;
+        }
+    }
+    let mut out = vec![0f32; w * h];
+    out.par_chunks_mut(w).enumerate().for_each(|(y, line)| {
+        let (y0, y1) = (y.saturating_sub(r), (y + r + 1).min(h));
+        for (x, o) in line.iter_mut().enumerate() {
+            let (x0, x1) = (x.saturating_sub(r), (x + r + 1).min(w));
+            let s = sum[y1 * (w + 1) + x1] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0] + sum[y0 * (w + 1) + x0];
+            *o = (s / ((x1 - x0) * (y1 - y0)) as f64) as f32;
+        }
+    });
+    out
+}
+
+/// Select and Mask: within `radius` px of the selection's edge, the mask
+/// follows the edges of the image (`guide(x0, y0, w, h)` gives its
+/// luminance 0…1 there) – a guided filter, which pulls hair and fur out of
+/// the background. `contrast` 0…1 hardens the result.
+pub fn refine_edge(
+    mask: &CpuMask,
+    radius: f64,
+    contrast: f32,
+    guide: impl FnOnce(i64, i64, usize, usize) -> Vec<f32>,
+    doc_w: u32,
+    doc_h: u32,
+) -> CpuMask {
+    let r = radius.round().max(1.0) as usize;
+    let Some(mut reg) = gather_region(mask, 2 * r, doc_w, doc_h) else {
+        return mask.clone();
+    };
+    let (w, h) = (reg.w, reg.h);
+    let lum = guide(reg.tx0 as i64 * TS as i64, reg.ty0 as i64 * TS as i64, w, h);
+    if lum.len() != w * h {
+        return mask.clone();
+    }
+    let p: Vec<f32> = reg.img.iter().map(|v| v / 255.0).collect();
+    // The band around the edge (where a window holds both inside and
+    // outside) is unknown; elsewhere the selection is trusted.
+    let hard: Vec<f32> = p.iter().map(|&v| (v > 0.5) as u8 as f32).collect();
+    let mixed = box_mean(&hard, w, h, r);
+    let band: Vec<bool> = mixed.iter().map(|&m| m > 0.0 && m < 1.0).collect();
+    let fg: Vec<f32> = (0..w * h).map(|k| (hard[k] > 0.5 && !band[k]) as u8 as f32).collect();
+    let bg: Vec<f32> = (0..w * h).map(|k| (hard[k] < 0.5 && !band[k]) as u8 as f32).collect();
+    // Local brightness of the known inside and outside (a window twice the band).
+    let weighted = |known: &[f32]| -> (Vec<f32>, Vec<f32>) {
+        let li: Vec<f32> = lum.iter().zip(known).map(|(l, k)| l * k).collect();
+        (box_mean(&li, w, h, 2 * r), box_mean(known, w, h, 2 * r))
+    };
+    let (fi, fn_) = weighted(&fg);
+    let (bi, bn) = weighted(&bg);
+    let mut alpha = p.clone();
+    for k in 0..w * h {
+        if !band[k] || fn_[k] <= 0.0 || bn[k] <= 0.0 {
+            continue;
+        }
+        let (f, b) = (fi[k] / fn_[k], bi[k] / bn[k]);
+        if (f - b).abs() > 0.04 {
+            // How far this pixel is from the background towards the subject.
+            alpha[k] = ((lum[k] - b) / (f - b)).clamp(0.0, 1.0);
+        }
+    }
+    // A light guided filter evens out noise along the edge (He et al.).
+    let rg = 2;
+    let eps = 1e-3f32;
+    let mean_i = box_mean(&lum, w, h, rg);
+    let mean_p = box_mean(&alpha, w, h, rg);
+    let ii: Vec<f32> = lum.iter().map(|v| v * v).collect();
+    let ip: Vec<f32> = lum.iter().zip(&alpha).map(|(a, b)| a * b).collect();
+    let corr_i = box_mean(&ii, w, h, rg);
+    let corr_ip = box_mean(&ip, w, h, rg);
+    let mut a = vec![0f32; w * h];
+    let mut b = vec![0f32; w * h];
+    for k in 0..w * h {
+        let var = corr_i[k] - mean_i[k] * mean_i[k];
+        let cov = corr_ip[k] - mean_i[k] * mean_p[k];
+        a[k] = cov / (var + eps);
+        b[k] = mean_p[k] - a[k] * mean_i[k];
+    }
+    let (ma, mb) = (box_mean(&a, w, h, rg), box_mean(&b, w, h, rg));
+    let gain = 1.0 + 6.0 * contrast.clamp(0.0, 1.0);
+    for k in 0..w * h {
+        let mut v = if band[k] { (ma[k] * lum[k] + mb[k]).clamp(0.0, 1.0) } else { p[k] };
+        if band[k] && contrast > 0.0 {
+            v = ((v - 0.5) * gain + 0.5).clamp(0.0, 1.0);
+        }
+        reg.img[k] = v * 255.0;
+    }
+    scatter_region(&reg, mask.default)
+}
+
 /// Softens a mask with an approximately Gaussian blur (three box passes) of
 /// the given radius. Works on the bounding box of all non-default tiles,
 /// expanded by the blur reach, clipped to the document.
@@ -575,6 +673,42 @@ fn transpose(img: &[f32], w: usize, h: usize) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn refine_edge_follows_the_image() {
+        // The image: bright left of x = 150 (with a thin bright "hair" at
+        // y = 40 reaching to x = 180), dark right. The selection: a rough box
+        // ending at x = 140.
+        let (w, h) = (256u32, 256u32);
+        let mut m = CpuMask::filled(0);
+        let mut px = vec![0u8; TILE_PX];
+        for y in 0..256 {
+            for x in 0..140 {
+                px[y * TS + x] = 255;
+            }
+        }
+        m.tiles.insert(TileCoord::new(0, 0), MaskData::Pixels(px));
+        let guide = |x0: i64, y0: i64, gw: usize, gh: usize| {
+            let mut v = vec![0.0f32; gw * gh];
+            for y in 0..gh {
+                for x in 0..gw {
+                    let (dx, dy) = (x0 + x as i64, y0 + y as i64);
+                    if dx < 150 || ((38..=42).contains(&dy) && dx < 180) {
+                        v[y * gw + x] = 1.0;
+                    }
+                }
+            }
+            v
+        };
+        let r = refine_edge(&m, 16.0, 0.5, guide, w, h);
+        let at = |x, y| r.tile(TileCoord::new(0, 0)).get(x, y);
+        assert!(at(146, 100) > 200, "selection grew to the image edge: {}", at(146, 100));
+        assert!(at(154, 100) < 60, "and stops there: {}", at(154, 100));
+        assert!(at(50, 100) == 255 && at(220, 100) == 0, "far from the edge nothing changes");
+        assert!(at(153, 40) > 180, "the hair is kept: {}", at(153, 40));
+        assert!(at(153, 60) < 60, "beside it nothing: {}", at(153, 60));
+    }
+
     use super::*;
 
     #[test]

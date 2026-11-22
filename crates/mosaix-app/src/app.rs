@@ -1039,7 +1039,9 @@ impl App {
                     self.settings.add_recent(p);
                     self.store_settings();
                 }
-                self.session = Some(Session::new(engine, name, source, native_len));
+                let mut session = Session::new(engine, name, source, native_len);
+                session.engine.set_history_limit(self.settings.prefs.history_limit);
+                self.session = Some(session);
                 // The start screen comes with the first (blank) document and
                 // goes when another one is opened.
                 self.ui_state.home = std::mem::take(&mut self.home_pending).then(Default::default);
@@ -2429,7 +2431,7 @@ impl App {
         if self.picking || self.ui_state.file.is_some() {
             return;
         }
-        if std::env::var_os("MOSAIX_BUILTIN_DIALOG").is_some() {
+        if std::env::var_os("MOSAIX_BUILTIN_DIALOG").is_some() || self.settings.prefs.builtin_dialog {
             self.builtin_file_dialog(req);
             return;
         }
@@ -2705,7 +2707,8 @@ impl App {
         }
         if !self.modified
             || self.edit_count == self.autosave_mark
-            || self.autosave_at.elapsed() < AUTOSAVE_EVERY
+            || self.settings.prefs.autosave_minutes == 0
+            || self.autosave_at.elapsed() < AUTOSAVE_EVERY.mul_f64(self.settings.prefs.autosave_minutes as f64 / 3.0)
             || self.stroke.is_some()
             || self.loading
         {
@@ -4261,6 +4264,8 @@ impl App {
                 .collect(),
             tab: self.active_tab(),
             history_source: e.history_source(),
+            prefs: self.settings.prefs.clone(),
+            language: self.settings.language.clone(),
             zoom: self.view.zoom / self.scale,
             rotation_deg: self.view.rotation.to_degrees(),
             // Not while dragging: the panels need not be rebuilt for every stroke frame.
@@ -4696,6 +4701,32 @@ impl App {
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
                 Action::SwitchTab(i) => self.switch_tab(i),
+                Action::SetPrefs(p) => {
+                    let n = p.history_limit;
+                    self.settings.prefs = p;
+                    if let Some(e) = self.engine() {
+                        e.set_history_limit(n);
+                    }
+                    for t in self.tabs.iter_mut().flatten() {
+                        t.session.engine.set_history_limit(n);
+                    }
+                    self.store_settings();
+                }
+                Action::SetLanguage(l) => {
+                    self.settings.language = l;
+                    self.store_settings();
+                    tracing::info!("{}", tr("The language changes the next time Mosaix starts."));
+                }
+                Action::ClearRecent => {
+                    self.settings.recent.clear();
+                    self.store_settings();
+                }
+                Action::ResetLayout => {
+                    self.ui_state.dock = None;
+                    self.settings.dock_layout = None;
+                    self.store_settings();
+                }
+                Action::OpenShortcuts => self.ui_state.shortcuts = Some(Default::default()),
                 Action::HistorySource(p) => {
                     if let Some(e) = self.engine() {
                         e.set_history_source(p);

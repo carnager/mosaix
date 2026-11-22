@@ -1192,6 +1192,11 @@ impl Engine {
         )
     }
 
+    /// How many undo steps are kept.
+    pub fn set_history_limit(&mut self, n: usize) {
+        self.history.set_limit(n);
+    }
+
     /// The history position the History Brush paints from (0 = as opened).
     pub fn history_source(&self) -> usize {
         self.history_source.min(self.history.undo_len() + self.history.redo_len())

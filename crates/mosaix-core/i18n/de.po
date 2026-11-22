@@ -3325,3 +3325,102 @@ msgstr "Nächstes Dokument"
 
 msgid "Previous Document"
 msgstr "Vorheriges Dokument"
+
+msgid "Pencil"
+msgstr "Buntstift"
+
+msgid "History Brush"
+msgstr "Protokoll-Pinsel"
+
+msgid "Quick Mask"
+msgstr "Maskierungsmodus"
+
+msgid "Quick Mask: paint with black to mask (deselect), with white or the eraser to reveal; Q turns it back into a selection"
+msgstr "Maskierungsmodus: Schwarz maskiert (wählt ab), Weiß oder der Radierer gibt frei; Q macht wieder eine Auswahl daraus"
+
+msgid "Nothing is selected"
+msgstr "Nichts ist ausgewählt"
+
+msgid "Transform Selection: the outline only. Enter applies, Esc cancels."
+msgstr "Auswahl transformieren: nur der Umriss. Enter übernimmt, Esc bricht ab."
+
+msgid "Transform Selection"
+msgstr "Auswahl transformieren"
+
+msgid "The language changes the next time Mosaix starts."
+msgstr "Die Sprache wechselt beim nächsten Start von Mosaix."
+
+msgid "Select and Mask"
+msgstr "Auswählen und maskieren"
+
+msgid "Preferences …"
+msgstr "Voreinstellungen …"
+
+msgid "Select and Mask …"
+msgstr "Auswählen und maskieren …"
+
+msgid "Refine the selection's edge along the image: hair, fur, soft edges"
+msgstr "Die Auswahlkante am Bild verfeinern: Haare, Fell, weiche Kanten"
+
+msgid "Scale, rotate or distort the selection outline; the pixels stay"
+msgstr "Den Auswahlumriss skalieren, drehen oder verzerren; die Pixel bleiben"
+
+msgid "History Brush source: the History Brush (Y) paints this state back"
+msgstr "Quelle des Protokoll-Pinsels: der Protokoll-Pinsel (Y) malt diesen Zustand zurück"
+
+msgid "Preferences"
+msgstr "Voreinstellungen"
+
+msgid "Language"
+msgstr "Sprache"
+
+msgid "From the system"
+msgstr "Wie im System"
+
+msgid "Recovery copy"
+msgstr "Wiederherstellungskopie"
+
+msgid "every {n} min"
+msgstr "alle {n} min"
+
+msgid "Of documents with unsaved changes, in ~/.local/state/mosaix/autosave; offered after a crash"
+msgstr "Von Dokumenten mit ungespeicherten Änderungen, in ~/.local/state/mosaix/autosave; nach einem Absturz angeboten"
+
+msgid "Undo steps"
+msgstr "Rückgängig-Schritte"
+
+msgid "File dialog"
+msgstr "Dateidialog"
+
+msgid "System"
+msgstr "System"
+
+msgid "Built-in"
+msgstr "Eingebaut"
+
+msgid "Clear Recent Files"
+msgstr "Zuletzt geöffnete leeren"
+
+msgid "Edge radius"
+msgstr "Kantenradius"
+
+msgid "How far from the selection's edge the image decides (hair, fur)"
+msgstr "Wie weit von der Auswahlkante das Bild entscheidet (Haare, Fell)"
+
+msgid "Shift Edge"
+msgstr "Kante verschieben"
+
+msgid "Output"
+msgstr "Ausgabe"
+
+msgid "Select the subject roughly first (e.g. Select › Subject), then widen the edge radius over hair until it is caught."
+msgstr "Erst das Motiv grob auswählen (z. B. Auswahl › Motiv), dann den Kantenradius über Haaren vergrößern, bis sie erfasst sind."
+
+msgid "the Quick Mask layer is gone"
+msgstr "die Maskierungsebene ist weg"
+
+msgid "this layer did not exist (as pixels) at the history source – pick another state in the History panel"
+msgstr "diese Ebene gab es im Quellzustand (als Pixel) nicht – im Protokoll einen anderen Zustand wählen"
+
+msgid "Brush / Pencil"
+msgstr "Pinsel / Buntstift"

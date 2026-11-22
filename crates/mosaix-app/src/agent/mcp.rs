@@ -502,6 +502,13 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "select_refine",
+            "Select and Mask: refine the selection's edge along the image within `radius` px (hair, fur; default 10), then contrast 0–1, shift (px, + grows), feather (px). output: selection (default) or mask (the active layer's mask; the selection goes). Typical: select_subject → select_refine {radius: 20}.",
+            json!({ "radius": { "type": "number", "minimum": 0 }, "contrast": { "type": "number", "minimum": 0, "maximum": 1 }, "shift": { "type": "number" }, "feather": { "type": "number", "minimum": 0 }, "output": { "type": "string", "enum": ["selection", "mask"] } }),
+            &[],
+            false,
+        ),
+        tool(
             "history_source",
             "Set the state the History Brush (paint_stroke history: true) paints from: 0 = as opened, n = after the n-th step of document_info's history.",
             json!({ "position": { "type": "integer", "minimum": 0 } }),
