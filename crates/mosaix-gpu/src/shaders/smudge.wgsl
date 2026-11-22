@@ -185,11 +185,30 @@ fn fs_tone(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let ou = orig.rgb / orig.a;
         let ke = vec3<f32>(enc1(ku.r), enc1(ku.g), enc1(ku.b));
         let oe = vec3<f32>(enc1(ou.r), enc1(ou.g), enc1(ou.b));
+        // Colour to alpha: the pixel is read as the key colour mixed with a
+        // foreground colour; within half the tolerance it is all key
+        // (erased), beyond the tolerance all foreground (kept). In between
+        // the key's share is removed from the colour too, so edges lose
+        // the background's tint instead of just fading.
+        let tol = max(k, 0.002);
+        let t0 = tol * 0.5;
         let dv = abs(ke - oe);
         let d = max(dv.r, max(dv.g, dv.b));
-        let tol = max(k, 0.002);
-        let m = 1.0 - smoothstep(tol * 0.5, tol, d);
-        goal = orig * (1.0 - m);
+        let ramp = clamp((d - t0) / (tol - t0), 0.0, 1.0);
+        // At least the opacity that keeps the unmixed colour in range
+        // (otherwise it would be clipped to black or white).
+        let lo = select((ke - oe) / max(ke, vec3<f32>(1e-5)), (oe - ke) / max(1.0 - ke, vec3<f32>(1e-5)), oe > ke);
+        let gamut = clamp(max(lo.r, max(lo.g, lo.b)), 0.0, 1.0);
+        let a = max(ramp, min(gamut, ramp * 4.0));
+        if a <= 0.0 {
+            goal = vec4<f32>(0.0);
+        } else {
+            // Foreground colour: pixel = a·F + (1 − a)·key, solved for F
+            // (over the old background it looks exactly as before).
+            let fe = clamp(ke + (oe - ke) / a, vec3<f32>(0.0), vec3<f32>(1.0));
+            let na = orig.a * a;
+            goal = vec4<f32>(vec3<f32>(dec1(fe.r), dec1(fe.g), dec1(fe.b)) * na, na);
+        }
     } else if job.primed == 5u {
         goal = mix(orig, blurred(job, gp), k);
     } else if job.primed == 6u {

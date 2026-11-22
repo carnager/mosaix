@@ -4012,3 +4012,37 @@ fn background_eraser_keeps_other_colours() {
         e.undo();
     }
 }
+
+#[test]
+fn background_eraser_unmixes_edge_pixels() {
+    use mosaix_core::color::{linear_to_srgb, srgb_to_linear};
+    use mosaix_gpu::{Tone, ToneKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    // Sky (sRGB 0.8, 0.9, 0.95) with a strip x 120…136 that is a 60/40 mix of dark green (0.1, 0.4, 0.1) and sky.
+    let sky = [0.8f32, 0.9, 0.95];
+    let green = [0.1f32, 0.4, 0.1];
+    let lin = |c: [f32; 3]| [srgb_to_linear(c[0]), srgb_to_linear(c[1]), srgb_to_linear(c[2]), 1.0];
+    let mix: [f32; 3] = std::array::from_fn(|i| 0.6 * green[i] + 0.4 * sky[i]);
+    e.fill(StrokeTarget::Pixels, lin(sky), 1.0, "Sky").unwrap();
+    e.select_shape(&Shape::Rect { x: 120.0, y: 0.0, w: 16.0, h: 256.0 }, CombineOp::Replace, "Selection").unwrap();
+    e.fill(StrokeTarget::Pixels, lin(mix), 1.0, "Edge").unwrap();
+    e.deselect("x").unwrap();
+    let mut brush = red_brush();
+    brush.size = 120.0;
+    e.begin_stroke(StrokeParams { tone: Some(Tone { kind: ToneKind::BackgroundErase, range: 1, amount: 0.8 }), ..Default::default() }).unwrap();
+    let mut st = Stroke::new(brush);
+    for x in [80.0, 90.0, 100.0] {
+        e.stroke_dabs(&st.add(InputSample { pos: DVec2::new(x, 128.0), pressure: 1.0 }));
+    }
+    e.end_stroke("Background Eraser");
+    e.flush();
+    let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&t, 90, 128)[3] < 0.01, "sky erased");
+    let p = px(&t, 128, 128);
+    assert!(p[3] > 0.2 && p[3] < 0.95, "edge partly transparent: {p:?}");
+    // The sky tint is gone: the remaining colour is greener than the mix.
+    let g_ratio = linear_to_srgb(p[1] / p[3]) - linear_to_srgb(p[2] / p[3]);
+    assert!(g_ratio > (mix[1] - mix[2]) + 0.1, "unmixed towards green: {p:?}");
+}

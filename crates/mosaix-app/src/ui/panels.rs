@@ -2651,7 +2651,7 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                                 tc |= ui.selectable_value(&mut t.bg_once, true, tr("Once")).changed();
                             })
                             .response
-                            .on_hover_text(tr("Sampling: the colour under the brush centre all along, or only where the stroke starts"));
+                            .on_hover_text(tr("Once: the colour you click on is erased, then drag anywhere (also over the subject). Continuous: always the colour under the crosshair – keep it on the background."));
                         let mut pct = t.bg_tolerance * 100.0;
                         ui.label(tr("Tolerance"));
                         tc |= ui.add(egui::Slider::new(&mut pct, 1.0..=100.0).suffix(" %").max_decimals(0)).changed();
