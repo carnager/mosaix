@@ -3,7 +3,8 @@
 //! Adjustments: Levels (`levl`), Curves (`curv`), Brightness/Contrast
 //! (`brit` + `CgEd`), Hue/Saturation (`hue2`, master and colorize),
 //! Exposure (`expA`), Vibrance (`vibA`), Black & White (`blwh`), Invert
-//! (`nvrt`), Posterize (`post`), Threshold (`thrs`). Text: the `TySh`
+//! (`nvrt`), Posterize (`post`), Threshold (`thrs`), Color Balance
+//! (`blnc`), Channel Mixer (`mixr`), Gradient Map (`grdm`). Text: the `TySh`
 //! block (text, first run's font, size, colour, alignment, leading,
 //! tracking, transform, paragraph width).
 
@@ -60,6 +61,23 @@ pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
     let mut b = B { b: data, p: 0 };
     Some(match key {
         b"nvrt" => Adjustment::Invert,
+        b"blnc" => {
+            let mut t = || -> Option<[f32; 3]> { Some([b.i16()? as f32, b.i16()? as f32, b.i16()? as f32]) };
+            let (shadows, midtones, highlights) = (t()?, t()?, t()?);
+            Adjustment::ColorBalance { shadows, midtones, highlights, preserve_luminosity: b.u8().unwrap_or(1) != 0 }
+        }
+        b"mixr" => {
+            b.u16()?;
+            let monochrome = b.u16()? != 0;
+            let mut row = || -> Option<[f32; 4]> {
+                let v: Vec<f32> = (0..5).map(|_| b.i16().map(|x| x as f32)).collect::<Option<_>>()?;
+                Some([v[0], v[1], v[2], v[4]])
+            };
+            let (red, green, blue) = (row()?, row()?, row()?);
+            let gray = row().unwrap_or([40.0, 40.0, 20.0, 0.0]);
+            Adjustment::ChannelMixer { red, green, blue, gray, monochrome }
+        }
+        b"grdm" => read_gradient_map(&mut b)?,
         b"post" => Adjustment::Posterize {
             levels: b.u16()?.clamp(2, 255) as f32,
         },
@@ -203,6 +221,96 @@ pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
     })
 }
 
+fn read_gradient_map(b: &mut B) -> Option<Adjustment> {
+    use mosaix_core::gradient::{AlphaStop, ColorStop, Gradient};
+    b.u16()?;
+    let reverse = b.u8()? != 0;
+    let _dither = b.u8()?;
+    let name_len = b.u32()? as usize;
+    b.p += name_len * 2;
+    let n = b.u16()? as usize;
+    let mut colors = Vec::with_capacity(n);
+    for _ in 0..n {
+        let at = b.u32()? as f32 / 4096.0;
+        let mid = b.u32()? as f32 / 100.0;
+        let _mode = b.u16()?;
+        let c = [b.u16()?, b.u16()?, b.u16()?, b.u16()?];
+        b.u16()?;
+        let color = [c[0], c[1], c[2]].map(|v| mosaix_core::color::srgb_to_linear(v as f32 / 65535.0));
+        colors.push(ColorStop { at: at.clamp(0.0, 1.0), color, mid: mid.clamp(0.0, 1.0) });
+    }
+    let n = b.u16()? as usize;
+    let mut alphas = Vec::with_capacity(n);
+    for _ in 0..n {
+        let at = b.u32()? as f32 / 4096.0;
+        let mid = b.u32()? as f32 / 100.0;
+        let opacity = b.u16()? as f32 / 255.0;
+        alphas.push(AlphaStop { at: at.clamp(0.0, 1.0), opacity: opacity.clamp(0.0, 1.0), mid: mid.clamp(0.0, 1.0) });
+    }
+    // Interpolation (smoothness, 0…4096) follows the expansion count.
+    let smoothness = b.u16().and_then(|_| b.u16()).map_or(0.0, |v| v as f32 / 4096.0);
+    if colors.is_empty() {
+        return None;
+    }
+    if alphas.iter().all(|a| a.opacity >= 1.0) {
+        alphas.clear();
+    }
+    Some(Adjustment::GradientMap { gradient: Gradient { colors, alphas, smoothness }, reverse })
+}
+
+fn write_gradient_map(o: &mut Vec<u8>, g: &mosaix_core::gradient::Gradient, reverse: bool) {
+    let be16 = |o: &mut Vec<u8>, v: u16| o.extend(v.to_be_bytes());
+    let be32 = |o: &mut Vec<u8>, v: u32| o.extend(v.to_be_bytes());
+    let g = g.clone().sorted();
+    be16(o, 1);
+    o.push(reverse as u8);
+    o.push(0);
+    // Name (Unicode).
+    let name: Vec<u16> = "Custom".encode_utf16().collect();
+    be32(o, name.len() as u32);
+    for c in &name {
+        be16(o, *c);
+    }
+    be16(o, g.colors.len() as u16);
+    for s in &g.colors {
+        be32(o, (s.at.clamp(0.0, 1.0) * 4096.0).round() as u32);
+        be32(o, (s.mid.clamp(0.0, 1.0) * 100.0).round() as u32);
+        be16(o, 0); // RGB
+        for c in s.color {
+            be16(o, (mosaix_core::color::linear_to_srgb(c).clamp(0.0, 1.0) * 65535.0).round() as u16);
+        }
+        be16(o, 0);
+        be16(o, 0);
+    }
+    let alphas = if g.alphas.is_empty() {
+        vec![(0.0, 1.0, 0.5), (1.0, 1.0, 0.5)]
+    } else {
+        g.alphas.iter().map(|a| (a.at, a.opacity, a.mid)).collect()
+    };
+    be16(o, alphas.len() as u16);
+    for (at, op, mid) in alphas {
+        be32(o, (at.clamp(0.0, 1.0) * 4096.0).round() as u32);
+        be32(o, (mid.clamp(0.0, 1.0) * 100.0).round() as u32);
+        be16(o, (op.clamp(0.0, 1.0) * 255.0).round() as u16);
+    }
+    be16(o, 2); // expansion count
+    be16(o, (g.smoothness.clamp(0.0, 1.0) * 4096.0).round() as u16);
+    be16(o, 32); // length
+    be16(o, 0); // mode
+    be32(o, 0); // random seed
+    be16(o, 0); // showing transparency
+    be16(o, 0); // using vector colour
+    be32(o, 2048); // roughness
+    be16(o, 3); // colour model (RGB)
+    for _ in 0..4 {
+        be16(o, 0);
+    }
+    for _ in 0..4 {
+        be16(o, 0x8000);
+    }
+    be16(o, 0);
+}
+
 /// Tagged blocks for an adjustment layer: (key, data), in writing order.
 pub(crate) fn adjustment_blocks(a: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
     let mut o = Vec::new();
@@ -214,6 +322,39 @@ pub(crate) fn adjustment_blocks(a: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             be16(&mut o, levels.round().clamp(2.0, 255.0) as u16);
             be16(&mut o, 0);
             out.push((*b"post", o));
+        }
+        Adjustment::ColorBalance {
+            shadows,
+            midtones,
+            highlights,
+            preserve_luminosity,
+        } => {
+            for v in shadows.iter().chain(midtones).chain(highlights) {
+                o.extend((v.round().clamp(-100.0, 100.0) as i16).to_be_bytes());
+            }
+            o.push(*preserve_luminosity as u8);
+            o.push(0);
+            out.push((*b"blnc", o));
+        }
+        Adjustment::ChannelMixer {
+            red,
+            green,
+            blue,
+            gray,
+            monochrome,
+        } => {
+            be16(&mut o, 1);
+            be16(&mut o, *monochrome as u16);
+            for r in [red, green, blue, gray] {
+                for v in [r[0], r[1], r[2], 0.0, r[3]] {
+                    o.extend((v.round().clamp(-200.0, 200.0) as i16).to_be_bytes());
+                }
+            }
+            out.push((*b"mixr", o));
+        }
+        Adjustment::GradientMap { gradient, reverse } => {
+            write_gradient_map(&mut o, gradient, *reverse);
+            out.push((*b"grdm", o));
         }
         Adjustment::Threshold { level } => {
             be16(&mut o, level.round().clamp(1.0, 255.0) as u16);
@@ -645,6 +786,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gradient_map_roundtrips() {
+        use mosaix_core::gradient::{ColorStop, Gradient};
+        let g = Gradient {
+            colors: vec![
+                ColorStop { at: 0.0, color: [0.0, 0.0, 0.2], mid: 0.5 },
+                ColorStop { at: 0.25, color: [1.0, 0.2, 0.0], mid: 0.3 },
+                ColorStop { at: 1.0, color: [1.0, 1.0, 1.0], mid: 0.5 },
+            ],
+            alphas: Vec::new(),
+            smoothness: 1.0,
+        };
+        let a = Adjustment::GradientMap { gradient: g.clone(), reverse: true };
+        let blocks = adjustment_blocks(&a);
+        let back = read_adjustment(&blocks[0].0, &blocks[0].1).unwrap();
+        let Adjustment::GradientMap { gradient, reverse } = back else { panic!() };
+        assert!(reverse);
+        assert_eq!(gradient.colors.len(), 3);
+        for (x, y) in gradient.colors.iter().zip(&g.colors) {
+            assert!((x.at - y.at).abs() < 1e-3 && (x.mid - y.mid).abs() < 0.01);
+            assert!(x.color.iter().zip(y.color).all(|(a, b)| (a - b).abs() < 1e-3), "{:?} {:?}", x.color, y.color);
+        }
+        assert!((gradient.smoothness - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
     fn adjustments_roundtrip_through_blocks() {
         let cases = [
             Adjustment::Invert,
@@ -673,6 +839,19 @@ mod tests {
             },
             Adjustment::BlackWhite {
                 weights: [40.0, 60.0, 40.0, 60.0, 20.0, 80.0],
+            },
+            Adjustment::ColorBalance {
+                shadows: [-20.0, 10.0, 30.0],
+                midtones: [40.0, -10.0, 0.0],
+                highlights: [0.0, 20.0, -50.0],
+                preserve_luminosity: false,
+            },
+            Adjustment::ChannelMixer {
+                red: [80.0, 30.0, -10.0, 5.0],
+                green: [0.0, 100.0, 0.0, 0.0],
+                blue: [20.0, 0.0, 70.0, -10.0],
+                gray: [40.0, 40.0, 20.0, 0.0],
+                monochrome: true,
             },
         ];
         for a in cases {

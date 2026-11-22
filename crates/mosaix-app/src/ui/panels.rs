@@ -2917,6 +2917,11 @@ fn filter_dialog(ctx: &egui::Context, st: &mut State, out: &mut Vec<Action>) {
                     s(ui, tr("Threshold"), threshold, 0.0..=255.0, false, "");
                 }
                 Filter::HighPass { radius } => s(ui, "Radius", radius, 0.1..=1000.0, true, " px"),
+                Filter::ShadowsHighlights { shadows, highlights, radius } => {
+                    s(ui, tr("Shadows"), shadows, 0.0..=100.0, false, " %");
+                    s(ui, tr("Highlights"), highlights, 0.0..=100.0, false, " %");
+                    s(ui, "Radius", radius, 1.0..=500.0, true, " px");
+                }
                 Filter::AddNoise { amount, monochrome, gaussian, seed } => {
                     s(ui, tr("Amount"), amount, 0.0..=100.0, false, " %");
                     ui.checkbox(monochrome, tr("Monochromatic"));

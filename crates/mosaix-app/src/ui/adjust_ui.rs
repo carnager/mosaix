@@ -14,6 +14,10 @@ pub struct EditorState {
     dragging: Option<usize>,
     /// Hue/Saturation: 0 = Master, 1–6 = Reds … Magentas.
     hue_range: usize,
+    /// Color balance: 0 = shadows, 1 = midtones, 2 = highlights.
+    tone: Option<usize>,
+    /// Channel mixer: output channel 0–2.
+    output: usize,
 }
 
 const CHANNELS: [&str; 4] = ["RGB", "Red", "Green", "Blue"];
@@ -287,6 +291,78 @@ pub fn editor(
             slider(levels, 2.0..=255.0).max_decimals(0),
             &mut t,
         ),
+        Adjustment::ColorBalance {
+            shadows,
+            midtones,
+            highlights,
+            preserve_luminosity,
+        } => {
+            let tone = st.tone.get_or_insert(1);
+            ui.horizontal(|ui| {
+                for (i, n) in ["Shadows", "Midtones", "Highlights"].iter().enumerate() {
+                    ui.selectable_value(tone, i, tr(n));
+                }
+            });
+            let v = match *tone {
+                0 => shadows,
+                2 => highlights,
+                _ => midtones,
+            };
+            for (k, (l, r)) in [("Cyan", "Red"), ("Magenta", "Green"), ("Yellow", "Blue")].into_iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.add_sized([56.0, 18.0], egui::Label::new(tr(l)));
+                    let resp = ui.add(slider(&mut v[k], -100.0..=100.0).max_decimals(0));
+                    t.add(&resp);
+                    ui.label(tr(r));
+                });
+            }
+            row(ui, "Preserve Luminosity", egui::Checkbox::without_text(preserve_luminosity), &mut t);
+        }
+        Adjustment::ChannelMixer {
+            red,
+            green,
+            blue,
+            gray,
+            monochrome,
+        } => {
+            row(ui, "Monochrome", egui::Checkbox::without_text(monochrome), &mut t);
+            let r = if *monochrome {
+                ui.label(RichText::new(tr("Output: Gray")).weak());
+                gray
+            } else {
+                ui.horizontal(|ui| {
+                    for (i, n) in ["Red", "Green", "Blue"].iter().enumerate() {
+                        if ui.selectable_label(st.output == i, RichText::new(tr(n)).color(CHANNEL_COLORS[i + 1])).clicked() {
+                            st.output = i;
+                        }
+                    }
+                });
+                match st.output {
+                    1 => green,
+                    2 => blue,
+                    _ => red,
+                }
+            };
+            for (k, n) in ["Red", "Green", "Blue"].iter().enumerate() {
+                row(ui, n, slider(&mut r[k], -200.0..=200.0).suffix(" %").max_decimals(0), &mut t);
+            }
+            let total = r[0] + r[1] + r[2];
+            ui.label(
+                RichText::new(tr!("Total {pct} %", pct = format!("{total:+.0}")))
+                    .color(if total > 100.0 { Color32::from_rgb(240, 170, 60) } else { ui.visuals().weak_text_color() }),
+            );
+            row(ui, "Constant", slider(&mut r[3], -200.0..=200.0).suffix(" %").max_decimals(0), &mut t);
+        }
+        Adjustment::GradientMap { gradient, reverse } => {
+            let o = super::gradient_ui::editor(ui, gradient, "gradient map");
+            if o.changed {
+                t.changed = true;
+            }
+            if o.done {
+                t.done = true;
+            }
+            row(ui, "Reverse", egui::Checkbox::without_text(reverse), &mut t);
+        }
     }
     if ui.small_button(tr("Reset")).clicked()
         && let Some(d) = Adjustment::defaults()

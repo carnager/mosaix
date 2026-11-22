@@ -566,7 +566,9 @@ pub fn tools() -> Vec<Value> {
              Kinds: brightness_contrast {brightness −150…150, contrast −50…100}; levels {master/red/green/blue: {in_black, in_white, gamma, out_black, out_white} 0…1}; \
              curves {master/red/green/blue: [[x,y],…] 0…1}; exposure {exposure stops, offset, gamma}; vibrance {vibrance, saturation −100…100}; \
              hue_saturation {hue −180…180, saturation, lightness −100…100, colorize}; black_white {weights: 6 percentages for red, yellow, green, cyan, blue, magenta}; \
-             invert; posterize {levels}; threshold {level 1…255}. Omitted parameters are neutral.",
+             invert; posterize {levels}; threshold {level 1…255}; color_balance {shadows/midtones/highlights: [cyan–red, magenta–green, \
+             yellow–blue] −100…100, preserve_luminosity}; channel_mixer {red/green/blue/gray: [r %, g %, b %, constant %], monochrome}; \
+             gradient_map {gradient: {colors: [{at 0…1, color [r,g,b] linear}]}, reverse}. Omitted parameters are neutral.",
             json!({ "adjustment": { "type": "object" }, "name": { "type": "string" } }),
             &["adjustment"],
             false,
@@ -575,7 +577,7 @@ pub fn tools() -> Vec<Value> {
             "filter_apply",
             "Apply a pixel filter to a layer (within the selection, if any). filter is an object with \"kind\": \
              gaussian_blur {radius px}; unsharp_mask {amount % 1…500, radius px, threshold 0…255}; \
-             high_pass {radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}; \
+             high_pass {radius px}; shadows_highlights {shadows %, highlights %, radius px}; add_noise {amount % 0…100, monochrome, gaussian, seed}; \
              plugin {name, values: {param: number | bool | \"#rrggbb\"}} for a filter plugin (see filter_plugin_list). \
              With smart=true it is added as a smart filter instead: non-destructive, on the whole layer, \
              listed under smart_filters in document_info and editable with smart_filter_set.",

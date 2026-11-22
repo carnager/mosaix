@@ -16,6 +16,16 @@ pub enum Filter {
     },
     /// Keeps detail above the radius, grey elsewhere (for sharpening in overlay mode).
     HighPass { radius: f32 },
+    /// Brightens dark and darkens bright areas, judged by their
+    /// surroundings within `radius` px; amounts in % (0…100).
+    ShadowsHighlights {
+        #[serde(default = "shadows_default")]
+        shadows: f32,
+        #[serde(default)]
+        highlights: f32,
+        #[serde(default = "sh_radius")]
+        radius: f32,
+    },
     /// amount in % (0…100) of the value range.
     AddNoise {
         amount: f32,
@@ -89,6 +99,12 @@ impl SmartFilter {
 fn yes() -> bool {
     true
 }
+fn shadows_default() -> f32 {
+    35.0
+}
+fn sh_radius() -> f32 {
+    30.0
+}
 
 impl Filter {
     pub fn defaults() -> Vec<Filter> {
@@ -100,6 +116,7 @@ impl Filter {
                 threshold: 0.0,
             },
             Filter::HighPass { radius: 10.0 },
+            Filter::ShadowsHighlights { shadows: 35.0, highlights: 0.0, radius: 30.0 },
             Filter::AddNoise {
                 amount: 10.0,
                 monochrome: false,
@@ -114,6 +131,7 @@ impl Filter {
             Filter::GaussianBlur { .. } => crate::tr("Gaussian Blur").into(),
             Filter::UnsharpMask { .. } => crate::tr("Unsharp Mask").into(),
             Filter::HighPass { .. } => crate::tr("High Pass").into(),
+            Filter::ShadowsHighlights { .. } => crate::tr("Shadows/Highlights").into(),
             Filter::AddNoise { .. } => crate::tr("Add Noise").into(),
             Filter::Plugin { name, .. } => name.clone().into(),
         }
@@ -134,7 +152,8 @@ impl Filter {
         match self {
             Filter::GaussianBlur { radius }
             | Filter::UnsharpMask { radius, .. }
-            | Filter::HighPass { radius } => radius.clamp(0.1, 1000.0),
+            | Filter::HighPass { radius }
+            | Filter::ShadowsHighlights { radius, .. } => radius.clamp(0.1, 1000.0),
             Filter::AddNoise { .. } | Filter::Plugin { .. } => 0.0,
         }
     }

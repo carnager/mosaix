@@ -1108,6 +1108,29 @@ fn adjustment_layers_match_cpu_reference() {
             vibrance: 60.0,
             saturation: -10.0,
         },
+        Adjustment::ColorBalance {
+            shadows: [-20.0, 10.0, 30.0],
+            midtones: [40.0, -10.0, 0.0],
+            highlights: [0.0, 20.0, -50.0],
+            preserve_luminosity: true,
+        },
+        Adjustment::ColorBalance {
+            shadows: [0.0; 3],
+            midtones: [-40.0, 30.0, 10.0],
+            highlights: [0.0; 3],
+            preserve_luminosity: false,
+        },
+        Adjustment::ChannelMixer {
+            red: [80.0, 30.0, -10.0, 5.0],
+            green: [0.0, 100.0, 0.0, 0.0],
+            blue: [20.0, 0.0, 70.0, -10.0],
+            gray: [40.0, 40.0, 20.0, 0.0],
+            monochrome: false,
+        },
+        Adjustment::GradientMap {
+            gradient: mosaix_core::gradient::Gradient::two([0.05, 0.0, 0.3], [1.0, 0.8, 0.2]),
+            reverse: true,
+        },
         Adjustment::Exposure {
             exposure: 0.7,
             offset: 0.02,
@@ -2997,4 +3020,28 @@ fn upscale_job_scales_layers() {
     assert!(tiles.contains_key(&TileCoord::new(-2, 0)) && tiles.contains_key(&TileCoord::new(-1, 1)));
     e.undo();
     assert_eq!(e.size(), (300, 200));
+}
+
+#[test]
+fn shadows_highlights_lifts_dark_areas() {
+    use mosaix_core::Filter;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(512, 256));
+    // Dark grey left half, light grey right half.
+    let dark = mosaix_core::color::srgb_to_linear(0.15);
+    let light = mosaix_core::color::srgb_to_linear(0.85);
+    e.fill(StrokeTarget::Pixels, [light, light, light, 1.0], 1.0, "Light").unwrap();
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 256.0, h: 256.0 }, CombineOp::Replace, "Selection").unwrap();
+    e.fill(StrokeTarget::Pixels, [dark, dark, dark, 1.0], 1.0, "Dark").unwrap();
+    e.deselect("x").unwrap();
+    let px = |e: &mut Engine, x: usize| {
+        e.flush();
+        let c = TileCoord::containing(x as f64, 128.0);
+        let v = composite_px(e, c, x % 256, 128);
+        mosaix_core::color::linear_to_srgb(v[0])
+    };
+    e.apply_filter(&Filter::ShadowsHighlights { shadows: 50.0, highlights: 50.0, radius: 10.0 }, "S/H").unwrap();
+    let (d, l) = (px(&mut e, 64), px(&mut e, 448));
+    assert!(d > 0.25, "shadows lifted: {d}");
+    assert!(l < 0.8, "highlights lowered: {l}");
 }

@@ -2839,3 +2839,42 @@ msgstr "Hilfslinien"
 
 msgid "Snap"
 msgstr "Einrasten"
+
+msgid "Output: Gray"
+msgstr "Ausgabe: Grau"
+
+msgid "Total {pct} %"
+msgstr "Gesamt {pct} %"
+
+msgid "Shadows/Highlights"
+msgstr "Tiefen/Lichter"
+
+msgid "Color Balance"
+msgstr "Farbbalance"
+
+msgid "Channel Mixer"
+msgstr "Kanalmixer"
+
+msgid "Gradient Map"
+msgstr "Verlaufsumsetzung"
+
+msgid "Cyan"
+msgstr "Cyan"
+
+msgid "Magenta"
+msgstr "Magenta"
+
+msgid "Yellow"
+msgstr "Gelb"
+
+msgid "Midtones"
+msgstr "Mitteltöne"
+
+msgid "Preserve Luminosity"
+msgstr "Luminanz erhalten"
+
+msgid "Monochrome"
+msgstr "Monochrom"
+
+msgid "Constant"
+msgstr "Konstante"

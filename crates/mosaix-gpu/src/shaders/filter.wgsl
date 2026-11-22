@@ -4,6 +4,7 @@
 //   kind 1: unsharp mask   out = src + (src − blur) · amount where |diff| > threshold
 //   kind 2: high pass      out = src − blur + 0.5 grey
 //   kind 3: add noise      amount, monochrome, gaussian; seeded by pixel position
+//   kind 4: shadows/highlights  lifts dark / lowers bright areas by the blurred luminance
 
 enable wgpu_binding_array;
 
@@ -71,6 +72,27 @@ fn load(slot: u32, p: vec2<i32>) -> vec4<f32> {
     return textureLoad(layer_tiles[slot >> 16u], p, slot & 0xffffu, 0);
 }
 
+fn srgb1(v: f32) -> f32 {
+    let c = max(v, 0.0);
+    return select(1.055 * pow(c, 1.0 / 2.4) - 0.055, c * 12.92, c <= 0.0031308);
+}
+
+fn linear1(v: f32) -> f32 {
+    return select(pow((v + 0.055) / 1.055, 2.4), v / 12.92, v <= 0.04045);
+}
+
+fn to_srgb(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(srgb1(c.r), srgb1(c.g), srgb1(c.b));
+}
+
+fn to_linear(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(linear1(c.r), linear1(c.g), linear1(c.b));
+}
+
+fn luma(c: vec3<f32>) -> f32 {
+    return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+}
+
 fn hash(p: vec2<u32>, seed: u32) -> f32 {
     var h = p.x * 0x8da6b343u ^ p.y * 0xd8163841u ^ seed * 0xcb1ab31fu;
     h ^= h >> 16u;
@@ -114,6 +136,27 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             }
             let o = s + d * job.p.x;
             return vec4<f32>(clamp(o.rgb, vec3<f32>(0.0), vec3<f32>(max(s.a, 0.0)) * 4.0), s.a);
+        }
+        case 4u: {
+            let s = texel(job.src, p);
+            if s.a <= 0.0 {
+                return s;
+            }
+            let b = load(job.blur_slot, local);
+            let e = to_srgb(s.rgb / s.a);
+            let lb = luma(to_srgb(b.rgb / max(b.a, 1e-6)));
+            // Tonal width 50 %: shadows below half, highlights above.
+            let ws = 1.0 - smoothstep(0.0, 0.5, lb);
+            let wh = smoothstep(0.5, 1.0, lb);
+            let l = luma(e);
+            var l2 = pow(max(l, 0.0), 1.0 / (1.0 + 2.0 * job.p.x * ws));
+            l2 = 1.0 - pow(max(1.0 - l2, 0.0), 1.0 / (1.0 + 2.0 * job.p.y * wh));
+            var o = vec3<f32>(l2);
+            if l > 1e-4 {
+                o = e * (l2 / l);
+            }
+            o = clamp(o, vec3<f32>(0.0), vec3<f32>(1.0));
+            return vec4<f32>(to_linear(o) * s.a, s.a);
         }
         default: {
             let s = texel(job.src, p);

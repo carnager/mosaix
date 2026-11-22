@@ -9,6 +9,9 @@ const ADJ_VIBRANCE: u32 = 2u;
 const ADJ_BW: u32 = 3u;
 const ADJ_EXPOSURE: u32 = 4u;
 const ADJ_THRESHOLD: u32 = 5u;
+const ADJ_COLOR_BALANCE: u32 = 6u;
+const ADJ_CHANNEL_MIXER: u32 = 7u;
+const ADJ_GRADIENT_MAP: u32 = 8u;
 const LUT_SIZE: f32 = 256.0;
 
 fn lut_channel(off: u32, x: f32, c: u32) -> f32 {
@@ -198,6 +201,40 @@ fn adjust_rgb(lin: vec3<f32>, kind: u32, off: u32) -> vec3<f32> {
             // Photoshop: luminance in 8-bit steps.
             let l = round((0.3 * e.r + 0.59 * e.g + 0.11 * e.b) * 255.0) / 255.0;
             o = vec3<f32>(select(0.0, 1.0, l >= a.x - 0.5 / 255.0));
+        }
+        case 6u: {
+            // Color balance (mirrors color_balance in adjust.rs).
+            let c = clamp(e, vec3<f32>(0.0), vec3<f32>(1.0));
+            let l = rgb_to_hsl(c).z;
+            let ws = clamp((l - 0.333) / -0.25 + 0.5, 0.0, 1.0) * 0.7;
+            let wm = clamp((l - 0.333) / 0.25 + 0.5, 0.0, 1.0) * clamp((l + 0.333 - 1.0) / -0.25 + 0.5, 0.0, 1.0) * 0.7;
+            let wh = clamp((l + 0.333 - 1.0) / 0.25 + 0.5, 0.0, 1.0) * 0.7;
+            let hi = adjust[off + 2u].xyz;
+            o = clamp(c + a.xyz * ws + b.xyz * wm + hi * wh, vec3<f32>(0.0), vec3<f32>(1.0));
+            if a.w > 0.5 {
+                var h = rgb_to_hsl(o);
+                h.z = l;
+                o = hsl_to_rgb(h);
+            }
+        }
+        case 7u: {
+            // Channel mixer: rows (r, g, b, constant).
+            let bl = adjust[off + 2u];
+            o = clamp(
+                vec3<f32>(dot(a.xyz, e) + a.w, dot(b.xyz, e) + b.w, dot(bl.xyz, e) + bl.w),
+                vec3<f32>(0.0),
+                vec3<f32>(1.0),
+            );
+        }
+        case 8u: {
+            // Gradient map: luminance → a 256-entry table after the parameters.
+            var l = clamp(0.3 * e.r + 0.59 * e.g + 0.11 * e.b, 0.0, 1.0);
+            if a.x > 0.5 {
+                l = 1.0 - l;
+            }
+            let t = l * (LUT_SIZE - 1.0);
+            let i = min(u32(floor(t)), u32(LUT_SIZE) - 2u);
+            o = mix(adjust[off + 2u + i].xyz, adjust[off + 3u + i].xyz, t - f32(i));
         }
         default: {}
     }

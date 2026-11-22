@@ -33,6 +33,7 @@ const BLUR: u32 = 0;
 const UNSHARP: u32 = 1;
 const HIGH_PASS: u32 = 2;
 const NOISE: u32 = 3;
+const SHADOWS_HIGHLIGHTS: u32 = 4;
 /// Above this sigma the blur runs on a downscaled copy.
 const DIRECT_SIGMA: f32 = 10.0;
 
@@ -178,11 +179,15 @@ impl Engine {
         let full = mosaix_core::tr("GPU memory full");
         Ok(match f {
             Filter::GaussianBlur { .. } => self.blur(src, f.radius(), &dest).ok_or(full)?,
-            Filter::UnsharpMask { .. } | Filter::HighPass { .. } if !src.is_empty() => {
+            Filter::UnsharpMask { .. } | Filter::HighPass { .. } | Filter::ShadowsHighlights { .. } if !src.is_empty() => {
                 let (kind, p) = match f {
                     Filter::UnsharpMask {
                         amount, threshold, ..
                     } => (UNSHARP, [amount / 100.0, *threshold, 0.0, 0.0]),
+                    Filter::ShadowsHighlights { shadows, highlights, .. } => (
+                        SHADOWS_HIGHLIGHTS,
+                        [shadows.clamp(0.0, 100.0) / 100.0, highlights.clamp(0.0, 100.0) / 100.0, 0.0, 0.0],
+                    ),
                     _ => (HIGH_PASS, [0.0; 4]),
                 };
                 let dest: Vec<TileCoord> =

@@ -223,6 +223,55 @@ pub enum Adjustment {
         #[serde(default = "four")]
         levels: f32,
     },
+    /// Shifts per tonal range: cyan–red, magenta–green, yellow–blue, each
+    /// −100…100.
+    ColorBalance {
+        #[serde(default)]
+        shadows: [f32; 3],
+        #[serde(default)]
+        midtones: [f32; 3],
+        #[serde(default)]
+        highlights: [f32; 3],
+        #[serde(default = "yes")]
+        preserve_luminosity: bool,
+    },
+    /// Each output channel as a mix of red, green and blue in % (−200…200)
+    /// plus a constant (−200…200). Monochrome uses `gray` for all three.
+    ChannelMixer {
+        #[serde(default = "mix_red")]
+        red: [f32; 4],
+        #[serde(default = "mix_green")]
+        green: [f32; 4],
+        #[serde(default = "mix_blue")]
+        blue: [f32; 4],
+        #[serde(default = "mix_gray")]
+        gray: [f32; 4],
+        #[serde(default)]
+        monochrome: bool,
+    },
+    /// The luminance mapped onto a gradient (dark → its start).
+    GradientMap {
+        #[serde(default)]
+        gradient: crate::gradient::Gradient,
+        #[serde(default)]
+        reverse: bool,
+    },
+}
+
+fn yes() -> bool {
+    true
+}
+fn mix_red() -> [f32; 4] {
+    [100.0, 0.0, 0.0, 0.0]
+}
+fn mix_green() -> [f32; 4] {
+    [0.0, 100.0, 0.0, 0.0]
+}
+fn mix_blue() -> [f32; 4] {
+    [0.0, 0.0, 100.0, 0.0]
+}
+fn mix_gray() -> [f32; 4] {
+    [40.0, 40.0, 20.0, 0.0]
 }
 
 fn bw_default() -> [f32; 6] {
@@ -317,6 +366,9 @@ pub const KIND_VIBRANCE: u32 = 2;
 pub const KIND_BW: u32 = 3;
 pub const KIND_EXPOSURE: u32 = 4;
 pub const KIND_THRESHOLD: u32 = 5;
+pub const KIND_COLOR_BALANCE: u32 = 6;
+pub const KIND_CHANNEL_MIXER: u32 = 7;
+pub const KIND_GRADIENT_MAP: u32 = 8;
 
 impl Adjustment {
     /// All kinds with neutral settings, for menus.
@@ -358,6 +410,23 @@ impl Adjustment {
             Adjustment::BlackWhite {
                 weights: bw_default(),
             },
+            Adjustment::ColorBalance {
+                shadows: [0.0; 3],
+                midtones: [0.0; 3],
+                highlights: [0.0; 3],
+                preserve_luminosity: true,
+            },
+            Adjustment::ChannelMixer {
+                red: mix_red(),
+                green: mix_green(),
+                blue: mix_blue(),
+                gray: mix_gray(),
+                monochrome: false,
+            },
+            Adjustment::GradientMap {
+                gradient: crate::gradient::Gradient::two([0.0; 3], [1.0; 3]),
+                reverse: false,
+            },
             Adjustment::Invert,
             Adjustment::Posterize { levels: 4.0 },
             Adjustment::Threshold { level: 128.0 },
@@ -376,6 +445,9 @@ impl Adjustment {
             Adjustment::Invert => crate::tr("Invert"),
             Adjustment::Threshold { .. } => crate::tr("Threshold"),
             Adjustment::Posterize { .. } => crate::tr("Posterize"),
+            Adjustment::ColorBalance { .. } => crate::tr("Color Balance"),
+            Adjustment::ChannelMixer { .. } => crate::tr("Channel Mixer"),
+            Adjustment::GradientMap { .. } => crate::tr("Gradient Map"),
         }
     }
 
@@ -391,6 +463,9 @@ impl Adjustment {
             Adjustment::Invert => "invert",
             Adjustment::Threshold { .. } => "threshold",
             Adjustment::Posterize { .. } => "posterize",
+            Adjustment::ColorBalance { .. } => "color_balance",
+            Adjustment::ChannelMixer { .. } => "channel_mixer",
+            Adjustment::GradientMap { .. } => "gradient_map",
         }
     }
 
@@ -522,6 +597,42 @@ impl Adjustment {
                 p[0] = level.clamp(1.0, 255.0) / 255.0;
                 KIND_THRESHOLD
             }
+            Adjustment::ColorBalance {
+                shadows,
+                midtones,
+                highlights,
+                preserve_luminosity,
+            } => {
+                let n = |v: &[f32; 3]| v.map(|x| x.clamp(-100.0, 100.0) / 100.0);
+                let (sh, mi, hi) = (n(shadows), n(midtones), n(highlights));
+                p = [sh[0], sh[1], sh[2], *preserve_luminosity as u8 as f32, mi[0], mi[1], mi[2], 0.0];
+                extra.push([hi[0], hi[1], hi[2], 0.0]);
+                KIND_COLOR_BALANCE
+            }
+            Adjustment::ChannelMixer {
+                red,
+                green,
+                blue,
+                gray,
+                monochrome,
+            } => {
+                let n = |v: &[f32; 4]| v.map(|x| x.clamp(-200.0, 200.0) / 100.0);
+                let rows = if *monochrome { [n(gray); 3] } else { [n(red), n(green), n(blue)] };
+                p[..4].copy_from_slice(&rows[0]);
+                p[4..].copy_from_slice(&rows[1]);
+                extra.push(rows[2]);
+                KIND_CHANNEL_MIXER
+            }
+            Adjustment::GradientMap { gradient, reverse } => {
+                p[0] = *reverse as u8 as f32;
+                // The gradient as a table of sRGB-encoded colours.
+                let lut = gradient.lut();
+                extra.extend((0..LUT_SIZE).map(|i| {
+                    let c = lut.at(i as f32 / (LUT_SIZE - 1) as f32);
+                    [linear_to_srgb(c[0]), linear_to_srgb(c[1]), linear_to_srgb(c[2]), 0.0]
+                }));
+                KIND_GRADIENT_MAP
+            }
             _ => unreachable!("handled by channel_map"),
         };
         GpuAdjust::Shader(kind, p, extra)
@@ -552,6 +663,21 @@ impl Adjustment {
                     [if l >= p[0] - 0.5 / 255.0 { 1.0 } else { 0.0 }; 3]
                 }
                 KIND_HSL => hue_sat(enc, p, &extra),
+                KIND_COLOR_BALANCE => color_balance(enc, p, &extra),
+                KIND_CHANNEL_MIXER => {
+                    let row = |r: &[f32]| (r[0] * enc[0] + r[1] * enc[1] + r[2] * enc[2] + r[3]).clamp(0.0, 1.0);
+                    [row(&p[..4]), row(&p[4..]), row(&extra[0])]
+                }
+                KIND_GRADIENT_MAP => {
+                    let mut l = (0.3 * enc[0] + 0.59 * enc[1] + 0.11 * enc[2]).clamp(0.0, 1.0);
+                    if p[0] > 0.5 {
+                        l = 1.0 - l;
+                    }
+                    let t = l * (LUT_SIZE - 1) as f32;
+                    let i = (t.floor() as usize).min(LUT_SIZE - 2);
+                    let f = t - i as f32;
+                    std::array::from_fn(|k| extra[i][k] * (1.0 - f) + extra[i + 1][k] * f)
+                }
                 KIND_VIBRANCE => vibrance(enc, p),
                 KIND_BW => {
                     let g = black_white(enc, p);
@@ -562,6 +688,24 @@ impl Adjustment {
         };
         out.map(srgb_to_linear)
     }
+}
+
+/// Color balance on sRGB values (mirrors `adjust.wgsl`; GIMP's weighting of
+/// the tonal ranges by lightness).
+fn color_balance(c: [f32; 3], p: [f32; 8], extra: &[[f32; 4]]) -> [f32; 3] {
+    let c = c.map(|v| v.clamp(0.0, 1.0));
+    let l = rgb_to_hsl(c)[2];
+    let (a, b, scale) = (0.25f32, 0.333f32, 0.7f32);
+    let ws = ((l - b) / -a + 0.5).clamp(0.0, 1.0) * scale;
+    let wm = ((l - b) / a + 0.5).clamp(0.0, 1.0) * ((l + b - 1.0) / -a + 0.5).clamp(0.0, 1.0) * scale;
+    let wh = ((l + b - 1.0) / a + 0.5).clamp(0.0, 1.0) * scale;
+    let mut o: [f32; 3] = std::array::from_fn(|k| (c[k] + p[k] * ws + p[4 + k] * wm + extra[0][k] * wh).clamp(0.0, 1.0));
+    if p[3] > 0.5 {
+        let mut h = rgb_to_hsl(o);
+        h[2] = l;
+        o = hsl_to_rgb(h);
+    }
+    o
 }
 
 fn rgb_to_hsl(c: [f32; 3]) -> [f32; 3] {
@@ -698,11 +842,37 @@ mod tests {
                 Adjustment::Invert
                 | Adjustment::Posterize { .. }
                 | Adjustment::Threshold { .. }
+                | Adjustment::GradientMap { .. }
                 | Adjustment::BlackWhite { .. } => continue,
                 _ => {}
             }
             assert!(close(a.apply(c), c, 0.01), "{}: {:?}", a.name(), a.apply(c));
         }
+    }
+
+    #[test]
+    fn color_balance_mixer_and_gradient_map() {
+        // More red in the midtones: mid grey turns reddish, keeps its lightness.
+        let cb = Adjustment::ColorBalance { shadows: [0.0; 3], midtones: [50.0, 0.0, 0.0], highlights: [0.0; 3], preserve_luminosity: true };
+        let grey = [srgb_to_linear(0.5); 3];
+        let o = cb.apply(grey).map(linear_to_srgb);
+        assert!(o[0] > o[1] + 0.05 && (o[1] - o[2]).abs() < 1e-3, "{o:?}");
+        assert!((rgb_to_hsl(o)[2] - 0.5).abs() < 0.01);
+        // Black stays black with a midtone shift.
+        assert!(cb.apply([0.0; 3])[0] < 0.01);
+        // Channel mixer: swap red and blue.
+        let m = Adjustment::ChannelMixer { red: [0.0, 0.0, 100.0, 0.0], green: mix_green(), blue: [100.0, 0.0, 0.0, 0.0], gray: mix_gray(), monochrome: false };
+        let c = [srgb_to_linear(0.8), srgb_to_linear(0.4), srgb_to_linear(0.1)];
+        let o = m.apply(c).map(linear_to_srgb);
+        assert!(close(o, [0.1, 0.4, 0.8], 1e-3), "{o:?}");
+        // Monochrome: 40/40/20 grey.
+        let m = Adjustment::ChannelMixer { red: mix_red(), green: mix_green(), blue: mix_blue(), gray: mix_gray(), monochrome: true };
+        let o = m.apply(c).map(linear_to_srgb);
+        assert!(close(o, [0.5; 3], 1e-3), "{o:?}");
+        // Gradient map black → red: white becomes red, black stays black.
+        let g = Adjustment::GradientMap { gradient: crate::gradient::Gradient::two([0.0; 3], [1.0, 0.0, 0.0]), reverse: false };
+        assert!(close(g.apply([1.0; 3]), [1.0, 0.0, 0.0], 1e-3));
+        assert!(close(g.apply([0.0; 3]), [0.0; 3], 1e-3));
     }
 
     #[test]
