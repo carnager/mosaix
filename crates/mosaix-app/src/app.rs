@@ -485,6 +485,9 @@ pub struct App {
     bucket_all: bool,
     /// Filter › Last Filter (Ctrl+F) repeats it.
     last_filter: Option<mosaix_core::Filter>,
+    /// Shape tool: "rect", "ellipse", "line", "polygon", "star" or a preset;
+    /// polygon/star corners, star inner radius, line width.
+    shape: ui::panels::ShapeOpts,
     /// Whether an OpenAI key is saved or in the environment (for the dialog).
     openai_key: settings::KeyState,
     wand_tolerance: f32,
@@ -749,6 +752,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         poly_click: None,
         bucket_all: false,
         last_filter: None,
+        shape: Default::default(),
         openai_key: settings::key_state(),
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
@@ -1285,6 +1289,32 @@ impl App {
                 Drag::None
             }
         }
+    }
+
+    /// Shape tool outline for line, polygon, star and the ready-made shapes
+    /// (document px; closed or not). `None` for rectangle and ellipse.
+    fn shape_points(&self, start: DVec2, end: DVec2) -> Option<(Vec<DVec2>, bool)> {
+        let kind = self.shape.kind.as_str();
+        if matches!(self.tool, Tool::Shape { ellipse: true }) || matches!(kind, "rect" | "ellipse") {
+            return None;
+        }
+        if kind == "line" {
+            let mut d = end - start;
+            if self.mods.shift {
+                // 45° steps.
+                let a = (d.y.atan2(d.x) / std::f64::consts::FRAC_PI_4).round() * std::f64::consts::FRAC_PI_4;
+                d = DVec2::new(a.cos(), a.sin()) * d.length();
+            }
+            return Some((vec![start, start + d], false));
+        }
+        let (a, b) = shape_rect(start, end, self.mods.shift, self.mods.alt);
+        let (x, y, w, h) = (a.x, a.y, b.x - a.x, b.y - a.y);
+        let pts = match kind {
+            "polygon" => mosaix_core::vector::regular_polygon(x, y, w, h, self.shape.sides, None),
+            "star" => mosaix_core::vector::regular_polygon(x, y, w, h, self.shape.sides, Some(self.shape.inset)),
+            p => mosaix_core::vector::preset_shape(p, x, y, w, h)?,
+        };
+        Some((pts.into_iter().map(|[x, y]| DVec2::new(x, y)).collect(), true))
     }
 
     /// Painting on the Quick Mask layer right now.
@@ -1993,6 +2023,11 @@ impl App {
             _ => DVec2::ZERO,
         };
         let step = if self.recording.is_some() { recorded_drag(&drag, zoom, move_delta) } else { None };
+        let shape_pts = match &drag {
+            Drag::Shape { start, end } => self.shape_points(*start, *end),
+            _ => None,
+        };
+        let (line_width, shape_label) = (self.shape.line_width, ui::panels::shape_name(&self.shape.kind));
         let Some(s) = &mut self.session else { return };
         let e = &mut s.engine;
         let result: Result<bool, &str> = match drag {
@@ -2020,6 +2055,21 @@ impl App {
                 }
                 None => Ok(false),
             },
+            Drag::Shape { start, end } if shape_pts.is_some() => {
+                match shape_pts {
+                    Some((pts, closed)) if (end - start).length() * zoom >= 3.0 => {
+                        let line = !closed;
+                        let v = mosaix_core::VectorLayer::shape(mosaix_core::vector::ShapeSpec {
+                            geometry: mosaix_core::vector::Geometry::Polygon { points: pts.iter().map(|p| [p.x, p.y]).collect(), closed },
+                            fill: (!line).then_some([color[0], color[1], color[2], 1.0]),
+                            stroke: line.then(|| mosaix_core::vector::StrokeStyle::new([color[0], color[1], color[2], 1.0], line_width.max(0.5))),
+                            paint: None,
+                        });
+                        Ok(e.add_vector(v, &shape_label).is_some())
+                    }
+                    _ => Ok(false),
+                }
+            }
             Drag::Shape { start, end } => {
                 let (start, end) = shape_rect(start, end, self.mods.shift, self.mods.alt);
                 let size = end - start;
@@ -3806,7 +3856,9 @@ impl App {
             }
             Keysym::u => self.set_tool(Tool::Smudge),
             Keysym::U if shift => {
-                let ellipse = matches!(self.tool, Tool::Shape { ellipse: false });
+                // Shift+U: rectangle ↔ ellipse (other shapes are in the options bar).
+                let ellipse = self.tool == Tool::Shape { ellipse: false } && self.shape.kind == "rect";
+                self.shape.kind = if ellipse { "ellipse" } else { "rect" }.into();
                 self.set_tool(Tool::Shape { ellipse });
             }
             Keysym::t if !ctrl => self.set_tool(Tool::Text),
@@ -4416,7 +4468,7 @@ impl App {
             },
             favourite_fonts: self.settings.favourite_fonts.clone(),
             recent_fonts: self.settings.recent_fonts.clone(),
-            shape_ellipse: matches!(self.tool, Tool::Shape { ellipse: true }),
+            shape: self.shape.clone(),
             histogram: None,
         })
     }
@@ -4627,7 +4679,10 @@ impl App {
                         (m.size_jitter, m.angle_jitter, m.scatter, m.flow_jitter);
                 }
                 Action::SmudgeStrength(v) => self.smudge_strength = v,
-                Action::ShapeEllipse(ellipse) => self.tool = Tool::Shape { ellipse },
+                Action::ShapeOpts(o) => {
+                    self.tool = Tool::Shape { ellipse: o.kind == "ellipse" };
+                    self.shape = o;
+                }
                 Action::FontUsed(name) => {
                     let r = &mut self.settings.recent_fonts;
                     r.retain(|f| f != &name);
@@ -4716,6 +4771,13 @@ impl App {
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
                 Action::SwitchTab(i) => self.switch_tab(i),
+                Action::SelectionToShape => {
+                    let cmd = serde_json::json!({ "cmd": "select_to_shape", "color": actions::hex(self.brush.color) });
+                    if self.recording.is_some() {
+                        self.record(cmd.clone());
+                    }
+                    self.run_agent_cmd(cmd);
+                }
                 Action::LoadLut(p) => match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| mosaix_core::adjust::parse_cube(&t)) {
                     Ok((size, data)) => {
                         let name = p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -5450,6 +5512,10 @@ impl App {
                     points: points.iter().map(|p| v.doc_to_screen(*p)).collect(),
                     closed: true,
                 }]
+            }
+            Drag::Shape { start, end } if self.shape_points(*start, *end).is_some() => {
+                let (pts, closed) = self.shape_points(*start, *end).unwrap();
+                vec![OverlayLine { points: pts.iter().map(|p| v.doc_to_screen(*p)).collect(), closed }]
             }
             Drag::Shape { start, end } => {
                 let (a, b) = shape_rect(*start, *end, self.mods.shift, self.mods.alt);

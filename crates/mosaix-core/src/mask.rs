@@ -391,6 +391,121 @@ fn scatter_region(r: &Region, default: u8) -> CpuMask {
     out
 }
 
+/// The outlines of a mask (at 50 %) as closed polygons in document px,
+/// simplified to within `tolerance` px. Outer outlines run clockwise,
+/// holes counter-clockwise (so a non-zero fill leaves the holes open).
+pub fn trace(mask: &CpuMask, tolerance: f64, doc_w: u32, doc_h: u32) -> Vec<Vec<[f64; 2]>> {
+    use std::collections::HashMap as Map;
+    let Some(reg) = gather_region(mask, 1, doc_w, doc_h) else {
+        return Vec::new();
+    };
+    let (w, h) = (reg.w as i64, reg.h as i64);
+    let (ox, oy) = (reg.tx0 as i64 * TS as i64, reg.ty0 as i64 * TS as i64);
+    let inside = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < h && reg.img[(y * w + x) as usize] >= 127.5;
+    // Directed edges between pixel corners, the inside on the right (screen
+    // y down: clockwise around filled areas).
+    let mut next: Map<(i64, i64), Vec<(i64, i64)>> = Map::new();
+    for y in -1..=h {
+        for x in -1..=w {
+            if !inside(x, y) {
+                continue;
+            }
+            if !inside(x, y - 1) {
+                next.entry((x, y)).or_default().push((x + 1, y));
+            }
+            if !inside(x + 1, y) {
+                next.entry((x + 1, y)).or_default().push((x + 1, y + 1));
+            }
+            if !inside(x, y + 1) {
+                next.entry((x + 1, y + 1)).or_default().push((x, y + 1));
+            }
+            if !inside(x - 1, y) {
+                next.entry((x, y + 1)).or_default().push((x, y));
+            }
+        }
+    }
+    let mut loops = Vec::new();
+    while let Some(&start) = next.keys().next() {
+        let mut pts = vec![start];
+        let mut at = start;
+        let mut came = (0i64, 0i64);
+        while let Some(outs) = next.get_mut(&at) {
+            // At a corner touched twice, turn right first (keeps loops apart).
+            let pick = if outs.len() > 1 {
+                let right = (-came.1, came.0);
+                outs.iter().position(|o| (o.0 - at.0, o.1 - at.1) == right).unwrap_or(0)
+            } else {
+                0
+            };
+            let to = outs.swap_remove(pick);
+            if outs.is_empty() {
+                next.remove(&at);
+            }
+            came = (to.0 - at.0, to.1 - at.1);
+            at = to;
+            if at == start {
+                break;
+            }
+            pts.push(at);
+        }
+        if pts.len() >= 3 {
+            let poly: Vec<[f64; 2]> = pts.iter().map(|&(x, y)| [(x + ox) as f64, (y + oy) as f64]).collect();
+            loops.push(simplify_closed(&poly, tolerance));
+        }
+    }
+    loops.retain(|l| l.len() >= 3);
+    loops
+}
+
+/// Ramer–Douglas–Peucker on a closed polygon.
+fn simplify_closed(p: &[[f64; 2]], tol: f64) -> Vec<[f64; 2]> {
+    fn rdp(p: &[[f64; 2]], tol: f64, out: &mut Vec<[f64; 2]>) {
+        let (a, b) = (p[0], p[p.len() - 1]);
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len = (dx * dx + dy * dy).sqrt().max(1e-9);
+        let (mut far, mut at) = (0.0, 0);
+        for (i, q) in p.iter().enumerate().take(p.len() - 1).skip(1) {
+            let d = ((q[0] - a[0]) * dy - (q[1] - a[1]) * dx).abs() / len;
+            if d > far {
+                (far, at) = (d, i);
+            }
+        }
+        if far > tol && at > 0 {
+            rdp(&p[..=at], tol, out);
+            rdp(&p[at..], tol, out);
+        } else {
+            out.push(a);
+        }
+    }
+    if p.len() < 4 {
+        return p.to_vec();
+    }
+    // Split at the point farthest from the first, so both halves are open.
+    let far = (1..p.len()).max_by(|&i, &j| {
+        let d = |k: usize| (p[k][0] - p[0][0]).powi(2) + (p[k][1] - p[0][1]).powi(2);
+        d(i).total_cmp(&d(j))
+    }).unwrap_or(p.len() / 2);
+    let mut out = Vec::new();
+    rdp(&p[..=far], tol, &mut out);
+    let mut second: Vec<[f64; 2]> = p[far..].to_vec();
+    second.push(p[0]);
+    rdp(&second, tol, &mut out);
+    // The start point stays even on a straight edge: drop such points.
+    let mut i = 0;
+    while out.len() > 3 && i < out.len() {
+        let n = out.len();
+        let (a, q, b) = (out[(i + n - 1) % n], out[i], out[(i + 1) % n]);
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len = (dx * dx + dy * dy).sqrt().max(1e-9);
+        if ((q[0] - a[0]) * dy - (q[1] - a[1]) * dx).abs() / len <= tol {
+            out.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Mean over a (2r+1)² window (clipped at the borders), via an integral image.
 fn box_mean(img: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
     let mut sum = vec![0f64; (w + 1) * (h + 1)];
@@ -673,6 +788,38 @@ fn transpose(img: &[f32], w: usize, h: usize) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn trace_finds_outline_and_hole() {
+        // A 100 × 60 rectangle with a 20 × 20 hole.
+        let mut m = CpuMask::filled(0);
+        let mut px = vec![0u8; TILE_PX];
+        for y in 50..110 {
+            for x in 30..130 {
+                if !((70..90).contains(&x) && (70..90).contains(&y)) {
+                    px[y * TS + x] = 255;
+                }
+            }
+        }
+        m.tiles.insert(TileCoord::new(0, 0), MaskData::Pixels(px));
+        let mut loops = trace(&m, 0.5, 256, 256);
+        assert_eq!(loops.len(), 2, "{loops:?}");
+        let area = |l: &Vec<[f64; 2]>| {
+            let mut a = 0.0;
+            for i in 0..l.len() {
+                let (p, q) = (l[i], l[(i + 1) % l.len()]);
+                a += p[0] * q[1] - q[0] * p[1];
+            }
+            a / 2.0
+        };
+        loops.sort_by(|a, b| area(a).abs().total_cmp(&area(b).abs()));
+        let (hole, outer) = (&loops[0], &loops[1]);
+        assert_eq!(hole.len(), 4);
+        assert_eq!(outer.len(), 4, "a rectangle has four corners: {outer:?}");
+        assert!((area(outer).abs() - 6000.0).abs() < 1.0 && (area(hole).abs() - 400.0).abs() < 1.0);
+        assert!(area(outer).signum() != area(hole).signum(), "holes run the other way");
+    }
+
 
     #[test]
     fn refine_edge_follows_the_image() {

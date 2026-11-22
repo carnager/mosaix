@@ -645,6 +645,8 @@ pub(crate) fn read_text(data: &[u8]) -> Result<crate::psd::Text> {
     let tracking = sget("Tracking").and_then(Ps::num).unwrap_or(0.0) as f32 * size / 1000.0;
     let faux_bold = sget("FauxBold") == Some(&Ps::Bool(true));
     let faux_italic = sget("FauxItalic") == Some(&Ps::Bool(true));
+    let underline = sget("Underline") == Some(&Ps::Bool(true));
+    let strikethrough = sget("Strikethrough") == Some(&Ps::Bool(true));
     let align =
         match get("EngineDict/ParagraphRun/RunArray/0/ParagraphSheet/Properties/Justification")
             .and_then(Ps::num)
@@ -700,6 +702,8 @@ pub(crate) fn read_text(data: &[u8]) -> Result<crate::psd::Text> {
         tracking,
         faux_bold,
         faux_italic,
+        underline,
+        strikethrough,
         width,
         transform: t,
         features,
@@ -753,6 +757,8 @@ pub(crate) fn write_text(t: &crate::psd::Text, height: f32) -> Vec<u8> {
         st.set("FontSize", Ps::Num(t.size as f64));
         st.set("FauxBold", Ps::Bool(t.faux_bold));
         st.set("FauxItalic", Ps::Bool(t.faux_italic));
+        st.set("Underline", Ps::Bool(t.underline));
+        st.set("Strikethrough", Ps::Bool(t.strikethrough));
         let auto = (t.line_height - 1.2).abs() < 1e-3;
         st.set("AutoLeading", Ps::Bool(auto));
         st.set("Leading", Ps::Num(if auto { 0.01 } else { (t.size * t.line_height) as f64 }));
@@ -983,6 +989,8 @@ mod tests {
             tracking: 3.6,
             faux_bold: false,
             faux_italic: true,
+            underline: true,
+            strikethrough: false,
             width: Some(400.0),
             transform: [1.0, 0.0, 0.0, 1.0, 20.0, 60.0],
             features: [("dlig".to_string(), 1u16), ("liga".to_string(), 0)].into_iter().collect(),

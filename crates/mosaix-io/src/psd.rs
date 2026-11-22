@@ -102,6 +102,8 @@ pub struct Text {
     pub tracking: f32,
     pub faux_bold: bool,
     pub faux_italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
     /// Paragraph text: box width (px).
     pub width: Option<f32>,
     /// [xx, xy, yx, yy, tx, ty]: baseline origin of the first line.

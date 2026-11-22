@@ -479,6 +479,8 @@ struct Run {
 
 struct TextLayout {
     runs: Vec<Run>,
+    /// Underline and strikethrough bars (x0, y0, x1, y1 in the text box).
+    decorations: Vec<[f64; 4]>,
     width: f32,
     height: f32,
     /// Text on a path: per glyph (run, index) its transform onto the curve.
@@ -718,10 +720,23 @@ fn layout_text(t: &TextSpec) -> TextLayout {
     };
     let l = build_layout(t);
     let mut runs = Vec::new();
+    let mut decorations = Vec::new();
     for line in l.lines() {
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(g) = item {
                 let run = g.run();
+                // Bars from the font's own metrics (offsets up from the baseline).
+                // Offsets are to the top of the bar, upwards from the baseline.
+                let m = run.font_metrics();
+                let (x0, x1, base) = (g.offset() as f64, (g.offset() + g.advance()) as f64, g.baseline() as f64);
+                if t.underline {
+                    let (off, size) = (m.underline_offset as f64, (m.underline_size as f64).max(1.0));
+                    decorations.push([x0, base - off, x1, base - off + size]);
+                }
+                if t.strikethrough {
+                    let (off, size) = (m.strikethrough_offset as f64, (m.strikethrough_size as f64).max(1.0));
+                    decorations.push([x0, base - off, x1, base - off + size]);
+                }
                 runs.push(Run {
                     font: run.font().clone(),
                     size: run.font_size(),
@@ -769,6 +784,7 @@ fn layout_text(t: &TextSpec) -> TextLayout {
     });
     TextLayout {
         runs,
+        decorations,
         width: t.width.unwrap_or(l.width()).max(l.width()),
         height: l.height(),
         on_path,
@@ -1003,6 +1019,9 @@ fn draw_part(ctx: &mut RenderContext, res: &mut Resources, p: &Prepared, part: P
                     .normalized_coords(&run.coords)
                     .hint(false)
                     .fill_glyphs(run.glyphs.iter().copied());
+            }
+            for d in &l.decorations {
+                ctx.fill_rect(&Rect::new(d[0], d[1], d[2], d[3]));
             }
             ctx.set_transform(base);
         }

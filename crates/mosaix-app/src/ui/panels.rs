@@ -74,6 +74,46 @@ pub enum ToolId {
     HistoryBrush,
 }
 
+/// Shape tool settings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapeOpts {
+    /// "rect", "ellipse", "line", "polygon", "star" or a ready-made shape.
+    pub kind: String,
+    /// Polygon corners / star points.
+    pub sides: u32,
+    /// Star: inner radius as a share of the outer one.
+    pub inset: f64,
+    pub line_width: f32,
+}
+
+impl Default for ShapeOpts {
+    fn default() -> Self {
+        Self { kind: "rect".into(), sides: 5, inset: 0.5, line_width: 4.0 }
+    }
+}
+
+/// Display name of a shape kind.
+pub fn shape_name(kind: &str) -> String {
+    match kind {
+        "rect" => tr("Rectangle").into(),
+        "ellipse" => tr("Ellipse").into(),
+        "line" => tr("Line").into(),
+        "polygon" => tr("Polygon").into(),
+        "star" => tr("Star").into(),
+        "arrow" => tr("Arrow").into(),
+        "double_arrow" => tr("Double Arrow").into(),
+        "chevron" => tr("Chevron").into(),
+        "triangle" => tr("Triangle").into(),
+        "diamond" => tr("Diamond").into(),
+        "plus" => tr("Plus").into(),
+        "cross" => tr("Cross").into(),
+        "check" => tr("Check Mark").into(),
+        "heart" => tr("Heart").into(),
+        "speech" => tr("Speech Bubble").into(),
+        k => k.into(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerRow {
     pub id: LayerId,
@@ -267,7 +307,7 @@ pub struct Model {
     pub favourite_fonts: Vec<String>,
     pub recent_fonts: Vec<String>,
     /// Shape tool: ellipse instead of rectangle.
-    pub shape_ellipse: bool,
+    pub shape: ShapeOpts,
     /// Histogram of what is below the active adjustment (levels and curves).
     pub histogram: Option<std::sync::Arc<mosaix_gpu::Histogram>>,
 }
@@ -286,6 +326,10 @@ pub enum Action {
     SelectLayerPixels { layer: LayerId, mode: &'static str },
     /// Paint Bucket: sample all layers instead of the active one.
     BucketAll(bool),
+    /// Shape tool settings.
+    ShapeOpts(ShapeOpts),
+    /// Select › Selection to Shape Layer (foreground colour).
+    SelectionToShape,
     /// The active layer's locks.
     SetLock(mosaix_core::doc::Lock),
     /// The History Brush's source state.
@@ -375,7 +419,6 @@ pub enum Action {
         effects: Vec<mosaix_core::style::Effect>,
         done: bool,
     },
-    ShapeEllipse(bool),
     WandTolerance(f32),
     WandContiguous(bool),
     SelectLayer(LayerId),
@@ -1229,6 +1272,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         ("Select", S::TransformSelection, "Transform Selection", sel(m.has_selection)),
         ("Select", S::SelectAndMask, "Select and Mask …", sel(m.has_selection)),
         ("Edit", S::Preferences, "Preferences …", None),
+        ("Select", S::SelectionToShape, "Selection to Shape Layer", sel(m.has_selection)),
         ("File", S::Revert, "Revert", (!m.can_revert).then_some(tr("The image was never saved"))),
         ("Edit", S::StrokeSelection, "Stroke …", (!(m.has_selection && pixel_active(m))).then_some(tr("Needs a selection on a pixel layer"))),
     ] {
@@ -1289,6 +1333,7 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
             S::OpenAsLayers => out.push(Action::PickFile(super::files::FileMode::OpenAsLayer)),
             S::Revert => out.push(Action::Revert),
             S::TransformSelection => out.push(Action::TransformSelection),
+            S::SelectionToShape => out.push(Action::SelectionToShape),
             S::Preferences => st.dialog = Some(Dialog::Prefs { p: m.prefs.clone(), language: m.language.clone() }),
             S::SelectAndMask => {
                 st.dialog = Some(Dialog::Refine { radius: 10.0, contrast: 0.0, shift: 0.0, feather: 0.0, to_mask: false });
@@ -1526,6 +1571,13 @@ fn special_entry(
         Special::Revert => {
             let r = ui.add_enabled(m.can_revert, egui::Button::new((icon, tr("Revert"))));
             if r.on_disabled_hover_text(tr("The image was never saved")).on_hover_text(tr("Reload the last saved version")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
+        Special::SelectionToShape => {
+            let r = ui.add_enabled(m.has_selection, egui::Button::new((icon, tr("Selection to Shape Layer"))));
+            if r.on_disabled_hover_text(tr("Needs a selection")).on_hover_text(tr("The outline as an editable shape (in the foreground color); the Pen tool can edit it")).clicked() {
                 run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
@@ -2379,14 +2431,38 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             ),
         ),
         ToolId::Shape => {
-            if ui
-                .selectable_label(!m.shape_ellipse, tr("Rectangle"))
-                .clicked()
-            {
-                out.push(Action::ShapeEllipse(false));
+            let mut o = m.shape.clone();
+            for k in ["rect", "ellipse", "line", "polygon", "star"] {
+                ui.selectable_value(&mut o.kind, k.to_string(), shape_name(k));
             }
-            if ui.selectable_label(m.shape_ellipse, "Ellipse").clicked() {
-                out.push(Action::ShapeEllipse(true));
+            let preset = mosaix_core::vector::SHAPE_PRESETS.contains(&o.kind.as_str());
+            egui::ComboBox::from_id_salt("shape preset")
+                .selected_text(if preset { shape_name(&o.kind) } else { tr("More Shapes").to_string() })
+                .show_ui(ui, |ui| {
+                    for p in mosaix_core::vector::SHAPE_PRESETS {
+                        ui.selectable_value(&mut o.kind, p.to_string(), shape_name(p));
+                    }
+                });
+            match o.kind.as_str() {
+                "polygon" | "star" => {
+                    ui.label(if o.kind == "star" { tr("Points") } else { tr("Sides") });
+                    ui.add(egui::DragValue::new(&mut o.sides).range(3..=100));
+                    if o.kind == "star" {
+                        ui.label(tr("Inner radius"));
+                        let mut pct = o.inset * 100.0;
+                        if ui.add(egui::DragValue::new(&mut pct).range(5.0..=100.0).suffix(" %")).changed() {
+                            o.inset = pct / 100.0;
+                        }
+                    }
+                }
+                "line" => {
+                    ui.label(tr("Width"));
+                    ui.add(egui::DragValue::new(&mut o.line_width).range(0.5..=500.0).suffix(" px"));
+                }
+                _ => {}
+            }
+            if o != m.shape {
+                out.push(Action::ShapeOpts(o));
             }
             hint(
                 ui,

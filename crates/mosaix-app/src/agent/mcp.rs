@@ -537,6 +537,13 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "select_to_shape",
+            "Turn the selection's outline into an editable shape layer (holes stay open), filled with color (default black); tolerance = simplification in px (default 1).",
+            json!({ "color": color_param("Fill colour"), "tolerance": { "type": "number", "minimum": 0.1 } }),
+            &[],
+            false,
+        ),
+        tool(
             "auto_adjust",
             "Image › Adjustments › Auto Tone (levels per channel), Auto Contrast (one levels for all channels) or Auto Color (per channel with neutral midtones), worked out from the active layer and applied to its pixels. Returns the levels used.",
             json!({ "mode": { "type": "string", "enum": ["tone", "contrast", "color"] } }),
@@ -722,7 +729,7 @@ pub fn tools() -> Vec<Value> {
             json!({ "text": { "type": "string" }, "x": { "type": "number" }, "y": { "type": "number" },
                     "size": { "type": "number", "description": "px" }, "font": { "type": "string", "description": "family, or sans-serif / serif / monospace" },
                     "color": color_param("Text colour (default black)"), "weight": { "type": "number", "description": "100–900, 700 = bold" },
-                    "italic": { "type": "boolean" }, "align": { "type": "string", "enum": ["left", "center", "right", "justify"] },
+                    "italic": { "type": "boolean" }, "underline": { "type": "boolean" }, "strikethrough": { "type": "boolean" }, "align": { "type": "string", "enum": ["left", "center", "right", "justify"] },
                     "line_height": { "type": "number", "description": "multiple of the size (1.2)" }, "letter_spacing": { "type": "number" },
                     "width": { "type": "number" }, "name": { "type": "string" } }),
             &["text", "x", "y", "size"],
@@ -731,10 +738,13 @@ pub fn tools() -> Vec<Value> {
         tool(
             "shape_add",
             "Add a shape layer (stays sharp and editable): rect / ellipse (x, y, width, height; rect radius), polygon (points), \
-             path (SVG path data d). Fill defaults to black; no_fill for outlines; stroke_color / stroke_width for a contour; \
+             path (SVG path data d), line (points [[x0,y0],[x1,y1]], stroke_width default 4), regular_polygon / star (x, y, width, \
+             height, sides, star inset 0–1) or a ready-made shape in the box x, y, width, height: arrow, double_arrow, chevron, \
+             triangle, diamond, plus, cross, check, heart, speech. Fill defaults to black; no_fill for outlines; stroke_color / stroke_width for a contour; \
              gradient (colours, evenly spaced; gradient_style, gradient_angle) or pattern (a name from pattern_list; pattern_scale) \
              fill it like Photoshop's gradient / pattern fill layers.",
-            json!({ "shape": { "type": "string", "enum": ["rect", "ellipse", "polygon", "path"] },
+            json!({ "shape": { "type": "string", "enum": ["rect", "ellipse", "polygon", "path", "line", "regular_polygon", "star", "arrow", "double_arrow", "chevron", "triangle", "diamond", "plus", "cross", "check", "heart", "speech"] },
+                    "sides": { "type": "integer", "minimum": 3 }, "inset": { "type": "number" },
                     "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" },
                     "radius": { "type": "number" }, "points": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
                     "d": { "type": "string" }, "fill": color_param("Fill colour"), "no_fill": { "type": "boolean" },

@@ -746,6 +746,8 @@ fn psd_text_layer(
         face.weight
     };
     spec.italic = face.italic || t.faux_italic;
+    spec.underline = t.underline;
+    spec.strikethrough = t.strikethrough;
     spec.align = t.align;
     spec.line_height = t.line_height;
     spec.letter_spacing = t.tracking;

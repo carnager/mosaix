@@ -311,6 +311,14 @@ pub fn editor(
                         }
                     });
                     ui.end_row();
+                    ui.label(tr("Lines"));
+                    ui.horizontal(|ui| {
+                        let r = ui.toggle_value(&mut s.underline, RichText::new(tr("U")).underline()).on_hover_text(tr("Underline"));
+                        t.add(&r);
+                        let r = ui.toggle_value(&mut s.strikethrough, RichText::new(tr("S")).strikethrough()).on_hover_text(tr("Strikethrough"));
+                        t.add(&r);
+                    });
+                    ui.end_row();
                     ui.label(tr("Align"));
                     ui.horizontal(|ui| {
                         for a in TextAlign::ALL {

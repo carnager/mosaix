@@ -3547,3 +3547,75 @@ msgstr "Vergröberungsfilter"
 
 msgid "Other"
 msgstr "Sonstige Filter"
+
+msgid "Shape from Selection"
+msgstr "Form aus Auswahl"
+
+msgid "Lines"
+msgstr "Linien"
+
+msgid "U"
+msgstr "U"
+
+msgid "Underline"
+msgstr "Unterstrichen"
+
+msgid "S"
+msgstr "D"
+
+msgid "Strikethrough"
+msgstr "Durchgestrichen"
+
+msgid "Line"
+msgstr "Linie"
+
+msgid "Polygon"
+msgstr "Polygon"
+
+msgid "Star"
+msgstr "Stern"
+
+msgid "Arrow"
+msgstr "Pfeil"
+
+msgid "Double Arrow"
+msgstr "Doppelpfeil"
+
+msgid "Chevron"
+msgstr "Winkel"
+
+msgid "Triangle"
+msgstr "Dreieck"
+
+msgid "Plus"
+msgstr "Plus"
+
+msgid "Cross"
+msgstr "Kreuz"
+
+msgid "Check Mark"
+msgstr "Häkchen"
+
+msgid "Heart"
+msgstr "Herz"
+
+msgid "Speech Bubble"
+msgstr "Sprechblase"
+
+msgid "Selection to Shape Layer"
+msgstr "Auswahl in Formebene"
+
+msgid "The outline as an editable shape (in the foreground color); the Pen tool can edit it"
+msgstr "Der Umriss als bearbeitbare Form (in der Vordergrundfarbe); der Zeichenstift kann ihn bearbeiten"
+
+msgid "More Shapes"
+msgstr "Weitere Formen"
+
+msgid "Points"
+msgstr "Zacken"
+
+msgid "Sides"
+msgstr "Ecken"
+
+msgid "Inner radius"
+msgstr "Innenradius"

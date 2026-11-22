@@ -87,6 +87,10 @@ pub struct TextSpec {
     pub weight: f32,
     #[serde(default)]
     pub italic: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub underline: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strikethrough: bool,
     /// Linear RGB + alpha (straight).
     pub color: [f32; 4],
     #[serde(default)]
@@ -174,6 +178,8 @@ impl TextSpec {
             size,
             weight: default_weight(),
             italic: false,
+            underline: false,
+            strikethrough: false,
             color,
             align: TextAlign::Left,
             line_height: default_line_height(),
@@ -463,8 +469,73 @@ impl VectorLayer {
     }
 }
 
+/// Ready-made shapes for the Shape tool (names as in `preset_shape`).
+pub const SHAPE_PRESETS: [&str; 10] = ["arrow", "double_arrow", "chevron", "triangle", "diamond", "plus", "cross", "check", "heart", "speech"];
+
+/// Corners of a regular polygon (`inset` = None) or a star (`inset`: inner
+/// radius as a share of the outer one) filling the box (x, y, w, h), the
+/// first corner pointing up.
+pub fn regular_polygon(x: f64, y: f64, w: f64, h: f64, sides: u32, inset: Option<f64>) -> Vec<[f64; 2]> {
+    let n = sides.clamp(3, 100) as usize;
+    let (cx, cy, rx, ry) = (x + w / 2.0, y + h / 2.0, w / 2.0, h / 2.0);
+    let k = if inset.is_some() { 2 * n } else { n };
+    (0..k)
+        .map(|i| {
+            let a = -std::f64::consts::FRAC_PI_2 + i as f64 * std::f64::consts::TAU / k as f64;
+            let r = match inset {
+                Some(f) if i % 2 == 1 => f.clamp(0.05, 1.0),
+                _ => 1.0,
+            };
+            [cx + rx * r * a.cos(), cy + ry * r * a.sin()]
+        })
+        .collect()
+}
+
+/// A ready-made shape as a closed polygon in the box (x, y, w, h).
+pub fn preset_shape(name: &str, x: f64, y: f64, w: f64, h: f64) -> Option<Vec<[f64; 2]>> {
+    let unit: Vec<[f64; 2]> = match name {
+        "arrow" => vec![[0.0, 0.3], [0.6, 0.3], [0.6, 0.0], [1.0, 0.5], [0.6, 1.0], [0.6, 0.7], [0.0, 0.7]],
+        "double_arrow" => vec![[0.0, 0.5], [0.3, 0.0], [0.3, 0.3], [0.7, 0.3], [0.7, 0.0], [1.0, 0.5], [0.7, 1.0], [0.7, 0.7], [0.3, 0.7], [0.3, 1.0]],
+        "chevron" => vec![[0.0, 0.0], [0.6, 0.0], [1.0, 0.5], [0.6, 1.0], [0.0, 1.0], [0.4, 0.5]],
+        "triangle" => vec![[0.5, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        "diamond" => vec![[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]],
+        "plus" => vec![[0.35, 0.0], [0.65, 0.0], [0.65, 0.35], [1.0, 0.35], [1.0, 0.65], [0.65, 0.65], [0.65, 1.0], [0.35, 1.0], [0.35, 0.65], [0.0, 0.65], [0.0, 0.35], [0.35, 0.35]],
+        "cross" => vec![[0.15, 0.0], [0.5, 0.35], [0.85, 0.0], [1.0, 0.15], [0.65, 0.5], [1.0, 0.85], [0.85, 1.0], [0.5, 0.65], [0.15, 1.0], [0.0, 0.85], [0.35, 0.5], [0.0, 0.15]],
+        "check" => vec![[0.0, 0.55], [0.15, 0.4], [0.38, 0.62], [0.85, 0.1], [1.0, 0.25], [0.38, 0.92]],
+        "heart" => (0..64)
+            .map(|i| {
+                // The classic heart curve, scaled into the unit square.
+                let t = i as f64 / 64.0 * std::f64::consts::TAU;
+                let hx = 16.0 * t.sin().powi(3);
+                let hy = 13.0 * t.cos() - 5.0 * (2.0 * t).cos() - 2.0 * (3.0 * t).cos() - (4.0 * t).cos();
+                [(hx + 17.0) / 34.0, (12.0 - hy) / 29.0]
+            })
+            .collect(),
+        "speech" => vec![[0.0, 0.0], [1.0, 0.0], [1.0, 0.7], [0.45, 0.7], [0.2, 1.0], [0.25, 0.7], [0.0, 0.7]],
+        _ => return None,
+    };
+    Some(unit.into_iter().map(|[u, v]| [x + u * w, y + v * h]).collect())
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn stars_polygons_and_presets_fill_their_box() {
+        let p = regular_polygon(0.0, 0.0, 100.0, 100.0, 5, None);
+        assert_eq!(p.len(), 5);
+        assert!((p[0][0] - 50.0).abs() < 1e-9 && p[0][1].abs() < 1e-9, "first corner at the top");
+        let s = regular_polygon(0.0, 0.0, 100.0, 100.0, 5, Some(0.5));
+        assert_eq!(s.len(), 10);
+        let r = |q: [f64; 2]| ((q[0] - 50.0).powi(2) + (q[1] - 50.0).powi(2)).sqrt();
+        assert!((r(s[1]) - 25.0).abs() < 1e-9);
+        for name in SHAPE_PRESETS {
+            let q = preset_shape(name, 10.0, 20.0, 30.0, 40.0).unwrap();
+            assert!(q.iter().all(|p| p[0] >= 9.9 && p[0] <= 40.1 && p[1] >= 19.9 && p[1] <= 60.1), "{name}");
+        }
+        assert!(preset_shape("nope", 0.0, 0.0, 1.0, 1.0).is_none());
+    }
+
     use super::*;
 
     #[test]

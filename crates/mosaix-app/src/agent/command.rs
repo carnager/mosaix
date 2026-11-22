@@ -353,6 +353,12 @@ pub enum Command {
     LayerDistribute {
         direction: String,
     },
+    /// Select › Selection to Shape Layer: the outline as an editable shape.
+    SelectToShape {
+        color: Option<ColorSpec>,
+        /// Simplification in px (default 1).
+        tolerance: Option<f64>,
+    },
     /// Image › Adjustments › Auto Tone / Contrast / Color.
     AutoAdjust {
         mode: String,
@@ -474,6 +480,10 @@ pub enum Command {
         weight: Option<f32>,
         #[serde(default)]
         italic: bool,
+        #[serde(default)]
+        underline: bool,
+        #[serde(default)]
+        strikethrough: bool,
         align: Option<mosaix_core::vector::TextAlign>,
         line_height: Option<f32>,
         letter_spacing: Option<f32>,
@@ -489,6 +499,10 @@ pub enum Command {
         radius: Option<f64>,
         points: Option<Vec<[f64; 2]>>,
         d: Option<String>,
+        /// Polygon corners / star points.
+        sides: Option<u32>,
+        /// Star: inner radius as a share of the outer one.
+        inset: Option<f64>,
         fill: Option<ColorSpec>,
         #[serde(default)]
         no_fill: bool,
@@ -683,6 +697,7 @@ impl Command {
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
             Self::AutoAdjust { .. } => "auto_adjust",
+            Self::SelectToShape { .. } => "select_to_shape",
             Self::LayerAlign { .. } => "layer_align",
             Self::SelectTransform { .. } => "select_transform",
             Self::HistorySource { .. } => "history_source",
@@ -1813,6 +1828,34 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             s.engine.distribute_layers(horizontal, tr("Distribute Layers")).map_err(engine_err)?;
             ok(s)
         }
+        Command::SelectToShape { color, tolerance } => {
+            let sel = s.engine.selection_cpu().context("nothing is selected")?;
+            let (w, h) = s.engine.size();
+            let loops = mosaix_core::mask::trace(&sel, tolerance.unwrap_or(1.0).clamp(0.1, 50.0), w, h);
+            ensure!(!loops.is_empty(), "the selection has no outline");
+            let mut d = String::new();
+            for l in &loops {
+                for (i, p) in l.iter().enumerate() {
+                    d += &format!("{}{} {} ", if i == 0 { "M" } else { "L" }, p[0], p[1]);
+                }
+                d += "Z ";
+            }
+            let fill = match &color {
+                Some(c) => {
+                    let (rgb, a) = c.linear()?;
+                    [rgb[0], rgb[1], rgb[2], a]
+                }
+                None => [0.0, 0.0, 0.0, 1.0],
+            };
+            let v = mosaix_core::VectorLayer::shape(mosaix_core::vector::ShapeSpec {
+                geometry: mosaix_core::vector::Geometry::Path { d: d.trim_end().to_string() },
+                fill: Some(fill),
+                stroke: None,
+                paint: None,
+            });
+            let id = s.engine.add_vector(v, tr("Shape from Selection")).context("not possible right now")?;
+            Ok(Output::json(json!({ "ok": true, "layer": id, "outlines": loops.len() })))
+        }
         Command::AutoAdjust { mode } => {
             use mosaix_core::adjust::AutoMode as M;
             let (m, label) = match mode.as_str() {
@@ -2110,6 +2153,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             color,
             weight,
             italic,
+            underline,
+            strikethrough,
             align,
             line_height,
             letter_spacing,
@@ -2128,6 +2173,8 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             }
             t.weight = weight.unwrap_or(t.weight).clamp(100.0, 900.0);
             t.italic = italic;
+            t.underline = underline;
+            t.strikethrough = strikethrough;
             t.align = align.unwrap_or_default();
             t.line_height = line_height.unwrap_or(t.line_height);
             t.letter_spacing = letter_spacing.unwrap_or(0.0);
@@ -2161,8 +2208,14 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             pattern,
             pattern_scale,
             name,
+            sides,
+            inset,
         } => {
             use mosaix_core::vector::{Geometry, Paint, ShapeSpec, StrokeStyle};
+            // A line is an open polygon with a stroke (and no fill unless asked).
+            let is_line = shape == "line";
+            let no_fill = no_fill || (is_line && fill.is_none());
+            let stroke_width = if is_line { stroke_width.or(Some(4.0)) } else { stroke_width };
             let need = |v: Option<f64>, n: &str| v.with_context(|| format!("{shape} needs {n}"));
             let geometry = match shape.as_str() {
                 "rect" => Geometry::Rect {
@@ -2188,7 +2241,30 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 "path" => Geometry::Path {
                     d: d.context("path needs d (SVG path data)")?,
                 },
-                o => bail!("shape must be rect, ellipse, polygon or path, got {o:?}"),
+                "line" => {
+                    let p = points.context("line needs points [[x0, y0], [x1, y1]]")?;
+                    ensure!(p.len() >= 2, "line needs two points");
+                    Geometry::Polygon { points: p, closed: false }
+                }
+                "regular_polygon" | "star" => Geometry::Polygon {
+                    points: mosaix_core::vector::regular_polygon(
+                        need(x, "x")?,
+                        need(y, "y")?,
+                        need(width, "width")?,
+                        need(height, "height")?,
+                        sides.unwrap_or(5),
+                        (shape == "star").then(|| inset.unwrap_or(0.5)),
+                    ),
+                    closed: true,
+                },
+                o if mosaix_core::vector::SHAPE_PRESETS.contains(&o) => Geometry::Polygon {
+                    points: mosaix_core::vector::preset_shape(o, need(x, "x")?, need(y, "y")?, need(width, "width")?, need(height, "height")?).unwrap(),
+                    closed: true,
+                },
+                o => bail!(
+                    "shape must be rect, ellipse, polygon, path, line, regular_polygon, star or one of {}, got {o:?}",
+                    mosaix_core::vector::SHAPE_PRESETS.join(", ")
+                ),
             };
             let lin = |c: &ColorSpec| -> anyhow::Result<[f32; 4]> {
                 let (rgb, a) = c.linear()?;
