@@ -115,6 +115,8 @@ pub struct Layer<T> {
     /// Clipping mask: shown only where the layers below it (down to the
     /// first unclipped "base" layer) have pixels.
     pub clip: bool,
+    /// Lock transparent pixels / all pixels / the position.
+    pub lock: Lock,
     /// Groups: "Pass Through" – the children blend directly with what is
     /// below the group (Photoshop's default); otherwise the group is
     /// composited on its own first (isolated, "Normal").
@@ -235,6 +237,24 @@ pub enum MaskSlot {
     Selection,
     /// Index into [`Document::channels`].
     Channel(usize),
+}
+
+/// What a layer protects (the lock buttons in the layer panel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Lock {
+    /// Painting and filling keep each pixel's opacity.
+    pub transparency: bool,
+    /// No painting, filling, filters or adjustments on the pixels.
+    pub pixels: bool,
+    /// No moving or transforming.
+    pub position: bool,
+}
+
+impl Lock {
+    pub fn any(self) -> bool {
+        self.transparency || self.pixels || self.position
+    }
 }
 
 /// Layer › Merge Down, Merge Visible, Flatten Image.
@@ -720,6 +740,7 @@ impl<T: Clone> Document<T> {
             filters: Vec::new(),
             effects: Vec::new(),
             clip: false,
+            lock: Lock::default(),
         };
         list.insert(i, group);
         self.active = gid;
@@ -1010,6 +1031,7 @@ impl<T: Clone> Document<T> {
                     filters: l.filters.clone(),
                     effects: l.effects.clone(),
                     clip: l.clip,
+                    lock: l.lock,
                     pass_through: l.pass_through,
                     fill_opacity: l.fill_opacity,
                 })
@@ -1074,6 +1096,7 @@ impl<T> Layer<T> {
             filters: Vec::new(),
             effects: Vec::new(),
             clip: false,
+            lock: Lock::default(),
             pass_through: false,
             fill_opacity: 1.0,
         }

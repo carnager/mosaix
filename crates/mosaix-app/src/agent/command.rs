@@ -157,6 +157,8 @@ pub enum Command {
         pass_through: Option<bool>,
         /// Fill opacity: the layer's own pixels, not its style.
         fill_opacity: Option<f32>,
+        /// Locks: {transparency, pixels, position}.
+        lock: Option<mosaix_core::doc::Lock>,
     },
     LayerSelect {
         layer: LayerId,
@@ -314,6 +316,21 @@ pub enum Command {
         contiguous: Option<bool>,
         antialias: Option<bool>,
         sample: Option<String>,
+    },
+    /// Align the selected layers (or one layer to the canvas).
+    LayerAlign {
+        edge: String,
+    },
+    /// Space three or more selected layers evenly.
+    LayerDistribute {
+        direction: String,
+    },
+    /// Edit › Stroke: a line along the selection's edge.
+    StrokeSelection {
+        width: f64,
+        position: Option<String>,
+        color: ColorSpec,
+        opacity: Option<f32>,
     },
     /// Image › Adjustments: an adjustment applied to the layer's own pixels.
     AdjustmentApply {
@@ -632,6 +649,9 @@ impl Command {
             Self::LayerVia { .. } => "layer_via",
             Self::SelectLayerPixels { .. } => "select_layer_pixels",
             Self::BucketFill { .. } => "bucket_fill",
+            Self::StrokeSelection { .. } => "stroke_selection",
+            Self::LayerAlign { .. } => "layer_align",
+            Self::LayerDistribute { .. } => "layer_distribute",
             Self::AdjustmentApply { .. } => "adjustment_apply",
             Self::SmartReplace { .. } => "smart_replace",
             Self::GuideDelete { .. } => "guide_delete",
@@ -1165,6 +1185,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             clip,
             pass_through,
             fill_opacity,
+            lock,
         } => {
             let id = target_layer(s, layer)?;
             let blend = blend
@@ -1200,6 +1221,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 }
                 if let Some(v) = visible {
                     l.visible = v;
+                }
+                if let Some(k) = lock {
+                    l.lock = k;
                 }
                 true
             })?;
@@ -1391,6 +1415,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                         })
                     },
                     tone,
+                    keep_alpha: false,
                 })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);
@@ -1680,6 +1705,46 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                     opacity.unwrap_or(1.0).clamp(0.0, 1.0),
                     tr("Paint Bucket"),
                 )
+                .map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "tiles": n })))
+        }
+        Command::LayerAlign { edge } => {
+            use mosaix_gpu::Align as A;
+            let edge = match edge.as_str() {
+                "left" => A::Left,
+                "center_x" | "centre_x" => A::CenterX,
+                "right" => A::Right,
+                "top" => A::Top,
+                "center_y" | "centre_y" => A::CenterY,
+                "bottom" => A::Bottom,
+                e => bail!("unknown edge {e:?} (left, center_x, right, top, center_y, bottom)"),
+            };
+            not_painting(s)?;
+            s.engine.align_layers(edge, tr("Align Layers")).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::LayerDistribute { direction } => {
+            let horizontal = match direction.as_str() {
+                "horizontal" => true,
+                "vertical" => false,
+                d => bail!("unknown direction {d:?} (horizontal, vertical)"),
+            };
+            not_painting(s)?;
+            s.engine.distribute_layers(horizontal, tr("Distribute Layers")).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::StrokeSelection { width, position, color, opacity } => {
+            pixel_layer(s, None)?;
+            use mosaix_core::style::StrokePosition as P;
+            let position = match position.as_deref() {
+                None | Some("outside") => P::Outside,
+                Some("inside") => P::Inside,
+                Some("center") | Some("centre") => P::Center,
+                Some(p) => bail!("unknown position {p:?} (inside, center, outside)"),
+            };
+            let n = s
+                .engine
+                .stroke_selection(width, position, premul(&color, StrokeTarget::Pixels)?, opacity.unwrap_or(1.0).clamp(0.0, 1.0), tr("Stroke"))
                 .map_err(engine_err)?;
             Ok(Output::json(json!({ "ok": true, "tiles": n })))
         }

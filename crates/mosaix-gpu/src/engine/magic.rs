@@ -297,6 +297,12 @@ impl Engine {
         if region.is_empty() {
             return Err(mosaix_core::tr("nothing to fill there"));
         }
+        self.fill_through(region, color, opacity, label)
+    }
+
+    /// Fills the active pixel layer through `region` (instead of the
+    /// selection, which stays as it is). One undo step.
+    fn fill_through(&mut self, region: CpuMask, color: [f32; 4], opacity: f32, label: &str) -> Result<usize, &'static str> {
         let gpu = self.mask_to_gpu(region).ok_or(mosaix_core::tr("GPU memory full"))?;
         let old = self.doc.selection.replace(gpu);
         let r = self.fill(super::StrokeTarget::Pixels, color, opacity, label);
@@ -308,6 +314,36 @@ impl Engine {
         }
         self.recheck_all = true;
         r
+    }
+
+    /// Edit › Stroke: a line of `width` px along the selection's edge,
+    /// inside it, centred on it or outside it. One undo step.
+    pub fn stroke_selection(
+        &mut self,
+        width: f64,
+        position: mosaix_core::style::StrokePosition,
+        color: [f32; 4],
+        opacity: f32,
+        label: &str,
+    ) -> Result<usize, &'static str> {
+        use mosaix_core::mask::{Modify, modify};
+        use mosaix_core::style::StrokePosition as P;
+        self.check_target(super::StrokeTarget::Pixels)?;
+        let sel = self.selection_cpu().ok_or(mosaix_core::tr("nothing is selected"))?;
+        if width < 1.0 {
+            return Err(mosaix_core::tr("the width must be at least 1 px"));
+        }
+        let (w, h) = self.size();
+        let (outer, inner) = match position {
+            P::Inside => (sel.clone(), modify(&sel, Modify::Contract(width), w, h)),
+            P::Outside => (modify(&sel, Modify::Expand(width), w, h), sel.clone()),
+            P::Center => (modify(&sel, Modify::Expand(width / 2.0), w, h), modify(&sel, Modify::Contract(width / 2.0), w, h)),
+        };
+        let band = combine(&outer, &inner, CombineOp::Subtract);
+        if band.is_empty() {
+            return Err(mosaix_core::tr("nothing to stroke"));
+        }
+        self.fill_through(band, color, opacity, label)
     }
 }
 

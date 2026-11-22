@@ -247,6 +247,11 @@ impl Session {
     }
 
     /// Whether the document has its own `.mosaix` file yet.
+    /// The file File › Revert reloads: the last saved one, else the source.
+    pub fn revert_path(&self) -> Option<PathBuf> {
+        self.save_path.clone().or_else(|| self.source.clone()).filter(|p| p.exists())
+    }
+
     pub fn has_save_path(&self) -> bool {
         self.save_path.is_some()
     }

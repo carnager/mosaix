@@ -57,6 +57,9 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `select_layer_pixels` | Select a layer's pixels by their opacity (`mode` replace/add/subtract/intersect) |
 | `bucket_fill` | Paint Bucket at (x, y): `color`, `opacity`, `tolerance` 0–255, `contiguous`, `sample` layer/image; within the selection |
 | `adjustment_apply` | Apply an adjustment (same objects as `adjustment_add`) to the pixel layer's own pixels, inside the selection |
+| `layer_align`, `layer_distribute` | Align the selected layers (`edge` left/center_x/right/top/center_y/bottom; one layer: to the canvas) or space three or more evenly (`direction`) |
+| `stroke_selection` | Edit › Stroke: `width`, `position` inside/center/outside, `color`, `opacity` |
+| `layer_set` with `lock` | `{transparency, pixels, position}` |
 | `layer_merge` | Merge layers as they look (blend modes, masks, styles, text baked in; pixels outside the canvas are kept): `mode` `down` (the active layer onto the one below, default), `visible` (all visible top-level layers; hidden ones stay), `flatten` (everything into one layer; hidden layers are dropped) |
 | `layer_place`, `layer_convert_smart`, `smart_replace` | Smart objects: embed an image, convert a pixel layer, replace the contents; transforms stay lossless |
 | `guide_add`, `guide_list`, `guide_delete`, `guide_clear` | Guides (`orientation` vertical/horizontal, `position` in px) |

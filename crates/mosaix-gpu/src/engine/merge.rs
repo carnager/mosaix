@@ -181,4 +181,115 @@ impl Engine {
         self.dirty.extend(changed);
         Ok(())
     }
+
+    /// Aligns the selected layers' contents (or one layer to the canvas):
+    /// `edge` is left, center_x, right, top, center_y or bottom. Each layer
+    /// moves by whole pixels; one undo step.
+    pub fn align_layers(&mut self, edge: Align, label: &str) -> Result<(), &'static str> {
+        let ids = self.doc.selected_layers();
+        let mut boxes = Vec::new();
+        for id in &ids {
+            if let Some(b) = self.content_bounds(*id) {
+                boxes.push((*id, b));
+            }
+        }
+        if boxes.is_empty() {
+            return Err(mosaix_core::tr("nothing to align"));
+        }
+        // Several layers align to their joint bounds, a single one to the canvas.
+        let all = if boxes.len() > 1 {
+            boxes.iter().fold((i64::MAX, i64::MAX, i64::MIN, i64::MIN), |a, (_, b)| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+        } else {
+            (0, 0, self.doc.width as i64, self.doc.height as i64)
+        };
+        let moves: Vec<(LayerId, i64, i64)> = boxes
+            .iter()
+            .map(|&(id, (x0, y0, x1, y1))| {
+                let (dx, dy) = match edge {
+                    Align::Left => (all.0 - x0, 0),
+                    Align::Right => (all.2 - x1, 0),
+                    Align::CenterX => ((all.0 + all.2 - x0 - x1) / 2, 0),
+                    Align::Top => (0, all.1 - y0),
+                    Align::Bottom => (0, all.3 - y1),
+                    Align::CenterY => (0, (all.1 + all.3 - y0 - y1) / 2),
+                };
+                (id, dx, dy)
+            })
+            .collect();
+        self.move_layers(&moves, label)
+    }
+
+    /// Spaces the centres of three or more selected layers evenly between
+    /// the outermost ones (`horizontal` or vertically). One undo step.
+    pub fn distribute_layers(&mut self, horizontal: bool, label: &str) -> Result<(), &'static str> {
+        let ids = self.doc.selected_layers();
+        let mut c: Vec<(LayerId, f64)> = Vec::new();
+        for id in &ids {
+            if let Some((x0, y0, x1, y1)) = self.content_bounds(*id) {
+                c.push((*id, if horizontal { (x0 + x1) as f64 / 2.0 } else { (y0 + y1) as f64 / 2.0 }));
+            }
+        }
+        if c.len() < 3 {
+            return Err(mosaix_core::tr("select at least three layers to distribute"));
+        }
+        c.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let (first, last) = (c[0].1, c[c.len() - 1].1);
+        let step = (last - first) / (c.len() - 1) as f64;
+        let moves: Vec<(LayerId, i64, i64)> = c
+            .iter()
+            .enumerate()
+            .map(|(i, &(id, at))| {
+                let d = (first + step * i as f64 - at).round() as i64;
+                if horizontal { (id, d, 0) } else { (id, 0, d) }
+            })
+            .collect();
+        self.move_layers(&moves, label)
+    }
+
+    /// Moves layers by their own whole-pixel offsets, as one undo step.
+    fn move_layers(&mut self, moves: &[(LayerId, i64, i64)], label: &str) -> Result<(), &'static str> {
+        if moves.iter().any(|(id, ..)| self.doc.find(*id).is_some_and(|l| l.lock.position)) {
+            return Err(mosaix_core::tr("the layer's position is locked"));
+        }
+        let (active, picked) = (self.doc.active, self.doc.picked.clone());
+        let before = self.doc.clone();
+        let n = self.history.undo_len();
+        let mut result = Ok(());
+        for &(id, dx, dy) in moves {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            self.doc.active = id;
+            self.doc.picked.clear();
+            let fwd = glam::DAffine2::from_translation(glam::DVec2::new(dx as f64, dy as f64));
+            if let Err(e) = self.transform_layer(fwd, super::Interp::Nearest, false, label) {
+                result = Err(e);
+                break;
+            }
+        }
+        self.doc.active = active;
+        self.doc.picked = picked;
+        if result.is_err() {
+            // Undo what was done so far.
+            while self.history.undo_len() > n {
+                self.undo();
+            }
+            self.doc.active = active;
+            self.doc.picked = before.picked.clone();
+            return result;
+        }
+        self.history.squash_since(n, before, label);
+        Ok(())
+    }
+}
+
+/// Edges and centres for [`Engine::align_layers`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    CenterX,
+    Right,
+    Top,
+    CenterY,
+    Bottom,
 }

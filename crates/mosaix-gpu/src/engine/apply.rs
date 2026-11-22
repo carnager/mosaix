@@ -56,6 +56,8 @@ const KIND_BAKE_MASK: u32 = 5;
 const MODE_PAINT: u32 = 1;
 const MODE_ERASE: u32 = 2;
 const MODE_REPLACE: u32 = 3;
+/// Or'ed into a mode: the result keeps the old pixel's opacity.
+pub(super) const MODE_KEEP_ALPHA: u32 = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GradientKind {
@@ -171,7 +173,7 @@ impl Engine {
         let mut j = self.with_old(self.job(c), layer, StrokeTarget::Pixels, c);
         j.src_kind = KIND_STROKE;
         j.src_slots[0] = src_slot;
-        j.mode = MODE_REPLACE;
+        j.mode = MODE_REPLACE | self.alpha_lock(layer, StrokeTarget::Pixels);
         j
     }
 
@@ -429,7 +431,7 @@ impl Engine {
                 (true, _) => MODE_REPLACE,
                 (false, true) => MODE_ERASE,
                 (false, false) => MODE_PAINT,
-            };
+            } | self.alpha_lock(layer, target);
             j.opacity = stroke.params.opacity;
             jobs.push(j);
             kept.push(c);
@@ -497,7 +499,17 @@ impl Engine {
         if target == StrokeTarget::Mask && l.mask.is_none() {
             return Err(mosaix_core::tr("the layer has no mask"));
         }
+        if target == StrokeTarget::Pixels && l.lock.pixels {
+            return Err(mosaix_core::tr("the layer's pixels are locked"));
+        }
         Ok(l.id)
+    }
+
+    /// Mode flag for the apply kernel: keep each pixel's opacity (the
+    /// layer's transparent pixels are locked).
+    pub(super) fn alpha_lock(&self, layer: LayerId, target: StrokeTarget) -> u32 {
+        let locked = target == StrokeTarget::Pixels && self.doc.find(layer).is_some_and(|l| l.lock.transparency);
+        if locked { MODE_KEEP_ALPHA } else { 0 }
     }
 
     /// Fills the selection (or everything) of the active layer / its mask.
@@ -518,6 +530,7 @@ impl Engine {
                 j.src_kind = KIND_COLOR;
                 j.color0 = color;
                 j.opacity = opacity;
+                j.mode |= self.alpha_lock(layer, target);
                 j
             })
             .collect();
@@ -548,6 +561,7 @@ impl Engine {
                 } else {
                     KIND_RADIAL
                 };
+                j.mode |= self.alpha_lock(layer, target);
                 j.color0 = c0;
                 j.color1 = c1;
                 j.g0 = [p0.0 as f32, p0.1 as f32];

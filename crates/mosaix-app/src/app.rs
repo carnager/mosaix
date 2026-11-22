@@ -1698,6 +1698,7 @@ impl App {
             smudge: settings.smudge.is_some(),
             clone,
             tone,
+            keep_alpha: false,
         };
         if let Err(e) = engine.begin_stroke(params) {
             tracing::warn!("{}", tr!("Cannot paint: {error}", error = e));
@@ -2248,7 +2249,8 @@ impl App {
             | ui::files::FileMode::ImportBrushes
             | ui::files::FileMode::ImportPatterns
             | ui::files::FileMode::PlaceEmbedded
-            | ui::files::FileMode::ReplaceContents => None,
+            | ui::files::FileMode::ReplaceContents
+            | ui::files::FileMode::OpenAsLayer => None,
             ui::files::FileMode::SaveAs => s.map(|s| s.default_save_path()),
             ui::files::FileMode::ExportAs => s.map(|s| s.default_export_path()),
         }
@@ -3961,6 +3963,10 @@ impl App {
                 Some((BoxKind::Transform, b)) if b.quad.is_none() => Some(b.angle()),
                 _ => None,
             },
+            box_geom: self.boxed.as_ref().and_then(|(_, b)| {
+                let (c, s) = (b.centre(), b.size()?);
+                Some([c.x, c.y, s.x, s.y].map(|v| (v * 10.0).round() / 10.0))
+            }),
             box_mode: match &self.boxed {
                 Some((BoxKind::Transform, b)) => Some(b.mode),
                 _ => None,
@@ -3985,6 +3991,7 @@ impl App {
             history,
             history_done,
             has_selection: doc.selection.is_some(),
+            can_revert: s.revert_path().is_some(),
             channels: doc.channels.iter().map(|c| c.name.clone()).collect(),
             active_bounds: None,
             view: self.view,
@@ -4053,6 +4060,7 @@ impl App {
                         | Action::CancelBox
                         | Action::BoxRotate(_)
                         | Action::BoxAngle(_)
+                        | Action::BoxGeom(_)
                         | Action::BoxFlip { .. }
                         | Action::BoxMode(_)
                 )
@@ -4118,6 +4126,24 @@ impl App {
                     self.openai_key = settings::key_state();
                 }
                 Action::PlaceEmbedded(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_place", "path": p })),
+                Action::OpenAsLayer(p) => {
+                    let name = p.file_stem().map(|n| n.to_string_lossy().into_owned());
+                    self.run_agent_cmd(serde_json::json!({ "cmd": "place_image", "path": p, "name": name }));
+                }
+                Action::Revert => match self.session.as_ref().and_then(|s| s.revert_path()) {
+                    Some(p) => self.guard_unsaved(Pending::Open(p)),
+                    None => tracing::warn!("{}", tr("Nothing to revert to: the image was never saved")),
+                },
+                Action::StrokeSelection { width, position, opacity } => {
+                    let cmd = serde_json::json!({
+                        "cmd": "stroke_selection", "width": width, "position": position,
+                        "color": actions::hex(self.brush.color), "opacity": opacity,
+                    });
+                    if self.recording.is_some() {
+                        self.record(cmd.clone());
+                    }
+                    self.run_agent_cmd(cmd);
+                }
                 Action::ReplaceContents(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "smart_replace", "path": p })),
                 Action::ConvertToSmart => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_convert_smart" })),
                 Action::ViewCenter(x, y) => {
@@ -4315,6 +4341,9 @@ impl App {
                 Action::WandTolerance(v) => self.wand_tolerance = v,
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
+                Action::SetLock(l) => self.run_agent_cmd(serde_json::json!({
+                    "cmd": "layer_set", "lock": { "transparency": l.transparency, "pixels": l.pixels, "position": l.position },
+                })),
                 Action::PickLayer { layer, range } => {
                     if let Some(e) = self.engine() {
                         e.select(|d| {
@@ -4472,6 +4501,12 @@ impl App {
                 Action::BoxRotate(deg) => {
                     if let Some((BoxKind::Transform, b)) = &mut self.boxed {
                         b.rotate_by(deg);
+                    }
+                }
+                Action::BoxGeom([x, y, w, h]) => {
+                    if let Some((_, b)) = &mut self.boxed {
+                        b.set_size(DVec2::new(w, h));
+                        b.set_centre(DVec2::new(x, y));
                     }
                 }
                 Action::BoxAngle(deg) => {

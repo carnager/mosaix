@@ -83,12 +83,15 @@ impl FlattenBatch {
                 } => {
                     let (mask_slot, mask_const) = mask_slot(mask);
                     let st = stroke.filter(|s| s.0 == id);
-                    let stroke_mode = st.map_or(0, |s| match (s.2.target, s.2.erase) {
-                        _ if s.2.working_copy() => 5,
-                        (StrokeTarget::Pixels, false) => 1,
-                        (StrokeTarget::Pixels, true) => 2,
-                        (StrokeTarget::Mask, false) => 3,
-                        (StrokeTarget::Mask, true) => 4,
+                    let stroke_mode = st.map_or(0, |s| {
+                        let keep = if s.2.target == StrokeTarget::Pixels && s.2.keep_alpha { 16 } else { 0 };
+                        keep | match (s.2.target, s.2.erase) {
+                            _ if s.2.working_copy() => 5,
+                            (StrokeTarget::Pixels, false) => 1,
+                            (StrokeTarget::Pixels, true) => 2,
+                            (StrokeTarget::Mask, false) => 3,
+                            (StrokeTarget::Mask, true) => 4,
+                        }
                     });
                     GpuOp {
                         kind: if clip { 4 } else { 0 },

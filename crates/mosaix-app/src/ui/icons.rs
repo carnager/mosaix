@@ -15,6 +15,15 @@ pub enum Icon {
     Duplicate,
     Trash,
     Adjust,
+    /// A padlock (locked layer).
+    Lock,
+    /// Lock buttons: transparent pixels, all pixels, position.
+    LockAlpha,
+    LockPixels,
+    LockPosition,
+    /// Align left, centre x, right, top, centre y, bottom (0–5);
+    /// distribute horizontally / vertically (6, 7).
+    Align(u8),
 }
 
 fn dashed_poly(p: &Painter, pts: &[Pos2], stroke: Stroke) {
@@ -407,6 +416,49 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 })
                 .collect();
             p.add(Shape::convex_polygon(half, color, Stroke::NONE));
+        }
+        Icon::Lock => {
+            let mut arc = Vec::new();
+            for i in 0..=12 {
+                let t = std::f32::consts::PI * (1.0 + i as f32 / 12.0);
+                arc.push(at(10.0 + 4.0 * t.cos(), 9.0 + 4.5 * t.sin()));
+            }
+            arc.insert(0, at(6.0, 10.0));
+            arc.push(at(14.0, 10.0));
+            p.add(Shape::line(arc, mid));
+            p.rect_filled(Rect::from_min_max(at(4.0, 9.5), at(16.0, 18.0)), 1.5 * u, color);
+        }
+        Icon::LockAlpha => {
+            p.rect_stroke(Rect::from_min_max(at(3.0, 3.0), at(17.0, 17.0)), 1.0, thin, egui::StrokeKind::Inside);
+            for (x, y) in [(3.0, 3.0), (10.0, 10.0)] {
+                p.rect_filled(Rect::from_min_max(at(x, y), at(x + 7.0, y + 7.0)), 0.0, color);
+            }
+        }
+        Icon::LockPixels => {
+            p.line_segment([at(4.0, 16.0), at(13.0, 7.0)], Stroke::new(2.4 * u, color));
+            p.add(Shape::convex_polygon(vec![at(12.0, 5.0), at(15.5, 2.5), at(17.5, 4.5), at(15.0, 8.0)], color, Stroke::NONE));
+            p.circle_filled(at(4.0, 16.5), 1.8 * u, color);
+        }
+        Icon::LockPosition => {
+            p.line_segment([at(10.0, 3.0), at(10.0, 17.0)], thin);
+            p.line_segment([at(3.0, 10.0), at(17.0, 10.0)], thin);
+            for (tip, a, b) in [((10.0, 2.0), (8.0, 4.5), (12.0, 4.5)), ((10.0, 18.0), (8.0, 15.5), (12.0, 15.5)), ((2.0, 10.0), (4.5, 8.0), (4.5, 12.0)), ((18.0, 10.0), (15.5, 8.0), (15.5, 12.0))] {
+                p.add(Shape::convex_polygon(vec![at(tip.0, tip.1), at(a.0, a.1), at(b.0, b.1)], color, Stroke::NONE));
+            }
+        }
+        Icon::Align(k) => {
+            // Two bars and the line they line up on.
+            let bar = |x0: f32, y0: f32, x1: f32, y1: f32| p.rect_filled(Rect::from_min_max(at(x0, y0), at(x1, y1)), 0.5 * u, color);
+            match k {
+                0 => { p.line_segment([at(3.0, 2.0), at(3.0, 18.0)], thin); bar(4.5, 4.5, 16.0, 8.5); bar(4.5, 11.5, 11.0, 15.5); }
+                1 => { p.line_segment([at(10.0, 2.0), at(10.0, 18.0)], thin); bar(4.0, 4.5, 16.0, 8.5); bar(6.5, 11.5, 13.5, 15.5); }
+                2 => { p.line_segment([at(17.0, 2.0), at(17.0, 18.0)], thin); bar(4.0, 4.5, 15.5, 8.5); bar(9.0, 11.5, 15.5, 15.5); }
+                3 => { p.line_segment([at(2.0, 3.0), at(18.0, 3.0)], thin); bar(4.5, 4.5, 8.5, 16.0); bar(11.5, 4.5, 15.5, 11.0); }
+                4 => { p.line_segment([at(2.0, 10.0), at(18.0, 10.0)], thin); bar(4.5, 4.0, 8.5, 16.0); bar(11.5, 6.5, 15.5, 13.5); }
+                5 => { p.line_segment([at(2.0, 17.0), at(18.0, 17.0)], thin); bar(4.5, 4.0, 8.5, 15.5); bar(11.5, 9.0, 15.5, 15.5); }
+                6 => { for x in [3.0, 8.5, 14.0] { bar(x, 6.0, x + 3.0, 14.0); } p.line_segment([at(2.0, 17.5), at(18.0, 17.5)], thin); }
+                _ => { for y in [3.0, 8.5, 14.0] { bar(6.0, y, 14.0, y + 3.0); } p.line_segment([at(17.5, 2.0), at(17.5, 18.0)], thin); }
+            }
         }
         Icon::Trash => {
             p.line_segment([at(3.0, 5.0), at(17.0, 5.0)], thin);

@@ -3446,3 +3446,102 @@ fn several_selected_layers_move_and_merge_together() {
     let ids: Vec<_> = e.doc().layers.iter().map(|l| l.id).collect();
     assert_eq!(ids, vec![a, m]);
 }
+
+#[test]
+fn stroke_selection_inside_centre_outside() {
+    use mosaix_core::style::StrokePosition as P;
+    let Some(g) = gpu() else { return };
+    for (pos, red, clear) in [(P::Inside, (55, 100), (45, 100)), (P::Outside, (45, 100), (55, 100)), (P::Center, (47, 100), (60, 100))] {
+        let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+        let layer = e.doc().active;
+        e.select_shape(&Shape::Rect { x: 50.0, y: 50.0, w: 100.0, h: 100.0 }, CombineOp::Replace, "Sel").unwrap();
+        e.stroke_selection(10.0, pos, [1.0, 0.0, 0.0, 1.0], 1.0, "Stroke").unwrap();
+        let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+        assert!(px(&t, red.0, red.1)[0] > 0.99, "{pos:?}: {red:?} red");
+        assert_eq!(px(&t, clear.0, clear.1)[3], 0.0, "{pos:?}: {clear:?} empty");
+        assert_eq!(px(&t, 100, 100)[3], 0.0, "{pos:?}: middle empty");
+        assert!(e.has_selection(), "the selection stays");
+    }
+}
+
+#[test]
+fn locked_layers() {
+    use mosaix_core::doc::Lock;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    // Left half half-transparent blue, right half empty.
+    let mut t = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS / 2 {
+            t[(y * TS + x) * 4..][..4].copy_from_slice(&[0.0, 0.0, 0.5, 0.5].map(f16::from_f32));
+        }
+    }
+    e.upload_tile(layer, TileCoord::new(0, 0), &t);
+    e.edit("Lock", |d| {
+        d.find_mut(layer).unwrap().lock = Lock { transparency: true, ..Default::default() };
+        true
+    });
+    // Fill and brush keep each pixel's opacity.
+    e.fill(StrokeTarget::Pixels, [1.0, 0.0, 0.0, 1.0], 1.0, "Fill").unwrap();
+    let after = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    let l = px(&after, 10, 10);
+    assert!((l[0] - 0.5).abs() < 1e-3 && l[2] < 1e-3 && (l[3] - 0.5).abs() < 1e-3, "red at the old opacity: {l:?}");
+    assert_eq!(px(&after, 200, 10)[3], 0.0, "transparent stays transparent");
+    stroke(&mut e, DVec2::new(200.0, 100.0), StrokeParams::default());
+    let after = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert_eq!(px(&after, 200, 100)[3], 0.0, "no paint where it was empty");
+    // Pixels locked: nothing paints; position locked: nothing moves.
+    e.edit("Lock", |d| {
+        d.find_mut(layer).unwrap().lock = Lock { pixels: true, position: true, ..Default::default() };
+        true
+    });
+    assert!(e.fill(StrokeTarget::Pixels, [0.0, 1.0, 0.0, 1.0], 1.0, "Fill").is_err());
+    assert!(e.begin_stroke(StrokeParams::default()).is_err());
+    assert!(e.translate_active(5, 0, "Move").is_err());
+}
+
+#[test]
+fn align_and_distribute_layers() {
+    use mosaix_gpu::Align;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let a = e.doc().active;
+    let (mut b, mut c) = (0, 0);
+    e.edit("Layers", |d| {
+        b = d.add_pixel_layer();
+        c = d.add_pixel_layer();
+        true
+    });
+    let square = |x0: usize, y0: usize| {
+        let mut t = vec![f16::ZERO; TS * TS * 4];
+        for y in y0..y0 + 10 {
+            for x in x0..x0 + 10 {
+                t[(y * TS + x) * 4..][..4].fill(f16::ONE);
+            }
+        }
+        t
+    };
+    e.upload_tile(a, TileCoord::new(0, 0), &square(0, 0));
+    e.upload_tile(b, TileCoord::new(0, 0), &square(30, 40));
+    e.upload_tile(c, TileCoord::new(0, 0), &square(200, 100));
+    e.select(|d| {
+        d.active = c;
+        d.picked = vec![a, b];
+    });
+    e.align_layers(Align::Left, "Align").unwrap();
+    for id in [a, b, c] {
+        assert_eq!(e.content_bounds(id).unwrap().0, 0, "layer {id} at the left edge");
+    }
+    assert_eq!(e.history_len().0, 2, "one undo step (after the layers step)");
+    e.undo();
+    assert_eq!(e.content_bounds(c).unwrap().0, 200);
+    e.distribute_layers(true, "Distribute").unwrap();
+    let cx = |e: &mut Engine, id| {
+        let (x0, _, x1, _) = e.content_bounds(id).unwrap();
+        (x0 + x1) / 2
+    };
+    let (ca, cb, cc) = (cx(&mut e, a), cx(&mut e, b), cx(&mut e, c));
+    assert_eq!((ca, cc), (5, 205), "the outer ones stay");
+    assert!((cb - 105).abs() <= 1, "the middle one is centred: {cb}");
+}

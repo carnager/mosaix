@@ -60,6 +60,7 @@ use mosaix_core::{
 
 pub use apply::GradientKind;
 pub use cafill::{FillJob, FillResult};
+pub use merge::Align;
 pub use upscale::{UpscaleJob, UpscaleResult};
 pub use clipboard::CopiedPixels;
 pub use histogram::Histogram;
@@ -141,6 +142,9 @@ pub struct StrokeParams {
     pub clone: Option<CloneSource>,
     /// Dodge, burn, sponge, blur or sharpen the layer under the brush.
     pub tone: Option<Tone>,
+    /// Set by the engine from the layer's lock: the stroke keeps each
+    /// pixel's opacity.
+    pub keep_alpha: bool,
 }
 
 /// The retouching brushes that change the pixels under them. One stroke
@@ -193,6 +197,7 @@ impl Default for StrokeParams {
             smudge: false,
             clone: None,
             tone: None,
+            keep_alpha: false,
         }
     }
 }
@@ -1403,6 +1408,11 @@ impl Engine {
         if !l.visible {
             return Err(mosaix_core::tr("the layer is hidden"));
         }
+        if params.target == StrokeTarget::Pixels && l.lock.pixels {
+            return Err(mosaix_core::tr("the layer's pixels are locked"));
+        }
+        let mut params = params;
+        params.keep_alpha = params.target == StrokeTarget::Pixels && l.lock.transparency;
         if params.target == StrokeTarget::Mask && l.mask.is_none() {
             return Err(mosaix_core::tr("the layer has no mask"));
         }

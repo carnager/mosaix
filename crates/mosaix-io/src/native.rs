@@ -110,10 +110,16 @@ struct LayerEntry {
     effects: Vec<mosaix_core::style::Effect>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     clip: bool,
+    #[serde(default, skip_serializing_if = "is_unlocked")]
+    lock: mosaix_core::doc::Lock,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pass_through: bool,
     #[serde(default = "one", skip_serializing_if = "is_one")]
     fill_opacity: f32,
+}
+
+fn is_unlocked(l: &mosaix_core::doc::Lock) -> bool {
+    !l.any()
 }
 
 fn one() -> f32 {
@@ -261,6 +267,7 @@ fn to_manifest(doc: &Document<BlobRef>, raw: &HashMap<u64, BlobRef>) -> Manifest
                 filters: l.filters.clone(),
                 effects: l.effects.clone(),
                 clip: l.clip,
+                lock: l.lock,
                 pass_through: l.pass_through,
                 fill_opacity: l.fill_opacity,
             })
@@ -350,6 +357,7 @@ fn from_manifest(m: Manifest, file_len: u64, read: ReadBlob, raws: RawRefs) -> a
                     filters: e.filters,
                     effects: e.effects,
                     clip: e.clip,
+                    lock: e.lock,
                     pass_through: e.pass_through,
                     fill_opacity: e.fill_opacity.clamp(0.0, 1.0),
                 })

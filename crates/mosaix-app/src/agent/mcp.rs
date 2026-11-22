@@ -268,7 +268,8 @@ pub fn tools() -> Vec<Value> {
                 "blend": { "type": "string", "enum": blend_keys, "description": "Blend mode (Photoshop semantics)" },
                 "visible": { "type": "boolean" },
                 "clip": { "type": "boolean", "description": "Clipping mask: the layer shows only where the layers below it (down to the first unclipped one) have pixels; that base layer's opacity and blend mode apply to the group" },
-                "pass_through": { "type": "boolean", "description": "Groups only: Pass Through (Photoshop's default for groups) – children blend directly with what is below the group; false = isolated group using its own blend mode" }
+                "pass_through": { "type": "boolean", "description": "Groups only: Pass Through (Photoshop's default for groups) – children blend directly with what is below the group; false = isolated group using its own blend mode" },
+                "lock": { "type": "object", "description": "Locks (missing = false): transparency (painting keeps each pixel's opacity), pixels (no painting/filling/filters), position (no moving/transforming)", "properties": { "transparency": { "type": "boolean" }, "pixels": { "type": "boolean" }, "position": { "type": "boolean" } } }
             }),
             &[],
             false,
@@ -496,6 +497,27 @@ pub fn tools() -> Vec<Value> {
                 "contiguous": { "type": "boolean" }, "antialias": { "type": "boolean" }, "sample": { "type": "string", "enum": ["layer", "image"] }
             }),
             &["x", "y", "color"],
+            false,
+        ),
+        tool(
+            "layer_align",
+            "Align the selected layers' contents to each other (select several with layer_select {also}), or a single layer to the canvas.",
+            json!({ "edge": { "type": "string", "enum": ["left", "center_x", "right", "top", "center_y", "bottom"] } }),
+            &["edge"],
+            false,
+        ),
+        tool(
+            "layer_distribute",
+            "Space the centres of three or more selected layers evenly between the outermost ones.",
+            json!({ "direction": { "type": "string", "enum": ["horizontal", "vertical"] } }),
+            &["direction"],
+            false,
+        ),
+        tool(
+            "stroke_selection",
+            "Edit › Stroke: draw a line of `width` px along the selection's edge on the active pixel layer – inside, center or outside (default) – with color and opacity. The selection stays.",
+            json!({ "width": { "type": "number", "minimum": 1 }, "position": { "type": "string", "enum": ["inside", "center", "outside"] }, "color": color_param("Stroke color"), "opacity": { "type": "number", "minimum": 0, "maximum": 1 } }),
+            &["width", "color"],
             false,
         ),
         tool(
@@ -1090,7 +1112,7 @@ mod tests {
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
             "generative_fill": {"prompt": "a bench"},
-            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "layer_distribute": {"direction": "vertical"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {
@@ -1130,6 +1152,7 @@ mod tests {
                         ("white_balance", _) => json!({"mode": "auto"}),
                         ("highlights", _) => json!("clip"),
                         ("tone", _) => json!({"highlights": -50}),
+                        ("lock", _) => json!({"pixels": true}),
                         ("negative", _) => json!([[1, 2]]),
                         ("also", _) => json!([1]),
                         ("corners", _) => json!([[0, 0], [10, 0], [10, 10], [0, 10]]),

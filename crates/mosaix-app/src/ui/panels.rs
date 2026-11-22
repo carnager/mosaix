@@ -91,6 +91,7 @@ pub struct LayerRow {
     pub clip: bool,
     /// Mask thumbnail (grey) and the used part of it.
     pub mask_thumb: Option<(egui::TextureId, (f32, f32))>,
+    pub lock: mosaix_core::doc::Lock,
 }
 
 /// A path layer offered for text on a path.
@@ -195,6 +196,9 @@ pub struct Model {
     pub boxed: Option<&'static str>,
     /// Free transform: current angle (degrees).
     pub box_angle: Option<f64>,
+    /// Transform/crop box: centre x, y and width, height (document px),
+    /// unless skewed or distorted.
+    pub box_geom: Option<[f64; 4]>,
     /// Free transform: what the handles do.
     pub box_mode: Option<crate::boxedit::Mode>,
     /// Liquify session: tool, brush diameter, strength.
@@ -219,6 +223,8 @@ pub struct Model {
     pub history: Vec<String>,
     pub history_done: usize,
     pub has_selection: bool,
+    /// File › Revert has a saved file to go back to.
+    pub can_revert: bool,
     /// Names of the saved selections.
     pub channels: Vec<String>,
     /// Content bounds of the active smart object (x0, y0, x1, y1).
@@ -265,11 +271,18 @@ pub enum Action {
     SelectLayerPixels { layer: LayerId, mode: &'static str },
     /// Paint Bucket: sample all layers instead of the active one.
     BucketAll(bool),
+    /// The active layer's locks.
+    SetLock(mosaix_core::doc::Lock),
     /// Layer panel: Ctrl+click (toggle) or Shift+click (`range`) a layer.
     PickLayer { layer: LayerId, range: bool },
     /// Saves (`Some`) or forgets (`None`) the OpenAI API key.
     SaveApiKey(Option<String>),
     PlaceEmbedded(std::path::PathBuf),
+    OpenAsLayer(std::path::PathBuf),
+    /// File › Revert.
+    Revert,
+    /// Edit › Stroke with the foreground colour.
+    StrokeSelection { width: f64, position: &'static str, opacity: f32 },
     ReplaceContents(std::path::PathBuf),
     ConvertToSmart,
     /// Select › Modify (`op` as in the `select_modify` command).
@@ -361,6 +374,8 @@ pub enum Action {
     /// Free transform: turn by (degrees), set the angle, mirror.
     BoxRotate(f64),
     BoxAngle(f64),
+    /// Transform/crop box: exact centre and size (document px).
+    BoxGeom([f64; 4]),
     /// Skew / distort / perspective (opens free transform if needed).
     BoxMode(crate::boxedit::Mode),
     BoxFlip {
@@ -483,6 +498,8 @@ pub struct State {
 }
 
 enum Dialog {
+    /// Edit › Stroke.
+    Stroke { width: f64, position: &'static str, opacity: f32 },
     /// Image › Adjustments: an adjustment for the pixels, previewed live.
     Adjust { adj: mosaix_core::Adjustment },
     Canvas { w: u32, h: u32, anchor: (u8, u8) },
@@ -539,6 +556,11 @@ impl State {
         self.dialog = Some(Dialog::Adjust { adj: a });
         self.dialog_new = true;
         self.adj_editor = Default::default();
+    }
+
+    /// Opens Edit › Stroke (UI snapshots).
+    pub fn open_stroke(&mut self) {
+        self.dialog = Some(Dialog::Stroke { width: 4.0, position: "outside", opacity: 1.0 });
     }
 
     /// Opens Edit › Generative Fill (UI snapshots).
@@ -1140,6 +1162,9 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         ("View", S::NewGuide, "New Guide …", None),
         ("View", S::Messages, "Messages", None),
         ("Select", S::LayerPixels, "Layer Pixels", None),
+        ("File", S::OpenAsLayers, "Open as Layers …", None),
+        ("File", S::Revert, "Revert", (!m.can_revert).then_some(tr("The image was never saved"))),
+        ("Edit", S::StrokeSelection, "Stroke …", (!(m.has_selection && pixel_active(m))).then_some(tr("Needs a selection on a pixel layer"))),
     ] {
         let (en, label) = one(en);
         add(menu, en, label, disabled, Extra::Special(sp));
@@ -1195,6 +1220,9 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
             S::CanvasSize => st.dialog = Some(Dialog::Canvas { w: m.doc_size.0, h: m.doc_size.1, anchor: (1, 1) }),
             S::ImageSize => st.dialog = Some(Dialog::Image { w: m.doc_size.0, h: m.doc_size.1, keep: true }),
             S::Messages => st.show_log = true,
+            S::OpenAsLayers => out.push(Action::PickFile(super::files::FileMode::OpenAsLayer)),
+            S::Revert => out.push(Action::Revert),
+            S::StrokeSelection => st.dialog = Some(Dialog::Stroke { width: 4.0, position: "outside", opacity: 1.0 }),
             S::LayerPixels => out.push(Action::SelectLayerPixels { layer: m.active, mode: "replace" }),
             _ => {}
         },
@@ -1415,6 +1443,26 @@ fn special_entry(
             })
             .response
             .on_disabled_hover_text(tr("Works on pixel layers"));
+        }
+        Special::OpenAsLayers => {
+            if ui.button((icon, tr("Open as Layers …"))).on_hover_text(tr("An image file as a new pixel layer")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
+        Special::Revert => {
+            let r = ui.add_enabled(m.can_revert, egui::Button::new((icon, tr("Revert"))));
+            if r.on_disabled_hover_text(tr("The image was never saved")).on_hover_text(tr("Reload the last saved version")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
+        Special::StrokeSelection => {
+            let r = ui.add_enabled(m.has_selection && pixel_active(m), egui::Button::new((icon, tr("Stroke …"))));
+            if r.on_disabled_hover_text(tr("Needs a selection on a pixel layer")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
         }
         Special::LayerPixels => {
             let r = ui.button((icon, tr("Layer Pixels"))).on_hover_text(tr("Select the active layer's pixels by their opacity (also Ctrl+click on a layer thumbnail; Shift adds, Alt subtracts)"));
@@ -1670,6 +1718,17 @@ fn options_bar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
         if let Some(kind) = m.boxed {
             ui.label(RichText::new(tr(kind)).strong());
             ui.separator();
+            if let Some(g) = m.box_geom {
+                let mut v = g;
+                for (i, label, tip) in [(0, "X", "centre"), (1, "Y", "centre"), (2, "W", "width"), (3, "H", "height")] {
+                    ui.label(label).on_hover_text(tr(tip));
+                    ui.add(egui::DragValue::new(&mut v[i]).speed(1.0).max_decimals(1).suffix(" px"));
+                }
+                if v != g {
+                    out.push(Action::BoxGeom(v));
+                }
+                ui.separator();
+            }
             if let Some(angle) = m.box_angle {
                 ui.label(tr("Angle"));
                 let mut a = angle;
@@ -2480,6 +2539,29 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             if ui.button(tr("Free Transform (Ctrl+T)")).clicked() {
                 out.push(Action::Command(palette::find("Free Transform")));
             }
+            ui.separator();
+            let several = m.selected.len() > 1;
+            for (k, edge, tip) in [
+                (0u8, "left", "Align left edges"),
+                (1, "center_x", "Align horizontal centres"),
+                (2, "right", "Align right edges"),
+                (3, "top", "Align top edges"),
+                (4, "center_y", "Align vertical centres"),
+                (5, "bottom", "Align bottom edges"),
+            ] {
+                let tip = if several { tr(tip).to_string() } else { format!("{} – {}", tr(tip), tr("to the canvas (select several layers to align them to each other)")) };
+                if icons::button(ui, Icon::Align(k), 20.0, false).on_hover_text(tip).clicked() {
+                    out.push(Action::Agent(serde_json::json!({ "cmd": "layer_align", "edge": edge })));
+                }
+            }
+            ui.add_enabled_ui(m.selected.len() >= 3, |ui| {
+                for (k, dir, tip) in [(6u8, "horizontal", "Distribute horizontally"), (7, "vertical", "Distribute vertically")] {
+                    if icons::button(ui, Icon::Align(k), 20.0, false).on_hover_text(tr(tip)).on_disabled_hover_text(tr("Select three or more layers")).clicked() {
+                        out.push(Action::Agent(serde_json::json!({ "cmd": "layer_distribute", "direction": dir })));
+                    }
+                }
+            });
+            ui.separator();
             hint(
                 ui,
                 tr(
@@ -2561,6 +2643,24 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
         percent(ui, m.active_fill, true)
             .on_hover_text(tr("Fill: opacity of the layer's own pixels; its layer style keeps full strength"));
     });
+    if let Some(row) = m.layers.iter().find(|r| r.id == m.active) {
+        ui.horizontal(|ui| {
+            ui.label(tr("Lock"));
+            let mut lock = row.lock;
+            for (icon, on, tip) in [
+                (Icon::LockAlpha, &mut lock.transparency, tr("Lock transparent pixels: painting keeps each pixel's opacity")),
+                (Icon::LockPixels, &mut lock.pixels, tr("Lock image pixels: no painting, filling or filters")),
+                (Icon::LockPosition, &mut lock.position, tr("Lock position: no moving or transforming")),
+            ] {
+                if icons::button(ui, icon, 20.0, *on).on_hover_text(tip).clicked() {
+                    *on = !*on;
+                }
+            }
+            if lock != row.lock {
+                out.push(Action::SetLock(lock));
+            }
+        });
+    }
     ui.add_space(2.0);
 
     // Buttons stay at the bottom; the list scrolls in the space above.
@@ -2745,7 +2845,15 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                         let mask_w = row_h - 6.0;
                         let name_end = rect.max.x
                             - if row.has_mask { mask_w + 10.0 } else { 4.0 }
-                            - if row.fx { 20.0 } else { 0.0 };
+                            - if row.fx { 20.0 } else { 0.0 }
+                            - if row.lock.any() { 16.0 } else { 0.0 };
+                        if row.lock.any() {
+                            let x = rect.max.x - if row.has_mask { mask_w + 12.0 } else { 6.0 } - if row.fx { 20.0 } else { 0.0 } - 7.0;
+                            let r = egui::Rect::from_center_size(egui::pos2(x, rect.center().y), Vec2::splat(12.0));
+                            // Solid when everything is locked, faint for a partial lock (like Photoshop).
+                            let full = row.lock.pixels && row.lock.position;
+                            icons::paint(&painter, r, Icon::Lock, Color32::from_gray(if full { 210 } else { 140 }));
+                        }
                         if row.fx {
                             let x = rect.max.x - if row.has_mask { mask_w + 12.0 } else { 6.0 } - 8.0;
                             painter.text(
@@ -2970,6 +3078,42 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
     let mut open = true;
     let mut done = false;
     match d {
+        Dialog::Stroke { width, position, opacity } => {
+            egui::Window::new(tr("Stroke"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    egui::Grid::new("stroke").num_columns(2).show(ui, |ui| {
+                        ui.label(tr("Width"));
+                        ui.add(egui::DragValue::new(width).range(1.0..=500.0).speed(0.5).suffix(" px"));
+                        ui.end_row();
+                        ui.label(tr("Position"));
+                        ui.horizontal(|ui| {
+                            for (p, label) in [("inside", "Inside"), ("center", "Center"), ("outside", "Outside")] {
+                                ui.selectable_value(position, p, tr(label));
+                            }
+                        });
+                        ui.end_row();
+                        ui.label(tr("Opacity"));
+                        let mut pct = *opacity * 100.0;
+                        if ui.add(egui::Slider::new(&mut pct, 1.0..=100.0).suffix(" %").max_decimals(0)).changed() {
+                            *opacity = pct / 100.0;
+                        }
+                        ui.end_row();
+                        ui.label(tr("Color"));
+                        let (r, _) = ui.allocate_exact_size(Vec2::new(40.0, 18.0), Sense::hover());
+                        let c = m.color;
+                        ui.painter().rect_filled(r, 3.0, egui::Rgba::from_rgb(c[0], c[1], c[2]));
+                        ui.end_row();
+                    });
+                    ui.label(RichText::new(tr("Uses the foreground color, on the active layer.")).weak().small());
+                    if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        out.push(Action::StrokeSelection { width: *width, position, opacity: *opacity });
+                        done = true;
+                    }
+                });
+        }
         Dialog::Adjust { adj } => {
             if first_frame {
                 out.push(Action::AdjustPreview(Some(adj.clone())));
@@ -3444,6 +3588,7 @@ pub fn layer_rows<T: Clone>(doc: &mosaix_core::Document<T>) -> Vec<LayerRow> {
                     .map(|v| matches!(v.kind, mosaix_core::vector::VectorKind::Text(_))),
                 fx: l.effects.iter().any(|e| e.enabled),
                 clip: l.clip,
+                lock: l.lock,
                 mask_thumb: None,
             })
         })

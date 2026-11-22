@@ -152,6 +152,35 @@ impl BoxEdit {
         }
     }
 
+    /// Size of the box in document px along its own axes (`None` while
+    /// skewed, distorted or in perspective).
+    pub fn size(&self) -> Option<DVec2> {
+        if self.quad.is_some() {
+            return None;
+        }
+        let (a, b) = self.base;
+        let m = self.fwd.matrix2;
+        Some(DVec2::new((b.x - a.x) * m.x_axis.length(), (b.y - a.y) * m.y_axis.length()))
+    }
+
+    /// Moves the box so its centre is at `c`.
+    pub fn set_centre(&mut self, c: DVec2) {
+        let t = DAffine2::from_translation(c - self.centre());
+        self.apply_affine(t, self.fwd, self.quad);
+    }
+
+    /// Resizes the box about its centre to `size` (document px, along its
+    /// own axes); the angle stays. A negative or zero size is ignored.
+    pub fn set_size(&mut self, size: DVec2) {
+        let Some(now) = self.size() else { return };
+        if size.min_element() < 1.0 || now.min_element() <= 0.0 {
+            return;
+        }
+        let lc = self.local_point(0, 0);
+        let k = size / now;
+        self.fwd = self.fwd * DAffine2::from_translation(lc) * DAffine2::from_scale(k) * DAffine2::from_translation(-lc);
+    }
+
     /// Current rotation in degrees (−180 … 180).
     pub fn angle(&self) -> f64 {
         let x = self.fwd.matrix2.x_axis;
@@ -508,6 +537,19 @@ fn nonzero(v: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn exact_position_and_size_keep_the_angle() {
+        let mut b = BoxEdit::new(DVec2::new(0.0, 0.0), DVec2::new(100.0, 50.0), true);
+        b.rotate_by(30.0);
+        b.set_size(DVec2::new(200.0, 25.0));
+        b.set_centre(DVec2::new(300.0, 400.0));
+        let s = b.size().unwrap();
+        assert!((s.x - 200.0).abs() < 1e-9 && (s.y - 25.0).abs() < 1e-9, "{s}");
+        assert!((b.angle() - 30.0).abs() < 1e-9);
+        assert!(b.centre().distance(DVec2::new(300.0, 400.0)) < 1e-9);
+    }
+
     use super::*;
 
     #[test]

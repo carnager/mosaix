@@ -3208,3 +3208,105 @@ msgstr "mindestens zwei Ebenen auswählen"
 
 msgid "the selected layers must be in the same group"
 msgstr "die ausgewählten Ebenen müssen in derselben Gruppe liegen"
+
+msgid "Nothing to revert to: the image was never saved"
+msgstr "Nichts zum Zurücksetzen: das Bild wurde nie gespeichert"
+
+msgid "Align Layers"
+msgstr "Ebenen ausrichten"
+
+msgid "Distribute Layers"
+msgstr "Ebenen verteilen"
+
+msgid "Open as Layers"
+msgstr "Als Ebenen öffnen"
+
+msgid "The image was never saved"
+msgstr "Das Bild wurde nie gespeichert"
+
+msgid "Open as Layers …"
+msgstr "Als Ebenen öffnen …"
+
+msgid "An image file as a new pixel layer"
+msgstr "Eine Bilddatei als neue Pixelebene"
+
+msgid "Revert"
+msgstr "Zurück zur letzten Version"
+
+msgid "Reload the last saved version"
+msgstr "Die zuletzt gespeicherte Fassung neu laden"
+
+msgid "Stroke …"
+msgstr "Kontur füllen …"
+
+msgid "to the canvas (select several layers to align them to each other)"
+msgstr "an der Arbeitsfläche (mehrere Ebenen auswählen, um sie aneinander auszurichten)"
+
+msgid "Select three or more layers"
+msgstr "Drei oder mehr Ebenen auswählen"
+
+msgid "Lock"
+msgstr "Fixieren"
+
+msgid "Lock transparent pixels: painting keeps each pixel's opacity"
+msgstr "Transparente Pixel fixieren: Malen behält die Deckkraft jedes Pixels"
+
+msgid "Lock image pixels: no painting, filling or filters"
+msgstr "Bildpixel fixieren: kein Malen, Füllen, keine Filter"
+
+msgid "Lock position: no moving or transforming"
+msgstr "Position fixieren: kein Verschieben oder Transformieren"
+
+msgid "Uses the foreground color, on the active layer."
+msgstr "Mit der Vordergrundfarbe, auf der aktiven Ebene."
+
+msgid "the layer's pixels are locked"
+msgstr "die Pixel der Ebene sind fixiert"
+
+msgid "the layer's position is locked"
+msgstr "die Position der Ebene ist fixiert"
+
+msgid "the width must be at least 1 px"
+msgstr "die Breite muss mindestens 1 px sein"
+
+msgid "nothing to stroke"
+msgstr "nichts für eine Kontur"
+
+msgid "nothing to align"
+msgstr "nichts auszurichten"
+
+msgid "select at least three layers to distribute"
+msgstr "zum Verteilen mindestens drei Ebenen auswählen"
+
+msgid "Align left edges"
+msgstr "Linke Kanten ausrichten"
+
+msgid "Align horizontal centres"
+msgstr "Horizontal zentrieren"
+
+msgid "Align right edges"
+msgstr "Rechte Kanten ausrichten"
+
+msgid "Align top edges"
+msgstr "Obere Kanten ausrichten"
+
+msgid "Align vertical centres"
+msgstr "Vertikal zentrieren"
+
+msgid "Align bottom edges"
+msgstr "Untere Kanten ausrichten"
+
+msgid "Distribute horizontally"
+msgstr "Horizontal verteilen"
+
+msgid "Distribute vertically"
+msgstr "Vertikal verteilen"
+
+msgid "centre"
+msgstr "Mitte"
+
+msgid "width"
+msgstr "Breite"
+
+msgid "height"
+msgstr "Höhe"

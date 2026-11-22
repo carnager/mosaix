@@ -1009,6 +1009,9 @@ impl Engine {
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
+        if self.doc.selected_layers().iter().any(|id| self.doc.find(*id).is_some_and(|l| l.lock.position)) {
+            return Err(mosaix_core::tr("the layer's position is locked"));
+        }
         if self.doc.selected_layers().len() <= 1
             && !self
                 .doc

@@ -125,15 +125,31 @@ fn fs_rgba(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if job.src_kind == 5u {
         return old * load_mask(job.src_slots.x, job.src_consts.x, p);
     }
-    if job.mode == 3u {
+    let mode = job.mode & 15u;
+    var r: vec4<f32>;
+    if mode == 3u {
         // Replace (smudge): the stroke tile is a modified copy of the layer.
-        return mix(old, load_layer(job.src_slots.x, p), job.opacity * load_mask(job.sel_slot, job.sel_const, p));
+        r = mix(old, load_layer(job.src_slots.x, p), job.opacity * load_mask(job.sel_slot, job.sel_const, p));
+    } else {
+        let s = source(job, p) * (job.opacity * load_mask(job.sel_slot, job.sel_const, p));
+        if mode == 2u {
+            r = old * (1.0 - s.a);
+        } else {
+            r = s + old * (1.0 - s.a);
+        }
     }
-    let s = source(job, p) * (job.opacity * load_mask(job.sel_slot, job.sel_const, p));
-    if job.mode == 2u {
-        return old * (1.0 - s.a);
+    if (job.mode & 16u) != 0u {
+        return keep_alpha(r, old);
     }
-    return s + old * (1.0 - s.a);
+    return r;
+}
+
+// The result's colour at the old pixel's opacity (transparency locked).
+fn keep_alpha(r: vec4<f32>, old: vec4<f32>) -> vec4<f32> {
+    if r.a <= 0.0 {
+        return old;
+    }
+    return vec4<f32>(r.rgb / r.a * old.a, old.a);
 }
 
 @fragment
@@ -143,7 +159,7 @@ fn fs_mask(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let old = load_mask(job.old_slot, job.old_const, p);
     let s = source(job, p) * (job.opacity * load_mask(job.sel_slot, job.sel_const, p));
     var v: f32;
-    if job.mode == 2u {
+    if (job.mode & 15u) == 2u {
         v = old * (1.0 - s.a);
     } else {
         v = s.r + old * (1.0 - s.a);

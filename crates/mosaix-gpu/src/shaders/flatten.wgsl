@@ -81,12 +81,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let w = op.stroke_opacity * load_mask(op.sel_slot, op.sel_const, p);
                 let raw = load_slot(op.stroke_slot, p);
                 let s = raw * w;
-                switch op.stroke_mode {
+                let before = src;
+                switch op.stroke_mode & 15u {
                     case 1u: { src = s + src * (1.0 - s.a); }
                     case 5u: { src = mix(src, raw, w); }
                     case 2u: { src = src * (1.0 - s.a); }
                     case 3u: { m = s.r + m * (1.0 - s.a); }
                     default: { m = m * (1.0 - s.a); }
+                }
+                // Transparency locked: the stroke keeps each pixel's opacity.
+                if (op.stroke_mode & 16u) != 0u {
+                    if src.a > 0.0 {
+                        src = vec4<f32>(src.rgb / src.a * before.a, before.a);
+                    } else {
+                        src = before;
+                    }
                 }
             }
             let c = composite(stack[sp], src * (m * op.opacity), op.blend, params.blend_space);

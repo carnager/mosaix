@@ -25,6 +25,16 @@ impl<S> History<S> {
         }
     }
 
+    /// Folds the actions recorded since there were `n` into one step
+    /// starting at `before`.
+    pub fn squash_since(&mut self, n: usize, before: S, label: impl Into<String>) {
+        if self.undo.len() <= n {
+            return;
+        }
+        self.undo.truncate(n);
+        self.push(before, label);
+    }
+
     /// The state the last action started from (to correct it, e.g. when an
     /// action ran under a temporary selection).
     pub fn last_before_mut(&mut self) -> Option<&mut S> {

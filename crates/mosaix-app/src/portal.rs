@@ -59,7 +59,7 @@ fn filters(mode: FileMode) -> Vec<FileFilter> {
         ],
         FileMode::ImportBrushes => vec![one(tr("Brushes and images"), FileMode::ImportBrushes.extensions())],
         FileMode::ImportPatterns => vec![one(tr("Patterns and images"), FileMode::ImportPatterns.extensions())],
-        FileMode::PlaceEmbedded | FileMode::ReplaceContents => vec![one(tr("Images"), FileMode::PlaceEmbedded.extensions())],
+        FileMode::PlaceEmbedded | FileMode::ReplaceContents | FileMode::OpenAsLayer => vec![one(tr("Images"), FileMode::PlaceEmbedded.extensions())],
     }
 }
 
@@ -129,7 +129,12 @@ async fn ask(req: &Request, surface: Option<WlSurface>) -> ashpd::Result<Option<
     let title = req.mode.title();
     let folder = Some(req.folder.as_path()).filter(|p| p.is_dir());
     let response = match req.mode {
-        FileMode::Open | FileMode::ImportBrushes | FileMode::ImportPatterns | FileMode::PlaceEmbedded | FileMode::ReplaceContents => {
+        FileMode::Open
+        | FileMode::ImportBrushes
+        | FileMode::ImportPatterns
+        | FileMode::PlaceEmbedded
+        | FileMode::ReplaceContents
+        | FileMode::OpenAsLayer => {
             let mut r = SelectedFiles::open_file()
                 .identifier(parent)
                 .title(title)

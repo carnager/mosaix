@@ -108,6 +108,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         eyedrop_all: true,
         boxed: std::env::var_os("MOSAIX_SNAPSHOT_BOX").map(|_| "Free Transform"),
         box_angle: std::env::var_os("MOSAIX_SNAPSHOT_BOX").map(|_| 30.0),
+        box_geom: std::env::var_os("MOSAIX_SNAPSHOT_BOX").map(|_| [1200.0, 800.0, 640.0, 480.0]),
         box_mode: std::env::var_os("MOSAIX_SNAPSHOT_BOX").map(|_| crate::boxedit::Mode::Scale),
         mask_edit: false,
         text_overlay: None,
@@ -125,6 +126,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         history: labels,
         history_done: done,
         has_selection: doc.selection.is_some(),
+        can_revert: false,
         channels: doc.channels.iter().map(|c| c.name.clone()).collect(),
         active_bounds: None,
         view,
@@ -213,6 +215,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         }
         Ok("confirm") => state.confirm = Some(tr("They will be lost when quitting.").into()),
         Ok("generative") => state.open_generative(),
+        Ok("stroke") => state.open_stroke(),
         Ok("adjust") => state.open_adjust(mosaix_core::Adjustment::defaults().into_iter().find(|a| a.key() == "hue_saturation").unwrap()),
         Ok("filter") => state.open_filter(mosaix_core::Filter::GaussianBlur { radius: 25.0 }),
         Ok(d) if d.starts_with("filter:") => {
@@ -394,7 +397,11 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "poly_lasso" => ToolId::PolyLasso,
             _ => ToolId::Brush,
         };
-        model.boxed = (t == "move").then_some("Free Transform");
+        // "transform": the Move tool with a free transform open.
+        if t == "transform" {
+            model.tool = ToolId::Move;
+            model.boxed = Some("Free Transform");
+        }
     }
     // A few passes so that egui's layout settles.
     // Enough passes (and time) for layout and fade-in animations to settle.
