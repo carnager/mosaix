@@ -88,7 +88,7 @@ pub fn save_macro(dir: &Path, name: &str, steps: &[Value]) -> Result<PathBuf> {
         p = dir.join(format!("{clean} {n}.jsonl"));
         n += 1;
     }
-    let mut text = format!("# mosaix action “{clean}” – one agent command per line (see docs/agenten.md)\n");
+    let mut text = format!("# mosaix action “{clean}” – one agent command per line (see docs/agents.md)\n");
     for s in steps {
         text += &serde_json::to_string(s)?;
         text.push('\n');

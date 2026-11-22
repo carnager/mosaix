@@ -65,15 +65,14 @@ claude mcp add mosaix -- mosaix mcp --attach
 
 With `--attach`, the agent works in the window you have open and you watch it
 happen. Without it, the agent gets its own headless editor. See
-[docs/agenten.md](docs/agenten.md).
+[docs/agents.md](docs/agents.md).
 
 ## More
 
-- [docs/bedienung.md](docs/bedienung.md): every tool and shortcut (German)
-- [docs/aktionen.md](docs/aktionen.md): actions and scripts (German)
+- [docs/usage.md](docs/usage.md): every tool and shortcut
+- [docs/actions.md](docs/actions.md): actions and scripts
 - [docs/filter-plugins.md](docs/filter-plugins.md): writing filter plugins
-  (German)
-- [PLAN.md](PLAN.md): design notes and roadmap (German)
+- [PLAN.md](PLAN.md): design notes and roadmap
 
 ## License
 

@@ -1,13 +1,13 @@
-# Filter-Plugins (WGSL)
+# Filter plugins (WGSL)
 
-Eigene Filter laufen auf der GPU, genauso schnell wie die eingebauten: eine
-`.wgsl`-Datei in `~/.local/share/mosaix/filters/` (bzw. `$XDG_DATA_HOME/mosaix/filters/`).
-Sie erscheinen unter *Bild › Filter › Plugins* (*Plugins neu laden* liest den Ordner
-erneut), mit Vorschau, als Smart-Filter, rückgängig machbar und für Agenten
-(`filter_apply {"filter": {"kind": "plugin", "name": …}}`). Ein Smart-Filter speichert
-den Shader im Dokument – die Datei funktioniert auch ohne installiertes Plugin.
+Your own filters run on the GPU, just as fast as the built-in ones: a
+`.wgsl` file in `~/.local/share/mosaix/filters/` (or `$XDG_DATA_HOME/mosaix/filters/`).
+They show up under *Image › Filter › Plugins* (*Reload Plugins* reads the folder
+again), with preview, as smart filters, undoable and for agents
+(`filter_apply {"filter": {"kind": "plugin", "name": …}}`). A smart filter stores
+the shader in the document – the file works even without the plugin installed.
 
-## Aufbau
+## Structure
 
 ```wgsl
 // @name Vignette
@@ -23,34 +23,34 @@ fn process(p: vec2<i32>) -> vec4<f32> {
 }
 ```
 
-- `@name` (Pflicht), `@description`
-- `@param id "Beschriftung" min max standard [einheit] [log]` – Zahl, Regler (log = logarithmisch)
-- `@param id "Beschriftung" bool [true]` – Schalter
-- `@param id "Beschriftung" color [#rrggbb]` – Farbe
-- `@reach px|param` – wie weit der Filter um ein Pixel herum liest (z. B. Weichzeichner); bestimmt, welche Kacheln außerhalb der Ebene mitgerechnet werden
-- `@canvas` – malt die ganze Arbeitsfläche, auch wo die Ebene leer ist (Generatoren)
+- `@name` (required), `@description`
+- `@param id "Label" min max default [unit] [log]` – number, slider (log = logarithmic)
+- `@param id "Label" bool [true]` – switch
+- `@param id "Label" color [#rrggbb]` – color
+- `@reach px|param` – how far around a pixel the filter reads (e.g. blurs); decides which tiles outside the layer are computed too
+- `@canvas` – paints the whole canvas, also where the layer is empty (generators)
 
-Höchstens 16 Zahlen an Parametern (eine Farbe zählt 3). Jeder Parameter ist
-eine Funktion seines Namens: `amount()` → `f32`, `inverted()` → `bool`,
+At most 16 numbers of parameters (a color counts 3). Every parameter is
+a function of its name: `amount()` → `f32`, `inverted()` → `bool`,
 `tint()` → `vec3<f32>` (linear).
 
-`process` bekommt die Dokumentposition des Pixels und gibt **vormultipliziertes
-lineares RGBA** zurück. Hilfsfunktionen:
+`process` gets the pixel's document position and returns **premultiplied
+linear RGBA**. Helpers:
 
-| Funktion | |
+| Function | |
 |---|---|
-| `src(p: vec2<i32>) -> vec4<f32>` | Quellpixel (vormultipliziert, linear; außerhalb transparent) |
-| `sample(p: vec2<f32>) -> vec4<f32>` | bilinear, Pixelmitten bei +0,5 |
-| `unpremultiply(c)`, `premultiply(c)` | gerade ↔ vormultiplizierte Deckkraft |
-| `to_srgb(v)`, `to_linear(v)` | sRGB-Kurve (`vec3<f32>`) |
-| `luminance(rgb) -> f32` | Rec.-709-Luminanz (linear) |
-| `canvas() -> vec2<f32>` | Dokumentgröße in px |
-| `rand(p: vec2<i32>, seed: u32) -> f32` | 0…1, pro Pixel stabil |
+| `src(p: vec2<i32>) -> vec4<f32>` | Source pixel (premultiplied, linear; transparent outside) |
+| `sample(p: vec2<f32>) -> vec4<f32>` | Bilinear, pixel centers at +0.5 |
+| `unpremultiply(c)`, `premultiply(c)` | Straight ↔ premultiplied alpha |
+| `to_srgb(v)`, `to_linear(v)` | sRGB curve (`vec3<f32>`) |
+| `luminance(rgb) -> f32` | Rec. 709 luminance (linear) |
+| `canvas() -> vec2<f32>` | Document size in px |
+| `rand(p: vec2<i32>, seed: u32) -> f32` | 0…1, stable per pixel |
 
-Fehler (Kopfzeilen oder WGSL) nennen die Zeile der Plugin-Datei; kaputte Plugins
-stehen ausgegraut im Menü (Fehler im Tooltip). Beispiele: `crates/mosaix-app/plugins/`
-(Vignette, Pixelate, Chromatic Aberration, Clouds) – eine Datei gleichen Namens im
-Ordner ersetzt das eingebaute Beispiel.
+Errors (header lines or WGSL) name the line of the plugin file; broken plugins
+are greyed out in the menu (error in the tooltip). Examples: `crates/mosaix-app/plugins/`
+(Vignette, Pixelate, Chromatic Aberration, Clouds) – a file of the same name in the
+folder replaces the built-in example.
 
-Agenten: `filter_plugin_list` (Plugins, Parameter, Format), `filter_plugin_install`
-(prüft und speichert eigenen WGSL-Code; `check_only` nur prüfen).
+Agents: `filter_plugin_list` (plugins, parameters, format), `filter_plugin_install`
+(checks and saves your own WGSL code; `check_only` only checks).

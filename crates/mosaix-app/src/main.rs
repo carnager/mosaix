@@ -29,7 +29,7 @@ Usage:
   mosaix FILE --save A.mosaix --export B.png
                                 convert without a window (both optional, can be combined)
 
-For agents (see docs/agenten.md):
+For agents (see docs/agents.md):
   mosaix mcp [FILE]            MCP server over stdio with its own engine
   mosaix mcp --attach          MCP server that controls the running window live
   mosaix run SCRIPT.jsonl      run JSON commands line by line (`-` = stdin)
