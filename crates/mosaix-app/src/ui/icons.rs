@@ -136,6 +136,53 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.circle_filled(at(15.5, 7.0), 2.6 * u, color);
             p.line_segment([at(15.5, 7.0), at(17.5, 2.5)], Stroke::new(2.6 * u, color));
         }
+        Icon::Tool(ToolId::Dodge) => {
+            // Photoshop's paddle: a disc on an upright stick.
+            p.circle_filled(at(10.0, 7.0), 4.8 * u, color.gamma_multiply(0.35));
+            p.circle_stroke(at(10.0, 7.0), 4.8 * u, mid);
+            p.line_segment([at(10.0, 11.8), at(10.0, 18.0)], Stroke::new(2.2 * u, color));
+        }
+        Icon::Tool(ToolId::Burn) => {
+            // A hand shaping light: palm and fingers, slightly cupped.
+            p.add(Shape::convex_polygon(
+                vec![at(5.0, 11.0), at(13.0, 11.0), at(14.0, 15.0), at(11.0, 18.0), at(6.0, 17.0), at(4.0, 14.0)],
+                color,
+                Stroke::NONE,
+            ));
+            for (x, top) in [(5.5, 6.0), (8.0, 4.0), (10.5, 4.5), (13.0, 6.5)] {
+                p.line_segment([at(x, top), at(x, 11.5)], Stroke::new(2.0 * u, color));
+            }
+            p.line_segment([at(13.5, 13.0), at(16.5, 9.5)], Stroke::new(2.0 * u, color));
+        }
+        Icon::Tool(ToolId::Sponge) => {
+            // A rounded block with pores.
+            p.rect_stroke(
+                Rect::from_min_max(at(3.0, 5.0), at(17.0, 15.5)),
+                3.0 * u,
+                mid,
+                egui::StrokeKind::Middle,
+            );
+            for (x, y) in [(7.0, 8.5), (12.5, 8.0), (9.5, 12.0), (14.0, 12.5), (5.5, 12.5)] {
+                p.circle_filled(at(x, y), 1.1 * u, color);
+            }
+        }
+        Icon::Tool(ToolId::Blur) => {
+            // A drop.
+            let mut pts = vec![at(10.0, 2.5)];
+            pts.extend((0..=12).map(|i| {
+                let t = std::f32::consts::PI * (-0.15 + 1.3 * i as f32 / 12.0);
+                at(10.0 + 5.0 * t.cos(), 12.5 + 5.0 * t.sin())
+            }));
+            p.add(Shape::convex_polygon(pts, color.gamma_multiply(0.35), mid));
+        }
+        Icon::Tool(ToolId::Sharpen) => {
+            // A sharp triangle.
+            p.add(Shape::convex_polygon(
+                vec![at(10.0, 2.5), at(16.5, 17.0), at(3.5, 17.0)],
+                color.gamma_multiply(0.35),
+                mid,
+            ));
+        }
         Icon::Tool(ToolId::Clone) => {
             // A stamp: handle, neck and base.
             p.circle_filled(at(10.0, 4.5), 2.8 * u, color);

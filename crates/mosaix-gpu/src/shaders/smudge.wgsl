@@ -99,6 +99,94 @@ fn fs_write(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     return mix(old, b, cov);
 }
 
+fn enc1(v: f32) -> f32 {
+    let c = max(v, 0.0);
+    return select(1.055 * pow(c, 1.0 / 2.4) - 0.055, c * 12.92, c <= 0.0031308);
+}
+
+fn dec1(v: f32) -> f32 {
+    return select(pow((v + 0.055) / 1.055, 2.4), v / 12.92, v <= 0.04045);
+}
+
+// Dodge, burn and sponge on one straight sRGB colour; `k` = exposure/flow,
+// `range` 0 shadows, 1 midtones, 2 highlights.
+fn tone_color(e: vec3<f32>, kind: u32, range: i32, k: f32) -> vec3<f32> {
+    let l = clamp(0.299 * e.r + 0.587 * e.g + 0.114 * e.b, 0.0, 1.0);
+    switch kind {
+        case 1u: {
+            if range == 0 {
+                return e + (vec3<f32>(1.0) - e) * (k * (1.0 - l) * (1.0 - l));
+            }
+            if range == 2 {
+                return e + (vec3<f32>(1.0) - e) * (k * l * l);
+            }
+            return pow(max(e, vec3<f32>(0.0)), vec3<f32>(1.0 / (1.0 + k)));
+        }
+        case 2u: {
+            if range == 0 {
+                return e * (1.0 - k * (1.0 - l) * (1.0 - l));
+            }
+            if range == 2 {
+                return e * (1.0 - k * l * l);
+            }
+            return pow(max(e, vec3<f32>(0.0)), vec3<f32>(1.0 + k));
+        }
+        case 3u: {
+            return clamp(vec3<f32>(l) + (e - vec3<f32>(l)) * (1.0 + k), vec3<f32>(0.0), vec3<f32>(1.0));
+        }
+        default: {
+            return mix(e, vec3<f32>(l), k);
+        }
+    }
+}
+
+// Blur / sharpen source: a Gaussian of the original layer around `p`.
+fn blurred(job: Job, p: vec2<i32>) -> vec4<f32> {
+    let r = 2;
+    var acc = vec4<f32>(0.0);
+    var ws = 0.0;
+    for (var y = -r; y <= r; y++) {
+        for (var x = -r; x <= r; x++) {
+            let w = exp(-f32(x * x + y * y) / 3.0);
+            acc += w * canvas_texel(job, p + vec2<i32>(x, y));
+            ws += w;
+        }
+    }
+    return acc / ws;
+}
+
+// Retouching brushes: the stroke tile (a copy of the layer) moves towards
+// the effect applied to the original layer, so one stroke never applies it
+// twice. `primed` = kind, `offset.x` = tonal range, `shape.w` = amount.
+@fragment
+fn fs_tone(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+    let job = jobs[params.index];
+    let p = vec2<i32>(frag.xy);
+    let old = textureLoad(layer_tiles[job.stroke_slot >> 16u], p, job.stroke_slot & 0xffffu, 0);
+    let local = job.origin + frag.xy - job.center;
+    let cov = coverage(local, job.radius, job.hardness, job.shape.xyz, job.tip) * job.rate;
+    if cov <= 0.0 {
+        return old;
+    }
+    let gp = vec2<i32>(job.origin) + p;
+    let orig = canvas_texel(job, gp);
+    var goal = orig;
+    let k = job.shape.w;
+    if job.primed == 5u {
+        goal = mix(orig, blurred(job, gp), k);
+    } else if job.primed == 6u {
+        let b = blurred(job, gp);
+        let s = orig + (orig - b) * (2.0 * k);
+        goal = vec4<f32>(clamp(s.rgb, vec3<f32>(0.0), vec3<f32>(orig.a)), orig.a);
+    } else if orig.a > 0.0 {
+        let u = orig.rgb / orig.a;
+        let e = vec3<f32>(enc1(u.r), enc1(u.g), enc1(u.b));
+        let t = clamp(tone_color(e, job.primed, job.offset.x, k), vec3<f32>(0.0), vec3<f32>(1.0));
+        goal = vec4<f32>(vec3<f32>(dec1(t.r), dec1(t.g), dec1(t.b)) * orig.a, orig.a);
+    }
+    return mix(old, goal, cov);
+}
+
 // Clone stamp: paints the source pixels (exact, integer offset) through the
 // tip over the stroke tile; `rate` is the dab's flow.
 @fragment

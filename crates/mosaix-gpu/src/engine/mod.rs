@@ -138,6 +138,29 @@ pub struct StrokeParams {
     /// Clone stamp: paints pixels from `offset` away (document px) instead
     /// of a colour; dab alpha = flow.
     pub clone: Option<CloneSource>,
+    /// Dodge, burn, sponge, blur or sharpen the layer under the brush.
+    pub tone: Option<Tone>,
+}
+
+/// The retouching brushes that change the pixels under them. One stroke
+/// applies its effect at most once (like Photoshop); strokes add up.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tone {
+    pub kind: ToneKind,
+    /// Dodge and burn: 0 shadows, 1 midtones, 2 highlights.
+    pub range: u8,
+    /// Exposure / strength / flow of the effect, 0…1.
+    pub amount: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToneKind {
+    Dodge = 1,
+    Burn = 2,
+    Saturate = 3,
+    Desaturate = 4,
+    Blur = 5,
+    Sharpen = 6,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -156,7 +179,7 @@ pub struct CloneSource {
 impl StrokeParams {
     /// Stroke tiles are a working copy of the layer that replaces it (smudge, clone).
     pub fn working_copy(&self) -> bool {
-        self.smudge || self.clone.is_some_and(|c| !c.spot)
+        self.smudge || self.tone.is_some() || self.clone.is_some_and(|c| !c.spot)
     }
 }
 
@@ -168,6 +191,7 @@ impl Default for StrokeParams {
             target: StrokeTarget::Pixels,
             smudge: false,
             clone: None,
+            tone: None,
         }
     }
 }
@@ -284,6 +308,7 @@ pub struct Engine {
     /// Clone stamp from the flattened image: composite tiles copied on first use.
     clone_cache: HashMap<TileCoord, Option<Tile>>,
     clone_pipeline: wgpu::RenderPipeline,
+    tone_pipeline: wgpu::RenderPipeline,
     smudge_pickup_pipeline: wgpu::RenderPipeline,
     smudge_write_pipeline: wgpu::RenderPipeline,
     arrays_bgl: wgpu::BindGroupLayout,
@@ -808,6 +833,16 @@ impl Engine {
             None,
             TriangleList,
         );
+        let tone_pipeline = rp(
+            "tone",
+            &smudge_layout,
+            &smudge_shader,
+            ("vs", "fs_tone"),
+            &[],
+            TILE_FORMAT,
+            None,
+            TriangleList,
+        );
         let filter_pipeline = rp(
             "filter",
             &warp_layout,
@@ -1034,6 +1069,7 @@ impl Engine {
             smudge_cur: 0,
             clone_cache: HashMap::new(),
             clone_pipeline,
+            tone_pipeline,
             smudge_pickup_pipeline,
             smudge_write_pipeline,
             arrays_bgl,

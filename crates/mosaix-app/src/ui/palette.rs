@@ -303,6 +303,7 @@ pub const COMMANDS: &[Cmd] = &[
         false,
     ),
     c("Tool", "Smudge", K::u, false, false, false),
+    c("Tool", "Dodge / Burn / Sponge", K::o, false, false, false),
     c("Tool", "Clone Stamp", K::s, false, false, false),
     c(
         "Tool",

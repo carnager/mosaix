@@ -48,7 +48,7 @@ Jedes mosaix-Fenster lauscht auf `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (nur für 
 | `layer_add`, `layer_duplicate`, `layer_delete`, `layer_select`, `layer_move`, `layer_group`, `layer_ungroup` | Ebenenverwaltung |
 | `layer_set` | Name, Deckkraft, Füllmethode (`multiply`, `screen`, `overlay`, … 19 Stück), Sichtbarkeit |
 | `set_blend_space` | `srgb` (Photoshop-artig) oder `linear` |
-| `paint_stroke` | Pinselstrich entlang einer Punktliste, optional mit Druck pro Punkt; Größe, Härte, Deckkraft, Fluss, Radierer; Spitzen (`tip`: round/chalk/bristles/spray/rough/charcoal), Winkel, Rundheit, Zufall (`size_jitter`, `angle_jitter`, `scatter`, `flow_jitter`), `follow_direction`; `smudge: 0…1` verwischt statt zu malen; `target: "mask"` malt in die Ebenenmaske |
+| `paint_stroke` | Pinselstrich entlang einer Punktliste, optional mit Druck pro Punkt; Größe, Härte, Deckkraft, Fluss, Radierer; Spitzen (`tip`: round/chalk/bristles/spray/rough/charcoal), Winkel, Rundheit, Zufall (`size_jitter`, `angle_jitter`, `scatter`, `flow_jitter`), `follow_direction`; `smudge: 0…1` verwischt statt zu malen; `tone` (dodge/burn/sponge_saturate/sponge_desaturate/blur/sharpen) mit `range` und `amount` retuschiert statt zu malen; `target: "mask"` malt in die Ebenenmaske |
 | `select_rect`, `select_ellipse`, `select_polygon` | Auswahl mit Kantenglättung; `mode`: `replace`, `add`, `subtract`, `intersect` |
 | `select_all`, `select_none`, `select_invert`, `select_feather` | Auswahl verwalten, weiche Kante |
 | `guide_add`, `guide_list`, `guide_delete`, `guide_clear` | Hilfslinien (`orientation` vertical/horizontal, `position` in px) |

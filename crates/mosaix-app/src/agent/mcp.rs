@@ -339,7 +339,11 @@ pub fn tools() -> Vec<Value> {
                                   "description": "Clone stamp: paint the pixels found at point + [dx, dy] (exact copy); colour not needed" },
                 "clone_all_layers": { "type": "boolean", "description": "Clone from the flattened image instead of the layer (stamp onto an empty layer)" },
                 "heal": { "type": "boolean", "description": "With clone_offset: healing brush – texture from the source, colour and brightness matched to the surroundings when the stroke ends" },
-                "spot_heal": { "type": "boolean", "description": "Spot healing brush: paint over a blemish, a matching source is found automatically (no clone_offset, no colour)" }
+                "spot_heal": { "type": "boolean", "description": "Spot healing brush: paint over a blemish, a matching source is found automatically (no clone_offset, no colour)" },
+                "tone": { "type": "string", "enum": ["dodge", "burn", "sponge_saturate", "sponge_desaturate", "blur", "sharpen"],
+                          "description": "Retouching brush: changes the pixels under it (no colour); one stroke applies it once, strokes add up" },
+                "range": { "type": "string", "enum": ["midtones", "shadows", "highlights"], "description": "dodge/burn: tonal range (default midtones)" },
+                "amount": { "type": "number", "minimum": 0, "maximum": 1, "description": "retouching: exposure/strength (default 0.5)" }
             }),
             &["points", "size"],
             false,

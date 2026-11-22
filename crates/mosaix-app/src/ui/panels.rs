@@ -9,7 +9,7 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 20] = [
+pub const TOOLS: [(ToolId, &str, &str); 25] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
@@ -19,6 +19,11 @@ pub const TOOLS: [(ToolId, &str, &str); 20] = [
     (ToolId::Crop, "Crop", "C"),
     (ToolId::Brush, "Brush", "B"),
     (ToolId::Smudge, "Smudge", "U"),
+    (ToolId::Blur, "Blur", ""),
+    (ToolId::Sharpen, "Sharpen", ""),
+    (ToolId::Dodge, "Dodge", "O"),
+    (ToolId::Burn, "Burn", "O"),
+    (ToolId::Sponge, "Sponge", "O"),
     (ToolId::Clone, "Clone Stamp", "S"),
     (ToolId::SpotHeal, "Spot Healing Brush", "J"),
     (ToolId::Remove, "Remove (AI)", "J"),
@@ -54,6 +59,11 @@ pub enum ToolId {
     Radial,
     ObjectSelect,
     Remove,
+    Dodge,
+    Burn,
+    Sponge,
+    Blur,
+    Sharpen,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +169,7 @@ pub struct Model {
     pub color: [f32; 3],
     pub brush: BrushModel,
     pub smudge_strength: f32,
+    pub tone: crate::settings::ToneOpts,
     /// Clone stamp: sample all layers, aligned, source set.
     pub clone_all: bool,
     pub clone_aligned: bool,
@@ -234,6 +245,7 @@ pub enum Action {
     /// Select › Modify (`op` as in the `select_modify` command).
     ModifySelection { op: &'static str, amount: f64 },
     SetGuides(Vec<mosaix_core::Guide>),
+    ToneOpts(crate::settings::ToneOpts),
     ViewOpts(crate::settings::ViewOpts),
     Command(Cmd),
     /// Open a camera RAW file developed with these settings.
@@ -1229,7 +1241,8 @@ pub const TOOL_GROUPS: &[&[ToolId]] = &[
     &[ToolId::Clone],
     &[ToolId::Eraser],
     &[ToolId::Gradient, ToolId::Radial],
-    &[ToolId::Smudge],
+    &[ToolId::Smudge, ToolId::Blur, ToolId::Sharpen],
+    &[ToolId::Dodge, ToolId::Burn, ToolId::Sponge],
     &[ToolId::Pen],
     &[ToolId::Text],
     &[ToolId::Shape],
@@ -1918,7 +1931,12 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
         | ToolId::Clone
         | ToolId::Heal
         | ToolId::SpotHeal
-        | ToolId::Remove => {
+        | ToolId::Remove
+        | ToolId::Dodge
+        | ToolId::Burn
+        | ToolId::Sponge
+        | ToolId::Blur
+        | ToolId::Sharpen => {
             let mut b = m.brush;
             let mut changed = false;
             ui.label(tr("Size"));
@@ -1962,7 +1980,35 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             if b.tip == 0 {
                 changed |= slider(ui, tr("Hardness"), &mut b.hardness, 0.0..=1.0, true);
             }
-            if m.tool == ToolId::Smudge {
+            let retouch = matches!(m.tool, ToolId::Dodge | ToolId::Burn | ToolId::Sponge | ToolId::Blur | ToolId::Sharpen);
+            if retouch {
+                let mut t = m.tone;
+                let mut tc = false;
+                match m.tool {
+                    ToolId::Dodge | ToolId::Burn => {
+                        egui::ComboBox::from_id_salt("tone range")
+                            .selected_text(tr(["Shadows", "Midtones", "Highlights"][t.range.min(2) as usize]))
+                            .width(100.0)
+                            .show_ui(ui, |ui| {
+                                for (i, n) in ["Shadows", "Midtones", "Highlights"].iter().enumerate() {
+                                    tc |= ui.selectable_value(&mut t.range, i as u8, tr(n)).changed();
+                                }
+                            })
+                            .response
+                            .on_hover_text(tr("Range"));
+                        tc |= slider(ui, tr("Exposure"), &mut t.exposure, 0.01..=1.0, true);
+                    }
+                    ToolId::Sponge => {
+                        tc |= ui.selectable_value(&mut t.sponge_saturate, false, tr("Desaturate")).changed();
+                        tc |= ui.selectable_value(&mut t.sponge_saturate, true, tr("Saturate")).changed();
+                        tc |= slider(ui, tr("Flow"), &mut t.sponge_flow, 0.01..=1.0, true);
+                    }
+                    _ => tc |= slider(ui, tr("Strength"), &mut t.strength, 0.01..=1.0, true),
+                }
+                if tc {
+                    out.push(Action::ToneOpts(t));
+                }
+            } else if m.tool == ToolId::Smudge {
                 let mut s = m.smudge_strength;
                 if slider(ui, tr("Strength"), &mut s, 0.0..=1.0, true) {
                     out.push(Action::SmudgeStrength(s));

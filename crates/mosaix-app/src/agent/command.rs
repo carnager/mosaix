@@ -205,6 +205,12 @@ pub enum Command {
         /// Spot healing: no source needed, it is found automatically.
         #[serde(default)]
         spot_heal: bool,
+        /// Retouching: dodge, burn, sponge_saturate, sponge_desaturate, blur, sharpen.
+        tone: Option<String>,
+        /// Dodge/burn: shadows, midtones (default), highlights.
+        range: Option<String>,
+        /// Exposure / strength of the retouching brush, 0…1 (default 0.5).
+        amount: Option<f32>,
     },
     Fill {
         layer: Option<LayerId>,
@@ -1192,18 +1198,44 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             clone_all_layers,
             heal,
             spot_heal,
+            tone,
+            range,
+            amount,
         } => {
             pixel_layer(s, layer)?;
+            let tone = match tone.as_deref() {
+                None => None,
+                Some(k) => {
+                    use mosaix_gpu::ToneKind as T;
+                    let kind = match k {
+                        "dodge" => T::Dodge,
+                        "burn" => T::Burn,
+                        "sponge_saturate" => T::Saturate,
+                        "sponge_desaturate" => T::Desaturate,
+                        "blur" => T::Blur,
+                        "sharpen" => T::Sharpen,
+                        _ => bail!("tone must be dodge, burn, sponge_saturate, sponge_desaturate, blur or sharpen"),
+                    };
+                    let range = match range.as_deref().unwrap_or("midtones") {
+                        "shadows" => 0,
+                        "midtones" => 1,
+                        "highlights" => 2,
+                        r => bail!("range must be shadows, midtones or highlights, got {r:?}"),
+                    };
+                    ensure!(target.as_deref().is_none_or(|t| t == "pixels"), "retouching brushes work on pixels");
+                    Some(mosaix_gpu::Tone { kind, range, amount: amount.unwrap_or(0.5).clamp(0.0, 1.0) })
+                }
+            };
             not_painting(s)?;
             let target = parse_target(&target)?;
             ensure!(!points.is_empty(), "points must not be empty");
             ensure!(size > 0.0 && size <= 5000.0, "size must be 0–5000 px");
             let (mut color, alpha) = match &color {
                 Some(c) => c.linear()?,
-                None if eraser || smudge.is_some() || clone_offset.is_some() || spot_heal => {
+                None if eraser || smudge.is_some() || clone_offset.is_some() || spot_heal || tone.is_some() => {
                     ([0.35; 3], 1.0)
                 }
-                None => bail!("color is required unless eraser, smudge or clone_offset is set"),
+                None => bail!("color is required unless eraser, smudge, tone or clone_offset is set"),
             };
             if target == StrokeTarget::Mask {
                 let l = linear_to_srgb(0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]);
@@ -1267,6 +1299,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                             spot: false,
                         })
                     },
+                    tone,
                 })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);

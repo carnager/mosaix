@@ -78,6 +78,27 @@ impl Brush {
     }
 }
 
+/// Dodge, burn, sponge, blur and sharpen.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToneOpts {
+    /// Dodge/burn: 0 shadows, 1 midtones, 2 highlights.
+    pub range: u8,
+    /// Dodge/burn exposure, 0…1.
+    pub exposure: f32,
+    pub sponge_saturate: bool,
+    /// Sponge flow, 0…1.
+    pub sponge_flow: f32,
+    /// Blur/sharpen strength, 0…1.
+    pub strength: f32,
+}
+
+impl Default for ToneOpts {
+    fn default() -> Self {
+        Self { range: 1, exposure: 0.5, sponge_saturate: false, sponge_flow: 0.5, strength: 0.5 }
+    }
+}
+
 /// View › Rulers, Guides, Grid, Snap.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -120,6 +141,7 @@ pub struct Settings {
     pub keymap: crate::ui::palette::Keymap,
     pub recent_fonts: Vec<String>,
     pub view: ViewOpts,
+    pub tone: ToneOpts,
 }
 
 impl Default for Settings {
@@ -142,6 +164,7 @@ impl Default for Settings {
             keymap: Default::default(),
             recent_fonts: Vec::new(),
             view: ViewOpts::default(),
+            tone: ToneOpts::default(),
         }
     }
 }

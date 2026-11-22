@@ -183,6 +183,11 @@ enum Tool {
     ObjectSelect,
     /// Local AI: paint over something, it is removed (LaMa).
     Remove,
+    Dodge,
+    Burn,
+    Sponge,
+    Blur,
+    Sharpen,
 }
 
 impl Tool {
@@ -209,13 +214,29 @@ impl Tool {
             Tool::Eyedropper => tr("Eyedropper"),
             Tool::ObjectSelect => tr("Object Selection"),
             Tool::Remove => tr("Remove"),
+            Tool::Dodge => tr("Dodge"),
+            Tool::Burn => tr("Burn"),
+            Tool::Sponge => tr("Sponge"),
+            Tool::Blur => tr("Blur"),
+            Tool::Sharpen => tr("Sharpen"),
         }
     }
 
     fn paints(self) -> bool {
         matches!(
             self,
-            Tool::Brush | Tool::Eraser | Tool::Smudge | Tool::Clone | Tool::Heal | Tool::SpotHeal | Tool::Remove
+            Tool::Brush
+                | Tool::Eraser
+                | Tool::Smudge
+                | Tool::Clone
+                | Tool::Heal
+                | Tool::SpotHeal
+                | Tool::Remove
+                | Tool::Dodge
+                | Tool::Burn
+                | Tool::Sponge
+                | Tool::Blur
+                | Tool::Sharpen
         )
     }
 }
@@ -1084,7 +1105,12 @@ impl App {
             | Tool::Clone
             | Tool::Heal
             | Tool::SpotHeal
-            | Tool::Remove => {
+            | Tool::Remove
+            | Tool::Dodge
+            | Tool::Burn
+            | Tool::Sponge
+            | Tool::Blur
+            | Tool::Sharpen => {
                 self.begin_stroke(pos, pressure, eraser_tool || self.tool == Tool::Eraser)
             }
             Tool::Marquee { ellipse } => Drag::Marquee {
@@ -1512,16 +1538,40 @@ impl App {
             let lum = linear_to_srgb(0.2126 * r + 0.7152 * g + 0.0722 * b);
             settings.color = [lum; 3];
         }
+        let t = self.settings.tone;
+        let tone = (!eraser).then(|| {
+            use mosaix_gpu::ToneKind as K;
+            let (kind, amount) = match self.tool {
+                Tool::Dodge => (K::Dodge, t.exposure),
+                Tool::Burn => (K::Burn, t.exposure),
+                Tool::Sponge if t.sponge_saturate => (K::Saturate, t.sponge_flow),
+                Tool::Sponge => (K::Desaturate, t.sponge_flow),
+                Tool::Blur => (K::Blur, t.strength),
+                Tool::Sharpen => (K::Sharpen, t.strength),
+                _ => return None,
+            };
+            Some(mosaix_gpu::Tone { kind, range: t.range.min(2), amount })
+        })
+        .flatten();
+        if tone.is_some() {
+            settings.flow = 1.0;
+        }
+        if tone.is_some() && target == StrokeTarget::Mask {
+            tracing::warn!("{}", tr("Retouching brushes work on pixels, not on masks"));
+            return Drag::None;
+        }
         let doc_pos = self.view.screen_to_doc(pos);
         let Some(engine) = self.engine() else {
             return Drag::None;
         };
         let params = StrokeParams {
-            opacity: settings.opacity,
+            // The effect itself is the strength; the brush opacity does not apply.
+            opacity: if tone.is_some() { 1.0 } else { settings.opacity },
             erase: settings.eraser,
             target,
             smudge: settings.smudge.is_some(),
             clone,
+            tone,
         };
         if let Err(e) = engine.begin_stroke(params) {
             tracing::warn!("{}", tr!("Cannot paint: {error}", error = e));
@@ -2133,6 +2183,11 @@ impl App {
             "wand" => Tool::Wand,
             "object_select" => Tool::ObjectSelect,
             "remove" => Tool::Remove,
+            "dodge" => Tool::Dodge,
+            "burn" => Tool::Burn,
+            "sponge" => Tool::Sponge,
+            "blur" => Tool::Blur,
+            "sharpen" => Tool::Sharpen,
             "gradient" => Tool::Gradient { radial: false },
             "radial" => Tool::Gradient { radial: true },
             "move" => Tool::Move,
@@ -2167,6 +2222,11 @@ impl App {
             Tool::Wand => "wand",
             Tool::ObjectSelect => "object_select",
             Tool::Remove => "remove",
+            Tool::Dodge => "dodge",
+            Tool::Burn => "burn",
+            Tool::Sponge => "sponge",
+            Tool::Blur => "blur",
+            Tool::Sharpen => "sharpen",
             Tool::Gradient { radial: false } => "gradient",
             Tool::Gradient { radial: true } => "radial",
             Tool::Move => "move",
@@ -3207,6 +3267,12 @@ impl App {
                 let ellipse = matches!(self.tool, Tool::Marquee { ellipse: false });
                 self.set_tool(Tool::Marquee { ellipse })
             }
+            // Like Photoshop's O (Shift+O there): dodge → burn → sponge.
+            Keysym::o if !ctrl => self.set_tool(match self.tool {
+                Tool::Dodge => Tool::Burn,
+                Tool::Burn => Tool::Sponge,
+                _ => Tool::Dodge,
+            }),
             Keysym::l => self.set_tool(Tool::Lasso),
             Keysym::g => {
                 let radial = matches!(self.tool, Tool::Gradient { radial: false });
@@ -3603,6 +3669,11 @@ impl App {
             Tool::Wand => ToolId::Wand,
             Tool::ObjectSelect => ToolId::ObjectSelect,
             Tool::Remove => ToolId::Remove,
+            Tool::Dodge => ToolId::Dodge,
+            Tool::Burn => ToolId::Burn,
+            Tool::Sponge => ToolId::Sponge,
+            Tool::Blur => ToolId::Blur,
+            Tool::Sharpen => ToolId::Sharpen,
             Tool::Gradient { radial: false } => ToolId::Gradient,
             Tool::Gradient { radial: true } => ToolId::Radial,
             Tool::Move => ToolId::Move,
@@ -3651,6 +3722,7 @@ impl App {
                 follow_direction: b.follow_direction,
             },
             smudge_strength: self.smudge_strength,
+            tone: self.settings.tone,
             clone_all: self.clone_all,
             clone_aligned: self.clone_aligned,
             clone_source: self.clone_source.is_some(),
@@ -3787,6 +3859,7 @@ impl App {
                     self.settings.view.guides = true;
                 }
                 Action::ViewOpts(v) => self.settings.view = v,
+                Action::ToneOpts(t) => self.settings.tone = t,
                 Action::Run(e) => self.run_action(&e),
                 Action::StartRecording => self.start_recording(),
                 Action::StopRecording(name) => {
@@ -3816,6 +3889,11 @@ impl App {
                         ToolId::Wand => Tool::Wand,
                         ToolId::ObjectSelect => Tool::ObjectSelect,
                         ToolId::Remove => Tool::Remove,
+                        ToolId::Dodge => Tool::Dodge,
+                        ToolId::Burn => Tool::Burn,
+                        ToolId::Sponge => Tool::Sponge,
+                        ToolId::Blur => Tool::Blur,
+                        ToolId::Sharpen => Tool::Sharpen,
                         ToolId::Gradient => Tool::Gradient { radial: false },
                         ToolId::Radial => Tool::Gradient { radial: true },
                         ToolId::Move => Tool::Move,

@@ -3045,3 +3045,54 @@ fn shadows_highlights_lifts_dark_areas() {
     assert!(d > 0.25, "shadows lifted: {d}");
     assert!(l < 0.8, "highlights lowered: {l}");
 }
+
+#[test]
+fn tone_brushes_dodge_burn_sponge_blur_sharpen() {
+    use mosaix_gpu::{Tone, ToneKind};
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let srgb = mosaix_core::color::srgb_to_linear;
+    // Left half muted red (sRGB 0.6, 0.3, 0.3), right half black: an edge at x = 128.
+    let (r, gg) = (srgb(0.6), srgb(0.3));
+    e.fill(StrokeTarget::Pixels, [0.0, 0.0, 0.0, 1.0], 1.0, "Black").unwrap();
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 128.0, h: 256.0 }, CombineOp::Replace, "Selection").unwrap();
+    e.fill(StrokeTarget::Pixels, [r, gg, gg, 1.0], 1.0, "Red").unwrap();
+    e.deselect("x").unwrap();
+    let px = |e: &mut Engine, x: usize, y: usize| {
+        e.flush();
+        let c = TileCoord::containing(x as f64, y as f64);
+        composite_px(e, c, x % 256, y % 256).map(mosaix_core::color::linear_to_srgb)
+    };
+    let tone = |kind| StrokeParams { tone: Some(Tone { kind, range: 1, amount: 0.5 }), ..Default::default() };
+    let before = px(&mut e, 64, 64);
+    stroke(&mut e, DVec2::new(64.0, 64.0), tone(ToneKind::Dodge));
+    let d = px(&mut e, 64, 64);
+    assert!(d[0] > before[0] + 0.05 && d[1] > before[1] + 0.05, "dodge brightens: {before:?} → {d:?}");
+    e.undo();
+    stroke(&mut e, DVec2::new(64.0, 64.0), tone(ToneKind::Burn));
+    let b = px(&mut e, 64, 64);
+    assert!(b[0] < before[0] - 0.05, "burn darkens: {b:?}");
+    e.undo();
+    stroke(&mut e, DVec2::new(64.0, 64.0), tone(ToneKind::Desaturate));
+    let s = px(&mut e, 64, 64);
+    assert!((s[0] - s[1]) < (before[0] - before[1]) - 0.05, "sponge desaturates: {s:?}");
+    e.undo();
+    // One stroke applies the effect once, even where its dabs overlap.
+    e.begin_stroke(tone(ToneKind::Dodge)).unwrap();
+    let mut st = Stroke::new(red_brush());
+    for i in 0..20 {
+        e.stroke_dabs(&st.add(InputSample { pos: DVec2::new(64.0 + (i % 2) as f64, 64.0), pressure: 1.0 }));
+    }
+    e.end_stroke("Dodge");
+    let again = px(&mut e, 64, 64);
+    assert!((again[0] - d[0]).abs() < 0.02, "no build-up within a stroke: {d:?} vs {again:?}");
+    e.undo();
+    // Blur softens the edge, sharpen makes it harsher.
+    let edge = |e: &mut Engine| px(e, 127, 64)[0];
+    let e0 = edge(&mut e);
+    stroke(&mut e, DVec2::new(128.0, 64.0), StrokeParams { tone: Some(Tone { kind: ToneKind::Blur, range: 1, amount: 1.0 }), ..Default::default() });
+    assert!(edge(&mut e) < e0 - 0.05, "blur: {e0} → {}", edge(&mut e));
+    e.undo();
+    stroke(&mut e, DVec2::new(128.0, 64.0), StrokeParams { tone: Some(Tone { kind: ToneKind::Sharpen, range: 1, amount: 1.0 }), ..Default::default() });
+    assert!(edge(&mut e) > e0 + 0.03, "sharpen: {e0} → {}", edge(&mut e));
+}

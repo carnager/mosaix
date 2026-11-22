@@ -6,7 +6,7 @@ pub mod pool;
 pub use engine::{
     CloneSource, CopiedPixels, Engine, FillJob, FillResult, UpscaleJob, UpscaleResult, GradientKind, Histogram, Interp,
     LiquifyTool, Overlay, OverlayLine, PoolKind, Readback, RenderStats, SampleFrom, StrokeParams,
-    StrokeTarget, Warp, is_integer_translation, FIRST_CUSTOM_TIP, MAX_CUSTOM_TIPS, TIP_SIZE,
+    StrokeTarget, Tone, ToneKind, Warp, is_integer_translation, FIRST_CUSTOM_TIP, MAX_CUSTOM_TIPS, TIP_SIZE,
 };
 pub use pool::Tile;
 

@@ -278,6 +278,7 @@ impl Engine {
         let stroke = self.stroke.as_mut().unwrap();
         let smudge = stroke.params.working_copy();
         let clone = stroke.params.clone.filter(|c| !c.spot);
+        let tone = stroke.params.tone;
         let mut fresh = Vec::new();
         for c in touched {
             if let Some((tile, needs_clear)) = stroke.tiles.get_mut(&c) {
@@ -291,9 +292,13 @@ impl Engine {
         }
         if smudge {
             self.init_smudge_tiles(enc, &fresh);
-            stats.dabs = match clone {
-                Some(src) => self.encode_clone(enc, &dabs, src),
-                None => self.encode_smudge(enc, &dabs),
+            stats.dabs = match (clone, tone) {
+                (Some(src), _) => self.encode_clone(enc, &dabs, src, None),
+                (None, Some(t)) => {
+                    let src = super::CloneSource { offset: [0, 0], all_layers: false, heal: false, spot: false };
+                    self.encode_clone(enc, &dabs, src, Some(t))
+                }
+                (None, None) => self.encode_smudge(enc, &dabs),
             };
             stats.paint_passes = passes.len() as u32;
             return;

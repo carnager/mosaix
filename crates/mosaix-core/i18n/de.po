@@ -2878,3 +2878,30 @@ msgstr "Monochrom"
 
 msgid "Constant"
 msgstr "Konstante"
+
+msgid "Dodge"
+msgstr "Abwedler"
+
+msgid "Burn"
+msgstr "Nachbelichter"
+
+msgid "Sponge"
+msgstr "Schwamm"
+
+msgid "Blur"
+msgstr "Weichzeichner"
+
+msgid "Sharpen"
+msgstr "Scharfzeichner"
+
+msgid "Retouching brushes work on pixels, not on masks"
+msgstr "Retusche-Pinsel wirken auf Pixel, nicht auf Masken"
+
+msgid "Desaturate"
+msgstr "Sättigung verringern"
+
+msgid "Saturate"
+msgstr "Sättigung erhöhen"
+
+msgid "Dodge / Burn / Sponge"
+msgstr "Abwedler / Nachbelichter / Schwamm"

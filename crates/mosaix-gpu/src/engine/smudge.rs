@@ -333,6 +333,7 @@ impl Engine {
         enc: &mut wgpu::CommandEncoder,
         dabs: &[Dab],
         src: super::CloneSource,
+        tone: Option<super::Tone>,
     ) -> u32 {
         if self.smudge_buffers.is_none() {
             self.smudge_buffers = Some(SmudgeBuffers::new(
@@ -433,15 +434,21 @@ impl Engine {
                     shape: [d.angle.cos(), d.angle.sin(), d.roundness, 0.0],
                     tip: d.tip,
                     rate: d.color[3],
-                    primed: 1,
+                    primed: tone.map_or(1, |t| t.kind as u32),
                     stroke_slot: tile.slot().packed(),
                     origin: [tx as f32, ty as f32],
                     grid_x0: gx0,
                     grid_y0: gy0,
                     grid_w: gw,
                     grid_h: gh,
-                    offset: [ox, oy],
+                    offset: match tone {
+                        Some(t) => [t.range as i32, 0],
+                        None => [ox, oy],
+                    },
                 });
+                if let Some(t) = tone {
+                    jobs.last_mut().unwrap().shape[3] = t.amount.clamp(0.0, 1.0);
+                }
                 scratch = (scratch + 1) % super::SCRATCH_LAYERS;
             }
         }
@@ -484,7 +491,7 @@ impl Engine {
                     ))],
                     ..Default::default()
                 });
-                rp.set_pipeline(&self.clone_pipeline);
+                rp.set_pipeline(if tone.is_some() { &self.tone_pipeline } else { &self.clone_pipeline });
                 rp.set_bind_group(0, self.arrays_bg.as_ref().unwrap(), &[]);
                 rp.set_bind_group(1, &bg, &[off]);
                 rp.set_bind_group(2, &bufs.bgs[0], &[]);
