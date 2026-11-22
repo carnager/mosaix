@@ -123,6 +123,17 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 mid,
             ));
         }
+        Icon::Tool(ToolId::Ruler) => {
+            // A tilted ruler with ticks.
+            let body = vec![at(2.0, 13.0), at(13.0, 2.0), at(18.0, 7.0), at(7.0, 18.0)];
+            p.add(Shape::convex_polygon(body, Color32::TRANSPARENT, mid));
+            for k in 1..5 {
+                let t = k as f32 / 5.0;
+                let a = at(2.0 + 11.0 * t, 13.0 - 11.0 * t);
+                let b = at(2.0 + 11.0 * t + 2.2, 13.0 - 11.0 * t + 2.2);
+                p.line_segment([a, b], thin);
+            }
+        }
         Icon::Tool(ToolId::HistoryBrush) => {
             // A brush with a turning-back arrow.
             p.line_segment([at(17.0, 7.0), at(10.0, 14.0)], Stroke::new(2.0 * u, color));

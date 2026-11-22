@@ -164,6 +164,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         recent_fonts: vec!["IBM Plex Mono".into()],
         shape: Default::default(),
         brush_blend: Default::default(),
+        ruler: std::env::var_os("MOSAIX_SNAPSHOT_RULER").map(|_| (412.3, 2.75)),
         histogram: None,
     };
     tracing::info!("{}", tr!("UI snapshot {w}×{h}", w = w, h = h));
@@ -413,6 +414,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "move" => ToolId::Move,
             "eyedropper" => ToolId::Eyedropper,
             "bucket" => ToolId::Bucket,
+            "ruler" => ToolId::Ruler,
             "poly_lasso" => ToolId::PolyLasso,
             _ => ToolId::Brush,
         };

@@ -478,6 +478,13 @@ pub fn tools() -> Vec<Value> {
             &[],
             false,
         ),
+        tool(
+            "image_rotate",
+            "Turn the whole image (every layer) by an angle in degrees, clockwise, about the canvas centre – e.g. to straighten a horizon. Content outside the canvas is kept; crop afterwards if wanted.",
+            json!({ "angle": { "type": "number" } }),
+            &["angle"],
+            false,
+        ),
         tool("layer_delete_hidden", "Delete all hidden layers (and hidden groups).", json!({}), &[], false),
         tool(
             "layer_via",
@@ -1157,7 +1164,7 @@ mod tests {
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
             "generative_fill": {"prompt": "a bench"},
-            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "layer_distribute": {"direction": "vertical"}
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "image_rotate": {"angle": 2.5}, "layer_distribute": {"direction": "vertical"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

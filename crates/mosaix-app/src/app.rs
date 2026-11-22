@@ -105,6 +105,8 @@ const PALETTE: [[f32; 3]; 6] = [
 enum Drag {
     None,
     Paint,
+    /// Ruler: measuring from `start`.
+    Ruler { start: DVec2 },
     /// Liquify brush: last position (document px) and pressure.
     Liquify {
         last: DVec2,
@@ -196,6 +198,8 @@ enum Tool {
     Pencil,
     /// Paints the layer back as it was at a history state.
     HistoryBrush,
+    /// Measures distances and angles; straightens the image.
+    Ruler,
 }
 
 impl Tool {
@@ -224,6 +228,7 @@ impl Tool {
             Tool::Shape { ellipse: true } => tr("Ellipse"),
             Tool::Pen => tr("Pen"),
             Tool::Eyedropper => tr("Eyedropper"),
+            Tool::Ruler => tr("Ruler"),
             Tool::ObjectSelect => tr("Object Selection"),
             Tool::Remove => tr("Remove"),
             Tool::Dodge => tr("Dodge"),
@@ -485,6 +490,8 @@ pub struct App {
     bucket_all: bool,
     /// Brush and pencil paint in this blend mode.
     brush_blend: mosaix_core::BlendMode,
+    /// The ruler's line (document px), kept until the next measurement.
+    ruler: Option<(DVec2, DVec2)>,
     /// Filter › Last Filter (Ctrl+F) repeats it.
     last_filter: Option<mosaix_core::Filter>,
     /// Shape tool: "rect", "ellipse", "line", "polygon", "star" or a preset;
@@ -755,6 +762,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         bucket_all: false,
         last_filter: None,
         brush_blend: mosaix_core::BlendMode::Normal,
+        ruler: None,
         shape: Default::default(),
         openai_key: settings::key_state(),
         wand_tolerance: 32.0,
@@ -1254,6 +1262,10 @@ impl App {
             Tool::Pen => self.pen_press(pos, doc),
             // Handled above.
             Tool::Eyedropper => Drag::None,
+            Tool::Ruler => {
+                self.ruler = Some((doc, doc));
+                Drag::Ruler { start: doc }
+            }
             Tool::Text => {
                 if self.text_edit.is_some() && self.text_edit_press(pos, doc) {
                     return Drag::TextSelect;
@@ -1952,6 +1964,16 @@ impl App {
             Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
             }
+            Drag::Ruler { start } => {
+                let mut end = self.view.screen_to_doc(pos);
+                if self.mods.shift {
+                    // 45° steps.
+                    let d = end - *start;
+                    let a = (d.y.atan2(d.x) / std::f64::consts::FRAC_PI_4).round() * std::f64::consts::FRAC_PI_4;
+                    end = *start + DVec2::new(a.cos(), a.sin()) * d.length();
+                }
+                self.ruler = Some((*start, end));
+            }
             Drag::BrushHud {
                 start,
                 size,
@@ -2597,6 +2619,7 @@ impl App {
             Tool::Shape { .. } => "shape",
             Tool::Pen => "pen",
             Tool::Eyedropper => "eyedropper",
+            Tool::Ruler => "ruler",
             Tool::Marquee { ellipse: false } => "marquee",
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
@@ -3910,7 +3933,7 @@ impl App {
             Keysym::q => self.toggle_quick_mask(),
             Keysym::x => self.swap_colors(),
             Keysym::d if !ctrl => self.reset_colors(),
-            Keysym::i if !ctrl => self.set_tool(Tool::Eyedropper),
+            Keysym::i if !ctrl => self.set_tool(if self.tool == Tool::Eyedropper { Tool::Ruler } else { Tool::Eyedropper }),
             Keysym::c => self.set_tool(Tool::Crop),
             Keysym::w => {
                 if self.tool == Tool::Wand {
@@ -4293,6 +4316,7 @@ impl App {
             Tool::Shape { .. } => ToolId::Shape,
             Tool::Pen => ToolId::Pen,
             Tool::Eyedropper => ToolId::Eyedropper,
+            Tool::Ruler => ToolId::Ruler,
             Tool::Marquee { ellipse: false } => ToolId::Marquee,
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
@@ -4475,6 +4499,10 @@ impl App {
             recent_fonts: self.settings.recent_fonts.clone(),
             shape: self.shape.clone(),
             brush_blend: self.brush_blend,
+            ruler: self.ruler.map(|(a, b)| {
+                let d = b - a;
+                (d.length(), -d.y.atan2(d.x).to_degrees())
+            }),
             histogram: None,
         })
     }
@@ -4603,6 +4631,7 @@ impl App {
                         ToolId::Brush => Tool::Brush,
                         ToolId::Pencil => Tool::Pencil,
                         ToolId::HistoryBrush => Tool::HistoryBrush,
+                        ToolId::Ruler => Tool::Ruler,
                         ToolId::Eraser => Tool::Eraser,
                         ToolId::Smudge => Tool::Smudge,
                         ToolId::Clone => Tool::Clone,
@@ -4777,6 +4806,20 @@ impl App {
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
                 Action::BrushBlend(b) => self.brush_blend = b,
+                Action::Straighten => {
+                    if let Some((a, b)) = self.ruler.take() {
+                        let d = b - a;
+                        let ang = d.y.atan2(d.x).to_degrees();
+                        // To the nearest horizontal or vertical.
+                        let target = (ang / 90.0).round() * 90.0;
+                        let cmd = serde_json::json!({ "cmd": "image_rotate", "angle": target - ang });
+                        if self.recording.is_some() {
+                            self.record(cmd.clone());
+                        }
+                        self.run_agent_cmd(cmd);
+                    }
+                }
+                Action::ClearRuler => self.ruler = None,
                 Action::SwitchTab(i) => self.switch_tab(i),
                 Action::SelectionToShape => {
                     let cmd = serde_json::json!({ "cmd": "select_to_shape", "color": actions::hex(self.brush.color) });
@@ -5550,6 +5593,10 @@ impl App {
                     points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)],
                     closed: false,
                 }]
+            }
+            _ if self.tool == Tool::Ruler && self.ruler.is_some() => {
+                let (a, b) = self.ruler.unwrap();
+                vec![OverlayLine { points: vec![v.doc_to_screen(a), v.doc_to_screen(b)], closed: false }]
             }
             _ if self.poly.is_some() => {
                 let (pts, _) = self.poly.as_ref().unwrap();

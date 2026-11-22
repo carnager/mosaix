@@ -244,6 +244,7 @@ const TOOL: &[Item] = &[
     C("Eraser", T(ToolId::Eraser)),
     C("Clone Stamp", T(ToolId::Clone)),
     C("History Brush", T(ToolId::HistoryBrush)),
+    C("Eyedropper / Ruler", T(ToolId::Eyedropper)),
     C("Spot Healing / Remove (AI) / Healing Brush", T(ToolId::SpotHeal)),
     C("Gradient / Paint Bucket", T(ToolId::Gradient)),
     Sep,

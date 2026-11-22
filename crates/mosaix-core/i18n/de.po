@@ -3694,3 +3694,21 @@ msgstr "Modus"
 
 msgid "How the paint mixes with the pixels below (Multiply darkens, Screen lightens, Color tints …)"
 msgstr "Wie sich die Farbe mit den Pixeln darunter mischt (Multiplizieren dunkelt ab, Negativ multiplizieren hellt auf, Farbe tönt …)"
+
+msgid "Ruler"
+msgstr "Linealwerkzeug"
+
+msgid "Straighten"
+msgstr "Gerade ausrichten"
+
+msgid "Length"
+msgstr "Länge"
+
+msgid "Turn the image so the line is horizontal (or vertical); nothing is cut off"
+msgstr "Das Bild so drehen, dass die Linie waagrecht (oder senkrecht) ist; nichts wird abgeschnitten"
+
+msgid "Drag along something that should be straight (Shift: 45°), then Straighten."
+msgstr "Entlang etwas ziehen, das gerade sein soll (Umschalt: 45°), dann Gerade ausrichten."
+
+msgid "Eyedropper / Ruler"
+msgstr "Pipette / Linealwerkzeug"

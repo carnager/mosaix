@@ -9,7 +9,7 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 29] = [
+pub const TOOLS: [(ToolId, &str, &str); 30] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
@@ -36,6 +36,7 @@ pub const TOOLS: [(ToolId, &str, &str); 29] = [
     (ToolId::Shape, "Shape (Rectangle / Ellipse)", "Shift+U"),
     (ToolId::Pen, "Pen", "P"),
     (ToolId::Eyedropper, "Eyedropper", "I"),
+    (ToolId::Ruler, "Ruler", "I"),
     (ToolId::Gradient, "Linear Gradient", "G"),
     (ToolId::Radial, "Radial Gradient", "G"),
     (ToolId::Bucket, "Paint Bucket", "G"),
@@ -72,6 +73,7 @@ pub enum ToolId {
     Bucket,
     Pencil,
     HistoryBrush,
+    Ruler,
 }
 
 /// Display name of a colour label.
@@ -337,6 +339,8 @@ pub struct Model {
     /// Shape tool: ellipse instead of rectangle.
     pub shape: ShapeOpts,
     pub brush_blend: BlendMode,
+    /// Ruler: length (px) and angle (degrees, counter-clockwise from horizontal).
+    pub ruler: Option<(f64, f64)>,
     /// Histogram of what is below the active adjustment (levels and curves).
     pub histogram: Option<std::sync::Arc<mosaix_gpu::Histogram>>,
 }
@@ -359,6 +363,9 @@ pub enum Action {
     ShapeOpts(ShapeOpts),
     /// Brush/pencil blend mode.
     BrushBlend(BlendMode),
+    /// Ruler › Straighten, Clear.
+    Straighten,
+    ClearRuler,
     /// Select › Selection to Shape Layer (foreground colour).
     SelectionToShape,
     /// The active layer's locks.
@@ -1768,7 +1775,7 @@ pub const TOOL_GROUPS: &[&[ToolId]] = &[
     &[ToolId::Lasso, ToolId::PolyLasso],
     &[ToolId::ObjectSelect, ToolId::Wand],
     &[ToolId::Crop],
-    &[ToolId::Eyedropper],
+    &[ToolId::Eyedropper, ToolId::Ruler],
     &[ToolId::SpotHeal, ToolId::Remove, ToolId::Heal],
     &[ToolId::Brush, ToolId::Pencil],
     &[ToolId::Clone, ToolId::HistoryBrush],
@@ -2733,6 +2740,21 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                 out.push(Action::BucketAll(all));
             }
             hint(ui, tr("Fills with the foreground color and brush opacity, within the selection."));
+        }
+        ToolId::Ruler => {
+            match m.ruler {
+                Some((len, ang)) => {
+                    ui.label(format!("{}: {len:.1} px", tr("Length")));
+                    ui.label(format!("{}: {ang:.2}°", tr("Angle")));
+                    if ui.button(tr("Straighten")).on_hover_text(tr("Turn the image so the line is horizontal (or vertical); nothing is cut off")).clicked() {
+                        out.push(Action::Straighten);
+                    }
+                    if ui.button(tr("Clear")).clicked() {
+                        out.push(Action::ClearRuler);
+                    }
+                }
+                None => hint(ui, tr("Drag along something that should be straight (Shift: 45°), then Straighten.")),
+            }
         }
         ToolId::Eyedropper => {
             let (mut radius, mut all) = (m.eyedrop_radius, m.eyedrop_all);

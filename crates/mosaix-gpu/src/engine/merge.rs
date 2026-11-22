@@ -291,6 +291,37 @@ impl Engine {
         self.apply_adjustment(&a, label)?;
         Ok(a)
     }
+
+    /// Turns every top-level layer by `degrees` (clockwise) about the canvas
+    /// centre, as one undo step (Ruler › Straighten). Content outside the
+    /// canvas is kept.
+    pub fn rotate_all(&mut self, degrees: f64, label: &str) -> Result<(), &'static str> {
+        if degrees.abs() < 1e-6 {
+            return Ok(());
+        }
+        let ids: Vec<LayerId> = self.doc.layers.iter().map(|l| l.id).collect();
+        if ids.iter().any(|id| self.doc.find(*id).is_some_and(|l| l.lock.position)) {
+            return Err(mosaix_core::tr("the layer's position is locked"));
+        }
+        let (active, picked, selection) = (self.doc.active, self.doc.picked.clone(), self.doc.selection.clone());
+        let c = glam::DVec2::new(self.doc.width as f64, self.doc.height as f64) * 0.5;
+        let fwd = glam::DAffine2::from_translation(c) * glam::DAffine2::from_angle(degrees.to_radians()) * glam::DAffine2::from_translation(-c);
+        let before = self.doc.clone();
+        let n = self.history.undo_len();
+        // All top-level layers at once, through the multi-layer transform.
+        self.doc.selection = None;
+        self.doc.active = ids[0];
+        self.doc.picked = ids[1..].to_vec();
+        let r = self.transform_layer(fwd, super::Interp::Bicubic, false, label);
+        self.doc.active = active;
+        self.doc.picked = picked;
+        self.doc.selection = selection;
+        if r.is_ok() {
+            self.history.squash_since(n, before, label);
+            self.recheck_all = true;
+        }
+        r
+    }
 }
 
 /// Edges and centres for [`Engine::align_layers`].

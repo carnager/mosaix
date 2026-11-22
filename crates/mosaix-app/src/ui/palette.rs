@@ -320,6 +320,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("Tool", "Dodge / Burn / Sponge", K::o, false, false, false),
     c("Tool", "Clone Stamp", K::s, false, false, false),
     c("Tool", "History Brush", K::y, false, false, false),
+    c("Tool", "Eyedropper / Ruler", K::i, false, false, false),
     c(
         "Tool",
         "Spot Healing / Remove (AI) / Healing Brush",

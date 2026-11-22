@@ -3924,3 +3924,33 @@ fn painting_in_a_blend_mode() {
         }
     }
 }
+
+#[test]
+fn rotate_all_layers_about_the_centre() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let a = e.doc().active;
+    let mut b = 0;
+    e.edit("Layer", |d| {
+        b = d.add_pixel_layer();
+        true
+    });
+    // A horizontal bar on each layer through the centre.
+    let mut bar = vec![f16::ZERO; TS * TS * 4];
+    for y in 126..130 {
+        for x in 28..228 {
+            bar[(y * TS + x) * 4..][..4].fill(f16::ONE);
+        }
+    }
+    e.upload_tile(a, TileCoord::new(0, 0), &bar);
+    e.upload_tile(b, TileCoord::new(0, 0), &bar);
+    e.rotate_all(90.0, "Straighten").unwrap();
+    for id in [a, b] {
+        let (x0, y0, x1, y1) = e.content_bounds(id).unwrap();
+        assert!(x1 - x0 < 10 && y1 - y0 > 190, "layer {id} upright: {:?}", (x0, y0, x1, y1));
+    }
+    assert_eq!(e.doc().active, b, "the selection of layers stays");
+    e.undo();
+    let (x0, _, x1, _) = e.content_bounds(a).unwrap();
+    assert!(x1 - x0 > 190, "one undo step");
+}

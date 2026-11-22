@@ -164,6 +164,10 @@ pub enum Command {
     },
     /// Layer › Delete Hidden Layers.
     LayerDeleteHidden,
+    /// Turn the whole image by an angle (degrees, clockwise) about its centre.
+    ImageRotate {
+        angle: f64,
+    },
     LayerSelect {
         layer: LayerId,
         /// Further layers selected along with it (delete, group, merge,
@@ -700,6 +704,7 @@ impl Command {
             Self::LayerMerge { .. } => "layer_merge",
             Self::LayerVia { .. } => "layer_via",
             Self::LayerDeleteHidden => "layer_delete_hidden",
+            Self::ImageRotate { .. } => "image_rotate",
             Self::SelectLayerPixels { .. } => "select_layer_pixels",
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
@@ -1756,6 +1761,12 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
         Command::LayerConvertSmart { layer } => {
             let id = pixel_layer(s, layer)?;
             s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::ImageRotate { angle } => {
+            ensure!(angle.is_finite() && angle.abs() <= 360.0, "angle must be −360…360");
+            not_painting(s)?;
+            s.engine.rotate_all(angle, tr("Straighten")).map_err(engine_err)?;
             ok(s)
         }
         Command::LayerDeleteHidden => {

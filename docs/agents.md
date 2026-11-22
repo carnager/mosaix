@@ -65,6 +65,7 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `paint_stroke` with `pencil` / `history` | Pencil (no anti-aliasing); History Brush, painting back the state set with `history_source {position}` |
 | `select_to_shape` | The selection's outline as an editable shape layer (`color`, `tolerance`) |
 | `layer_delete_hidden` | Delete all hidden layers |
+| `image_rotate` | Turn every layer by `angle` degrees (clockwise) about the canvas centre, e.g. to straighten a horizon |
 | `layer_merge` | Merge layers as they look (blend modes, masks, styles, text baked in; pixels outside the canvas are kept): `mode` `down` (the active layer onto the one below, default), `group` (the active group's contents), `visible` (all visible top-level layers; hidden ones stay), `flatten` (everything into one layer; hidden layers are dropped) |
 | `layer_place`, `layer_convert_smart`, `smart_replace` | Smart objects: embed an image, convert a pixel layer, replace the contents; transforms stay lossless |
 | `guide_add`, `guide_list`, `guide_delete`, `guide_clear` | Guides (`orientation` vertical/horizontal, `position` in px) |
