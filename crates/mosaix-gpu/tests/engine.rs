@@ -608,6 +608,23 @@ fn transform_scale_rotate_float_and_bounds() {
     );
     e.undo();
 
+    // Perspective: the rectangle 100..300 × 100..200 becomes a trapezoid
+    // whose top edge shrinks to 150..250 and whose bottom stays.
+    let quad = [
+        DVec2::new(150.0, 100.0),
+        DVec2::new(250.0, 100.0),
+        DVec2::new(300.0, 200.0),
+        DVec2::new(100.0, 200.0),
+    ];
+    let w = mosaix_gpu::Warp::from_quad(DVec2::new(100.0, 100.0), DVec2::new(300.0, 200.0), quad).unwrap();
+    e.transform_active(w, Interp::Bilinear, "Perspective").unwrap();
+    assert!(alpha_at(&mut e, 200, 105) > 0.99, "top middle");
+    assert!(alpha_at(&mut e, 130, 105) < 0.01, "top corner cut off");
+    assert!(alpha_at(&mut e, 105, 195) > 0.9, "bottom corner stays");
+    let b = e.content_bounds(id).unwrap();
+    assert!((b.0 - 100).abs() <= 1 && (b.2 - 300).abs() <= 1 && (b.1 - 100).abs() <= 1 && (b.3 - 200).abs() <= 1, "{b:?}");
+    e.undo();
+
     // Downscale ×0.25 stays smooth (supersampled): a half-covered pixel is ≈ 50 %.
     let fwd = DAffine2::from_scale(DVec2::splat(0.25));
     e.transform_active(fwd, Interp::Bicubic, "Shrink").unwrap();
@@ -646,7 +663,7 @@ fn transform_scale_rotate_float_and_bounds() {
     e.deselect("Deselect").unwrap();
     let before_px = alpha_at(&mut e, 700, 150);
     e.set_transform_preview(Some((
-        DAffine2::from_translation(DVec2::new(300.0, 0.0)),
+        DAffine2::from_translation(DVec2::new(300.0, 0.0)).into(),
         Interp::Bicubic,
     )))
     .unwrap();
@@ -675,7 +692,7 @@ fn transform_scale_rotate_float_and_bounds() {
         &Overlay::default(),
     );
     e.set_transform_preview(Some((
-        DAffine2::from_translation(DVec2::new(300.0, 0.0)),
+        DAffine2::from_translation(DVec2::new(300.0, 0.0)).into(),
         Interp::Bicubic,
     )))
     .unwrap();
@@ -2460,12 +2477,12 @@ fn merged_edits_refresh_an_open_transform_preview() {
         }
         e.set_vector(id, w, "Farbe", Some("fill")).unwrap();
         // The app re-sets the transform preview every frame.
-        e.set_transform_preview(Some((rot, mosaix_gpu::Interp::Bicubic)))
+        e.set_transform_preview(Some((rot.into(), mosaix_gpu::Interp::Bicubic)))
             .unwrap();
         e.flush();
         composite_px(e, TileCoord::new(0, 0), 150, 160)
     };
-    e.set_transform_preview(Some((rot, mosaix_gpu::Interp::Bicubic)))
+    e.set_transform_preview(Some((rot.into(), mosaix_gpu::Interp::Bicubic)))
         .unwrap();
     assert_eq!(
         colour(&mut e, [0.0, 1.0, 0.0, 1.0])[1],

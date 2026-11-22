@@ -1,4 +1,5 @@
-//! Affine transforms (move, scale, rotate) of the active layer through the
+//! Affine and projective transforms (move, scale, rotate, skew, distort,
+//! perspective) of the active layer through the
 //! warp kernel, with a floating selection, live preview and pixel-exact
 //! content bounds.
 //!
@@ -14,7 +15,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
-use glam::{DAffine2, DVec2};
+use glam::{DAffine2, DMat3, DVec2, DVec3};
 use mosaix_core::doc::{Content, MaskTile};
 use mosaix_core::{Document, LayerId, Mask, MaskRef, TILE_SIZE, TileCoord};
 
@@ -51,6 +52,160 @@ impl Interp {
     }
 }
 
+/// A map of document px to document px: affine, or projective for distort
+/// and perspective. `p' = M · (x, y, 1)`, divided by the third component;
+/// normalised so that the content's own side of the horizon has w > 0.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Warp(pub DMat3);
+
+impl From<DAffine2> for Warp {
+    fn from(a: DAffine2) -> Self {
+        Warp(DMat3::from(a))
+    }
+}
+
+impl Warp {
+    pub const IDENTITY: Warp = Warp(DMat3::IDENTITY);
+
+    /// The affine part, if the map has no perspective.
+    pub fn affine(&self) -> Option<DAffine2> {
+        let m = self.0;
+        let r = m.row(2);
+        let w = r.z;
+        (r.x.abs() <= 1e-12 * w.abs() && r.y.abs() <= 1e-12 * w.abs() && w.abs() > 1e-300).then(|| {
+            let m = m * (1.0 / w);
+            DAffine2::from_cols(m.x_axis.truncate(), m.y_axis.truncate(), m.z_axis.truncate())
+        })
+    }
+
+    /// The image of `p`, or `None` behind the horizon.
+    pub fn apply(&self, p: DVec2) -> Option<DVec2> {
+        let v = self.0 * DVec3::new(p.x, p.y, 1.0);
+        (v.z > 1e-12).then(|| DVec2::new(v.x / v.z, v.y / v.z))
+    }
+
+    pub fn inverse(&self) -> Warp {
+        Warp(self.0.inverse())
+    }
+
+    /// The map taking the rectangle `(min, max)` to the quadrilateral
+    /// `corners` (clockwise from the top left). `None` unless the
+    /// quadrilateral is convex and has the rectangle's orientation.
+    pub fn from_quad(min: DVec2, max: DVec2, corners: [DVec2; 4]) -> Option<Warp> {
+        if !convex(&corners) || (max - min).abs().min_element() < 1e-9 {
+            return None;
+        }
+        // Unit square → quad (Heckbert), then rectangle → unit square.
+        let [p0, p1, p2, p3] = corners;
+        let s = p0 - p1 + p2 - p3;
+        let (d1, d2) = (p1 - p2, p3 - p2);
+        let den = d1.x * d2.y - d2.x * d1.y;
+        if den.abs() < 1e-12 {
+            return None;
+        }
+        let g = (s.x * d2.y - d2.x * s.y) / den;
+        let h = (d1.x * s.y - s.x * d1.y) / den;
+        let sq = DMat3::from_cols(
+            DVec3::new(p1.x - p0.x + g * p1.x, p1.y - p0.y + g * p1.y, g),
+            DVec3::new(p3.x - p0.x + h * p3.x, p3.y - p0.y + h * p3.y, h),
+            DVec3::new(p0.x, p0.y, 1.0),
+        );
+        let size = max - min;
+        let unit = DMat3::from_cols(
+            DVec3::new(1.0 / size.x, 0.0, 0.0),
+            DVec3::new(0.0, 1.0 / size.y, 0.0),
+            DVec3::new(-min.x / size.x, -min.y / size.y, 1.0),
+        );
+        let mut m = sq * unit;
+        // w > 0 inside the rectangle (it is, for a convex quad: no sign change).
+        let c = (min + max) * 0.5;
+        if (m * DVec3::new(c.x, c.y, 1.0)).z < 0.0 {
+            m = -m;
+        }
+        Some(Warp(m))
+    }
+
+    fn determinant(&self) -> f64 {
+        self.0.determinant()
+    }
+}
+
+/// Whether the quadrilateral is convex (either orientation) and not degenerate.
+pub fn convex(q: &[DVec2; 4]) -> bool {
+    let mut sign = 0.0;
+    for i in 0..4 {
+        let (a, b, c) = (q[i], q[(i + 1) % 4], q[(i + 2) % 4]);
+        let cross = (b - a).perp_dot(c - b);
+        if cross.abs() < 1e-9 {
+            return false;
+        }
+        if sign == 0.0 {
+            sign = cross.signum();
+        } else if cross.signum() != sign {
+            return false;
+        }
+    }
+    true
+}
+
+/// Per-tile sampling geometry for the warp kernel: the source position of
+/// a reference point in the tile and the (projective) change around it.
+struct TileGeom {
+    s0_int: [i32; 2],
+    s0_frac: [f32; 2],
+    lin: [f32; 4],
+    persp: [f32; 2],
+    side: f32,
+    /// The reference point, relative to the tile's corner.
+    ref_pt: [f32; 2],
+    /// Largest source step per destination pixel (for supersampling).
+    stretch: f64,
+}
+
+fn tile_geom(inv: &Warp, origin: DVec2) -> TileGeom {
+    let m = inv.0;
+    let ts = TILE_SIZE as f64;
+    // The reference: the point of the tile furthest from the horizon (for
+    // affine maps all are equal and the corner wins).
+    let r = [DVec2::ZERO, DVec2::new(ts, 0.0), DVec2::new(0.0, ts), DVec2::splat(ts), DVec2::splat(ts * 0.5)]
+        .into_iter()
+        .max_by(|a, b| {
+            let w = |p: DVec2| (m * (origin + p).extend(1.0)).z.abs();
+            w(*a).total_cmp(&w(*b)).then(std::cmp::Ordering::Greater)
+        })
+        .unwrap();
+    let n0 = m * (origin + r).extend(1.0);
+    let w0 = if n0.z.abs() < 1e-300 { 1e-300 } else { n0.z };
+    let s0 = DVec2::new(n0.x / w0, n0.y / w0);
+    // Columns of the linear part, divided by w0.
+    let (ax, ay) = (m.x_axis / w0, m.y_axis / w0);
+    let q = DVec2::new(ax.z, ay.z);
+    // s(d) = s0 + (M d − s0 (q·d)) / (1 + q·d)
+    let cx = DVec2::new(ax.x, ax.y) - s0 * q.x;
+    let cy = DVec2::new(ay.x, ay.y) - s0 * q.y;
+    let si = s0.floor();
+    // The step at the tile's centre (exact for affine maps).
+    let d = DVec2::splat(ts * 0.5) - r;
+    let den = 1.0 + q.dot(d);
+    let stretch = if den * w0.signum() > 1e-9 {
+        let n = cx * d.x + cy * d.y;
+        let jx = (cx * den - n * q.x) / (den * den);
+        let jy = (cy * den - n * q.y) / (den * den);
+        jx.length().max(jy.length())
+    } else {
+        1.0
+    };
+    TileGeom {
+        s0_int: [si.x as i32, si.y as i32],
+        s0_frac: [(s0.x - si.x) as f32, (s0.y - si.y) as f32],
+        lin: [cx.x as f32, cx.y as f32, cy.x as f32, cy.y as f32],
+        persp: [q.x as f32, q.y as f32],
+        side: w0.signum() as f32,
+        ref_pt: [r.x as f32, r.y as f32],
+        stretch,
+    }
+}
+
 const CONST_TAG: u32 = 0xff00_0000;
 
 #[repr(C)]
@@ -81,7 +236,9 @@ pub(super) struct WarpJob {
     mode: u32,
     interp: u32,
     samples: u32,
-    _pad: u32,
+    side: f32,
+    persp: [f32; 2],
+    ref_pt: [f32; 2],
 }
 
 const MODE_REPLACE: u32 = 0;
@@ -151,30 +308,54 @@ pub(super) fn footprint(
     fwd: DAffine2,
     margin: f64,
 ) -> BTreeSet<TileCoord> {
+    footprint_warp(src, &Warp::from(fwd), margin, None)
+}
+
+/// Like [`footprint`] for any [`Warp`]. Source tiles that reach behind the
+/// horizon have no bounded image: they cover `clip` (tile rectangle
+/// `(x0, y0, x1, y1)`, inclusive), or nothing without one.
+pub(super) fn footprint_warp(
+    src: impl IntoIterator<Item = TileCoord>,
+    fwd: &Warp,
+    margin: f64,
+    clip: Option<(i64, i64, i64, i64)>,
+) -> BTreeSet<TileCoord> {
     let ts = TILE_SIZE as f64;
     let mut out = BTreeSet::new();
-    let ax = fwd.matrix2.x_axis;
-    let ay = fwd.matrix2.y_axis;
-    // Separating axes: the tile axes plus the normals of the parallelogram edges.
-    let normals = [DVec2::new(-ax.y, ax.x), DVec2::new(-ay.y, ay.x)];
     for c in src {
         let (ox, oy) = c.origin();
         let (x0, y0) = (ox as f64 - margin, oy as f64 - margin);
         let (x1, y1) = (ox as f64 + ts + margin, oy as f64 + ts + margin);
-        let quad = [
+        let corners = [
             DVec2::new(x0, y0),
             DVec2::new(x1, y0),
             DVec2::new(x1, y1),
             DVec2::new(x0, y1),
-        ]
-        .map(|p| fwd.transform_point2(p));
+        ];
+        let mapped = corners.map(|p| fwd.apply(p));
+        let Some(quad) = mapped.iter().copied().collect::<Option<Vec<_>>>() else {
+            if let Some((cx0, cy0, cx1, cy1)) = clip {
+                for ty in cy0..=cy1 {
+                    for tx in cx0..=cx1 {
+                        out.insert(TileCoord::new(tx as i32, ty as i32));
+                    }
+                }
+            }
+            continue;
+        };
+        let quad: [DVec2; 4] = [quad[0], quad[1], quad[2], quad[3]];
         let min = quad.iter().fold(DVec2::INFINITY, |a, p| a.min(*p));
         let max = quad.iter().fold(DVec2::NEG_INFINITY, |a, p| a.max(*p));
-        let (tx0, ty0) = ((min.x / ts).floor() as i64, (min.y / ts).floor() as i64);
-        let (tx1, ty1) = (
+        let (mut tx0, mut ty0) = ((min.x / ts).floor() as i64, (min.y / ts).floor() as i64);
+        let (mut tx1, mut ty1) = (
             ((max.x / ts).ceil() as i64) - 1,
             ((max.y / ts).ceil() as i64) - 1,
         );
+        if let Some((cx0, cy0, cx1, cy1)) = clip {
+            (tx0, ty0, tx1, ty1) = (tx0.max(cx0), ty0.max(cy0), tx1.min(cx1), ty1.min(cy1));
+        }
+        // Separating axes: the tile axes plus the normals of the quad's edges.
+        let normals: [DVec2; 4] = std::array::from_fn(|i| (quad[(i + 1) % 4] - quad[i]).perp());
         for ty in ty0..=ty1 {
             for tx in tx0..=tx1 {
                 let (bx0, by0) = (tx as f64 * ts, ty as f64 * ts);
@@ -215,14 +396,16 @@ fn proj(pts: &[DVec2; 4], n: DVec2) -> (f64, f64) {
 }
 
 /// Whether `fwd` moves by whole pixels only.
-pub fn is_integer_translation(fwd: DAffine2) -> bool {
-    fwd.matrix2 == glam::DMat2::IDENTITY && fwd.translation.round() == fwd.translation
+pub fn is_integer_translation(fwd: impl Into<Warp>) -> bool {
+    fwd.into()
+        .affine()
+        .is_some_and(|fwd| fwd.matrix2 == glam::DMat2::IDENTITY && fwd.translation.round() == fwd.translation)
 }
 
 /// What a live preview shows.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum PreviewKind {
-    Transform(DAffine2, Interp),
+    Transform(Warp, Interp),
     Filter(mosaix_core::Filter),
     /// The active layer with a smart filter replaced (`Some(index)`) or added.
     SmartFilter(Option<usize>, mosaix_core::Filter),
@@ -261,7 +444,7 @@ impl Engine {
     /// destination tiles intersecting a rectangle (preview).
     fn transformed_doc(
         &mut self,
-        fwd: DAffine2,
+        fwd: Warp,
         interp: Interp,
         use_selection: bool,
         only: Option<(DVec2, DVec2)>,
@@ -311,20 +494,27 @@ impl Engine {
     pub(super) fn warp_layer(
         &mut self,
         layer: LayerId,
-        fwd: DAffine2,
+        fwd: Warp,
         interp: Interp,
         use_selection: bool,
         only: Option<(DVec2, DVec2)>,
         out: &mut Document<Tile>,
     ) -> Result<(), &'static str> {
-        if fwd.matrix2.determinant().abs() < 1e-9 {
+        if fwd.determinant().abs() < 1e-9 {
             return Err(mosaix_core::tr("transformation is too flat (size 0)"));
         }
         let l = self
             .doc
             .find(layer)
             .ok_or(mosaix_core::tr("layer does not exist"))?;
+        let affine = fwd.affine();
+        if affine.is_none() && (l.vector().is_some() || l.raw().is_some()) {
+            return Err(mosaix_core::tr(
+                "distort and perspective work on pixels: rasterize text, shape and RAW layers first",
+            ));
+        }
         if let Some(v) = l.vector() {
+            let fwd = affine.unwrap();
             let mut v = v.clone();
             let m = fwd.matrix2;
             let f = [
@@ -341,6 +531,7 @@ impl Engine {
             }
         }
         if let Some(r) = l.raw() {
+            let fwd = affine.unwrap();
             let mut r = r.clone();
             let m = fwd.matrix2;
             let f = [m.x_axis.x, m.x_axis.y, m.y_axis.x, m.y_axis.y, fwd.translation.x, fwd.translation.y];
@@ -359,22 +550,37 @@ impl Engine {
         };
 
         let inv = fwd.inverse();
-        let lin = inv.matrix2;
-        let stretch = lin.x_axis.length().max(lin.y_axis.length());
-        let mut interp = interp;
-        let samples = if interp == Interp::Nearest {
-            1
-        } else {
-            (stretch - 0.01).ceil().clamp(1.0, 4.0) as u32
+        // Supersampling where the map shrinks (per tile for perspective).
+        let samples_for = |stretch: f64| {
+            if interp == Interp::Nearest {
+                1
+            } else {
+                (stretch - 0.01).ceil().clamp(1.0, 4.0) as u32
+            }
         };
-        if samples > 1 && interp == Interp::Bicubic {
-            interp = Interp::Bilinear;
-        }
-        let margin = match interp {
+        let max_samples = match affine {
+            Some(_) => samples_for(tile_geom(&inv, DVec2::ZERO).stretch),
+            None => 4,
+        };
+        let interp_for = |samples: u32| {
+            if samples > 1 && interp == Interp::Bicubic {
+                Interp::Bilinear
+            } else {
+                interp
+            }
+        };
+        let margin = match interp_for(max_samples) {
             Interp::Nearest => 0.0,
             Interp::Bilinear => 1.0,
             Interp::Bicubic => 2.0,
-        } + samples as f64 * 0.5;
+        } + max_samples as f64 * 0.5;
+        // Perspective can throw content towards infinity: what lands far
+        // outside the canvas is dropped.
+        let clip = affine.is_none().then(|| {
+            let ts = TILE_SIZE as i64;
+            let (w, h) = (out.width as i64, out.height as i64);
+            (-w / ts - 4, -h / ts - 4, 2 * w / ts + 4, 2 * h / ts + 4)
+        });
         let keep = |c: &TileCoord| {
             only.is_none_or(|(a, b)| {
                 let (x, y) = c.origin();
@@ -393,17 +599,15 @@ impl Engine {
 
         let base_job = |c: TileCoord| {
             let (x, y) = c.origin();
-            let s0 = inv.transform_point2(DVec2::new(x as f64, y as f64));
-            let si = s0.floor();
+            let g = tile_geom(&inv, DVec2::new(x as f64, y as f64));
+            let samples = if affine.is_some() { max_samples } else { samples_for(g.stretch) };
             WarpJob {
-                s0_int: [si.x as i32, si.y as i32],
-                s0_frac: [(s0.x - si.x) as f32, (s0.y - si.y) as f32],
-                lin: [
-                    lin.x_axis.x as f32,
-                    lin.x_axis.y as f32,
-                    lin.y_axis.x as f32,
-                    lin.y_axis.y as f32,
-                ],
+                s0_int: g.s0_int,
+                s0_frac: g.s0_frac,
+                lin: g.lin,
+                persp: g.persp,
+                side: g.side,
+                ref_pt: g.ref_pt,
                 src: GridRef::default(),
                 src_sel: GridRef::default(),
                 old_slot: NONE,
@@ -411,9 +615,8 @@ impl Engine {
                 dsel_slot: NONE,
                 dsel_const: 0.0,
                 mode: MODE_REPLACE,
-                interp: interp as u32,
+                interp: interp_for(samples) as u32,
                 samples,
-                _pad: 0,
             }
         };
 
@@ -427,7 +630,7 @@ impl Engine {
         } else {
             src.keys().copied().collect()
         };
-        let mut dest = footprint(moving.iter().copied(), fwd, margin);
+        let mut dest = footprint_warp(moving.iter().copied(), &fwd, margin, clip);
         if float {
             dest.extend(moving.iter().copied()); // the hole left behind
         }
@@ -461,7 +664,7 @@ impl Engine {
                 .filter(|(_, t)| !matches!(t, MaskTile::Solid(v) if *v == m.default))
                 .map(|(c, _)| *c)
                 .collect();
-            mask_dest = footprint(coords, fwd, margin)
+            mask_dest = footprint_warp(coords, &fwd, margin, clip)
                 .into_iter()
                 .filter(keep)
                 .collect();
@@ -688,7 +891,7 @@ impl Engine {
                         Arc::new(m.tiles.iter().map(|(c, t)| (shift(c), t.clone())).collect());
                 }
             } else {
-                self.warp_layer(id, fwd, interp, false, None, &mut out)?;
+                self.warp_layer(id, fwd.into(), interp, false, None, &mut out)?;
             }
         }
         out.width = w;
@@ -701,7 +904,7 @@ impl Engine {
     /// (document px → document px) as one undo step.
     pub fn transform_active(
         &mut self,
-        fwd: DAffine2,
+        fwd: impl Into<Warp>,
         interp: Interp,
         label: &str,
     ) -> Result<(), &'static str> {
@@ -712,11 +915,12 @@ impl Engine {
     /// whole layer even if there is a selection.
     pub fn transform_layer(
         &mut self,
-        fwd: DAffine2,
+        fwd: impl Into<Warp>,
         interp: Interp,
         use_selection: bool,
         label: &str,
     ) -> Result<(), &'static str> {
+        let fwd: Warp = fwd.into();
         if self.preview.take().is_some() {
             self.recheck_all = true;
         }
@@ -727,7 +931,7 @@ impl Engine {
         {
             self.check_target(StrokeTarget::Pixels)?;
         }
-        if fwd == DAffine2::IDENTITY {
+        if fwd.affine() == Some(DAffine2::IDENTITY) {
             return Ok(());
         }
         // Whole-pixel moves are exact with nearest sampling.
@@ -748,7 +952,7 @@ impl Engine {
     /// visible area is computed). `None` ends the preview.
     pub fn set_transform_preview(
         &mut self,
-        t: Option<(DAffine2, Interp)>,
+        t: Option<(Warp, Interp)>,
     ) -> Result<(), &'static str> {
         match t {
             None => {
@@ -872,7 +1076,9 @@ impl Engine {
                     mode: MODE_REPLACE,
                     interp: interp as u32,
                     samples,
-                    _pad: 0,
+                    side: 1.0,
+                    persp: [0.0; 2],
+                    ref_pt: [0.0; 2],
                 }
             })
             .collect();
@@ -918,7 +1124,9 @@ impl Engine {
             mode: MODE_REPLACE,
             interp: Interp::Bilinear as u32,
             samples,
-            _pad: 0,
+            side: 1.0,
+            persp: [0.0; 2],
+            ref_pt: [0.0; 2],
         };
         self.grid_buf
             .write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
@@ -944,7 +1152,9 @@ impl Engine {
             mode: MODE_REPLACE,
             interp: Interp::Bilinear as u32,
             samples,
-            _pad: 0,
+            side: 1.0,
+            persp: [0.0; 2],
+            ref_pt: [0.0; 2],
         };
         self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
         self.run_warp(StrokeTarget::Mask, &[job])?.pop()
@@ -1113,6 +1323,33 @@ mod tests {
             !f.contains(&TileCoord::new(0, 0)) && !f.contains(&TileCoord::new(2, 2)),
             "{f:?}"
         );
+    }
+
+    #[test]
+    fn quad_warp_maps_the_corners() {
+        let (min, max) = (DVec2::new(10.0, 20.0), DVec2::new(110.0, 70.0));
+        let q = [DVec2::new(0.0, 0.0), DVec2::new(200.0, 30.0), DVec2::new(180.0, 150.0), DVec2::new(20.0, 100.0)];
+        let w = Warp::from_quad(min, max, q).unwrap();
+        let rect = [min, DVec2::new(max.x, min.y), max, DVec2::new(min.x, max.y)];
+        for (r, q) in rect.iter().zip(q) {
+            assert!(w.apply(*r).unwrap().distance(q) < 1e-9);
+        }
+        assert!(w.affine().is_none());
+        // A parallelogram is affine.
+        let p = [DVec2::new(0.0, 0.0), DVec2::new(100.0, 0.0), DVec2::new(130.0, 50.0), DVec2::new(30.0, 50.0)];
+        assert!(Warp::from_quad(min, max, p).unwrap().affine().is_some());
+        // Not convex: refused.
+        let bad = [DVec2::new(0.0, 0.0), DVec2::new(100.0, 0.0), DVec2::new(20.0, 20.0), DVec2::new(0.0, 100.0)];
+        assert!(Warp::from_quad(min, max, bad).is_none());
+        // Per-tile geometry reproduces the map.
+        let inv = w.inverse();
+        let g = tile_geom(&inv, DVec2::new(256.0, 0.0));
+        let d = DVec2::new(40.0, 90.0) - DVec2::new(g.ref_pt[0] as f64, g.ref_pt[1] as f64);
+        let lin = glam::DMat2::from_cols_array(&g.lin.map(|v| v as f64));
+        let den = 1.0 + DVec2::new(g.persp[0] as f64, g.persp[1] as f64).dot(d);
+        let s = DVec2::new(g.s0_int[0] as f64 + g.s0_frac[0] as f64, g.s0_int[1] as f64 + g.s0_frac[1] as f64) + lin * d / den;
+        let want = inv.apply(DVec2::new(296.0, 90.0)).unwrap();
+        assert!(s.distance(want) < 1e-3, "{s} vs {want}");
     }
 
     #[test]

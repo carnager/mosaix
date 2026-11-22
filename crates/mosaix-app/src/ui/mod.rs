@@ -220,15 +220,19 @@ impl Gui {
         target: &wgpu::TextureView,
         size: (u32, u32),
     ) {
-        let textures = std::mem::take(&mut self.textures);
+        let mut textures = std::mem::take(&mut self.textures);
         let (prims, ppp) = (&self.prims, self.ppp);
-        if prims.is_empty() {
-            return;
-        }
-        for (id, deltas) in &textures.set {
-            for delta in deltas {
-                self.renderer.update_texture(device, queue, *id, delta);
+        // Uploads even without anything to draw (egui counts on it).
+        for (id, deltas) in textures.set.drain() {
+            for delta in &deltas {
+                self.renderer.update_texture(device, queue, id, delta);
             }
+        }
+        if prims.is_empty() {
+            for id in textures.free.drain() {
+                self.renderer.free_texture(&id);
+            }
+            return;
         }
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [size.0, size.1],
@@ -256,8 +260,8 @@ impl Gui {
                 .render(&mut rp.forget_lifetime(), prims, &screen);
         }
         queue.submit(extra.into_iter().chain([enc.finish()]));
-        for id in &textures.free {
-            self.renderer.free_texture(id);
+        for id in textures.free.drain() {
+            self.renderer.free_texture(&id);
         }
     }
 }

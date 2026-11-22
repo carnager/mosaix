@@ -578,8 +578,8 @@ msgstr "Pfeil runter"
 msgid "Drag a frame, adjust the handles. Dragging past the edge enlarges the canvas."
 msgstr "Rahmen ziehen, Anfasser anpassen. Über den Rand hinaus vergrößert die Arbeitsfläche."
 
-msgid "Drag corners: scale (Shift: free) · drag outside: rotate (Shift: 15°) · Alt: around the center"
-msgstr "Ecken ziehen: skalieren (Umschalt frei) · außerhalb ziehen: drehen (Umschalt 15°) · Alt: um die Mitte"
+msgid "Drag corners: scale (Shift: free) · Ctrl: distort · drag outside: rotate (Shift: 15°) · Alt: around the center"
+msgstr "Ecken ziehen: skalieren (Umschalt frei) · Strg: verzerren · außerhalb ziehen: drehen (Umschalt 15°) · Alt: um die Mitte"
 
 msgid "Drag or arrow keys (Shift: 10 px). With a selection, only the selected pixels."
 msgstr "Ziehen oder Pfeiltasten (Umschalt: 10 px). Mit Auswahl nur die ausgewählten Pixel."
@@ -2662,3 +2662,33 @@ msgstr "Hier erscheinen die Dateien, die du öffnest."
 
 msgid "not found"
 msgstr "nicht gefunden"
+
+msgid "Skew"
+msgstr "Neigen"
+
+msgid "Distort"
+msgstr "Verzerren"
+
+msgid "Perspective"
+msgstr "Perspektivisch"
+
+msgid "Text, shape and RAW layers: rasterize first"
+msgstr "Text-, Form- und RAW-Ebenen: erst rastern"
+
+msgid "Select a layer to transform"
+msgstr "Wähle eine Ebene zum Transformieren"
+
+msgid "Handles scale"
+msgstr "Griffe skalieren"
+
+msgid "Edges slide along themselves"
+msgstr "Kanten gleiten an sich entlang"
+
+msgid "Corners move freely (also: hold Ctrl)"
+msgstr "Ecken bewegen sich frei (auch: Strg halten)"
+
+msgid "Opposite corners move together"
+msgstr "Gegenüberliegende Ecken bewegen sich gemeinsam"
+
+msgid "distort and perspective work on pixels: rasterize text, shape and RAW layers first"
+msgstr "Verzerren und Perspektive wirken auf Pixel: Text-, Form- und RAW-Ebenen erst rastern"

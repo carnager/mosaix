@@ -106,6 +106,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         eyedrop_all: true,
         boxed: std::env::var_os("MOSAIX_SNAPSHOT_BOX").map(|_| "Free Transform"),
         box_angle: std::env::var_os("MOSAIX_SNAPSHOT_BOX").map(|_| 30.0),
+        box_mode: std::env::var_os("MOSAIX_SNAPSHOT_BOX").map(|_| crate::boxedit::Mode::Scale),
         mask_edit: false,
         text_overlay: None,
         path_overlay: None,

@@ -293,10 +293,14 @@ pub enum Command {
         scale_x: Option<f64>,
         scale_y: Option<f64>,
         rotate: Option<f64>,
+        skew_x: Option<f64>,
+        skew_y: Option<f64>,
         dx: Option<f64>,
         dy: Option<f64>,
         pivot_x: Option<f64>,
         pivot_y: Option<f64>,
+        /// Distort / perspective: where the corners of the content bounds go.
+        corners: Option<[[f64; 2]; 4]>,
         interp: Option<String>,
         use_selection: Option<bool>,
     },
@@ -775,6 +779,12 @@ fn parse_sample(v: &Option<String>) -> anyhow::Result<SampleFrom> {
         Some("image") => Ok(SampleFrom::Image),
         Some(o) => bail!("sample must be \"layer\" or \"image\", got {o:?}"),
     }
+}
+
+/// Shear by angles in degrees: `x` slants vertical lines, `y` horizontal ones.
+fn skew(x: f64, y: f64) -> anyhow::Result<DAffine2> {
+    ensure!(x.abs() < 89.0 && y.abs() < 89.0, "skew angles must be between −89° and 89°");
+    Ok(DAffine2::from_cols_array(&[1.0, y.to_radians().tan(), x.to_radians().tan(), 1.0, 0.0, 0.0]))
 }
 
 fn parse_interp(i: &Option<String>) -> anyhow::Result<Interp> {
@@ -1525,16 +1535,32 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             scale_x,
             scale_y,
             rotate,
+            skew_x,
+            skew_y,
             dx,
             dy,
             pivot_x,
             pivot_y,
+            corners,
             interp,
             use_selection,
         } => {
             let id = pixel_layer(s, layer)?;
             let interp = parse_interp(&interp)?;
             let use_selection = use_selection.unwrap_or(true);
+            if let Some(c) = corners {
+                ensure!(
+                    scale.is_none() && scale_x.is_none() && scale_y.is_none() && rotate.is_none() && skew_x.is_none() && skew_y.is_none() && dx.is_none() && dy.is_none(),
+                    "corners replaces scale, rotate, skew and dx/dy: give one or the other"
+                );
+                let b = s.engine.content_bounds(id).context("the layer (or selection) is empty")?;
+                let quad = c.map(|[x, y]| DVec2::new(x, y));
+                let w = mosaix_gpu::Warp::from_quad(DVec2::new(b.0 as f64, b.1 as f64), DVec2::new(b.2 as f64, b.3 as f64), quad)
+                    .context("the corners must form a convex shape, clockwise from the top left")?;
+                s.engine.transform_layer(w, interp, use_selection, tr("Distort")).map_err(engine_err)?;
+                let bounds = s.engine.content_bounds(id).map(bounds_json);
+                return Ok(Output::json(json!({ "ok": true, "active_layer": id, "bounds": bounds })));
+            }
             let k = DVec2::new(
                 scale_x.or(scale).unwrap_or(1.0),
                 scale_y.or(scale).unwrap_or(1.0),
@@ -1554,6 +1580,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let fwd = DAffine2::from_translation(
                 DVec2::new(dx.unwrap_or(0.0), dy.unwrap_or(0.0)) + pivot,
             ) * DAffine2::from_angle(rotate.unwrap_or(0.0).to_radians())
+                * skew(skew_x.unwrap_or(0.0), skew_y.unwrap_or(0.0))?
                 * DAffine2::from_scale(k)
                 * DAffine2::from_translation(-pivot);
             s.engine

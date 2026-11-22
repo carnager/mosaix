@@ -1232,6 +1232,7 @@ impl App {
         boxedit::Modifiers {
             shift: self.mods.shift,
             alt: self.mods.alt,
+            ctrl: self.mods.ctrl,
         }
     }
 
@@ -1337,11 +1338,11 @@ impl App {
     }
 
     /// The transform to show live (free transform, or a move in progress).
-    fn preview_transform(&self) -> Option<DAffine2> {
+    fn preview_transform(&self) -> Option<mosaix_gpu::Warp> {
         match (&self.boxed, &self.drag) {
             (Some((BoxKind::Transform, b)), _) => Some(b.delta()),
             (_, Drag::Move { start, end }) => {
-                Some(DAffine2::from_translation(self.move_delta(*start, *end)))
+                Some(DAffine2::from_translation(self.move_delta(*start, *end)).into())
             }
             _ => None,
         }
@@ -3496,7 +3497,11 @@ impl App {
             }),
             mask_edit: self.mask_edit,
             box_angle: match &self.boxed {
-                Some((BoxKind::Transform, b)) => Some(b.angle()),
+                Some((BoxKind::Transform, b)) if b.quad.is_none() => Some(b.angle()),
+                _ => None,
+            },
+            box_mode: match &self.boxed {
+                Some((BoxKind::Transform, b)) => Some(b.mode),
                 _ => None,
             },
             liquify: e.liquify_active().then_some((
@@ -3578,6 +3583,7 @@ impl App {
                         | Action::BoxRotate(_)
                         | Action::BoxAngle(_)
                         | Action::BoxFlip { .. }
+                        | Action::BoxMode(_)
                 )
             {
                 self.commit_box();
@@ -3886,6 +3892,14 @@ impl App {
                 Action::BoxFlip { x, y } => {
                     if let Some((BoxKind::Transform, b)) = &mut self.boxed {
                         b.flip(x, y);
+                    }
+                }
+                Action::BoxMode(mode) => {
+                    if self.boxed.is_none() {
+                        self.begin_transform();
+                    }
+                    if let Some((BoxKind::Transform, b)) = &mut self.boxed {
+                        b.mode = mode;
                     }
                 }
                 Action::CommitBox => self.commit_box(),

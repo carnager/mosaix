@@ -179,6 +179,8 @@ pub struct Model {
     pub boxed: Option<&'static str>,
     /// Free transform: current angle (degrees).
     pub box_angle: Option<f64>,
+    /// Free transform: what the handles do.
+    pub box_mode: Option<crate::boxedit::Mode>,
     /// Liquify session: tool, brush diameter, strength.
     pub liquify: Option<(mosaix_gpu::LiquifyTool, f32, f32)>,
     /// Text edited on the canvas: caret, selection, frame (screen points).
@@ -300,6 +302,8 @@ pub enum Action {
     /// Free transform: turn by (degrees), set the angle, mirror.
     BoxRotate(f64),
     BoxAngle(f64),
+    /// Skew / distort / perspective (opens free transform if needed).
+    BoxMode(crate::boxedit::Mode),
     BoxFlip {
         x: bool,
         y: bool,
@@ -900,6 +904,28 @@ fn special_entry(
             });
         }
         Special::Actions => actions_menu(ui, icon, m, st, out),
+        Special::Transform => {
+            use crate::boxedit::Mode;
+            let active = m.layers.iter().find(|r| r.id == m.active);
+            let any = active.is_some_and(|r| !r.adjustment);
+            let pixels = any && active.is_some_and(|r| r.vector.is_none()) && m.active_raw.is_none();
+            ui.add_enabled_ui(any, |ui| {
+                ui.menu_button((icon, tr("Transform")), |ui| {
+                    for mo in Mode::ALL {
+                        let ok = pixels || matches!(mo, Mode::Scale | Mode::Skew);
+                        let r = ui
+                            .add_enabled(ok, egui::Button::new(tr(mo.name())))
+                            .on_disabled_hover_text(tr("Text, shape and RAW layers: rasterize first"));
+                        if r.clicked() {
+                            out.push(Action::BoxMode(mo));
+                            ui.close();
+                        }
+                    }
+                });
+            })
+            .response
+            .on_disabled_hover_text(tr("Select a layer to transform"));
+        }
         Special::Filters => {
             ui.menu_button((icon, tr("Filter")), |ui| {
                 for f in mosaix_core::Filter::defaults() {
@@ -1208,11 +1234,25 @@ fn options_bar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                 }
                 ui.separator();
                 ui.label(tr("Flip"));
-                if ui.small_button("↔").on_hover_text(tr("horizontal")).clicked() {
+                if ui.small_button(super::glyphs::FLIP_HORIZONTAL).on_hover_text(tr("horizontal")).clicked() {
                     out.push(Action::BoxFlip { x: true, y: false });
                 }
-                if ui.small_button("↕").on_hover_text(tr("vertical")).clicked() {
+                if ui.small_button(super::glyphs::FLIP_VERTICAL).on_hover_text(tr("vertical")).clicked() {
                     out.push(Action::BoxFlip { x: false, y: true });
+                }
+                ui.separator();
+            }
+            if let Some(mode) = m.box_mode {
+                for mo in crate::boxedit::Mode::ALL {
+                    let tip = match mo {
+                        crate::boxedit::Mode::Scale => tr("Handles scale"),
+                        crate::boxedit::Mode::Skew => tr("Edges slide along themselves"),
+                        crate::boxedit::Mode::Distort => tr("Corners move freely (also: hold Ctrl)"),
+                        crate::boxedit::Mode::Perspective => tr("Opposite corners move together"),
+                    };
+                    if ui.selectable_label(mode == mo, tr(mo.name())).on_hover_text(tip).clicked() && mode != mo {
+                        out.push(Action::BoxMode(mo));
+                    }
                 }
                 ui.separator();
             }
@@ -1223,7 +1263,7 @@ fn options_bar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                 out.push(Action::CancelBox);
             }
             if m.box_angle.is_some() {
-                hint(ui, tr("Drag corners: scale (Shift: free) · drag outside: rotate (Shift: 15°) · Alt: around the center"));
+                hint(ui, tr("Drag corners: scale (Shift: free) · Ctrl: distort · drag outside: rotate (Shift: 15°) · Alt: around the center"));
             }
             return;
         }

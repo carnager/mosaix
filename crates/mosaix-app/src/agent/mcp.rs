@@ -480,16 +480,21 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "layer_transform",
-            "Scale, rotate and/or move a layer (with its mask) around a pivot (default: centre of its content). With a selection, \
+            "Scale, skew, rotate and/or move a layer (with its mask) around a pivot (default: centre of its content). With a selection, \
              only the selected pixels move and the selection follows (like Photoshop's free transform); set use_selection=false \
-             to transform the whole layer anyway. Order: scale, rotate, then move by dx/dy. Returns the new content bounds.",
+             to transform the whole layer anyway. Order: scale, skew, rotate, then move by dx/dy. Distort / perspective: give \
+             corners instead, the new positions of the content bounds' corners [[x,y]×4] clockwise from the top left (convex; \
+             pixel layers only). Returns the new content bounds.",
             json!({
                 "layer": layer_param(),
                 "scale": { "type": "number", "description": "uniform factor, e.g. 0.5" },
                 "scale_x": { "type": "number" }, "scale_y": { "type": "number", "description": "negative values mirror" },
                 "rotate": { "type": "number", "description": "degrees, clockwise" },
+                "skew_x": { "type": "number", "description": "degrees: slants vertical lines (−89…89)" },
+                "skew_y": { "type": "number", "description": "degrees: slants horizontal lines (−89…89)" },
                 "dx": { "type": "number" }, "dy": { "type": "number" },
                 "pivot_x": { "type": "number" }, "pivot_y": { "type": "number" },
+                "corners": { "type": "array", "items": { "type": "array", "items": { "type": "number" } }, "description": "distort/perspective: 4 [x, y] corners, clockwise from the top left" },
                 "interp": { "type": "string", "enum": ["bicubic", "bilinear", "nearest"], "description": "default bicubic; nearest for pixel art" },
                 "use_selection": { "type": "boolean" }
             }),
@@ -983,6 +988,7 @@ mod tests {
                         ("highlights", _) => json!("clip"),
                         ("tone", _) => json!({"highlights": -50}),
                         ("negative", _) => json!([[1, 2]]),
+                        ("corners", _) => json!([[0, 0], [10, 0], [10, 10], [0, 10]]),
                         ("noise", _) => json!({"luminance": 10, "color": 30}),
                         ("raw", _) => json!({"white_balance": {"mode": "custom", "temperature": 5000, "tint": 0}, "exposure": 1}),
                         ("filter", _) => json!({"kind": "high_pass", "radius": 3}),

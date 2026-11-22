@@ -1,4 +1,4 @@
-// "Warp" kernel: affine resampling of a layer (pixels or mask) into new
+// "Warp" kernel: affine or projective (perspective) resampling of a layer (pixels or mask) into new
 // tiles. Each job renders one destination tile; source texels are found via
 // a lookup grid (tile coordinate → pool slot) in a storage buffer, so a
 // destination tile can read from any number of source tiles.
@@ -27,7 +27,7 @@ struct Grid {
 struct Job {
     s0_int: vec2<i32>,   // source position of the destination tile's corner: integer part …
     s0_frac: vec2<f32>,  // … and fraction
-    lin: vec4<f32>,      // linear part: s = s0 + mat2(lin.xy, lin.zw) * local
+    lin: vec4<f32>,      // linear part: s = s0 + mat2(lin.xy, lin.zw) * (local − ref)
     src: Grid,           // source layer (pixels) or mask
     src_sel: Grid,       // float mode: selection at the source position
     old_slot: u32,       // float mode: current destination tile
@@ -37,7 +37,13 @@ struct Job {
     mode: u32,
     interp: u32,         // 0 nearest, 1 bilinear, 2 bicubic
     samples: u32,        // supersampling per axis (downscaling)
-    _pad: u32,
+    // Perspective: with d = local − ref, s = s0 + lin * d / (1 + dot(persp, d))
+    // (persp is zero for affine maps; s0 is the source of `ref`). Points
+    // where the denominator's sign differs from `side` lie behind the
+    // horizon and have no source.
+    side: f32,
+    persp: vec2<f32>,
+    ref_pt: vec2<f32>,
 };
 
 struct Params {
@@ -153,8 +159,15 @@ fn resample(job: Job, p: vec2<i32>, is_mask: bool) -> vec4<f32> {
     var acc = vec4<f32>(0.0);
     for (var sy = 0u; sy < n; sy++) {
         for (var sx = 0u; sx < n; sx++) {
-            let local = vec2<f32>(p) + (vec2<f32>(f32(sx), f32(sy)) + 0.5) / f32(n);
-            let s = job.s0_frac + m * local;
+            let local = vec2<f32>(p) + (vec2<f32>(f32(sx), f32(sy)) + 0.5) / f32(n) - job.ref_pt;
+            let den = 1.0 + dot(job.persp, local);
+            if den * job.side <= 1e-6 {
+                if is_mask {
+                    acc += vec4<f32>(job.src.fallback, 0.0, 0.0, 0.0);
+                }
+                continue;
+            }
+            let s = job.s0_frac + (m * local) / den;
             acc += sample(job, job.s0_int, s, is_mask);
         }
     }

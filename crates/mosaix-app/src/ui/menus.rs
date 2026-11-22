@@ -18,6 +18,8 @@ pub enum Icon {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Special {
     Recent,
+    /// Free transform in a given mode (scale, skew, distort, perspective).
+    Transform,
     Actions,
     Filters,
     Adjustments,
@@ -63,6 +65,7 @@ const EDIT: &[Item] = &[
     C("Paste", G(g::CLIPBOARD)),
     Sep,
     C("Free Transform", G(g::BOUNDING_BOX)),
+    S(Special::Transform, G(g::PERSPECTIVE)),
     C("Fill Area", G(g::PAINT_BUCKET)),
     C("Delete Selection (Pixels)", G(g::TRASH)),
     Sep,

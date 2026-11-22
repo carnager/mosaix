@@ -67,7 +67,7 @@ pub use magic::SampleFrom;
 pub use readback::{PoolKind, Readback};
 pub use thumbs::THUMB;
 pub use tips::{FIRST_CUSTOM_TIP, MAX_CUSTOM_TIPS, TIP_SIZE};
-pub use transform::{Interp, is_integer_translation};
+pub use transform::{Interp, Warp, is_integer_translation};
 
 use crate::pool::{BYTES_PER_PIXEL, MASK_FORMAT, Pool, PoolConfig, TILE_FORMAT, Tile, texel_copy};
 use util::{DynBuf, Params, PipelineSpec, compute_pipeline, make_origin_buf, render_pipeline};

@@ -54,7 +54,7 @@ Jedes mosaix-Fenster lauscht auf `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (nur für 
 | `fill`, `clear`, `gradient` | Auswahl (oder ganze Ebene) füllen, löschen, Verlauf linear/radial; Ebene oder Maske |
 | `layer_mask_add`, `layer_mask_delete`, `layer_mask_set`, `layer_mask_apply` | Ebenenmasken: anlegen (aus Auswahl), löschen, ein/aus, in Pixel übernehmen |
 | `layer_translate` | ganze Ebene samt Maske um ganze Pixel verschieben (ignoriert die Auswahl) |
-| `layer_transform` | skalieren, drehen (Grad, im Uhrzeigersinn), verschieben um einen Drehpunkt (Standard: Mitte des Inhalts); mit Auswahl nur die ausgewählten Pixel; `interp` bicubic/bilinear/nearest |
+| `layer_transform` | skalieren, neigen (`skew_x`/`skew_y` in Grad), drehen (Grad, im Uhrzeigersinn), verschieben um einen Drehpunkt (Standard: Mitte des Inhalts); verzerren/Perspektive mit `corners` (neue Lage der vier Ecken des Inhalts, im Uhrzeigersinn ab oben links); mit Auswahl nur die ausgewählten Pixel; `interp` bicubic/bilinear/nearest |
 | `layer_bounds` | pixelgenaue Grenzen des sichtbaren Inhalts einer Ebene |
 | `filter_apply` mit `smart: true`, `smart_filter_set` | Smart-Filter: nicht-destruktiv an der Ebene, ändern, ein/aus, entfernen, in die Pixel übernehmen (`apply`); `document_info` listet sie unter `smart_filters` |
 | `liquify` | Verflüssigen mit Strichen (push entlang eines Pfads, reconstruct, twirl_cw/ccw, pucker, bloat), ein Undo-Schritt |
