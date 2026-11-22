@@ -48,12 +48,23 @@ pub fn fill(p: &Provider, w: usize, h: usize, rgb: &mut [[f32; 3]], hole: &[bool
     } else {
         image::imageops::resize(&out, w as u32, h as u32, FilterType::CatmullRom)
     };
+    // Where the result is (partly) transparent the original shows through:
+    // its colour there is meaningless (often black).
+    let (mut seen, mut clear) = (0usize, 0usize);
     for (i, c) in rgb.iter_mut().enumerate() {
         if hole[i] {
             let p = out.get_pixel((i % w) as u32, (i / w) as u32);
-            *c = [p[0], p[1], p[2]].map(|v| v as f32 / 255.0);
+            let a = p[3] as f32 / 255.0;
+            seen += 1;
+            if a < 0.5 {
+                clear += 1;
+            }
+            for k in 0..3 {
+                c[k] = p[k] as f32 / 255.0 * a + c[k] * (1.0 - a);
+            }
         }
     }
+    ensure!(clear * 2 < seen.max(1), "the provider returned an empty (transparent) result");
     Ok(())
 }
 
@@ -104,8 +115,12 @@ fn openai(model: &str, key: &str, img: &RgbaImage, hole: &[bool], prompt: &str) 
     field("model", model.as_bytes(), None);
     field("prompt", prompt.as_bytes(), None);
     field("size", format!("{mw}x{mh}").as_bytes(), None);
-    field("image", &png(&image::DynamicImage::ImageRgba8(scaled))?, Some("image.png"));
-    field("mask", &png(&image::DynamicImage::ImageRgba8(mask))?, Some("mask.png"));
+    // Without this the model may answer with a transparent hole.
+    field("background", b"opaque", None);
+    let image_png = png(&image::DynamicImage::ImageRgba8(scaled))?;
+    let mask_png = png(&image::DynamicImage::ImageRgba8(mask))?;
+    field("image", &image_png, Some("image.png"));
+    field("mask", &mask_png, Some("mask.png"));
     body.extend(format!("--{boundary}--\r\n").as_bytes());
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(300)))
@@ -128,7 +143,23 @@ fn openai(model: &str, key: &str, img: &RgbaImage, hole: &[bool], prompt: &str) 
     }
     let b64 = v["data"][0]["b64_json"].as_str().context("OpenAI sent no image")?;
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64).context("OpenAI image")?;
+    keep_last(&[("image.png", &image_png), ("mask.png", &mask_png), ("answer.png", &bytes)]);
     Ok(image::load_from_memory(&bytes)?.to_rgba8())
+}
+
+/// The last exchange with the hosted model, for when a result looks wrong:
+/// `$XDG_CACHE_HOME/mosaix/generative-last/` (only on this computer).
+fn keep_last(files: &[(&str, &[u8])]) {
+    let dir = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("mosaix/generative-last");
+    if std::fs::create_dir_all(&dir).is_ok() {
+        for (name, data) in files {
+            let _ = std::fs::write(dir.join(name), data);
+        }
+    }
 }
 
 fn command(program: &str, img: &RgbaImage, hole: &[bool], prompt: &str) -> Result<RgbaImage> {
@@ -187,6 +218,23 @@ mod tests {
         fill(&p, w, h, &mut rgb, &hole, "something red").unwrap();
         assert!((rgb[0][0] - 1.0).abs() < 0.02 && rgb[0][2] < 0.02, "hole painted: {:?}", rgb[0]);
         assert_eq!(rgb[5], [0.0, 0.0, 1.0], "the rest stays");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_transparent_result_is_refused() {
+        let dir = std::env::temp_dir().join(format!("mosaix-fill-clear-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("clear.sh");
+        std::fs::write(&script, "#!/bin/sh\npython3 -c \"from PIL import Image; Image.new('RGBA', Image.open('$1').size, (0,0,0,0)).save('$4')\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (w, h) = (8, 4);
+        let mut rgb = vec![[0.0, 0.0, 1.0]; w * h];
+        let hole = vec![true; w * h];
+        let p = Provider::Command { program: script.display().to_string() };
+        assert!(fill(&p, w, h, &mut rgb, &hole, "nothing").is_err());
+        assert_eq!(rgb[0], [0.0, 0.0, 1.0], "nothing black painted");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
