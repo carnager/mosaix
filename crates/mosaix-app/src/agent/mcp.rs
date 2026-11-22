@@ -323,6 +323,7 @@ pub fn tools() -> Vec<Value> {
                 "hardness": { "type": "number", "minimum": 0, "maximum": 1, "description": "Edge hardness (default 0.8)" },
                 "pencil": { "type": "boolean", "description": "Pencil: every pixel fully painted or not at all (no anti-aliasing), for pixel art and crisp mask edges" },
                 "history": { "type": "boolean", "description": "History Brush: paint the active layer back as it was at the history source state (history_source)" },
+                "blend": { "type": "string", "enum": blend_keys.clone(), "description": "Paint in this blend mode (multiply, screen, color …); default normal" },
                 "opacity": { "type": "number", "minimum": 0, "maximum": 1, "description": "Maximum coverage of the stroke (default 1)" },
                 "flow": { "type": "number", "minimum": 0, "maximum": 1, "description": "Coverage per dab, builds up to opacity (default 1)" },
                 "spacing": { "type": "number", "minimum": 0.01, "description": "Dab spacing as fraction of diameter (default 0.1)" },

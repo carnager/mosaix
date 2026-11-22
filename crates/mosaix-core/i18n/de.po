@@ -3688,3 +3688,9 @@ msgstr "Keine Farbe"
 
 msgid "the active layer is not a group"
 msgstr "die aktive Ebene ist keine Gruppe"
+
+msgid "Mode"
+msgstr "Modus"
+
+msgid "How the paint mixes with the pixels below (Multiply darkens, Screen lightens, Color tints …)"
+msgstr "Wie sich die Farbe mit den Pixeln darunter mischt (Multiplizieren dunkelt ab, Negativ multiplizieren hellt auf, Farbe tönt …)"

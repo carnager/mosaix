@@ -197,6 +197,8 @@ pub enum Command {
         /// source (see `history_source`).
         #[serde(default)]
         history: bool,
+        /// Paint in this blend mode (multiply, screen, color …).
+        blend: Option<String>,
         opacity: Option<f32>,
         flow: Option<f32>,
         spacing: Option<f32>,
@@ -1366,6 +1368,7 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             hardness,
             pencil,
             history,
+            blend,
             opacity,
             flow,
             spacing,
@@ -1490,6 +1493,10 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                     tone,
                     keep_alpha: false,
                     history,
+                    blend: blend
+                        .map(|b| BlendMode::from_key(&b).with_context(|| format!("unknown blend mode {b:?}")))
+                        .transpose()?
+                        .unwrap_or(BlendMode::Normal),
                 })
                 .map_err(|e| anyhow::anyhow!(e))?;
             let mut stroke = Stroke::new(settings);

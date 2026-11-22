@@ -430,6 +430,7 @@ impl Engine {
             j.mode = match (stroke.params.working_copy(), stroke.params.erase) {
                 (true, _) => MODE_REPLACE,
                 (false, true) => MODE_ERASE,
+                (false, false) if target == StrokeTarget::Pixels => MODE_PAINT | (stroke.params.blend as u32) << 8,
                 (false, false) => MODE_PAINT,
             } | self.alpha_lock(layer, target);
             j.opacity = stroke.params.opacity;

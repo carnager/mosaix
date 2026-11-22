@@ -4,7 +4,7 @@
 // clearing and baking masks – for pixel tiles (fs_rgba) and
 // mask tiles (fs_mask).
 
-enable wgpu_binding_array;
+// (wgpu_binding_array is enabled and blend.wgsl prepended by the engine.)
 
 const NONE: u32 = 0xffffffffu;
 
@@ -135,7 +135,9 @@ fn fs_rgba(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         if mode == 2u {
             r = old * (1.0 - s.a);
         } else {
-            r = s + old * (1.0 - s.a);
+            // Painting in a blend mode (Normal = over).
+            let bm = job.mode >> 8u;
+            r = select(composite(old, s, bm, job.space), s + old * (1.0 - s.a), bm == 0u);
         }
     }
     if (job.mode & 16u) != 0u {

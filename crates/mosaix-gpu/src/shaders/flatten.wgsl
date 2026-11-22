@@ -83,7 +83,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let s = raw * w;
                 let before = src;
                 switch op.stroke_mode & 15u {
-                    case 1u: { src = s + src * (1.0 - s.a); }
+                    case 1u: {
+                        let bm = op.stroke_mode >> 8u;
+                        src = select(composite(src, s, bm, params.blend_space), s + src * (1.0 - s.a), bm == 0u);
+                    }
                     case 5u: { src = mix(src, raw, w); }
                     case 2u: { src = src * (1.0 - s.a); }
                     case 3u: { m = s.r + m * (1.0 - s.a); }

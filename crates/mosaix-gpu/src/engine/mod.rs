@@ -148,6 +148,8 @@ pub struct StrokeParams {
     /// History Brush (with `clone` at offset 0): paints the layer back as it
     /// was at the history source state.
     pub history: bool,
+    /// Painting: the blend mode of the paint onto the pixels (Normal = over).
+    pub blend: mosaix_core::BlendMode,
 }
 
 /// The retouching brushes that change the pixels under them. One stroke
@@ -202,6 +204,7 @@ impl Default for StrokeParams {
             tone: None,
             keep_alpha: false,
             history: false,
+            blend: mosaix_core::BlendMode::Normal,
         }
     }
 }
@@ -447,7 +450,10 @@ impl Engine {
                 include_str!("../shaders/flatten.wgsl")
             ),
         );
-        let apply_shader = shader("apply", include_str!("../shaders/apply.wgsl").into());
+        let apply_shader = shader(
+            "apply",
+            format!("enable wgpu_binding_array;\n{blend_src}\n{}", include_str!("../shaders/apply.wgsl")),
+        );
         let mip_shader = shader("mip", include_str!("../shaders/mip.wgsl").into());
         let smudge_shader = shader(
             "smudge",

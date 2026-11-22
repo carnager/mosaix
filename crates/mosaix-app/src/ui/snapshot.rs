@@ -163,6 +163,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         favourite_fonts: vec!["IBM Plex Sans".into()],
         recent_fonts: vec!["IBM Plex Mono".into()],
         shape: Default::default(),
+        brush_blend: Default::default(),
         histogram: None,
     };
     tracing::info!("{}", tr!("UI snapshot {w}×{h}", w = w, h = h));

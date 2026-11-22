@@ -85,6 +85,8 @@ impl FlattenBatch {
                     let st = stroke.filter(|s| s.0 == id);
                     let stroke_mode = st.map_or(0, |s| {
                         let keep = if s.2.target == StrokeTarget::Pixels && s.2.keep_alpha { 16 } else { 0 };
+                        let painting = s.2.target == StrokeTarget::Pixels && !s.2.erase && !s.2.working_copy();
+                        let keep = keep | if painting { (s.2.blend as u32) << 8 } else { 0 };
                         keep | match (s.2.target, s.2.erase) {
                             _ if s.2.working_copy() => 5,
                             (StrokeTarget::Pixels, false) => 1,

@@ -336,6 +336,7 @@ pub struct Model {
     pub recent_fonts: Vec<String>,
     /// Shape tool: ellipse instead of rectangle.
     pub shape: ShapeOpts,
+    pub brush_blend: BlendMode,
     /// Histogram of what is below the active adjustment (levels and curves).
     pub histogram: Option<std::sync::Arc<mosaix_gpu::Histogram>>,
 }
@@ -356,6 +357,8 @@ pub enum Action {
     BucketAll(bool),
     /// Shape tool settings.
     ShapeOpts(ShapeOpts),
+    /// Brush/pencil blend mode.
+    BrushBlend(BlendMode),
     /// Select › Selection to Shape Layer (foreground colour).
     SelectionToShape,
     /// The active layer's locks.
@@ -2527,6 +2530,23 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
         | ToolId::Sharpen => {
             let mut b = m.brush;
             let mut changed = false;
+            if matches!(m.tool, ToolId::Brush | ToolId::Pencil) {
+                ui.label(tr("Mode"));
+                let mut mode = m.brush_blend;
+                egui::ComboBox::from_id_salt("brush blend")
+                    .width(110.0)
+                    .selected_text(mode.name())
+                    .show_ui(ui, |ui| {
+                        for bm in BlendMode::ALL {
+                            ui.selectable_value(&mut mode, bm, bm.name());
+                        }
+                    })
+                    .response
+                    .on_hover_text(tr("How the paint mixes with the pixels below (Multiply darkens, Screen lightens, Color tints …)"));
+                if mode != m.brush_blend {
+                    out.push(Action::BrushBlend(mode));
+                }
+            }
             ui.label(tr("Size"));
             changed |= ui
                 .add(

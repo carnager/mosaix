@@ -483,6 +483,8 @@ pub struct App {
     poly_click: Option<Instant>,
     /// Paint Bucket compares colours in the whole image.
     bucket_all: bool,
+    /// Brush and pencil paint in this blend mode.
+    brush_blend: mosaix_core::BlendMode,
     /// Filter › Last Filter (Ctrl+F) repeats it.
     last_filter: Option<mosaix_core::Filter>,
     /// Shape tool: "rect", "ellipse", "line", "polygon", "star" or a preset;
@@ -752,6 +754,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         poly_click: None,
         bucket_all: false,
         last_filter: None,
+        brush_blend: mosaix_core::BlendMode::Normal,
         shape: Default::default(),
         openai_key: settings::key_state(),
         wand_tolerance: 32.0,
@@ -1854,6 +1857,7 @@ impl App {
             return Drag::None;
         }
         let doc_pos = self.view.screen_to_doc(pos);
+        let paint_blend = if matches!(self.tool, Tool::Brush | Tool::Pencil) { self.brush_blend } else { mosaix_core::BlendMode::Normal };
         let Some(engine) = self.engine() else {
             return Drag::None;
         };
@@ -1867,6 +1871,7 @@ impl App {
             tone,
             keep_alpha: false,
             history,
+            blend: paint_blend,
         };
         if let Err(e) = engine.begin_stroke(params) {
             tracing::warn!("{}", tr!("Cannot paint: {error}", error = e));
@@ -4469,6 +4474,7 @@ impl App {
             favourite_fonts: self.settings.favourite_fonts.clone(),
             recent_fonts: self.settings.recent_fonts.clone(),
             shape: self.shape.clone(),
+            brush_blend: self.brush_blend,
             histogram: None,
         })
     }
@@ -4770,6 +4776,7 @@ impl App {
                 Action::WandTolerance(v) => self.wand_tolerance = v,
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
+                Action::BrushBlend(b) => self.brush_blend = b,
                 Action::SwitchTab(i) => self.switch_tab(i),
                 Action::SelectionToShape => {
                     let cmd = serde_json::json!({ "cmd": "select_to_shape", "color": actions::hex(self.brush.color) });

@@ -3893,3 +3893,34 @@ fn distort_and_stylize_filters() {
     let t = e.read_layer_tile(l, TileCoord::new(0, 0)).unwrap();
     assert!(px(&t, 126, 50)[0] < 0.01 && px(&t, 129, 50)[0] > 0.99);
 }
+
+#[test]
+fn painting_in_a_blend_mode() {
+    let Some(g) = gpu() else { return };
+    for (mode, space) in [(BlendMode::Multiply, BlendSpace::Srgb), (BlendMode::Screen, BlendSpace::Linear), (BlendMode::Color, BlendSpace::Srgb), (BlendMode::Normal, BlendSpace::Srgb)] {
+        let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+        let layer = e.doc().active;
+        e.edit("Space", |d| {
+            d.blend_space = space;
+            true
+        });
+        let base = [0.3f32, 0.6, 0.2, 1.0];
+        e.fill(StrokeTarget::Pixels, base, 1.0, "Fill").unwrap();
+        // Live: during the stroke the composite shows the blended paint.
+        e.begin_stroke(StrokeParams { blend: mode, ..Default::default() }).unwrap();
+        let mut s = Stroke::new(red_brush());
+        let dabs = s.add(InputSample { pos: DVec2::new(100.0, 100.0), pressure: 1.0 });
+        e.stroke_dabs(&dabs);
+        e.flush();
+        let live = composite_px(&e, TileCoord::new(0, 0), 100, 100);
+        e.end_stroke("Paint");
+        e.flush();
+        let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+        let got = px(&t, 100, 100);
+        let want = composite(base, [1.0, 0.0, 0.0, 1.0], mode, space);
+        for k in 0..4 {
+            assert!((got[k] - want[k]).abs() < 3e-3, "{mode:?}: {got:?} vs {want:?}");
+            assert!((live[k] - want[k]).abs() < 3e-3, "{mode:?} live: {live:?} vs {want:?}");
+        }
+    }
+}
