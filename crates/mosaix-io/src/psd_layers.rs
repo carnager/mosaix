@@ -81,6 +81,23 @@ pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
             Adjustment::ChannelMixer { red, green, blue, gray, monochrome }
         }
         b"grdm" => read_gradient_map(&mut b)?,
+        // Color Lookup: version, descriptor version, descriptor with the
+        // .cube file (other LUT formats are not read).
+        b"clrL" => {
+            b.u16()?;
+            b.u32()?;
+            let d = read_desc(b.rest()).ok()?;
+            let cube = d.raw("LUT3DFileData")?;
+            let (size, data) = mosaix_core::adjust::parse_cube(&String::from_utf8_lossy(cube)).ok()?;
+            let name = d
+                .text("LUT3DFileName")
+                .or(d.text("Nm  "))
+                .unwrap_or("")
+                .trim_end_matches(".cube")
+                .trim_end_matches(".CUBE")
+                .to_string();
+            Adjustment::ColorLookup { name, size, data, amount: 100.0, path: None }
+        }
         // Photo filter: version (2: colour space + 4 × 16 bit; 3: XYZ),
         // density %, preserve luminosity.
         b"phfl" => {
@@ -378,7 +395,44 @@ pub(crate) fn adjustment_blocks(a: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             o.push(*preserve_luminosity as u8);
             out.push((*b"phfl", o));
         }
-        // No Photoshop block written (the layer has no effect there).
+        // Color Lookup: the .cube file itself inside the descriptor.
+        Adjustment::ColorLookup { name, size, data, amount, .. } if *size >= 2 && !data.is_empty() => {
+            // Photoshop has no amount: mixing with the input equals mixing
+            // the table with an identity table.
+            let n = *size as usize;
+            let k = (amount / 100.0).clamp(0.0, 1.0);
+            let step = 1.0 / (n - 1) as f32;
+            let data: Vec<[f32; 3]> = data
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    let id = [(i % n) as f32 * step, (i / n % n) as f32 * step, (i / (n * n)) as f32 * step];
+                    [0, 1, 2].map(|j| id[j] + (c[j] - id[j]) * k)
+                })
+                .collect();
+            let data = &data;
+            be16(&mut o, 1);
+            o.extend(16u32.to_be_bytes());
+            let en = |a: &str, b: &str| Value::Enum(a.into(), b.into());
+            let file = if name.is_empty() { "mosaix.cube".to_string() } else { format!("{name}.cube") };
+            w_desc(
+                &mut o,
+                &Desc {
+                    class: "null".into(),
+                    items: vec![
+                        ("lookupType".into(), en("colorLookupType", "3DLUT")),
+                        ("Nm  ".into(), Value::Text(file.clone())),
+                        ("Dthr".into(), Value::Bool(false)),
+                        ("LUTFormat".into(), en("LUTFormatType", "LUTFormatCUBE")),
+                        ("dataOrder".into(), en("dataOrder", "rgbOrder")),
+                        ("tableOrder".into(), en("tableOrder", "bgrOrder")),
+                        ("LUT3DFileData".into(), Value::Raw(mosaix_core::adjust::write_cube(name, *size, data).into_bytes())),
+                        ("LUT3DFileName".into(), Value::Text(file)),
+                    ],
+                },
+            );
+            out.push((*b"clrL", o));
+        }
         Adjustment::ColorLookup { .. } => {}
         Adjustment::Invert => out.push((*b"nvrt", o)),
         Adjustment::Posterize { levels } => {
@@ -903,6 +957,21 @@ pub(crate) fn write_text(t: &crate::psd::Text, height: f32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_lookup_round_trips_with_amount_baked_in() {
+        // A 2³ table that swaps red and blue.
+        let data: Vec<[f32; 3]> = (0..8).map(|i| [((i >> 2) & 1) as f32, ((i >> 1) & 1) as f32, (i & 1) as f32]).collect();
+        let a = Adjustment::ColorLookup { name: "swap".into(), size: 2, data: data.clone(), amount: 50.0, path: None };
+        let (k, d) = &adjustment_blocks(&a)[0];
+        assert_eq!(k, b"clrL");
+        let Some(Adjustment::ColorLookup { name, size, data: back, amount, .. }) = read_adjustment(k, d) else { panic!() };
+        assert_eq!((name.as_str(), size, amount), ("swap", 2, 100.0));
+        // Entry 1 (red = 1): identity (1, 0, 0), swapped (0, 0, 1) → halfway.
+        let e = back[1];
+        assert!((e[0] - 0.5).abs() < 1e-4 && e[1].abs() < 1e-4 && (e[2] - 0.5).abs() < 1e-4, "{e:?}");
+        assert_eq!(back.len(), 8);
+    }
 
     #[test]
     fn photo_filter_round_trips() {

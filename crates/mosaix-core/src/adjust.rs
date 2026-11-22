@@ -307,6 +307,19 @@ fn hundred() -> f32 {
 }
 
 /// Reads a .cube 3D LUT: (size, size³ RGB triples, red fastest).
+/// A .cube file for a table (`size`³ RGB triples, red fastest).
+pub fn write_cube(title: &str, size: u32, data: &[[f32; 3]]) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let title = title.replace('"', "'");
+    let _ = writeln!(s, "TITLE \"{}\"", if title.is_empty() { "mosaix" } else { &title });
+    let _ = writeln!(s, "LUT_3D_SIZE {size}");
+    for c in data {
+        let _ = writeln!(s, "{:.6} {:.6} {:.6}", c[0], c[1], c[2]);
+    }
+    s
+}
+
 pub fn parse_cube(text: &str) -> Result<(u32, Vec<[f32; 3]>), String> {
     let mut size = 0u32;
     let (mut lo, mut hi) = ([0.0f32; 3], [1.0f32; 3]);
