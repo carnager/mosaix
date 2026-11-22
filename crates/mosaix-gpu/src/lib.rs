@@ -1,5 +1,6 @@
 //! mosaix-gpu: wgpu device setup and the tiled canvas renderer.
 
+pub mod color;
 pub mod engine;
 pub mod pool;
 

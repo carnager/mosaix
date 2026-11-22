@@ -181,7 +181,7 @@ mod roundtrip {
             sixteen_bit,
             ..Default::default()
         };
-        mosaix_io::psd::write(path, (200, 200), &nodes, &composite, &opts).unwrap();
+        mosaix_io::psd::write(path, (200, 200), &nodes, &composite, &opts, &Default::default()).unwrap();
     }
 
     fn check(sixteen: bool) {
@@ -347,7 +347,7 @@ fn adjustment_layers_roundtrip() {
         .collect();
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("adj.psd");
-    mosaix_io::psd::write(&p, (64, 64), &nodes, &[], &Default::default()).unwrap();
+    mosaix_io::psd::write(&p, (64, 64), &nodes, &[], &Default::default(), &Default::default()).unwrap();
     let d = psd::open(&p).unwrap();
     let back: Vec<_> = d
         .layers
@@ -358,4 +358,26 @@ fn adjustment_layers_roundtrip() {
         })
         .collect();
     assert_eq!(back, adj);
+}
+
+#[test]
+fn guides_and_alpha_channels_round_trip() {
+    for sixteen in [false, true] {
+        let (w, h) = (40usize, 30usize);
+        let plane: Vec<u8> = (0..w * h).map(|i| if i % w < 20 { 255 } else { (i % 7) as u8 * 30 }).collect();
+        let extras = mosaix_io::psd::Extras {
+            guides: vec![mosaix_core::Guide { vertical: true, pos: 12.5 }, mosaix_core::Guide { vertical: false, pos: 7.0 }],
+            channels: vec![("Sky – Ümlaut".into(), plane.clone()), ("Face".into(), vec![128; w * h])],
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("extras.psd");
+        let opts = mosaix_io::export::ExportOptions { sixteen_bit: sixteen, ..Default::default() };
+        mosaix_io::psd::write(&p, (w as u32, h as u32), &[], &[], &opts, &extras).unwrap();
+        let d = psd::open(&p).unwrap();
+        assert_eq!(d.guides, extras.guides);
+        assert_eq!(d.channels.len(), 2);
+        assert_eq!(d.channels[0].0, "Sky – Ümlaut");
+        assert_eq!(d.channels[0].1, plane, "16 bit: {sixteen}");
+        assert_eq!(d.channels[1], ("Face".to_string(), vec![128; w * h]));
+    }
 }

@@ -468,10 +468,34 @@ impl Session {
                 }
             }
         });
+        // Saved selections: their pixel tiles (solid ones need no readback).
+        let (mut channel_keys, mut channel_tiles) = (Vec::new(), Vec::new());
+        let channels: Vec<(String, mosaix_core::Mask<()>)> = self
+            .engine
+            .doc()
+            .channels
+            .iter()
+            .enumerate()
+            .map(|(i, ch)| {
+                for (c, t) in ch.mask.tiles.iter() {
+                    if let MaskTile::Pixels(tile) = t {
+                        channel_keys.push((i, *c));
+                        channel_tiles.push(tile.clone());
+                    }
+                }
+                (ch.name.clone(), ch.mask.map(&mut |_| ()))
+            })
+            .collect();
+        let guides = self.engine.doc().guides.clone();
         let start = |kind, tiles: &[Tile]| {
             (!tiles.is_empty()).then(|| self.engine.begin_readback(kind, tiles))
         };
         PsdLayers {
+            channel_rb: start(PoolKind::Mask, &channel_tiles),
+            channel_keys,
+            channels,
+            channel_data: Vec::new(),
+            guides,
             layer_rb: start(PoolKind::Layer, &layer_tiles),
             mask_rb: start(PoolKind::Mask, &mask_tiles),
             doc: doc.map_tiles(&mut |_| ()),
@@ -559,13 +583,57 @@ struct PsdLayers {
     mask_rb: Option<Readback>,
     layer_data: Vec<Vec<u8>>,
     mask_data: Vec<Vec<u8>>,
+    /// Saved selections: names and structure, their pixel tiles' readback.
+    channels: Vec<(String, mosaix_core::Mask<()>)>,
+    channel_keys: Vec<(usize, TileCoord)>,
+    channel_rb: Option<Readback>,
+    channel_data: Vec<Vec<u8>>,
+    guides: Vec<mosaix_core::Guide>,
 }
 
 impl PsdLayers {
     fn take(mut self) -> Self {
         self.layer_data = self.layer_rb.take().map(Readback::take).unwrap_or_default();
         self.mask_data = self.mask_rb.take().map(Readback::take).unwrap_or_default();
+        self.channel_data = self.channel_rb.take().map(Readback::take).unwrap_or_default();
         self
+    }
+
+    /// Guides and saved selections as whole-canvas planes.
+    fn extras(&mut self, (w, h): (u32, u32)) -> mosaix_io::psd::Extras {
+        let ts = mosaix_core::TILE_SIZE as usize;
+        let (w, h) = (w as usize, h as usize);
+        let mut px: HashMap<(usize, TileCoord), Vec<u8>> =
+            std::mem::take(&mut self.channel_keys).into_iter().zip(std::mem::take(&mut self.channel_data)).collect();
+        let channels = std::mem::take(&mut self.channels)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, m))| {
+                let mut plane = vec![m.default; w * h];
+                for (c, t) in m.tiles.iter() {
+                    let (ox, oy) = (c.x as i64 * ts as i64, c.y as i64 * ts as i64);
+                    let data = match t {
+                        MaskTile::Solid(v) => Some(vec![*v; ts * ts]),
+                        MaskTile::Pixels(_) => px.remove(&(i, *c)),
+                    };
+                    let Some(data) = data else { continue };
+                    for y in 0..ts {
+                        let dy = oy + y as i64;
+                        if dy < 0 || dy >= h as i64 {
+                            continue;
+                        }
+                        for x in 0..ts {
+                            let dx = ox + x as i64;
+                            if dx >= 0 && dx < w as i64 {
+                                plane[dy as usize * w + dx as usize] = data[y * ts + x];
+                            }
+                        }
+                    }
+                }
+                (name, plane)
+            })
+            .collect();
+        mosaix_io::psd::Extras { guides: std::mem::take(&mut self.guides), channels }
     }
 
     /// The layer tree to write (adjustment layers are left out).
@@ -678,6 +746,7 @@ impl ExportJob {
             && self.psd.as_ref().is_none_or(|p| {
                 p.layer_rb.as_ref().is_none_or(|r| r.poll(device))
                     && p.mask_rb.as_ref().is_none_or(|r| r.poll(device))
+                    && p.channel_rb.as_ref().is_none_or(|r| r.poll(device))
             })
     }
 
@@ -695,9 +764,10 @@ impl ExportJob {
                         .map(|raw| bytemuck::pod_collect_to_vec(&raw)),
                 )
                 .collect();
-            if let Some(p) = psd {
+            if let Some(mut p) = psd {
+                let extras = p.extras(size);
                 let nodes = p.nodes();
-                mosaix_io::psd::write(&path, size, &nodes, &tiles, &opts)
+                mosaix_io::psd::write(&path, size, &nodes, &tiles, &opts, &extras)
                     .with_context(|| tr!("exporting {path}", path = path.display()))?;
                 return Ok(t0.elapsed().as_secs_f64() * 1e3);
             }

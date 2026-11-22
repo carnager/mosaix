@@ -84,13 +84,35 @@ impl SmartImage {
 /// Decodes an ordinary image file into straight-alpha linear RGBA (sRGB
 /// assumed; colour profiles are not applied yet).
 pub fn decode_image(bytes: &[u8]) -> anyhow::Result<SmartImage> {
+    use image::ImageDecoder;
+    // The embedded colour profile, if any (otherwise sRGB).
+    let icc = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|r| r.into_decoder().ok())
+        .and_then(|mut d| d.icc_profile().ok().flatten());
+    let convert = icc.as_deref().and_then(crate::color::color_transform);
     let img = image::load_from_memory(bytes)?;
     let rgba = img.to_rgba32f();
     let (w, h) = rgba.dimensions();
     let mut px = rgba.into_raw();
-    for p in px.as_chunks_mut::<4>().0 {
-        for v in &mut p[..3] {
-            *v = mosaix_core::color::srgb_to_linear(v.clamp(0.0, 1.0));
+    match convert {
+        Some((_, conv)) => {
+            use rayon::prelude::*;
+            px.par_chunks_mut(4 * w.max(1) as usize).for_each(|row| {
+                let mut rgb: Vec<f32> = row.chunks(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+                conv(&mut rgb);
+                for (p, c) in row.chunks_mut(4).zip(rgb.chunks(3)) {
+                    p[..3].copy_from_slice(c);
+                }
+            });
+        }
+        None => {
+            for p in px.as_chunks_mut::<4>().0 {
+                for v in &mut p[..3] {
+                    *v = mosaix_core::color::srgb_to_linear(v.clamp(0.0, 1.0));
+                }
+            }
         }
     }
     Ok(SmartImage { w, h, px })
@@ -437,5 +459,26 @@ mod tests {
         let p = &tiles[0].1;
         assert!(p[3].to_f32() > 0.99);
         assert_eq!(place(3, 2, &px, IDENTITY).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod icc_tests {
+    #[test]
+    fn smart_object_images_keep_their_colour_profile() {
+        use image::ImageEncoder;
+        // Pure Display P3 red is more saturated than sRGB can show.
+        let icc = moxcms::ColorProfile::new_display_p3().encode().unwrap();
+        let mut png = Vec::new();
+        let mut enc = image::codecs::png::PngEncoder::new(&mut png);
+        enc.set_icc_profile(icc).unwrap();
+        enc.write_image(&[255, 0, 0, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
+        let img = super::decode_image(&png).unwrap();
+        assert!(img.px[0] > 1.1 && img.px[1] < 0.0, "P3 red in linear sRGB: {:?}", &img.px[..3]);
+        // Without a profile: plain sRGB.
+        let mut plain = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut plain).write_image(&[255, 0, 0, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
+        let img = super::decode_image(&plain).unwrap();
+        assert!((img.px[0] - 1.0).abs() < 1e-4 && img.px[1].abs() < 1e-4);
     }
 }

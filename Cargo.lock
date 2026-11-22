@@ -2143,6 +2143,7 @@ dependencies = [
  "mosaix-core",
  "mosaix-raw",
  "mosaix-vector",
+ "moxcms",
  "pollster",
  "rayon",
  "serde",

@@ -39,6 +39,9 @@ impl B<'_> {
         self.p += 4;
         Some(v)
     }
+    fn i32(&mut self) -> Option<i32> {
+        self.u32().map(|v| v as i32)
+    }
     fn f32(&mut self) -> Option<f32> {
         self.u32().map(f32::from_bits)
     }
@@ -78,6 +81,24 @@ pub(crate) fn read_adjustment(key: &[u8], data: &[u8]) -> Option<Adjustment> {
             Adjustment::ChannelMixer { red, green, blue, gray, monochrome }
         }
         b"grdm" => read_gradient_map(&mut b)?,
+        // Photo filter: version (2: colour space + 4 × 16 bit; 3: XYZ),
+        // density %, preserve luminosity.
+        b"phfl" => {
+            let version = b.u16()?;
+            let color = if version == 2 {
+                let space = b.u16()?;
+                let c: Vec<f32> = (0..4).map(|_| b.u16().map(|v| v as f32 / 65535.0)).collect::<Option<_>>()?;
+                if space == 0 { [c[0], c[1], c[2]].map(mosaix_core::color::srgb_to_linear) } else { [0.7, 0.25, 0.0] }
+            } else {
+                for _ in 0..3 {
+                    b.i32()?;
+                }
+                [0.7, 0.25, 0.0]
+            };
+            let density = b.i32()? as f32;
+            let preserve_luminosity = b.u8().unwrap_or(1) != 0;
+            Adjustment::PhotoFilter { color, density, preserve_luminosity }
+        }
         // Selective color: version, method (0 relative, 1 absolute), ten
         // records of c, m, y, k (the first unused), percent.
         b"selc" => {
@@ -346,8 +367,19 @@ pub(crate) fn adjustment_blocks(a: &Adjustment) -> Vec<([u8; 4], Vec<u8>)> {
             }
             out.push((*b"selc", o));
         }
+        Adjustment::PhotoFilter { color, density, preserve_luminosity } => {
+            be16(&mut o, 2);
+            be16(&mut o, 0); // RGB
+            for v in color.map(|c| mosaix_core::color::linear_to_srgb(c.clamp(0.0, 1.0))) {
+                be16(&mut o, (v * 65535.0).round() as u16);
+            }
+            be16(&mut o, 0);
+            o.extend((density.round().clamp(0.0, 100.0) as i32).to_be_bytes());
+            o.push(*preserve_luminosity as u8);
+            out.push((*b"phfl", o));
+        }
         // No Photoshop block written (the layer has no effect there).
-        Adjustment::PhotoFilter { .. } | Adjustment::ColorLookup { .. } => {}
+        Adjustment::ColorLookup { .. } => {}
         Adjustment::Invert => out.push((*b"nvrt", o)),
         Adjustment::Posterize { levels } => {
             be16(&mut o, levels.round().clamp(2.0, 255.0) as u16);
@@ -817,6 +849,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn photo_filter_round_trips() {
+        let a = Adjustment::PhotoFilter { color: [0.0, 0.2, 1.0], density: 40.0, preserve_luminosity: false };
+        let (k, d) = &adjustment_blocks(&a)[0];
+        let Some(Adjustment::PhotoFilter { color, density, preserve_luminosity }) = read_adjustment(k, d) else { panic!() };
+        assert!((density - 40.0).abs() < 1e-3 && !preserve_luminosity);
+        assert!(color.iter().zip([0.0, 0.2, 1.0]).all(|(a, b)| (a - b).abs() < 1e-3), "{color:?}");
+    }
+
+    #[test]
     fn gradient_map_roundtrips() {
         use mosaix_core::gradient::{ColorStop, Gradient};
         let g = Gradient {
@@ -884,6 +925,7 @@ mod tests {
                 gray: [40.0, 40.0, 20.0, 0.0],
                 monochrome: true,
             },
+            Adjustment::SelectiveColor { ranges: [[10.0, -20.0, 30.0, -5.0]; 9], relative: false },
         ];
         for a in cases {
             let blocks = adjustment_blocks(&a);

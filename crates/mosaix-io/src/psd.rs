@@ -122,6 +122,17 @@ pub struct Psd {
     pub merged: Option<Raster>,
     /// Things that could not be carried over (shown to the user).
     pub warnings: Vec<String>,
+    pub guides: Vec<mosaix_core::Guide>,
+    /// Alpha channels (saved selections): name and one byte per pixel.
+    pub channels: Vec<(String, Vec<u8>)>,
+}
+
+/// What a PSD export carries besides layers: guides and saved selections
+/// (as named alpha channels, one byte per pixel of the canvas).
+#[derive(Default)]
+pub struct Extras {
+    pub guides: Vec<mosaix_core::Guide>,
+    pub channels: Vec<(String, Vec<u8>)>,
 }
 
 // --- Reading primitives -------------------------------------------------
@@ -761,6 +772,9 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     let n = c.u32()? as usize;
     let mut res = c.sub(n)?;
     let mut icc = None;
+    let mut guides = Vec::new();
+    let mut names_pascal: Vec<String> = Vec::new();
+    let mut names_unicode: Vec<String> = Vec::new();
     let mut light = crate::psd_fx::GlobalLight::default();
     let mut dpi = 72.0f64;
     while res.left() >= 12 {
@@ -778,6 +792,40 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         }
         if id == 1039 {
             icc = Some(data.to_vec());
+        }
+        // Grid and guides: version, grid (2 × 4), count, then (position in
+        // 1/32 px, direction: 0 vertical, 1 horizontal).
+        if id == 1032 && data.len() >= 16 {
+            let n = u32::from_be_bytes(data[12..16].try_into()?) as usize;
+            for k in 0..n {
+                let at = 16 + k * 5;
+                if data.len() < at + 5 {
+                    break;
+                }
+                let pos = i32::from_be_bytes(data[at..at + 4].try_into()?) as f64 / 32.0;
+                guides.push(mosaix_core::Guide { vertical: data[at + 4] == 0, pos });
+            }
+        }
+        // Alpha channel names: Pascal strings (1006) or Unicode (1045).
+        if id == 1006 {
+            let mut i = 0;
+            while i < data.len() {
+                let n = data[i] as usize;
+                names_pascal.push(String::from_utf8_lossy(&data[i + 1..(i + 1 + n).min(data.len())]).into_owned());
+                i += 1 + n;
+            }
+        }
+        if id == 1045 {
+            let mut i = 0;
+            while i + 4 <= data.len() {
+                let n = u32::from_be_bytes(data[i..i + 4].try_into()?) as usize;
+                i += 4;
+                let units: Vec<u16> = (0..n)
+                    .filter_map(|k| data.get(i + 2 * k..i + 2 * k + 2).map(|b| u16::from_be_bytes([b[0], b[1]])))
+                    .collect();
+                i += 2 * n;
+                names_unicode.push(String::from_utf16_lossy(&units).trim_end_matches('\0').to_string());
+            }
         }
         if id == 1005 && data.len() >= 4 {
             // Resolution: horizontal, 16.16 fixed point.
@@ -864,6 +912,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
     }
     // Merged image.
     let mut merged = None;
+    let mut channels = Vec::new();
     if c.left() >= 2 {
         let comp = c.u16()?;
         let (w, h) = (width as usize, height as usize);
@@ -914,6 +963,18 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
                 planes.get(i).cloned()
             };
             merged = Some(to_rgba(w * h, depth, mode, &get));
+            // The named alpha channels are the last planes.
+            let names = if names_unicode.is_empty() { &names_pascal } else { &names_unicode };
+            let extra = planes.len().saturating_sub(colours);
+            let k = names.len().min(extra);
+            for (name, plane) in names.iter().take(k).zip(&planes[planes.len() - k..]) {
+                let bytes: Vec<u8> = match depth {
+                    16 => plane.chunks(2).map(|b| b[0]).collect(),
+                    32 => plane.chunks(4).map(|b| (f32::from_be_bytes([b[0], b[1], b[2], b[3]]).clamp(0.0, 1.0) * 255.0).round() as u8).collect(),
+                    _ => plane.clone(),
+                };
+                channels.push((name.clone(), bytes));
+            }
         }
     }
     // Records (bottom → top) → tree.
@@ -1066,6 +1127,8 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         layers,
         merged,
         warnings,
+        guides,
+        channels,
     })
 }
 
@@ -1526,8 +1589,11 @@ pub fn write(
     nodes: &[WNode],
     composite: &[(mosaix_core::TileCoord, Vec<half::f16>)],
     opts: &crate::export::ExportOptions,
+    extras: &Extras,
 ) -> Result<()> {
     use rayon::prelude::*;
+    let plane_len = width as usize * height as usize;
+    let channels: Vec<&(String, Vec<u8>)> = extras.channels.iter().filter(|(_, p)| p.len() == plane_len).collect();
     let psb = width > 30000
         || height > 30000
         || path
@@ -1622,7 +1688,7 @@ pub fn write(
     o.b.extend(b"8BPS");
     o.u16(if psb { 2 } else { 1 });
     o.b.extend([0u8; 6]);
-    o.u16(4);
+    o.u16(4 + channels.len() as u16);
     o.u32(height);
     o.u32(width);
     o.u16(depth);
@@ -1640,6 +1706,50 @@ pub fn write(
         o.b.extend(&icc);
         if icc.len() % 2 == 1 {
             o.u8(0);
+        }
+    }
+    // Guides (1032): version 1, grid spacing (unused), count, then each
+    // position in 1/32 px and its direction (0 vertical, 1 horizontal).
+    if !extras.guides.is_empty() {
+        o.b.extend(b"8BIM");
+        o.u16(1032);
+        o.u16(0);
+        o.u32(16 + 5 * extras.guides.len() as u32);
+        o.u32(1);
+        o.u32(576);
+        o.u32(576);
+        o.u32(extras.guides.len() as u32);
+        for g in &extras.guides {
+            o.i32((g.pos * 32.0).round() as i32);
+            o.u8(if g.vertical { 0 } else { 1 });
+        }
+        if extras.guides.len() % 2 == 1 {
+            o.u8(0);
+        }
+    }
+    // Names of the alpha channels: Pascal (1006) and Unicode (1045).
+    if !channels.is_empty() {
+        let mut pascal = Vec::new();
+        let mut unicode = Vec::new();
+        for (name, _) in &channels {
+            let ascii: Vec<u8> = name.chars().map(|c| if c.is_ascii() { c as u8 } else { b'?' }).take(255).collect();
+            pascal.push(ascii.len() as u8);
+            pascal.extend(&ascii);
+            let units: Vec<u16> = name.encode_utf16().collect();
+            unicode.extend((units.len() as u32).to_be_bytes());
+            for u in units {
+                unicode.extend(u.to_be_bytes());
+            }
+        }
+        for (id, data) in [(1006u16, pascal), (1045, unicode)] {
+            o.b.extend(b"8BIM");
+            o.u16(id);
+            o.u16(0);
+            o.u32(data.len() as u32);
+            o.b.extend(&data);
+            if data.len() % 2 == 1 {
+                o.u8(0);
+            }
         }
     }
     // The global light (angle 1037, altitude 1049).
@@ -1712,7 +1822,11 @@ pub fn write(
         tiles: composite.to_vec(),
         mask: None,
     };
-    let full = encode_full(&merged, (width, height), depth, &convert);
+    let mut full = encode_full(&merged, (width, height), depth, &convert);
+    // Alpha channels follow the colour and transparency planes.
+    for (_, plane) in &channels {
+        full.push(if depth == 16 { plane.iter().flat_map(|&v| (v as u16 * 257).to_be_bytes()).collect() } else { plane.clone() });
+    }
     let bpp = depth as usize / 8;
     let row = width as usize * bpp;
     let rows: Vec<Vec<u8>> = full

@@ -8,6 +8,7 @@ license.workspace = true
 mosaix-vector.workspace = true
 mosaix-raw.workspace = true
 image.workspace = true
+moxcms.workspace = true
 rayon.workspace = true
 serde.workspace = true
 mosaix-core.workspace = true
