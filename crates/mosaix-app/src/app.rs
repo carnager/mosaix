@@ -425,6 +425,12 @@ pub struct App {
     boxed: Option<(BoxKind, BoxEdit)>,
     /// Move tool: bounds of what moves, for snapping (document px).
     move_bounds: Option<(DVec2, DVec2)>,
+    /// Navigator: its texture (view + UI id) and when it was last drawn.
+    nav: Option<(wgpu::Texture, wgpu::TextureView, egui::TextureId)>,
+    nav_drawn: Option<(Instant, u64)>,
+    /// Info panel: histogram (for an edit count) and the colour under the pointer.
+    info_hist: Option<(u64, std::sync::Arc<mosaix_gpu::Histogram>)>,
+    info_color: Option<((i64, i64), [f32; 4])>,
     wand_tolerance: f32,
     smudge_strength: f32,
     /// Clone stamp: source point (document px), the aligned offset once a
@@ -674,6 +680,10 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         quick_mask: false,
         boxed: None,
         move_bounds: None,
+        nav: None,
+        nav_drawn: None,
+        info_hist: None,
+        info_color: None,
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
         clone_source: None,
@@ -3772,6 +3782,7 @@ impl App {
             view: self.view,
             guides: doc.guides.clone(),
             view_opts: self.settings.view,
+            panels: Default::default(),
             status: self.ui_status.clone(),
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
             recent: self.settings.recent.clone(),
@@ -3860,6 +3871,17 @@ impl App {
                 }
                 Action::ViewOpts(v) => self.settings.view = v,
                 Action::ToneOpts(t) => self.settings.tone = t,
+                Action::ViewCenter(x, y) => {
+                    let (a, b) = self.canvas_rect;
+                    let mid = if b == DVec2::ZERO { self.view.viewport * 0.5 } else { (a + b) * 0.5 };
+                    let now = self.view.doc_to_screen(DVec2::new(x, y));
+                    self.view.pan(mid - now);
+                }
+                Action::ViewZoom(z) => {
+                    let (a, b) = self.canvas_rect;
+                    let mid = if b == DVec2::ZERO { self.view.viewport * 0.5 } else { (a + b) * 0.5 };
+                    self.view.set_zoom_at(mid, z.clamp(mosaix_core::view::MIN_ZOOM, mosaix_core::view::MAX_ZOOM));
+                }
                 Action::Run(e) => self.run_action(&e),
                 Action::StartRecording => self.start_recording(),
                 Action::StopRecording(name) => {
@@ -4352,6 +4374,7 @@ impl App {
             let rows: std::collections::HashSet<LayerId> = model.layers.iter().map(|r| r.id).collect();
             self.mask_thumbs.retain(|id, _| rows.contains(id));
         }
+        self.panel_data(&mut model);
         let size = (self.surface_config.width, self.surface_config.height);
         let changed =
             self.last_model.as_ref() != Some(&model) || ui::log::generation() != self.ui_log_gen;
@@ -4368,6 +4391,7 @@ impl App {
                 .and_then(ui::dock::layout_from_json);
         }
         let mut actions = Vec::new();
+        self.ui_state.panels_shown = Default::default();
         let state = &mut self.ui_state;
         self.gui.run(size, self.scale, |ctx| {
             actions = ui::panels::build(ctx, &model, state)
@@ -4403,6 +4427,52 @@ impl App {
         }
         self.apply_ui(actions);
         self.fit_if_needed();
+    }
+
+    /// Navigator texture, histogram and pointer colour for the panels that show.
+    fn panel_data(&mut self, model: &mut ui::panels::Model) {
+        let shown = self.ui_state.panels_shown;
+        if shown.navigator {
+            if self.nav.is_none() {
+                let n = ui::navigator::NAV;
+                let tex = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("navigator"),
+                    size: wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.surface_config.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = tex.create_view(&Default::default());
+                let id = self.gui.register_texture(&self.gpu.device, &view);
+                self.nav = Some((tex, view, id));
+                self.nav_drawn = None;
+                self.needs_redraw = true;
+            }
+            model.panels.navigator = self.nav.as_ref().map(|n| n.2);
+        }
+        if !shown.info || !matches!(self.drag, Drag::None) {
+            model.panels.histogram = self.info_hist.as_ref().map(|h| h.1.clone());
+            model.panels.color = self.info_color.map(|c| c.1);
+            return;
+        }
+        let Some(s) = &mut self.session else { return };
+        if self.info_hist.as_ref().is_none_or(|h| h.0 != self.edit_count) && !self.loading {
+            self.info_hist = Some((self.edit_count, s.engine.histogram(None)));
+        }
+        model.panels.histogram = self.info_hist.as_ref().map(|h| h.1.clone());
+        if let Some((x, y)) = model.cursor_doc {
+            let at = (x.floor() as i64, y.floor() as i64);
+            if self.info_color.is_none_or(|c| c.0 != at) {
+                let c = (x >= 0.0 && y >= 0.0)
+                    .then(|| s.engine.sample_straight(at.0 as u32, at.1 as u32, mosaix_gpu::SampleFrom::Image).ok())
+                    .flatten();
+                self.info_color = c.map(|c| (at, c));
+            }
+        }
+        model.panels.color = self.info_color.map(|c| c.1);
     }
 
     fn draw(&mut self) {
@@ -4510,6 +4580,15 @@ impl App {
                 tracing::warn!("{}", tr!("Preview: {error}", error = e));
             }
             s.engine.render(&target, &self.view, &overlay);
+            // The navigator: when it shows, after edits and while tiles still come in.
+            if self.ui_state.panels_shown.navigator
+                && let Some((_, view, _)) = &self.nav
+                && self.nav_drawn.is_none_or(|(t, n)| n != self.edit_count || t.elapsed().as_millis() > 400)
+            {
+                let (w, h) = s.engine.size();
+                s.engine.render_overview(view, &ui::navigator::nav_view((w, h)));
+                self.nav_drawn = Some((Instant::now(), self.edit_count));
+            }
         } else {
             clear(&self.gpu, &target);
         }

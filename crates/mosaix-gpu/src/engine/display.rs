@@ -325,3 +325,63 @@ impl Engine {
         stats
     }
 }
+
+impl Engine {
+    /// Draws the whole document small into `target` (navigator): only the
+    /// composite tiles that already exist, nothing is flattened or changed.
+    /// Call after [`Self::render`] (it uses the display bind groups).
+    pub fn render_overview(&mut self, target: &wgpu::TextureView, view: &View) {
+        if self.display_bgs.is_empty() {
+            return;
+        }
+        let c = view.doc_to_clip().to_cols_array_2d();
+        let globals = Globals {
+            m: [
+                [c[0][0], c[0][1], c[0][2], 0.0],
+                [c[1][0], c[1][1], c[1][2], 0.0],
+                [c[2][0], c[2][1], c[2][2], 0.0],
+            ],
+            doc_view: [self.doc.width as f32, self.doc.height as f32, view.viewport.x as f32, view.viewport.y as f32],
+            cursor: [0.0; 4],
+            params: [0.0, 4.0, 0.0, 0.0],
+        };
+        let mut by_chunk: BTreeMap<u16, Vec<TileInstance>> = BTreeMap::new();
+        for c in tiles_in_rect((0.0, 0.0), (self.doc.width as f64, self.doc.height as f64), self.doc.width, self.doc.height) {
+            if let Some(CompositeEntry { tile: Some(t), .. }) = self.comp.get(&c) {
+                let (x, y) = c.origin();
+                let s = t.slot();
+                by_chunk.entry(s.chunk).or_default().push(TileInstance { origin: [x as f32, y as f32], layer: s.layer as u32, _pad: 0 });
+            }
+        }
+        let mut instances = Vec::new();
+        let mut draws = Vec::new();
+        for (chunk, list) in by_chunk {
+            draws.push((chunk, instances.len() as u32, list.len() as u32));
+            instances.extend(list);
+        }
+        // Own buffers would be cleaner; these are rewritten by the next render anyway.
+        self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
+        self.instance_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&instances));
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        {
+            let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overview"),
+                color_attachments: &[Some(color_attachment(target, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)))],
+                ..Default::default()
+            });
+            rp.set_bind_group(0, &self.globals_bg, &[]);
+            rp.set_bind_group(1, &self.display_bgs[0], &[]);
+            rp.set_pipeline(&self.checker_pipeline);
+            rp.draw(0..4, 0..1);
+            if !draws.is_empty() {
+                rp.set_pipeline(&self.tile_pipeline);
+                rp.set_vertex_buffer(0, self.instance_buf.buf.slice(..));
+                for (chunk, start, count) in draws {
+                    rp.set_bind_group(1, &self.display_bgs[chunk as usize], &[]);
+                    rp.draw(0..4, start..start + count);
+                }
+            }
+        }
+        self.queue.submit([enc.finish()]);
+    }
+}

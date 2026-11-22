@@ -130,6 +130,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         } else {
             doc.guides.clone()
         },
+        panels: Default::default(),
         view_opts: crate::settings::ViewOpts {
             rulers: std::env::var_os("MOSAIX_SNAPSHOT_RULERS").is_some(),
             grid: std::env::var_os("MOSAIX_SNAPSHOT_GRID").is_some(),
@@ -160,6 +161,11 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         h.load_now(files);
         state.home = Some(h);
     }
+    state.focus_pane = match std::env::var("MOSAIX_SNAPSHOT_PANE").as_deref() {
+        Ok("navigator") => Some(super::dock::Pane::Navigator),
+        Ok("info") => Some(super::dock::Pane::Info),
+        _ => None,
+    };
     state.snapshot_flyout = std::env::var("MOSAIX_SNAPSHOT_FLYOUT").ok().and_then(|v| v.parse().ok());
     if let Ok(menu) = std::env::var("MOSAIX_SNAPSHOT_MENU")
         && let Some(i) = super::palette::MENUS.iter().position(|m| m.eq_ignore_ascii_case(&menu))
@@ -388,6 +394,25 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         .ok()
         .and_then(|f| f.parse().ok())
         .unwrap_or(30);
+    // The navigator's picture (like the app does after rendering).
+    let nav = {
+        let n = super::navigator::NAV;
+        let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("navigator"),
+            size: wgpu::Extent3d { width: n, height: n, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let v = tex.create_view(&Default::default());
+        let id = gui.register_texture(&gpu.device, &v);
+        (tex, v, id)
+    };
+    model.panels.navigator = Some(nav.2);
+    model.panels.histogram = Some(s.engine.histogram(None));
     for _ in 0..frames {
         std::thread::sleep(std::time::Duration::from_millis(15));
         let _ = match &state.filter_preview {
@@ -410,6 +435,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
                 ..Default::default()
             },
         );
+        s.engine.render_overview(&nav.1, &super::navigator::nav_view(s.engine.size()));
         let t0 = std::time::Instant::now();
         gui.run((w, h), ppp, |ctx| {
             panels::build(ctx, &model, &mut state);

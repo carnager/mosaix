@@ -15,6 +15,7 @@ pub mod home;
 pub mod icons;
 pub mod log;
 pub mod menus;
+pub mod navigator;
 pub mod palette;
 pub mod panels;
 pub mod rulers;

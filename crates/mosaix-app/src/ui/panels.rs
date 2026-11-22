@@ -218,6 +218,8 @@ pub struct Model {
     pub view: mosaix_core::View,
     pub guides: Vec<mosaix_core::Guide>,
     pub view_opts: crate::settings::ViewOpts,
+    /// Navigator texture, histogram and pointer colour (when those panels show).
+    pub panels: super::navigator::PanelData,
     pub status: String,
     pub busy: bool,
     pub recent: Vec<std::path::PathBuf>,
@@ -245,6 +247,9 @@ pub enum Action {
     /// Select › Modify (`op` as in the `select_modify` command).
     ModifySelection { op: &'static str, amount: f64 },
     SetGuides(Vec<mosaix_core::Guide>),
+    /// Navigator: show this document point in the middle of the canvas.
+    ViewCenter(f64, f64),
+    ViewZoom(f64),
     ToneOpts(crate::settings::ToneOpts),
     ViewOpts(crate::settings::ViewOpts),
     Command(Cmd),
@@ -399,6 +404,8 @@ pub struct State {
     pub canvas: Option<egui::Rect>,
     /// A guide being dragged out of a ruler or moved.
     pub guide_drag: Option<super::rulers::GuideDrag>,
+    /// Which data-hungry panels were drawn in the last frame.
+    pub panels_shown: PanelsShown,
     pub palette: Option<(String, usize)>,
     /// The keyboard-shortcuts dialog: search text and the command whose new
     /// keys are being recorded.
@@ -449,6 +456,12 @@ enum Dialog {
     ColorRange { color: [f32; 3], fuzziness: f32, image: bool, mode: &'static str },
     SaveSelection { name: String },
     NewGuide { vertical: bool, pos: f64 },
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PanelsShown {
+    pub navigator: bool,
+    pub info: bool,
 }
 
 /// Select › Modify: agent op, menu label, default amount.

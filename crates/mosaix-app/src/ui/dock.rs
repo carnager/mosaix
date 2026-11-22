@@ -18,16 +18,20 @@ pub enum Pane {
     Color,
     History,
     Layers,
+    Navigator,
+    Info,
 }
 
 impl Pane {
     /// The panels (everything but the canvas), in menu order.
-    pub const PANELS: [Pane; 5] = [
+    pub const PANELS: [Pane; 7] = [
         Pane::Properties,
         Pane::Styles,
         Pane::Color,
         Pane::History,
         Pane::Layers,
+        Pane::Navigator,
+        Pane::Info,
     ];
 
     pub fn name(self) -> &'static str {
@@ -38,6 +42,8 @@ impl Pane {
             Pane::Color => tr("Color"),
             Pane::History => tr("History"),
             Pane::Layers => tr("Layers"),
+            Pane::Navigator => tr("Navigator"),
+            Pane::Info => tr("Info"),
         }
     }
 }
@@ -49,7 +55,7 @@ pub fn default_layout() -> DockState<Pane> {
     let [_, right] = s.split_right(
         NodeIndex::root(),
         0.79,
-        vec![Pane::Properties, Pane::Styles, Pane::Color, Pane::History],
+        vec![Pane::Properties, Pane::Styles, Pane::Color, Pane::Navigator, Pane::Info, Pane::History],
     );
     s.split_below(right, 0.55, vec![Pane::Layers]);
     d
@@ -133,6 +139,8 @@ impl TabViewer for Viewer<'_> {
             Pane::Color => super::panels::color_section(ui, m, st, out),
             Pane::History => super::panels::history_section(ui, m, out),
             Pane::Layers => super::panels::layer_section(ui, m, st, out),
+            Pane::Navigator => super::navigator::navigator_tab(ui, m, st, out),
+            Pane::Info => super::navigator::info_tab(ui, m, st),
         }
     }
 

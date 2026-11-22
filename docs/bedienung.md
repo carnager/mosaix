@@ -75,6 +75,7 @@ Tastenkürzel folgen Photoshop. Die Ebenenliste erscheint bis zum UI (Phase 3) i
 | Zwischenablage | Strg+`C` kopiert (Text beim Bearbeiten, sonst die Pixel der Ebene in der Auswahl), Strg+Umschalt+`C` aus allen Ebenen, Strg+`X` ausschneiden, Strg+`V` einfügen (Bild → neue Ebene, an der alten Stelle wenn aus mosaix; Text → in den bearbeiteten Text bzw. als neue Textebene). Auch in Textfeldern der Oberfläche |
 | Tastaturbefehle | Bearbeiten › Tastaturbefehle … (Strg+Alt+Umschalt+`K`): jeden Menübefehl neu belegen (Kürzel anklicken, Tasten drücken; Rücktaste entfernt, Esc bricht ab); ein Kürzel, das ein anderer Befehl hatte, wird dort entfernt; „Standard“ bzw. „Alle zurücksetzen“ |
 | Pinselspitzen | Bearbeiten › Pinsel importieren … (Strg+Alt+Umschalt+`B`): Photoshop-Pinsel (.abr) , GIMP-Pinsel (.gbr/.gih) oder ein Bild werden zu eigenen Spitzen (Ordner `~/.local/share/mosaix/brushes`); Auswahl im Spitzen-Menü der Optionsleiste, Umschalt+`B` schaltet durch alle |
+| Navigator & Info | Panels rechts (oder Fenster-Menü): der Navigator zeigt das ganze Bild mit dem sichtbaren Ausschnitt (klicken oder ziehen zum Hinschauen, Zoomregler); Info zeigt Histogramm, Position und Farbe unter dem Zeiger |
 | Sonstiges | `F12` Benchmark, `F1` Hilfe, Strg+`Q` beenden |
 
 ## Aufbau
