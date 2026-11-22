@@ -2833,7 +2833,9 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                 .show(ctx, |ui| {
                     ui.label(tr("What should appear in the selection?"));
                     let r = ui.add(egui::TextEdit::multiline(prompt).desired_rows(2).desired_width(340.0).hint_text(tr("e.g. a wooden bench, morning light")));
-                    if key.is_empty() {
+                    // Focus the prompt when the dialog opens, but leave a
+                    // field the user clicked into alone.
+                    if ui.memory(|mem| mem.focused().is_none()) {
                         r.request_focus();
                     }
                     ui.add_space(6.0);
