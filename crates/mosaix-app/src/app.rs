@@ -433,6 +433,8 @@ pub struct App {
     info_color: Option<((i64, i64), [f32; 4])>,
     /// The last undo step is a Color Range preview (replaced by the next one).
     range_preview: bool,
+    /// Whether an OpenAI key is saved or in the environment (for the dialog).
+    openai_key: settings::KeyState,
     wand_tolerance: f32,
     smudge_strength: f32,
     /// Clone stamp: source point (document px), the aligned offset once a
@@ -687,6 +689,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         info_hist: None,
         info_color: None,
         range_preview: false,
+        openai_key: settings::key_state(),
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
         clone_source: None,
@@ -3826,6 +3829,7 @@ impl App {
             guides: doc.guides.clone(),
             view_opts: self.settings.view,
             generative: self.settings.generative.clone(),
+            openai_key: self.openai_key.clone(),
             panels: Default::default(),
             status: self.ui_status.clone(),
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
@@ -3944,6 +3948,13 @@ impl App {
                     }
                 }
                 Action::GenerativeFill(prompt) => self.generative_fill(prompt),
+                Action::SaveApiKey(key) => {
+                    match settings::store_openai_key(key.as_deref()) {
+                        Ok(()) => tracing::info!("{}", if key.is_some() { tr("API key saved") } else { tr("API key removed") }),
+                        Err(e) => tracing::warn!("{}", tr!("API key not saved: {error}", error = format!("{e:#}"))),
+                    }
+                    self.openai_key = settings::key_state();
+                }
                 Action::PlaceEmbedded(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_place", "path": p })),
                 Action::ReplaceContents(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "smart_replace", "path": p })),
                 Action::ConvertToSmart => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_convert_smart" })),

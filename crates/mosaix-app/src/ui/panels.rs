@@ -221,6 +221,7 @@ pub struct Model {
     pub guides: Vec<mosaix_core::Guide>,
     pub view_opts: crate::settings::ViewOpts,
     pub generative: crate::settings::GenSettings,
+    pub openai_key: crate::settings::KeyState,
     /// Navigator texture, histogram and pointer colour (when those panels show).
     pub panels: super::navigator::PanelData,
     pub status: String,
@@ -250,6 +251,8 @@ pub enum Action {
     PickFile(super::files::FileMode),
     GenSettings(crate::settings::GenSettings),
     GenerativeFill(String),
+    /// Saves (`Some`) or forgets (`None`) the OpenAI API key.
+    SaveApiKey(Option<String>),
     PlaceEmbedded(std::path::PathBuf),
     ReplaceContents(std::path::PathBuf),
     ConvertToSmart,
@@ -471,7 +474,7 @@ enum Dialog {
     ColorRange { color: [f32; 3], fuzziness: f32, image: bool, mode: &'static str },
     SaveSelection { name: String },
     NewGuide { vertical: bool, pos: f64 },
-    Generative { prompt: String, settings: crate::settings::GenSettings },
+    Generative { prompt: String, settings: crate::settings::GenSettings, key: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -507,7 +510,7 @@ impl State {
 
     /// Opens Edit › Generative Fill (UI snapshots).
     pub fn open_generative(&mut self) {
-        self.dialog = Some(Dialog::Generative { prompt: String::new(), settings: Default::default() });
+        self.dialog = Some(Dialog::Generative { prompt: String::new(), settings: Default::default(), key: String::new() });
     }
 
     /// The Color Range dialog is open (clicks on the canvas pick its colour).
@@ -1041,7 +1044,7 @@ fn special_entry(
                 .add_enabled(m.has_selection, egui::Button::new((icon, tr("Generative Fill …"))))
                 .on_disabled_hover_text(tr("Needs a selection"));
             if r.clicked() {
-                st.dialog = Some(Dialog::Generative { prompt: String::new(), settings: m.generative.clone() });
+                st.dialog = Some(Dialog::Generative { prompt: String::new(), settings: m.generative.clone(), key: String::new() });
                 ui.close();
             }
         }
@@ -2821,7 +2824,7 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                 out.push(Action::ColorRange { cmd, phase: RangePhase::Preview });
             }
         }
-        Dialog::Generative { prompt, settings } => {
+        Dialog::Generative { prompt, settings, key } => {
             egui::Window::new(tr("Generative Fill"))
                 .open(&mut open)
                 .collapsible(false)
@@ -2830,7 +2833,9 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                 .show(ctx, |ui| {
                     ui.label(tr("What should appear in the selection?"));
                     let r = ui.add(egui::TextEdit::multiline(prompt).desired_rows(2).desired_width(340.0).hint_text(tr("e.g. a wooden bench, morning light")));
-                    r.request_focus();
+                    if key.is_empty() {
+                        r.request_focus();
+                    }
                     ui.add_space(6.0);
                     let before = settings.clone();
                     egui::CollapsingHeader::new(tr("Provider")).default_open(settings.provider == "openai" && !settings.remote_ok).show(ui, |ui| {
@@ -2849,7 +2854,28 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                                 ui.label(tr("Model"));
                                 ui.text_edit_singleline(&mut settings.model);
                             });
-                            ui.label(RichText::new(tr("The API key is read from OPENAI_API_KEY.")).weak());
+                            use crate::settings::KeyState;
+                            ui.horizontal(|ui| {
+                                ui.label(tr("API key"));
+                                let hint = match &m.openai_key {
+                                    KeyState::Saved(end) => format!("…{end}"),
+                                    KeyState::Environment => tr("from OPENAI_API_KEY").to_string(),
+                                    KeyState::None => "sk-…".to_string(),
+                                };
+                                ui.add(egui::TextEdit::singleline(key).password(true).desired_width(170.0).hint_text(hint));
+                                if ui.add_enabled(!key.trim().is_empty(), egui::Button::new(tr("Save"))).clicked() {
+                                    out.push(Action::SaveApiKey(Some(std::mem::take(key))));
+                                }
+                                if matches!(m.openai_key, KeyState::Saved(_)) && ui.button(tr("Remove")).clicked() {
+                                    out.push(Action::SaveApiKey(None));
+                                }
+                            });
+                            let note = match &m.openai_key {
+                                KeyState::Saved(_) => tr("The key is saved in ~/.config/mosaix/openai-key, readable only by you."),
+                                KeyState::Environment => tr("The key comes from the environment. A saved key takes its place."),
+                                KeyState::None => tr("Saved in ~/.config/mosaix/openai-key, readable only by you. OPENAI_API_KEY works too."),
+                            };
+                            ui.label(RichText::new(note).weak());
                             ui.checkbox(
                                 &mut settings.remote_ok,
                                 tr("Send the selected area and its surroundings to OpenAI (they may keep it as their terms say)"),

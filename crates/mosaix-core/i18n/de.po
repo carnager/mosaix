@@ -2984,8 +2984,8 @@ msgstr "Erst das Programm für generatives Füllen einstellen"
 msgid "Generative fill with OpenAI needs your consent first (Edit › Generative Fill …)"
 msgstr "Generatives Füllen mit OpenAI braucht erst deine Zustimmung (Bearbeiten › Generatives Füllen …)"
 
-msgid "No OpenAI API key: set OPENAI_API_KEY in the environment"
-msgstr "Kein OpenAI-API-Schlüssel: OPENAI_API_KEY in der Umgebung setzen"
+msgid "No OpenAI API key: enter one in Edit › Generative Fill … or set OPENAI_API_KEY"
+msgstr "Kein OpenAI-API-Schlüssel: unter Bearbeiten › Generatives Füllen … eintragen oder OPENAI_API_KEY setzen"
 
 msgid "Generative fill needs a selection"
 msgstr "Generatives Füllen braucht eine Auswahl"
@@ -3020,8 +3020,29 @@ msgstr "Aufruf: programm bild.png maske.png prompt aus.png (Maske weiß = fülle
 msgid "Model"
 msgstr "Modell"
 
-msgid "The API key is read from OPENAI_API_KEY."
-msgstr "Der API-Schlüssel kommt aus OPENAI_API_KEY."
+msgid "API key"
+msgstr "API-Schlüssel"
+
+msgid "from OPENAI_API_KEY"
+msgstr "aus OPENAI_API_KEY"
+
+msgid "The key is saved in ~/.config/mosaix/openai-key, readable only by you."
+msgstr "Der Schlüssel liegt in ~/.config/mosaix/openai-key, nur für dich lesbar."
+
+msgid "The key comes from the environment. A saved key takes its place."
+msgstr "Der Schlüssel kommt aus der Umgebung. Ein gespeicherter Schlüssel hat Vorrang."
+
+msgid "Saved in ~/.config/mosaix/openai-key, readable only by you. OPENAI_API_KEY works too."
+msgstr "Wird in ~/.config/mosaix/openai-key gespeichert, nur für dich lesbar. OPENAI_API_KEY geht auch."
+
+msgid "API key saved"
+msgstr "API-Schlüssel gespeichert"
+
+msgid "API key removed"
+msgstr "API-Schlüssel entfernt"
+
+msgid "API key not saved: {error}"
+msgstr "API-Schlüssel nicht gespeichert: {error}"
 
 msgid "Send the selected area and its surroundings to OpenAI (they may keep it as their terms say)"
 msgstr "Den ausgewählten Bereich samt Umgebung an OpenAI senden (die dürfen ihn laut ihren Bedingungen behalten)"

@@ -133,6 +133,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         },
         panels: Default::default(),
         generative: Default::default(),
+        openai_key: Default::default(),
         view_opts: crate::settings::ViewOpts {
             rulers: std::env::var_os("MOSAIX_SNAPSHOT_RULERS").is_some(),
             grid: std::env::var_os("MOSAIX_SNAPSHOT_GRID").is_some(),

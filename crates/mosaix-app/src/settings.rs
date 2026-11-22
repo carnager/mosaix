@@ -78,8 +78,8 @@ impl Brush {
     }
 }
 
-/// Generative fill: who paints. The OpenAI key comes from the environment
-/// (`OPENAI_API_KEY`), never from this file.
+/// Generative fill: who paints. The OpenAI key is never in this file (see
+/// [`openai_key`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GenSettings {
@@ -109,10 +109,9 @@ impl GenSettings {
                 if !self.remote_ok {
                     return Err(mosaix_core::tr("Generative fill with OpenAI needs your consent first (Edit › Generative Fill …)").into());
                 }
-                let key = std::env::var("MOSAIX_OPENAI_KEY").or_else(|_| std::env::var("OPENAI_API_KEY")).unwrap_or_default();
-                if key.trim().is_empty() {
-                    return Err(mosaix_core::tr("No OpenAI API key: set OPENAI_API_KEY in the environment").into());
-                }
+                let Some(key) = openai_key() else {
+                    return Err(mosaix_core::tr("No OpenAI API key: enter one in Edit › Generative Fill … or set OPENAI_API_KEY").into());
+                };
                 Ok(Provider::OpenAi { model: self.model.clone(), key })
             }
         }
@@ -220,6 +219,77 @@ pub fn config_path() -> PathBuf {
     mosaix_core::paths::app_dir(&base).join("settings.json")
 }
 
+/// The saved OpenAI key: its own file next to settings.json (readable only
+/// by the user), so settings.json can be shared or kept in dotfiles.
+fn key_path() -> PathBuf {
+    config_path().with_file_name("openai-key")
+}
+
+fn saved_key() -> Option<String> {
+    let k = std::fs::read_to_string(key_path()).ok()?;
+    let k = k.trim();
+    (!k.is_empty()).then(|| k.to_string())
+}
+
+/// The OpenAI key: the one saved in the app, else `MOSAIX_OPENAI_KEY` or
+/// `OPENAI_API_KEY`.
+pub fn openai_key() -> Option<String> {
+    saved_key().or_else(|| {
+        std::env::var("MOSAIX_OPENAI_KEY")
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .ok()
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+    })
+}
+
+/// Saves (`Some`) or forgets (`None`) the OpenAI key.
+pub fn store_openai_key(key: Option<&str>) -> anyhow::Result<()> {
+    store_key_at(&key_path(), key)
+}
+
+fn store_key_at(path: &Path, key: Option<&str>) -> anyhow::Result<()> {
+    let path = path.to_path_buf();
+    match key.map(str::trim).filter(|k| !k.is_empty()) {
+        None => match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        },
+        Some(k) => {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let tmp = path.with_extension("tmp");
+            let _ = std::fs::remove_file(&tmp);
+            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+            f.write_all(k.as_bytes())?;
+            f.sync_all()?;
+            std::fs::rename(tmp, path)?;
+            Ok(())
+        }
+    }
+}
+
+/// Where the key comes from, for the dialog: the saved key's last four
+/// characters, or that the environment has one.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum KeyState {
+    #[default]
+    None,
+    Saved(String),
+    Environment,
+}
+
+pub fn key_state() -> KeyState {
+    match saved_key() {
+        Some(k) => KeyState::Saved(k.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect()),
+        None if openai_key().is_some() => KeyState::Environment,
+        None => KeyState::None,
+    }
+}
+
 impl Settings {
     /// Loads the settings; missing or broken files give the defaults.
     pub fn load_from(path: &Path) -> Self {
@@ -255,6 +325,27 @@ impl Settings {
         self.recent.insert(0, path.clone());
         self.recent.truncate(RECENT);
         self.last_dir = path.parent().map(Path::to_path_buf);
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn saved_key_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mosaix-key-{}", std::process::id()));
+        let path = dir.join("openai-key");
+        store_key_at(&path, Some("  sk-test-1234 \n")).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "sk-test-1234");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        store_key_at(&path, Some("sk-other")).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "sk-other");
+        store_key_at(&path, None).unwrap();
+        assert!(!path.exists());
+        store_key_at(&path, None).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 
