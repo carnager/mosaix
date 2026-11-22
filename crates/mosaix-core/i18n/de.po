@@ -3106,3 +3106,87 @@ msgstr "Braucht zwei sichtbare Ebenen"
 
 msgid "The image has only one layer"
 msgstr "Das Bild hat nur eine Ebene"
+
+msgid "Polygonal Lasso"
+msgstr "Polygon-Lasso"
+
+msgid "Paint Bucket"
+msgstr "Füllwerkzeug"
+
+msgid "Adjustments work on pixel layers"
+msgstr "Korrekturen wirken auf Pixelebenen"
+
+msgid "Layer via Cut"
+msgstr "Ebene durch Ausschneiden"
+
+msgid "Layer via Copy"
+msgstr "Ebene durch Kopie"
+
+msgid "Select Layer Pixels"
+msgstr "Ebenenpixel auswählen"
+
+msgid "Adjust: {name}"
+msgstr "Korrektur: {name}"
+
+msgid "Needs a selection on a pixel layer"
+msgstr "Braucht eine Auswahl auf einer Pixelebene"
+
+msgid "Adjustments"
+msgstr "Korrekturen"
+
+msgid "More"
+msgstr "Weitere"
+
+msgid "Layer Pixels"
+msgstr "Ebenenpixel"
+
+msgid "Select the active layer's pixels by their opacity (also Ctrl+click on a layer thumbnail; Shift adds, Alt subtracts)"
+msgstr "Wählt die Pixel der aktiven Ebene nach ihrer Deckkraft aus (auch Strg+Klick auf eine Ebenenminiatur; Umschalt fügt hinzu, Alt zieht ab)"
+
+msgid "only connected pixels"
+msgstr "nur zusammenhängende Pixel"
+
+msgid "All Layers"
+msgstr "Alle Ebenen"
+
+msgid "Compare colours in the whole image, fill the active layer"
+msgstr "Farben im ganzen Bild vergleichen, die aktive Ebene füllen"
+
+msgid "Fills with the foreground color and brush opacity, within the selection."
+msgstr "Füllt mit der Vordergrundfarbe und Pinseldeckkraft, innerhalb der Auswahl."
+
+msgid "Click to add points; click the start, double-click or Enter closes; Backspace removes the last point; Esc cancels. Shift = add, Alt = subtract."
+msgstr "Klicken setzt Punkte; Klick auf den Start, Doppelklick oder Enter schließt; Rücktaste entfernt den letzten Punkt; Esc bricht ab. Umschalt = hinzufügen, Alt = abziehen."
+
+msgid "Changes the layer's own pixels (inside the selection). For an editable version use Layer › New Adjustment Layer."
+msgstr "Ändert die Pixel der Ebene selbst (innerhalb der Auswahl). Bearbeitbar bleibt es mit Ebene › Neue Korrekturebene."
+
+msgid "nothing to change in the selection"
+msgstr "in der Auswahl gibt es nichts zu ändern"
+
+msgid "nothing is selected"
+msgstr "nichts ist ausgewählt"
+
+msgid "{layer} copy"
+msgstr "{layer} Kopie"
+
+msgid "this layer has no pixels"
+msgstr "diese Ebene hat keine Pixel"
+
+msgid "nothing to fill there"
+msgstr "dort gibt es nichts zu füllen"
+
+msgid "Hue/Saturation …"
+msgstr "Farbton/Sättigung …"
+
+msgid "Levels …"
+msgstr "Tonwertkorrektur …"
+
+msgid "Curves …"
+msgstr "Gradationskurven …"
+
+msgid "Lasso / Polygonal Lasso"
+msgstr "Lasso / Polygon-Lasso"
+
+msgid "Gradient / Paint Bucket"
+msgstr "Verlauf / Füllwerkzeug"

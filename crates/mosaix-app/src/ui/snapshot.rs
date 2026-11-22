@@ -97,6 +97,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         clone_source: false,
         wand_tolerance: 32.0,
         wand_contiguous: true,
+        bucket_all: false,
         bg_color: [1.0; 3],
         custom_tips: Vec::new(),
         patterns: std::sync::Arc::new(mosaix_core::pattern::Pattern::builtin()),
@@ -211,6 +212,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         }
         Ok("confirm") => state.confirm = Some(tr("They will be lost when quitting.").into()),
         Ok("generative") => state.open_generative(),
+        Ok("adjust") => state.open_adjust(mosaix_core::Adjustment::defaults().into_iter().find(|a| a.key() == "hue_saturation").unwrap()),
         Ok("filter") => state.open_filter(mosaix_core::Filter::GaussianBlur { radius: 25.0 }),
         Ok(d) if d.starts_with("filter:") => {
             let lib = crate::app::filters::load_library(&crate::app::filters::filter_dir());
@@ -387,6 +389,8 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             "shape" => ToolId::Shape,
             "move" => ToolId::Move,
             "eyedropper" => ToolId::Eyedropper,
+            "bucket" => ToolId::Bucket,
+            "poly_lasso" => ToolId::PolyLasso,
             _ => ToolId::Brush,
         };
         model.boxed = (t == "move").then_some("Free Transform");

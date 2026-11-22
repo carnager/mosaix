@@ -188,6 +188,10 @@ enum Tool {
     Sponge,
     Blur,
     Sharpen,
+    /// Click from point to point; closes on the start point, a double-click or Enter.
+    PolyLasso,
+    /// Click to fill the region of similar colour.
+    Bucket,
 }
 
 impl Tool {
@@ -198,6 +202,8 @@ impl Tool {
             Tool::Marquee { ellipse: false } => tr("Rectangular Marquee"),
             Tool::Marquee { ellipse: true } => tr("Elliptical Marquee"),
             Tool::Lasso => tr("Lasso"),
+            Tool::PolyLasso => tr("Polygonal Lasso"),
+            Tool::Bucket => tr("Paint Bucket"),
             Tool::Gradient { radial: false } => tr("Linear Gradient"),
             Tool::Gradient { radial: true } => tr("Radial Gradient"),
             Tool::Move => tr("Move"),
@@ -435,6 +441,12 @@ pub struct App {
     info_color: Option<((i64, i64), [f32; 4])>,
     /// The last undo step is a Color Range preview (replaced by the next one).
     range_preview: bool,
+    /// Polygonal lasso in progress: points so far and the combine mode.
+    poly: Option<(Vec<DVec2>, CombineOp)>,
+    /// When the last polygonal-lasso point was set (double-click closes).
+    poly_click: Option<Instant>,
+    /// Paint Bucket compares colours in the whole image.
+    bucket_all: bool,
     /// Whether an OpenAI key is saved or in the environment (for the dialog).
     openai_key: settings::KeyState,
     wand_tolerance: f32,
@@ -692,6 +704,9 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         info_hist: None,
         info_color: None,
         range_preview: false,
+        poly: None,
+        poly_click: None,
+        bucket_all: false,
         openai_key: settings::key_state(),
         wand_tolerance: 32.0,
         smudge_strength: 0.7,
@@ -1193,7 +1208,88 @@ impl App {
                 self.ai_select(Some(doc), op);
                 Drag::None
             }
+            Tool::PolyLasso => {
+                self.poly_press(doc, op);
+                Drag::None
+            }
+            Tool::Bucket => {
+                let (x, y) = (doc.x.floor(), doc.y.floor());
+                let (w, h) = self.engine().map_or((0, 0), |e| e.size());
+                if x >= 0.0 && y >= 0.0 && (x as u32) < w && (y as u32) < h {
+                    self.run_agent_cmd(serde_json::json!({
+                        "cmd": "bucket_fill", "x": x as u32, "y": y as u32,
+                        "color": actions::hex(self.brush.color), "opacity": self.brush.opacity,
+                        "tolerance": self.wand_tolerance, "contiguous": self.wand_contiguous,
+                        "sample": if self.bucket_all { "image" } else { "layer" },
+                    }));
+                }
+                Drag::None
+            }
         }
+    }
+
+    /// A selection exists and the active layer has pixels (Ctrl+J copies it then).
+    fn has_pixel_selection(&self) -> bool {
+        self.session.as_ref().is_some_and(|s| {
+            s.engine.has_selection() && s.engine.doc().active_layer().is_some_and(|l| l.is_pixels())
+        })
+    }
+
+    /// Image › Adjustments with a dialog (Ctrl+U, Ctrl+L, Ctrl+M).
+    fn open_adjust(&mut self, kind: &str) {
+        if !self.session.as_ref().is_some_and(|s| s.engine.doc().active_layer().is_some_and(|l| l.is_pixels())) {
+            return tracing::warn!("{}", tr("Adjustments work on pixel layers"));
+        }
+        if let Some(a) = mosaix_core::Adjustment::defaults().into_iter().find(|a| a.key() == kind) {
+            self.ui_state.open_adjust(a);
+            self.ui_state.hidden = false;
+        }
+    }
+
+    /// Polygonal lasso click: a new point, or closing the shape (on the
+    /// start point or with a double-click).
+    fn poly_press(&mut self, doc: DVec2, op: CombineOp) {
+        let now = Instant::now();
+        let double = self.poly_click.is_some_and(|t| now.duration_since(t).as_millis() < 400);
+        self.poly_click = Some(now);
+        let zoom = self.view.zoom;
+        match &mut self.poly {
+            None => self.poly = Some((vec![doc], op)),
+            Some((pts, _)) => {
+                let on_start = pts.len() >= 3 && pts[0].distance(doc) * zoom <= 8.0;
+                if on_start || double {
+                    self.poly_finish();
+                } else {
+                    pts.push(doc);
+                }
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Closes the polygonal lasso into a selection.
+    fn poly_finish(&mut self) {
+        let Some((pts, op)) = self.poly.take() else { return };
+        self.poly_click = None;
+        self.needs_redraw = true;
+        if pts.len() < 3 {
+            return;
+        }
+        let mode = match op {
+            CombineOp::Replace => "replace",
+            CombineOp::Add => "add",
+            CombineOp::Subtract => "subtract",
+            CombineOp::Intersect => "intersect",
+        };
+        let cmd = serde_json::json!({
+            "cmd": "select_polygon",
+            "points": pts.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>(),
+            "mode": mode,
+        });
+        if self.recording.is_some() {
+            self.record(cmd.clone());
+        }
+        self.run_agent_cmd(cmd);
     }
 
     fn liquifying(&self) -> bool {
@@ -1619,6 +1715,9 @@ impl App {
 
     fn motion(&mut self, pos: DVec2, pressure: f32) {
         self.cursor = Some(pos);
+        if self.poly.is_some() {
+            self.needs_redraw = true;
+        }
         if matches!(self.drag, Drag::Eyedrop) {
             self.eyedrop(self.view.screen_to_doc(pos));
             return;
@@ -1931,7 +2030,11 @@ impl App {
             Keysym::z if ctrl && self.boxed.is_none() => json!({ "cmd": "undo" }),
             Keysym::y if ctrl => json!({ "cmd": "redo" }),
             Keysym::n | Keysym::N if ctrl && shift => json!({ "cmd": "layer_add" }),
+            Keysym::J if ctrl && !alt => json!({ "cmd": "layer_via", "cut": true }),
+            Keysym::j if ctrl && self.has_pixel_selection() => json!({ "cmd": "layer_via", "cut": false }),
             Keysym::j if ctrl => json!({ "cmd": "layer_duplicate" }),
+            Keysym::i if ctrl && !alt => json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "invert" } }),
+            Keysym::U if ctrl && !alt => json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "hue_saturation", "saturation": -100 } }),
             Keysym::e | Keysym::E if ctrl && !shift && alt => json!({ "cmd": "layer_merge", "mode": "visible" }),
             Keysym::e if ctrl && !shift && !alt => json!({ "cmd": "layer_merge", "mode": "down" }),
             Keysym::f | Keysym::F if ctrl && shift && alt => json!({ "cmd": "layer_merge", "mode": "flatten" }),
@@ -2217,6 +2320,8 @@ impl App {
             "marquee" => Tool::Marquee { ellipse: false },
             "ellipse" => Tool::Marquee { ellipse: true },
             "lasso" => Tool::Lasso,
+            "poly_lasso" => Tool::PolyLasso,
+            "bucket" => Tool::Bucket,
             "wand" => Tool::Wand,
             "object_select" => Tool::ObjectSelect,
             "remove" => Tool::Remove,
@@ -2256,6 +2361,8 @@ impl App {
             Tool::Marquee { ellipse: false } => "marquee",
             Tool::Marquee { ellipse: true } => "ellipse",
             Tool::Lasso => "lasso",
+            Tool::PolyLasso => "poly_lasso",
+            Tool::Bucket => "bucket",
             Tool::Wand => "wand",
             Tool::ObjectSelect => "object_select",
             Tool::Remove => "remove",
@@ -3115,6 +3222,20 @@ impl App {
             }
             // Other edits wait until liquify is applied or cancelled.
             _ if self.liquifying() => tracing::info!("{}", tr("Apply (Enter) or cancel (Esc) Liquify first")),
+            Keysym::Escape if self.poly.is_some() => {
+                self.poly = None;
+                self.needs_redraw = true;
+            }
+            Keysym::Return | Keysym::KP_Enter if self.poly.is_some() => self.poly_finish(),
+            Keysym::BackSpace if self.poly.is_some() => {
+                if let Some((pts, _)) = &mut self.poly {
+                    pts.pop();
+                    if pts.is_empty() {
+                        self.poly = None;
+                    }
+                }
+                self.needs_redraw = true;
+            }
             Keysym::Escape => self.cancel_box(),
             Keysym::Return | Keysym::KP_Enter => self.commit_box(),
             Keysym::t if ctrl => self.begin_transform(),
@@ -3142,7 +3263,14 @@ impl App {
                 d.add_pixel_layer();
                 true
             }),
+            Keysym::J if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_via", "cut": true })),
+            Keysym::j if ctrl && self.has_pixel_selection() => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_via", "cut": false })),
             Keysym::j if ctrl => self.edit(tr("Duplicate Layer"), |d| d.duplicate_active().is_some()),
+            Keysym::i if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "invert" } })),
+            Keysym::U if ctrl && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "adjustment_apply", "adjustment": { "kind": "hue_saturation", "saturation": -100 } })),
+            Keysym::u if ctrl && !alt => self.open_adjust("hue_saturation"),
+            Keysym::l if ctrl && !alt => self.open_adjust("levels"),
+            Keysym::m if ctrl && !alt && !shift => self.open_adjust("curves"),
             Keysym::e | Keysym::E if ctrl && !shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "visible" })),
             Keysym::e if ctrl && !shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "down" })),
             Keysym::f | Keysym::F if ctrl && shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "flatten" })),
@@ -3291,7 +3419,7 @@ impl App {
                 let r = self.view.rotation;
                 self.view.rotate_at(center, -r);
             }
-            Keysym::bracketleft | Keysym::bracketright if self.tool == Tool::Wand => {
+            Keysym::bracketleft | Keysym::bracketright if matches!(self.tool, Tool::Wand | Tool::Bucket) => {
                 let step = if sym == Keysym::bracketleft { -8.0 } else { 8.0 };
                 self.wand_tolerance = (self.wand_tolerance + step).clamp(0.0, 255.0);
                 tracing::info!("{}", tr!("Tolerance {tol}", tol = format!("{:.0}", self.wand_tolerance)));
@@ -3350,11 +3478,12 @@ impl App {
                 Tool::Burn => Tool::Sponge,
                 _ => Tool::Dodge,
             }),
-            Keysym::l => self.set_tool(Tool::Lasso),
-            Keysym::g => {
-                let radial = matches!(self.tool, Tool::Gradient { radial: false });
-                self.set_tool(Tool::Gradient { radial })
-            }
+            Keysym::l => self.set_tool(if self.tool == Tool::Lasso { Tool::PolyLasso } else { Tool::Lasso }),
+            Keysym::g => self.set_tool(match self.tool {
+                Tool::Gradient { radial: false } => Tool::Gradient { radial: true },
+                Tool::Gradient { radial: true } => Tool::Bucket,
+                _ => Tool::Gradient { radial: false },
+            }),
             Keysym::v => self.set_tool(Tool::Move),
             Keysym::q => {
                 self.quick_mask = !self.quick_mask;
@@ -3455,6 +3584,9 @@ impl App {
     }
 
     fn set_tool(&mut self, tool: Tool) {
+        if tool != Tool::PolyLasso && self.poly.take().is_some() {
+            self.needs_redraw = true;
+        }
         if tool != Tool::Text {
             self.end_text_edit();
         }
@@ -3743,6 +3875,8 @@ impl App {
             Tool::Marquee { ellipse: false } => ToolId::Marquee,
             Tool::Marquee { ellipse: true } => ToolId::Ellipse,
             Tool::Lasso => ToolId::Lasso,
+            Tool::PolyLasso => ToolId::PolyLasso,
+            Tool::Bucket => ToolId::Bucket,
             Tool::Wand => ToolId::Wand,
             Tool::ObjectSelect => ToolId::ObjectSelect,
             Tool::Remove => ToolId::Remove,
@@ -3805,6 +3939,7 @@ impl App {
             clone_source: self.clone_source.is_some(),
             wand_tolerance: self.wand_tolerance,
             wand_contiguous: self.wand_contiguous,
+            bucket_all: self.bucket_all,
             bg_color: self.bg_color,
             custom_tips: self.custom_tips.clone(),
             patterns: self.patterns.clone(),
@@ -4017,6 +4152,8 @@ impl App {
                         ToolId::Marquee => Tool::Marquee { ellipse: false },
                         ToolId::Ellipse => Tool::Marquee { ellipse: true },
                         ToolId::Lasso => Tool::Lasso,
+                        ToolId::PolyLasso => Tool::PolyLasso,
+                        ToolId::Bucket => Tool::Bucket,
                         ToolId::Wand => Tool::Wand,
                         ToolId::ObjectSelect => Tool::ObjectSelect,
                         ToolId::Remove => Tool::Remove,
@@ -4172,6 +4309,29 @@ impl App {
                 }
                 Action::WandTolerance(v) => self.wand_tolerance = v,
                 Action::WandContiguous(v) => self.wand_contiguous = v,
+                Action::BucketAll(v) => self.bucket_all = v,
+                Action::AdjustPreview(a) => {
+                    if let Some(e) = self.engine()
+                        && let Err(err) = e.set_adjust_preview(a.as_ref())
+                    {
+                        tracing::warn!("{}", tr(err));
+                    }
+                    self.needs_redraw = true;
+                }
+                Action::ApplyAdjustment(a) => {
+                    let cmd = serde_json::json!({ "cmd": "adjustment_apply", "adjustment": a });
+                    if self.recording.is_some() {
+                        self.record(cmd.clone());
+                    }
+                    self.run_agent_cmd(cmd);
+                }
+                Action::SelectLayerPixels { layer, mode } => {
+                    let cmd = serde_json::json!({ "cmd": "select_layer_pixels", "layer": layer, "mode": mode });
+                    if self.recording.is_some() {
+                        self.record(serde_json::json!({ "cmd": "select_layer_pixels", "mode": mode }));
+                    }
+                    self.run_agent_cmd(cmd);
+                }
                 Action::SelectLayer(id) => {
                     if let Some(e) = self.engine() {
                         e.select(|d| d.active = id);
@@ -4824,6 +4984,14 @@ impl App {
                     points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)],
                     closed: false,
                 }]
+            }
+            _ if self.poly.is_some() => {
+                let (pts, _) = self.poly.as_ref().unwrap();
+                let mut points: Vec<DVec2> = pts.iter().map(|p| v.doc_to_screen(*p)).collect();
+                if let Some(c) = self.cursor {
+                    points.push(c);
+                }
+                vec![OverlayLine { points, closed: false }]
             }
             _ => match &self.boxed {
                 Some((_, b)) => b.lines(v, self.scale),

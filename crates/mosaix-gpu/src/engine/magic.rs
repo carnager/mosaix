@@ -267,6 +267,48 @@ impl Engine {
         };
         self.set_selection(Some(result), label)
     }
+
+    /// Paint Bucket at `(x, y)`: fills the similar (`contiguous`: connected)
+    /// region with `color`, within the selection if there is one. The
+    /// selection itself stays as it was. One undo step.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bucket_fill(
+        &mut self,
+        x: u32,
+        y: u32,
+        tolerance: f32,
+        contiguous: bool,
+        antialias: bool,
+        from: SampleFrom,
+        color: [f32; 4],
+        opacity: f32,
+        label: &str,
+    ) -> Result<usize, &'static str> {
+        self.check_target(super::StrokeTarget::Pixels)?;
+        let reference = self.sample_straight(x, y, from)?;
+        let band = if antialias { (tolerance * 0.5).max(12.0) } else { 0.0 };
+        let map = self.similarity_map(reference, tolerance, band, from)?;
+        let (w, h) = self.size();
+        let region = if contiguous { flood(&map, x, y, w, h) } else { map };
+        let region = match self.selection_cpu() {
+            Some(sel) => combine(&sel, &region, CombineOp::Intersect),
+            None => region,
+        };
+        if region.is_empty() {
+            return Err(mosaix_core::tr("nothing to fill there"));
+        }
+        let gpu = self.mask_to_gpu(region).ok_or(mosaix_core::tr("GPU memory full"))?;
+        let old = self.doc.selection.replace(gpu);
+        let r = self.fill(super::StrokeTarget::Pixels, color, opacity, label);
+        self.doc.selection = old.clone();
+        if r.is_ok()
+            && let Some(before) = self.history.last_before_mut()
+        {
+            before.selection = old;
+        }
+        self.recheck_all = true;
+        r
+    }
 }
 
 #[cfg(test)]

@@ -39,6 +39,39 @@ impl Engine {
         coords.sort();
         coords.dedup();
 
+        let tiles = self.composite_alone(&alone, &coords)?;
+
+        let name = match kind {
+            MergeKind::Down => shown.find(ids[0]).map_or_else(|| mosaix_core::tr("Merged").to_string(), |l| l.name.clone()),
+            MergeKind::Visible => mosaix_core::tr("Merged").to_string(),
+            MergeKind::Flatten => mosaix_core::tr("Background").to_string(),
+        };
+        let coords: Vec<TileCoord> = tiles.keys().copied().collect();
+        let mut new_id = 0;
+        let ok = self.edit(label, |d| {
+            let id = d.alloc_id();
+            let mut l = Layer::pixels(id, &name);
+            l.content = Content::Pixels(Arc::new(tiles));
+            new_id = id;
+            if kind == MergeKind::Flatten {
+                d.layers.clear();
+                d.layers.push(l);
+                d.active = id;
+                true
+            } else {
+                d.replace_merged(&ids, l)
+            }
+        });
+        if !ok {
+            return Err(mosaix_core::tr("could not merge"));
+        }
+        self.dirty.extend(coords);
+        Ok(new_id)
+    }
+
+    /// Composites `alone` (a document holding just the layers wanted) into
+    /// new layer tiles at `coords`, on the GPU.
+    pub(super) fn composite_alone(&mut self, alone: &mosaix_core::Document<Tile>, coords: &[TileCoord]) -> Result<HashMap<TileCoord, Tile>, &'static str> {
         let mut tiles: HashMap<TileCoord, Tile> = HashMap::new();
         for chunk in coords.chunks(BATCH) {
             let mut b = FlattenBatch::default();
@@ -73,31 +106,79 @@ impl Engine {
             tiles.extend(keep);
         }
 
-        let name = match kind {
-            MergeKind::Down => shown.find(ids[0]).map_or_else(|| mosaix_core::tr("Merged").to_string(), |l| l.name.clone()),
-            MergeKind::Visible => mosaix_core::tr("Merged").to_string(),
-            MergeKind::Flatten => mosaix_core::tr("Background").to_string(),
-        };
-        let coords: Vec<TileCoord> = tiles.keys().copied().collect();
-        let mut new_id = 0;
-        let ok = self.edit(label, |d| {
-            let id = d.alloc_id();
-            let mut l = Layer::pixels(id, &name);
-            l.content = Content::Pixels(Arc::new(tiles));
-            new_id = id;
-            if kind == MergeKind::Flatten {
-                d.layers.clear();
-                d.layers.push(l);
-                d.active = id;
-                true
-            } else {
-                d.replace_merged(&ids, l)
+        Ok(tiles)
+    }
+
+    /// Shows the active pixel layer with `a` applied (inside the selection)
+    /// without changing anything; `None` ends the preview.
+    pub fn set_adjust_preview(&mut self, a: Option<&mosaix_core::Adjustment>) -> Result<(), &'static str> {
+        match a {
+            None => self.set_filter_preview(None),
+            Some(a) => {
+                let kind = super::transform::PreviewKind::Adjust(a.clone());
+                if self.preview.as_ref().is_some_and(|p| p.kind == kind) {
+                    return Ok(());
+                }
+                self.compute_preview(kind)
             }
-        });
-        if !ok {
-            return Err(mosaix_core::tr("could not merge"));
         }
-        self.dirty.extend(coords);
-        Ok(new_id)
+    }
+
+    /// Image › Adjustments: applies `a` to the active pixel layer's own
+    /// pixels, inside the selection (soft edges blend). One undo step.
+    pub fn apply_adjustment(&mut self, a: &mosaix_core::Adjustment, label: &str) -> Result<(), &'static str> {
+        if self.stroke.is_some() {
+            return Err(mosaix_core::tr("finish the stroke first"));
+        }
+        let layer = self.check_target(super::StrokeTarget::Pixels)?;
+        if self.preview.take().is_some() {
+            self.recheck_all = true;
+        }
+        let src = self.doc.find(layer).ok_or_else(|| mosaix_core::tr("no such layer"))?;
+        let mut plain = src.clone();
+        plain.opacity = 1.0;
+        plain.fill_opacity = 1.0;
+        plain.blend = mosaix_core::BlendMode::Normal;
+        plain.mask = None;
+        plain.effects.clear();
+        plain.filters.clear();
+        plain.clip = false;
+        plain.visible = true;
+        let mut alone = self.doc.clone();
+        alone.selection = None;
+        let id = alone.alloc_id();
+        let mut adj = Layer::pixels(id, "");
+        adj.content = Content::Adjustment(a.clone());
+        adj.mask = self.doc.selection.clone();
+        adj.mask_enabled = true;
+        alone.layers = vec![plain, adj];
+        let own = src.tiles().cloned().unwrap_or_default();
+        // Tiles the selection leaves out keep their pixels exactly.
+        let sel = self.doc.selection.as_ref();
+        let coords: Vec<TileCoord> = own
+            .keys()
+            .copied()
+            .filter(|c| !matches!(sel.map(|s| s.at(*c)), Some(mosaix_core::MaskRef::Solid(0))))
+            .collect();
+        if coords.is_empty() {
+            return Err(mosaix_core::tr("nothing to change in the selection"));
+        }
+        let fresh = self.composite_alone(&alone, &coords)?;
+        let changed: Vec<TileCoord> = coords.clone();
+        let mut tiles = (*own).clone();
+        for c in coords {
+            match fresh.get(&c) {
+                Some(t) => tiles.insert(c, t.clone()),
+                None => tiles.remove(&c),
+            };
+        }
+        self.edit(label, |d| {
+            if let Some(l) = d.find_mut(layer) {
+                l.content = Content::Pixels(Arc::new(tiles));
+            }
+            true
+        });
+        self.dirty.extend(changed);
+        Ok(())
     }
 }

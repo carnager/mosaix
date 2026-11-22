@@ -33,6 +33,10 @@ pub enum Special {
     Actions,
     Filters,
     Adjustments,
+    /// Image › Adjustments: the other adjustments, applied to the pixels.
+    MoreAdjustments,
+    /// Select › Layer Pixels (as Ctrl+click on a layer thumbnail).
+    LayerPixels,
     CanvasSize,
     ImageSize,
     Upscale,
@@ -44,11 +48,23 @@ pub enum Item {
     /// A command by its (English) label.
     Cmd(&'static str, Icon),
     Special(Special, Icon),
+    /// A submenu.
+    Sub(&'static str, Icon, &'static [Item]),
     Sep,
 }
 
 use Icon::{Glyph as G, Tool as T};
-use Item::{Cmd as C, Sep, Special as S};
+use Item::{Cmd as C, Sep, Special as S, Sub};
+
+const ADJUSTMENTS: &[Item] = &[
+    C("Invert", G(g::CIRCLE_HALF)),
+    C("Desaturate", Icon::None),
+    C("Hue/Saturation …", Icon::None),
+    C("Levels …", G(g::CHART_BAR)),
+    C("Curves …", G(g::WAVE_SINE)),
+    Sep,
+    S(Special::MoreAdjustments, Icon::None),
+];
 
 const FILE: &[Item] = &[
     C("New …", G(g::FILE_PLUS)),
@@ -104,6 +120,7 @@ const IMAGE: &[Item] = &[
     C("Flip Image Horizontal", G(g::FLIP_HORIZONTAL)),
     C("Flip Image Vertical", G(g::FLIP_VERTICAL)),
     Sep,
+    Sub("Adjustments", G(g::CIRCLE_HALF_TILT), ADJUSTMENTS),
     S(Special::Filters, G(g::SLIDERS_HORIZONTAL)),
     C("Liquify …", G(g::WAVES)),
     Sep,
@@ -113,6 +130,7 @@ const IMAGE: &[Item] = &[
 const LAYER: &[Item] = &[
     C("New Layer", G(g::PLUS)),
     C("Duplicate Layer", G(g::COPY_SIMPLE)),
+    C("Layer via Cut", G(g::SCISSORS)),
     S(Special::ConvertToSmart, G(g::FRAME_CORNERS)),
     S(Special::Adjustments, G(g::CIRCLE_HALF)),
     Sep,
@@ -150,6 +168,7 @@ const SELECT: &[Item] = &[
     Sep,
     S(Special::ColorRange, G(g::EYEDROPPER_SAMPLE)),
     C("Subject (AI)", G(g::USER_FOCUS)),
+    S(Special::LayerPixels, G(g::SELECTION_FOREGROUND)),
     Sep,
     S(Special::Modify, G(g::SELECTION_PLUS)),
     C("Feather …", G(g::SELECTION_FOREGROUND)),
@@ -163,7 +182,7 @@ const SELECT: &[Item] = &[
 const TOOL: &[Item] = &[
     C("Move", T(ToolId::Move)),
     C("Rectangular / Elliptical Marquee", T(ToolId::Marquee)),
-    C("Lasso", T(ToolId::Lasso)),
+    C("Lasso / Polygonal Lasso", T(ToolId::Lasso)),
     C("Magic Wand", T(ToolId::Wand)),
     C("Object Selection (AI)", T(ToolId::ObjectSelect)),
     C("Crop Tool", T(ToolId::Crop)),
@@ -174,7 +193,7 @@ const TOOL: &[Item] = &[
     C("Eraser", T(ToolId::Eraser)),
     C("Clone Stamp", T(ToolId::Clone)),
     C("Spot Healing / Remove (AI) / Healing Brush", T(ToolId::SpotHeal)),
-    C("Gradient", T(ToolId::Gradient)),
+    C("Gradient / Paint Bucket", T(ToolId::Gradient)),
     Sep,
     C("Text", T(ToolId::Text)),
     C("Shape (Rectangle / Ellipse)", T(ToolId::Shape)),
@@ -250,13 +269,17 @@ mod tests {
     #[test]
     fn layouts_cover_the_commands() {
         for menu in MENUS {
-            let labels: Vec<&str> = layout(menu)
-                .iter()
-                .filter_map(|i| match i {
-                    Item::Cmd(l, _) => Some(*l),
-                    _ => None,
-                })
-                .collect();
+            fn cmds(items: &[Item], out: &mut Vec<&'static str>) {
+                for i in items {
+                    match i {
+                        Item::Cmd(l, _) => out.push(l),
+                        Item::Sub(_, _, sub) => cmds(sub, out),
+                        _ => {}
+                    }
+                }
+            }
+            let mut labels = Vec::new();
+            cmds(layout(menu), &mut labels);
             for l in &labels {
                 assert!(COMMANDS.iter().any(|c| c.menu == menu && c.label == *l), "{menu}: no command {l:?}");
                 assert_eq!(labels.iter().filter(|x| *x == l).count(), 1, "{menu}: {l:?} twice");

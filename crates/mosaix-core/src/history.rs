@@ -25,6 +25,12 @@ impl<S> History<S> {
         }
     }
 
+    /// The state the last action started from (to correct it, e.g. when an
+    /// action ran under a temporary selection).
+    pub fn last_before_mut(&mut self) -> Option<&mut S> {
+        self.undo.last_mut().map(|(s, _)| s)
+    }
+
     /// Returns the previous state and the label of the undone action.
     pub fn undo(&mut self, current: S) -> Result<(S, String), S> {
         match self.undo.pop() {

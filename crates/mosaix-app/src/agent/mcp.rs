@@ -474,6 +474,38 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "layer_via",
+            "Layer via Copy (cut: false) or Cut (cut: true): the active layer's pixels inside the selection onto a new layer above, in place (soft edges become alpha).",
+            json!({ "cut": { "type": "boolean" } }),
+            &[],
+            false,
+        ),
+        tool(
+            "select_layer_pixels",
+            "Select a layer's pixels by their opacity (like Ctrl+click on its thumbnail); mode replace/add/subtract/intersect.",
+            json!({ "layer": layer_param(), "mode": { "type": "string", "enum": ["replace", "add", "subtract", "intersect"] } }),
+            &[],
+            false,
+        ),
+        tool(
+            "bucket_fill",
+            "Paint Bucket: fill the region of similar colour at (x, y) on the active layer (within the selection, if any). tolerance 0–255 (default 32), contiguous (default true), sample layer/image.",
+            json!({
+                "x": { "type": "integer", "minimum": 0 }, "y": { "type": "integer", "minimum": 0 }, "color": color_param("Fill color"),
+                "opacity": { "type": "number", "minimum": 0, "maximum": 1 }, "tolerance": { "type": "number", "minimum": 0, "maximum": 255 },
+                "contiguous": { "type": "boolean" }, "antialias": { "type": "boolean" }, "sample": { "type": "string", "enum": ["layer", "image"] }
+            }),
+            &["x", "y", "color"],
+            false,
+        ),
+        tool(
+            "adjustment_apply",
+            "Image › Adjustments: apply an adjustment (same objects as adjustment_add) directly to the pixel layer's own pixels, inside the selection; the layer keeps its opacity and blend mode. Use adjustment_add for an editable layer instead.",
+            json!({ "layer": layer_param(), "adjustment": { "type": "object" } }),
+            &["adjustment"],
+            false,
+        ),
+        tool(
             "layer_merge",
             "Merge layers into one pixel layer, as they look (blend modes, masks, styles, text baked in; pixels outside the canvas kept). mode: down = the active layer onto the one below (default), visible = all visible top-level layers (hidden ones stay), flatten = everything into one layer (hidden layers are dropped).",
             json!({ "mode": { "type": "string", "enum": ["down", "visible", "flatten"] } }),
@@ -1057,7 +1089,8 @@ mod tests {
             "channel_delete": {"channel": 0}, "channel_rename": {"channel": 0, "name": "b"},
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
-            "generative_fill": {"prompt": "a bench"}
+            "generative_fill": {"prompt": "a bench"},
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

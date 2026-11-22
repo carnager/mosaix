@@ -289,6 +289,33 @@ pub enum Command {
     LayerConvertSmart {
         layer: Option<LayerId>,
     },
+    /// The selected part of the active layer onto a new layer (Ctrl+J /
+    /// Ctrl+Shift+J with a selection).
+    LayerVia {
+        #[serde(default)]
+        cut: bool,
+    },
+    /// A selection from a layer's opacity (Ctrl+click on the thumbnail).
+    SelectLayerPixels {
+        layer: Option<LayerId>,
+        mode: Option<String>,
+    },
+    /// Paint Bucket: fill the region of similar colour at (x, y).
+    BucketFill {
+        x: u32,
+        y: u32,
+        color: ColorSpec,
+        opacity: Option<f32>,
+        tolerance: Option<f32>,
+        contiguous: Option<bool>,
+        antialias: Option<bool>,
+        sample: Option<String>,
+    },
+    /// Image › Adjustments: an adjustment applied to the layer's own pixels.
+    AdjustmentApply {
+        layer: Option<LayerId>,
+        adjustment: mosaix_core::Adjustment,
+    },
     /// "down" (active onto the one below), "visible" or "flatten".
     LayerMerge {
         #[serde(default = "default_merge")]
@@ -598,6 +625,10 @@ impl Command {
             Self::LayerPlace { .. } => "layer_place",
             Self::LayerConvertSmart { .. } => "layer_convert_smart",
             Self::LayerMerge { .. } => "layer_merge",
+            Self::LayerVia { .. } => "layer_via",
+            Self::SelectLayerPixels { .. } => "select_layer_pixels",
+            Self::BucketFill { .. } => "bucket_fill",
+            Self::AdjustmentApply { .. } => "adjustment_apply",
             Self::SmartReplace { .. } => "smart_replace",
             Self::GuideDelete { .. } => "guide_delete",
             Self::GuideClear => "guide_clear",
@@ -1589,6 +1620,43 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
         Command::LayerConvertSmart { layer } => {
             let id = pixel_layer(s, layer)?;
             s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::LayerVia { cut } => {
+            pixel_layer(s, None)?;
+            let label = if cut { tr("Layer via Cut") } else { tr("Layer via Copy") };
+            s.engine.layer_via(cut, label).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::SelectLayerPixels { layer, mode } => {
+            let id = target_layer(s, layer)?;
+            s.engine.select_layer_pixels(id, parse_mode(&mode)?, tr("Select Layer Pixels")).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::BucketFill { x, y, color, opacity, tolerance, contiguous, antialias, sample } => {
+            pixel_layer(s, None)?;
+            let tolerance = tolerance.unwrap_or(32.0);
+            ensure!((0.0..=255.0).contains(&tolerance), "tolerance must be 0–255");
+            let n = s
+                .engine
+                .bucket_fill(
+                    x,
+                    y,
+                    tolerance,
+                    contiguous.unwrap_or(true),
+                    antialias.unwrap_or(true),
+                    parse_sample(&sample)?,
+                    premul(&color, StrokeTarget::Pixels)?,
+                    opacity.unwrap_or(1.0).clamp(0.0, 1.0),
+                    tr("Paint Bucket"),
+                )
+                .map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "tiles": n })))
+        }
+        Command::AdjustmentApply { layer, adjustment } => {
+            pixel_layer(s, layer)?;
+            let label = tr!("Adjust: {name}", name = adjustment.name());
+            s.engine.apply_adjustment(&adjustment, &label).map_err(engine_err)?;
             ok(s)
         }
         Command::LayerMerge { mode } => {

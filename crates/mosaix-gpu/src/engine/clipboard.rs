@@ -5,6 +5,9 @@ use std::collections::HashMap;
 
 use mosaix_core::{MaskTile, TILE_SIZE, TileCoord};
 
+use half::f16;
+use mosaix_core::LayerId;
+
 use super::{Engine, StrokeTarget};
 use crate::pool::Tile;
 
@@ -119,5 +122,76 @@ impl Engine {
             h: ch,
             px: out,
         })
+    }
+}
+
+impl Engine {
+    /// Layer › Layer via Copy / Cut: the active layer's pixels inside the
+    /// selection (soft edges become alpha) onto a new layer above it, in
+    /// place; `cut` also takes them out of the layer. One undo step.
+    pub fn layer_via(&mut self, cut: bool, label: &str) -> Result<LayerId, &'static str> {
+        let layer = self.check_target(StrokeTarget::Pixels)?;
+        let sel = self.selection_values().ok_or_else(|| mosaix_core::tr("nothing is selected"))?;
+        let src = self.doc.find(layer).and_then(|l| l.tiles()).cloned().unwrap_or_default();
+        let coords: Vec<TileCoord> = sel.keys().filter(|c| src.contains_key(c)).copied().collect();
+        let data = self.read_layer_tiles(&coords.iter().map(|c| src[c].clone()).collect::<Vec<_>>());
+        let (mut copied, mut rest) = (Vec::new(), Vec::new());
+        for (c, px) in coords.into_iter().zip(data) {
+            let m = &sel[&c];
+            let mut inside = px.clone();
+            let mut outside = px;
+            let mut any = false;
+            for (i, &v) in m.iter().enumerate() {
+                for k in 0..4 {
+                    let p = inside[i * 4 + k].to_f32();
+                    inside[i * 4 + k] = f16::from_f32(p * v);
+                    outside[i * 4 + k] = f16::from_f32(p * (1.0 - v));
+                }
+                any |= v > 0.0 && inside[i * 4 + 3].to_f32() > 0.0;
+            }
+            if any {
+                let empty = outside.chunks(4).all(|p| p[3].to_f32() <= 0.0);
+                copied.push((c, inside));
+                rest.push((c, (!empty).then_some(outside)));
+            }
+        }
+        if copied.is_empty() {
+            return Err(mosaix_core::tr("the selection contains no pixels"));
+        }
+        let mut new = HashMap::new();
+        for (c, px) in copied {
+            new.insert(c, self.write_new_tile(&px).ok_or_else(|| mosaix_core::tr("out of GPU memory"))?);
+        }
+        let mut left = Vec::new();
+        if cut {
+            for (c, px) in rest {
+                let t = match px {
+                    Some(px) => Some(self.write_new_tile(&px).ok_or_else(|| mosaix_core::tr("out of GPU memory"))?),
+                    None => None,
+                };
+                left.push((c, t));
+            }
+        }
+        let coords: Vec<TileCoord> = new.keys().copied().collect();
+        let name = self.doc.find(layer).map(|l| l.name.clone()).unwrap_or_default();
+        let mut id = 0;
+        self.edit(label, |d| {
+            if let Some(map) = d.tiles_mut(layer) {
+                for (c, t) in left {
+                    match t {
+                        Some(t) => map.insert(c, t),
+                        None => map.remove(&c),
+                    };
+                }
+            }
+            id = d.alloc_id();
+            let mut l = mosaix_core::Layer::pixels(id, &mosaix_core::tr!("{layer} copy", layer = name));
+            l.content = mosaix_core::Content::Pixels(std::sync::Arc::new(new));
+            d.active = layer;
+            d.insert_above_active(l);
+            true
+        });
+        self.dirty.extend(coords);
+        Ok(id)
     }
 }

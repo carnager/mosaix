@@ -46,7 +46,7 @@ impl Engine {
     }
 
     /// Uploads a CPU mask (compacted first). `None` if GPU memory ran out.
-    fn mask_to_gpu(&mut self, mut m: CpuMask) -> Option<Mask<Tile>> {
+    pub(super) fn mask_to_gpu(&mut self, mut m: CpuMask) -> Option<Mask<Tile>> {
         m.compact();
         let mut tiles = HashMap::with_capacity(m.tiles.len());
         for (c, t) in m.tiles {
@@ -191,6 +191,35 @@ impl Engine {
             Some(old) if op != CombineOp::Replace => combine(&old, &new, op),
             None if op == CombineOp::Subtract => CpuMask::filled(0),
             None if op == CombineOp::Intersect => CpuMask::filled(0),
+            _ => new,
+        };
+        self.set_selection(Some(result), label)
+    }
+
+    /// Selects a layer's pixels by their opacity (Ctrl+click on the
+    /// thumbnail), combined with the selection by `op`. Text, shapes and RAW
+    /// count as they are drawn.
+    pub fn select_layer_pixels(&mut self, layer: LayerId, op: CombineOp, label: &str) -> Result<(), &'static str> {
+        let l = self.doc.find(layer).ok_or(mosaix_core::tr("no such layer"))?;
+        let tiles = if l.is_rendered() {
+            self.refresh_smart();
+            self.vectors.get(&layer).map(|(_, t)| t.clone())
+        } else {
+            l.tiles().cloned()
+        }
+        .ok_or(mosaix_core::tr("this layer has no pixels"))?;
+        let coords: Vec<TileCoord> = tiles.keys().copied().filter(|c| self.in_document(*c)).collect();
+        let data = self.read_layer_tiles(&coords.iter().map(|c| tiles[c].clone()).collect::<Vec<_>>());
+        let mut new = CpuMask::filled(0);
+        for (c, px) in coords.into_iter().zip(data) {
+            let a: Vec<u8> = px.chunks(4).map(|p| (p[3].to_f32().clamp(0.0, 1.0) * 255.0).round() as u8).collect();
+            if a.iter().any(|&v| v > 0) {
+                new.tiles.insert(c, MaskData::Pixels(a).normalized());
+            }
+        }
+        let result = match self.selection_cpu() {
+            Some(old) if op != CombineOp::Replace => combine(&old, &new, op),
+            None if op == CombineOp::Subtract || op == CombineOp::Intersect => CpuMask::filled(0),
             _ => new,
         };
         self.set_selection(Some(result), label)

@@ -9,11 +9,12 @@ use super::palette::{self, COMMANDS, Cmd, MENUS};
 
 /// Tools as shown in the toolbar: (id, name, shortcut); English, translated
 /// when shown.
-pub const TOOLS: [(ToolId, &str, &str); 25] = [
+pub const TOOLS: [(ToolId, &str, &str); 27] = [
     (ToolId::Move, "Move", "V"),
     (ToolId::Marquee, "Rectangular Marquee", "M"),
     (ToolId::Ellipse, "Elliptical Marquee", "M"),
     (ToolId::Lasso, "Lasso", "L"),
+    (ToolId::PolyLasso, "Polygonal Lasso", "L"),
     (ToolId::Wand, "Magic Wand", "W"),
     (ToolId::ObjectSelect, "Object Selection (AI)", "Shift+W"),
     (ToolId::Crop, "Crop", "C"),
@@ -35,6 +36,7 @@ pub const TOOLS: [(ToolId, &str, &str); 25] = [
     (ToolId::Eyedropper, "Eyedropper", "I"),
     (ToolId::Gradient, "Linear Gradient", "G"),
     (ToolId::Radial, "Radial Gradient", "G"),
+    (ToolId::Bucket, "Paint Bucket", "G"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +66,8 @@ pub enum ToolId {
     Sponge,
     Blur,
     Sharpen,
+    PolyLasso,
+    Bucket,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -176,6 +180,7 @@ pub struct Model {
     pub clone_source: bool,
     pub wand_tolerance: f32,
     pub wand_contiguous: bool,
+    pub bucket_all: bool,
     pub bg_color: [f32; 3],
     /// Names of the custom brush tips (tip numbers FIRST_CUSTOM_TIP, …).
     pub custom_tips: Vec<String>,
@@ -251,6 +256,13 @@ pub enum Action {
     PickFile(super::files::FileMode),
     GenSettings(crate::settings::GenSettings),
     GenerativeFill(String),
+    /// Image › Adjustments preview (`None` ends it) and applying it.
+    AdjustPreview(Option<mosaix_core::Adjustment>),
+    ApplyAdjustment(mosaix_core::Adjustment),
+    /// Selection from a layer's opacity; mode as in `select_layer_pixels`.
+    SelectLayerPixels { layer: LayerId, mode: &'static str },
+    /// Paint Bucket: sample all layers instead of the active one.
+    BucketAll(bool),
     /// Saves (`Some`) or forgets (`None`) the OpenAI API key.
     SaveApiKey(Option<String>),
     PlaceEmbedded(std::path::PathBuf),
@@ -467,6 +479,8 @@ pub struct State {
 }
 
 enum Dialog {
+    /// Image › Adjustments: an adjustment for the pixels, previewed live.
+    Adjust { adj: mosaix_core::Adjustment },
     Canvas { w: u32, h: u32, anchor: (u8, u8) },
     Image { w: u32, h: u32, keep: bool },
     /// Select › Modify (op as in `select_modify`).
@@ -501,7 +515,7 @@ const MODIFY: [(&str, &str, f64); 5] = [
 
 /// The layer panel's right-click menu, in groups.
 const LAYER_MENU: &[&[&str]] = &[
-    &["Duplicate Layer", "Group Layers", "Ungroup Layers"],
+    &["Duplicate Layer", "Layer via Cut", "Group Layers", "Ungroup Layers"],
     &["Merge Down", "Merge Visible", "Flatten Image"],
     &["Add Layer Mask", "Apply Layer Mask", "Create/Release Clipping Mask"],
     &["Rasterize (Text/Shape/RAW to Pixels)", "Toggle Layer Visibility"],
@@ -514,6 +528,13 @@ impl State {
     pub fn open_effect(&mut self, i: usize) {
         self.fx_open = Some(i);
         self.focus_pane = Some(super::dock::Pane::Styles);
+    }
+
+    /// Opens an Image › Adjustments dialog (Invert applies at once).
+    pub fn open_adjust(&mut self, a: mosaix_core::Adjustment) {
+        self.dialog = Some(Dialog::Adjust { adj: a });
+        self.dialog_new = true;
+        self.adj_editor = Default::default();
     }
 
     /// Opens Edit › Generative Fill (UI snapshots).
@@ -937,10 +958,20 @@ fn menu_bar(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &mut Vec<Action>)
 
 /// The entries of one menu, in the order and groups of [`super::menus`].
 pub(super) fn menu_contents(ui: &mut egui::Ui, menu: &str, m: &Model, st: &mut State, out: &mut Vec<Action>) {
-    use super::menus::{Item, atom};
     ui.set_min_width(220.0);
-    for item in super::menus::layout(menu) {
+    menu_items(ui, menu, super::menus::layout(menu), m, st, out);
+}
+
+fn menu_items(ui: &mut egui::Ui, menu: &str, items: &[super::menus::Item], m: &Model, st: &mut State, out: &mut Vec<Action>) {
+    use super::menus::{Item, atom};
+    for item in items {
         match *item {
+            Item::Sub(label, icon, sub) => {
+                ui.menu_button((atom(icon), tr(label)), |ui| {
+                    ui.set_min_width(220.0);
+                    menu_items(ui, menu, sub, m, st, out);
+                });
+            }
             Item::Sep => {
                 ui.separator();
             }
@@ -954,7 +985,7 @@ pub(super) fn menu_contents(ui: &mut egui::Ui, menu: &str, m: &Model, st: &mut S
                     Some(false) => super::menus::Icon::None,
                     None => icon,
                 };
-                let b = egui::Button::new((atom(icon), c.label_text()))
+                let b = egui::Button::new((atom(icon), command_text(c, m)))
                     .shortcut_text(palette::shortcut_text(c, &m.keymap));
                 let why = unavailable(label, m);
                 if ui.add_enabled(why.is_none(), b).on_disabled_hover_text(why.unwrap_or_default()).clicked() {
@@ -965,6 +996,20 @@ pub(super) fn menu_contents(ui: &mut egui::Ui, menu: &str, m: &Model, st: &mut S
             Item::Special(sp, icon) => special_entry(ui, sp, atom(icon), m, st, out),
         }
     }
+}
+
+/// A command's menu text; Duplicate Layer reads "Layer via Copy" while
+/// something is selected, as that is what Ctrl+J then does.
+fn command_text(c: &palette::Cmd, m: &Model) -> &'static str {
+    if c.label == "Duplicate Layer" && m.has_selection && pixel_active(m) {
+        tr("Layer via Copy")
+    } else {
+        c.label_text()
+    }
+}
+
+fn pixel_active(m: &Model) -> bool {
+    m.layers.iter().find(|r| r.id == m.active).is_some_and(|r| !r.group && !r.adjustment && r.vector.is_none()) && m.active_raw.is_none()
 }
 
 /// The state of an on/off command (`None`: not one).
@@ -986,6 +1031,8 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
     let pixels = active.is_some_and(|r| !r.group && !r.adjustment && r.vector.is_none());
     let need = |ok: bool, why: &'static str| (!ok).then_some(why);
     match label {
+        "Layer via Cut" => need(m.has_selection && pixel_active(m), tr("Needs a selection on a pixel layer")),
+        "Invert" | "Desaturate" | "Hue/Saturation …" | "Levels …" | "Curves …" => need(pixel_active(m), tr("Works on pixel layers")),
         "Merge Down" => {
             // Rows run top → bottom; the sibling below is the next row at the same depth.
             let below = m.layers.iter().position(|r| r.id == m.active).and_then(|i| {
@@ -1028,6 +1075,8 @@ pub enum Extra {
     Special(super::menus::Special),
     Filter(mosaix_core::Filter),
     Adjust(mosaix_core::Adjustment),
+    /// Image › Adjustments (on the pixels, with a dialog).
+    AdjustPixels(mosaix_core::Adjustment),
     Modify(&'static str),
     Transform(crate::boxedit::Mode),
     Upscale(u32),
@@ -1077,6 +1126,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         ("Select", S::SaveSelection, "Save Selection …", sel(m.has_selection)),
         ("View", S::NewGuide, "New Guide …", None),
         ("View", S::Messages, "Messages", None),
+        ("Select", S::LayerPixels, "Layer Pixels", None),
     ] {
         let (en, label) = one(en);
         add(menu, en, label, disabled, Extra::Special(sp));
@@ -1097,7 +1147,8 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
     }
     for a in mosaix_core::Adjustment::defaults() {
         let name = a.name();
-        add("Layer", &format!("Adjustment Layer {name}"), format!("{}: {name}", tr("New Adjustment Layer")), None, Extra::Adjust(a));
+        add("Layer", &format!("Adjustment Layer {name}"), format!("{}: {name}", tr("New Adjustment Layer")), None, Extra::Adjust(a.clone()));
+        add("Image", &format!("Adjustments {name}"), format!("{}: {name} …", tr("Adjustments")), (!pixel_active(m)).then_some(tr("Works on pixel layers")), Extra::AdjustPixels(a));
     }
     for k in [2u32, 4] {
         add("Image", &format!("Upscale (AI) {k}x"), format!("{} {k}×", tr("Upscale (AI)")), None, Extra::Upscale(k));
@@ -1131,10 +1182,12 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
             S::CanvasSize => st.dialog = Some(Dialog::Canvas { w: m.doc_size.0, h: m.doc_size.1, anchor: (1, 1) }),
             S::ImageSize => st.dialog = Some(Dialog::Image { w: m.doc_size.0, h: m.doc_size.1, keep: true }),
             S::Messages => st.show_log = true,
+            S::LayerPixels => out.push(Action::SelectLayerPixels { layer: m.active, mode: "replace" }),
             _ => {}
         },
         Extra::Filter(f) => st.open_filter(f),
         Extra::Adjust(a) => out.push(Action::AddAdjustment(a)),
+        Extra::AdjustPixels(a) => st.open_adjust(a),
         Extra::Modify(op) => st.open_modify(op),
         Extra::Transform(mo) => out.push(Action::BoxMode(mo)),
         Extra::Upscale(k) => out.push(Action::Upscale(k)),
@@ -1336,6 +1389,27 @@ fn special_entry(
                 });
             });
         }
+        Special::MoreAdjustments => {
+            ui.add_enabled_ui(pixel_active(m), |ui| {
+                ui.menu_button(tr("More"), |ui| {
+                    for a in mosaix_core::Adjustment::defaults() {
+                        if ui.button(format!("{} …", a.name())).clicked() {
+                            st.open_adjust(a);
+                            ui.close();
+                        }
+                    }
+                });
+            })
+            .response
+            .on_disabled_hover_text(tr("Works on pixel layers"));
+        }
+        Special::LayerPixels => {
+            let r = ui.button((icon, tr("Layer Pixels"))).on_hover_text(tr("Select the active layer's pixels by their opacity (also Ctrl+click on a layer thumbnail; Shift adds, Alt subtracts)"));
+            if r.clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
         Special::Adjustments => {
             ui.menu_button((icon, tr("New Adjustment Layer")), |ui| {
                 for a in mosaix_core::Adjustment::defaults() {
@@ -1442,7 +1516,7 @@ fn status_bar(ui: &mut egui::Ui, m: &Model, st: &mut State) {
 pub const TOOL_GROUPS: &[&[ToolId]] = &[
     &[ToolId::Move],
     &[ToolId::Marquee, ToolId::Ellipse],
-    &[ToolId::Lasso],
+    &[ToolId::Lasso, ToolId::PolyLasso],
     &[ToolId::ObjectSelect, ToolId::Wand],
     &[ToolId::Crop],
     &[ToolId::Eyedropper],
@@ -1450,7 +1524,7 @@ pub const TOOL_GROUPS: &[&[ToolId]] = &[
     &[ToolId::Brush],
     &[ToolId::Clone],
     &[ToolId::Eraser],
-    &[ToolId::Gradient, ToolId::Radial],
+    &[ToolId::Gradient, ToolId::Radial, ToolId::Bucket],
     &[ToolId::Smudge, ToolId::Blur, ToolId::Sharpen],
     &[ToolId::Dodge, ToolId::Burn, ToolId::Sponge],
     &[ToolId::Pen],
@@ -2338,6 +2412,22 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
             }
             hint(ui, tr("Samples all layers. Shift = add, Alt = subtract."));
         }
+        ToolId::Bucket => {
+            let mut t = m.wand_tolerance;
+            ui.label(tr("Tolerance"));
+            if ui.add(egui::Slider::new(&mut t, 0.0..=255.0).max_decimals(0)).changed() {
+                out.push(Action::WandTolerance(t));
+            }
+            let mut c = m.wand_contiguous;
+            if ui.checkbox(&mut c, tr("Contiguous")).on_hover_text(tr("only connected pixels")).changed() {
+                out.push(Action::WandContiguous(c));
+            }
+            let mut all = m.bucket_all;
+            if ui.checkbox(&mut all, tr("All Layers")).on_hover_text(tr("Compare colours in the whole image, fill the active layer")).changed() {
+                out.push(Action::BucketAll(all));
+            }
+            hint(ui, tr("Fills with the foreground color and brush opacity, within the selection."));
+        }
         ToolId::Eyedropper => {
             let (mut radius, mut all) = (m.eyedrop_radius, m.eyedrop_all);
             ui.label(tr("Sample Size"));
@@ -2366,6 +2456,9 @@ fn tool_section(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
                     "Click or drag: picks the brush color. Alt+click does the same with the brush, eraser, gradient, shape and text tools.",
                 ),
             );
+        }
+        ToolId::PolyLasso => {
+            hint(ui, tr("Click to add points; click the start, double-click or Enter closes; Backspace removes the last point; Esc cancels. Shift = add, Alt = subtract."));
         }
         ToolId::Marquee | ToolId::Ellipse | ToolId::Lasso => {
             hint(ui, tr("Shift = add, Alt = subtract, both = intersect"))
@@ -2740,7 +2833,17 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                     Color32::WHITE,
                                 );
                         }
-                        if resp.clicked() || resp.secondary_clicked() {
+                        let mods = ui.input(|i| i.modifiers);
+                        if resp.clicked() && mods.ctrl && !row.group && !row.adjustment {
+                            // Ctrl+click: select the layer's pixels (Shift adds, Alt subtracts).
+                            let mode = match (mods.shift, mods.alt) {
+                                (true, true) => "intersect",
+                                (true, false) => "add",
+                                (false, true) => "subtract",
+                                _ => "replace",
+                            };
+                            out.push(Action::SelectLayerPixels { layer: row.id, mode });
+                        } else if resp.clicked() || resp.secondary_clicked() {
                             out.push(Action::SelectLayer(row.id));
                         }
                         if resp.double_clicked() {
@@ -2758,7 +2861,7 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                 for &label in *group {
                                     let c = palette::find(label);
                                     let why = unavailable(label, m);
-                                    let b = egui::Button::new(c.label_text()).shortcut_text(palette::shortcut_text(&c, &m.keymap));
+                                    let b = egui::Button::new(command_text(&c, m)).shortcut_text(palette::shortcut_text(&c, &m.keymap));
                                     let r = ui.add_enabled(why.is_none(), b);
                                     if let Some(w) = why {
                                         r.on_disabled_hover_text(w);
@@ -2843,6 +2946,36 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
     let mut open = true;
     let mut done = false;
     match d {
+        Dialog::Adjust { adj } => {
+            if first_frame {
+                out.push(Action::AdjustPreview(Some(adj.clone())));
+            }
+            let (mut ok, mut cancel) = (false, false);
+            egui::Window::new(adj.name())
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    if let Some((new, _)) = super::adjust_ui::editor(ui, adj, &mut st.adj_editor, None) {
+                        *adj = new;
+                        out.push(Action::AdjustPreview(Some(adj.clone())));
+                    }
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ok = ui.button("OK").clicked();
+                        cancel = ui.button(tr("Cancel")).clicked();
+                    });
+                    ui.label(RichText::new(tr("Changes the layer's own pixels (inside the selection). For an editable version use Layer › New Adjustment Layer.")).weak().small());
+                });
+            if ok {
+                out.push(Action::ApplyAdjustment(adj.clone()));
+                done = true;
+            } else if cancel || !open {
+                out.push(Action::AdjustPreview(None));
+                done = true;
+            }
+        }
         Dialog::Canvas { w, h, anchor } => {
             egui::Window::new(tr("Canvas Size"))
                 .open(&mut open)

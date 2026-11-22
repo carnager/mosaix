@@ -1319,7 +1319,7 @@ impl Engine {
         Some(id)
     }
 
-    fn write_new_tile(&mut self, pixels: &[f16]) -> Option<Tile> {
+    pub(super) fn write_new_tile(&mut self, pixels: &[f16]) -> Option<Tile> {
         assert_eq!(pixels.len(), (TILE_SIZE * TILE_SIZE * 4) as usize);
         let tile = self.layer_pool.alloc()?;
         let slot = tile.slot();

@@ -304,6 +304,24 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.add(Shape::mesh(mesh));
             p.rect_stroke(r, 1.0, thin, egui::StrokeKind::Inside);
         }
+        Icon::Tool(ToolId::PolyLasso) => {
+            // A straight-edged loop with corner points.
+            let pts = [at(4.0, 5.0), at(15.5, 3.5), at(17.0, 11.0), at(9.0, 12.5), at(3.0, 10.0)];
+            let mut loop_pts = pts.to_vec();
+            loop_pts.push(pts[0]);
+            p.add(Shape::line(loop_pts, mid));
+            for q in pts {
+                p.circle_filled(q, 1.3 * u, color);
+            }
+            p.add(Shape::line(vec![at(5.5, 10.6), at(5.0, 14.5), at(7.5, 16.0), at(6.0, 18.5)], mid));
+        }
+        Icon::Tool(ToolId::Bucket) => {
+            // A tilted bucket with paint dripping from its lip.
+            let body = vec![at(3.5, 9.0), at(10.0, 3.0), at(16.0, 9.0), at(9.5, 15.5)];
+            p.add(Shape::convex_polygon(body.clone(), Color32::TRANSPARENT, mid));
+            p.line_segment([at(6.0, 6.5), at(2.0, 2.5)], thin);
+            p.add(Shape::convex_polygon(vec![at(16.0, 9.0), at(18.0, 13.5), at(16.8, 16.5), at(15.2, 13.0)], color, Stroke::NONE));
+        }
         Icon::Tool(ToolId::Radial) => {
             for (r, a) in [(7.5, 0.35), (5.0, 0.65), (2.5, 1.0)] {
                 p.circle_filled(at(10.0, 10.0), r * u, color.gamma_multiply(a));

@@ -3286,3 +3286,117 @@ fn fill_onto_a_new_layer_sees_all_layers_and_leaves_them_alone() {
     e.undo();
     assert_eq!(e.doc().layers.len(), 2);
 }
+
+#[test]
+fn layer_via_copy_cut_and_select_layer_pixels() {
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    let src = pattern(2, false);
+    e.upload_tile(layer, TileCoord::new(0, 0), &src);
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 100.0, h: 256.0 }, CombineOp::Replace, "Sel").unwrap();
+
+    let copy = e.layer_via(false, "Layer via Copy").unwrap();
+    assert_eq!(e.doc().layers.len(), 2);
+    assert_eq!(e.doc().active, copy);
+    let t = e.read_layer_tile(copy, TileCoord::new(0, 0)).unwrap();
+    assert_eq!(px(&t, 50, 50), px(&src, 50, 50), "copied exactly");
+    assert_eq!(px(&t, 150, 50)[3], 0.0, "only the selection");
+    assert_eq!(e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap(), src, "copy leaves the layer alone");
+    e.undo();
+
+    // Cut: same new layer, the pixels leave the source (one undo step).
+    e.edit("Active", |d| {
+        d.active = layer;
+        true
+    });
+    let cut = e.layer_via(true, "Layer via Cut").unwrap();
+    let rest = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert_eq!(px(&rest, 50, 50)[3], 0.0, "cut out");
+    assert_eq!(px(&rest, 150, 50), px(&src, 150, 50), "outside stays");
+    assert_eq!(px(&e.read_layer_tile(cut, TileCoord::new(0, 0)).unwrap(), 50, 50), px(&src, 50, 50));
+    e.undo();
+    assert_eq!(e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap(), src);
+    assert_eq!(e.doc().layers.len(), 1);
+
+    // Ctrl+click: the selection follows the layer's opacity.
+    e.deselect("None").unwrap();
+    e.select_layer_pixels(layer, CombineOp::Replace, "Select Pixels").unwrap();
+    let sel = e.selection_cpu().unwrap();
+    let a = |x: usize, y: usize| sel.tiles[&TileCoord::new(0, 0)].get(x, y);
+    for (x, y) in [(3, 7), (100, 200), (31, 31)] {
+        let want = (px(&src, x, y)[3] * 255.0).round() as i32;
+        assert!((a(x, y) as i32 - want).abs() <= 1, "({x},{y}): {} vs {want}", a(x, y));
+    }
+}
+
+#[test]
+fn adjustments_bake_into_pixels_as_previewed() {
+    use mosaix_core::Adjustment;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    e.upload_tile(layer, TileCoord::new(0, 0), &pattern(3, false));
+    e.edit("Look", |d| {
+        let l = d.find_mut(layer).unwrap();
+        l.opacity = 0.6;
+        l.blend = BlendMode::Screen;
+        true
+    });
+    e.select_shape(&Shape::Ellipse { cx: 115.0, cy: 100.0, rx: 75.0, ry: 60.0 }, CombineOp::Replace, "Sel").unwrap();
+    e.feather_selection(6.0, "Feather").unwrap();
+    let mut hue = Adjustment::defaults().into_iter().find(|a| matches!(a, Adjustment::HueSaturation { .. })).unwrap();
+    if let Adjustment::HueSaturation { hue: h, saturation, lightness, .. } = &mut hue {
+        (*h, *saturation, *lightness) = (40.0, -30.0, 10.0);
+    }
+    for a in [Adjustment::Invert, hue] {
+        let before = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+        e.set_adjust_preview(Some(&a)).unwrap();
+        e.flush();
+        let preview = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+        e.apply_adjustment(&a, "Adjust").unwrap();
+        e.flush();
+        let baked = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+        let worst = preview.iter().zip(&baked).map(|(a, b)| (a.to_f32() - b.to_f32()).abs()).fold(0.0, f32::max);
+        assert!(worst < 3e-3, "{a:?}: baked differs from the preview ({worst})");
+        let after = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+        // Outside the selection nothing changed; inside it did; alpha kept.
+        let (o, n) = (px(&before, 2, 2), px(&after, 2, 2));
+        assert!(o.iter().zip(n).all(|(a, b)| (a - b).abs() < 1e-3), "{o:?} vs {n:?}");
+        assert!((px(&after, 115, 100)[3] - px(&before, 115, 100)[3]).abs() < 1e-3);
+        assert_ne!(px(&after, 115, 100), px(&before, 115, 100));
+        let l = e.doc().find(layer).unwrap();
+        assert_eq!((l.opacity, l.blend), (0.6, BlendMode::Screen), "the layer keeps its look");
+    }
+}
+
+#[test]
+fn paint_bucket_fills_the_region_and_keeps_the_selection() {
+    use mosaix_gpu::SampleFrom;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    let mut t = vec![f16::ZERO; TS * TS * 4];
+    for y in 0..TS {
+        for x in 0..TS {
+            let c = if x < 128 { [1.0, 0.0, 0.0, 1.0] } else { [0.0, 0.0, 1.0, 1.0] };
+            t[(y * TS + x) * 4..][..4].copy_from_slice(&c.map(f16::from_f32));
+        }
+    }
+    e.upload_tile(layer, TileCoord::new(0, 0), &t);
+    e.bucket_fill(20, 20, 32.0, true, false, SampleFrom::Layer, [0.0, 1.0, 0.0, 1.0], 1.0, "Paint Bucket").unwrap();
+    let after = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert_eq!(px(&after, 20, 200), [0.0, 1.0, 0.0, 1.0], "the red half is green");
+    assert_eq!(px(&after, 200, 20), [0.0, 0.0, 1.0, 1.0], "the blue half stays");
+    assert!(!e.has_selection(), "no selection left behind");
+    e.undo();
+    assert_eq!(e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap(), t);
+    assert!(!e.has_selection(), "undo does not bring a temporary selection back");
+    // Within a selection only the selected part of the region.
+    e.select_shape(&Shape::Rect { x: 0.0, y: 0.0, w: 256.0, h: 100.0 }, CombineOp::Replace, "Sel").unwrap();
+    e.bucket_fill(20, 20, 32.0, true, false, SampleFrom::Layer, [0.0, 1.0, 0.0, 1.0], 1.0, "Paint Bucket").unwrap();
+    let after = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert_eq!(px(&after, 20, 50)[1], 1.0);
+    assert_eq!(px(&after, 20, 200), [1.0, 0.0, 0.0, 1.0]);
+    assert!(e.has_selection());
+}

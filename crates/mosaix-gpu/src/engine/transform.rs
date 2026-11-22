@@ -413,6 +413,9 @@ pub(super) enum PreviewKind {
     Liquify,
     /// A vector layer shown with a different description (font picker).
     Vector(mosaix_core::LayerId, Box<mosaix_core::VectorLayer>),
+    /// Image › Adjustments: the active layer as it would look with the
+    /// adjustment applied inside the selection.
+    Adjust(mosaix_core::Adjustment),
 }
 
 pub(super) struct Preview {
@@ -1083,6 +1086,19 @@ impl Engine {
                     ));
                 }
                 l.content = mosaix_core::doc::Content::Vector((**v).clone());
+                d
+            }
+            PreviewKind::Adjust(a) => {
+                let layer = self.check_target(StrokeTarget::Pixels)?;
+                let mut d = self.doc.clone();
+                d.active = layer;
+                let id = d.add_adjustment(a.clone());
+                let l = d.find_mut(id).unwrap();
+                // Clipped: it changes only the layer below, like the baked result.
+                l.clip = true;
+                l.mask = self.doc.selection.clone();
+                l.mask_enabled = true;
+                d.active = layer;
                 d
             }
             PreviewKind::SmartFilter(index, f) => {
