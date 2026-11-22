@@ -92,9 +92,15 @@ pub struct GenSettings {
     pub remote_ok: bool,
 }
 
+/// OpenAI's default for image edits.
+pub const DEFAULT_MODEL: &str = "gpt-image-2.6-sunburst";
+
+/// Models OpenAI has shut down; settings naming one move to [`DEFAULT_MODEL`].
+const RETIRED_MODELS: &[&str] = &["gpt-image-1", "gpt-image-1-mini", "dall-e-2", "dall-e-3"];
+
 impl Default for GenSettings {
     fn default() -> Self {
-        Self { provider: "openai".into(), model: "gpt-image-1".into(), command: String::new(), remote_ok: false }
+        Self { provider: "openai".into(), model: DEFAULT_MODEL.into(), command: String::new(), remote_ok: false }
     }
 }
 
@@ -293,6 +299,15 @@ pub fn key_state() -> KeyState {
 impl Settings {
     /// Loads the settings; missing or broken files give the defaults.
     pub fn load_from(path: &Path) -> Self {
+        let mut s = Self::read(path);
+        let model = s.generative.model.trim();
+        if model.is_empty() || RETIRED_MODELS.contains(&model) {
+            s.generative.model = DEFAULT_MODEL.into();
+        }
+        s
+    }
+
+    fn read(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
                 // Plain English, no tr(): this runs before the language is initialised
@@ -331,6 +346,20 @@ impl Settings {
 #[cfg(test)]
 mod key_tests {
     use super::*;
+
+    #[test]
+    fn retired_model_moves_to_default() {
+        let dir = std::env::temp_dir().join(format!("mosaix-model-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        let mut s = Settings::default();
+        s.generative.model = "gpt-image-1".into();
+        s.save_to(&path).unwrap();
+        assert_eq!(Settings::load_from(&path).generative.model, DEFAULT_MODEL);
+        s.generative.model = "gpt-image-2.6-flare".into();
+        s.save_to(&path).unwrap();
+        assert_eq!(Settings::load_from(&path).generative.model, "gpt-image-2.6-flare");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn saved_key_is_private() {
