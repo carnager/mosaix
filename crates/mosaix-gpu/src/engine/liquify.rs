@@ -204,6 +204,50 @@ impl Engine {
         Ok(())
     }
 
+    /// Warp: sets the whole field from a Bézier patch (each point shows
+    /// where it comes from in the patch's box; outside the warped patch:
+    /// transparent).
+    pub fn liquify_set_warp(&mut self, patch: &mosaix_core::warp::Patch) {
+        let Some(l) = &mut self.liquify else { return };
+        // Points not covered by the patch read from far away: transparent.
+        const AWAY: f32 = 1.0e7;
+        let (fw, fh) = (l.fw, l.fh);
+        let size = (patch.max - patch.min).max(DVec2::splat(1e-9));
+        let rows: Vec<Vec<[f32; 2]>> = {
+            use rayon::prelude::*;
+            let (origin, spacing) = (l.origin, l.spacing);
+            (0..fh)
+                .into_par_iter()
+                .map(|y| {
+                    let mut guess: Option<DVec2> = None;
+                    (0..fw)
+                        .map(|x| {
+                            let p = origin + DVec2::new(x as f64, y as f64) * spacing;
+                            // Continued a little past the patch, so the field stays
+                            // smooth at its edge (the box has a transparent margin).
+                            let uv = patch.inverse_uv(p, guess).or_else(|| guess.and_then(|_| patch.inverse_uv(p, None)));
+                            match uv {
+                                Some(uv) => {
+                                    guess = Some(uv);
+                                    let d = patch.min + uv * size - p;
+                                    [d.x as f32, d.y as f32]
+                                }
+                                None => {
+                                    guess = None;
+                                    [AWAY, AWAY]
+                                }
+                            }
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        for (y, row) in rows.into_iter().enumerate() {
+            l.field[y * fw..(y + 1) * fw].copy_from_slice(&row);
+        }
+        l.mark(0, 0, fw, fh);
+    }
+
     pub fn liquify_active(&self) -> bool {
         self.liquify.is_some()
     }

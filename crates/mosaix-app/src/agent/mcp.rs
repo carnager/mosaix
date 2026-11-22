@@ -479,6 +479,13 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "layer_warp",
+            "Edit › Transform › Warp: bend the active pixel layer with a 4 × 4 Bézier grid laid evenly over its content. offsets: 16 [dx, dy] moves in px, row by row from the top left (corners are 0, 3, 12, 15; the others are handles and inner points). All zero = no change.",
+            json!({ "offsets": { "type": "array", "items": { "type": "array", "items": { "type": "number" } }, "minItems": 16, "maxItems": 16 } }),
+            &["offsets"],
+            false,
+        ),
+        tool(
             "image_rotate",
             "Turn the whole image (every layer) by an angle in degrees, clockwise, about the canvas centre – e.g. to straighten a horizon. Content outside the canvas is kept; crop afterwards if wanted.",
             json!({ "angle": { "type": "number" } }),
@@ -1164,7 +1171,7 @@ mod tests {
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
             "generative_fill": {"prompt": "a bench"},
-            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "image_rotate": {"angle": 2.5}, "layer_distribute": {"direction": "vertical"}
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "image_rotate": {"angle": 2.5}, "layer_warp": {"offsets": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]}, "layer_distribute": {"direction": "vertical"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {
@@ -1208,6 +1215,7 @@ mod tests {
                         ("label", _) => json!("red"),
                         ("negative", _) => json!([[1, 2]]),
                         ("also", _) => json!([1]),
+                        ("offsets", _) => json!(vec![[0.0, 0.0]; 16]),
                         ("corners", _) => json!([[0, 0], [10, 0], [10, 10], [0, 10]]),
                         ("noise", _) => json!({"luminance": 10, "color": 30}),
                         ("raw", _) => json!({"white_balance": {"mode": "custom", "temperature": 5000, "tint": 0}, "exposure": 1}),

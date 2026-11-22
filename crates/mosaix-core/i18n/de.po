@@ -3712,3 +3712,24 @@ msgstr "Entlang etwas ziehen, das gerade sein soll (Umschalt: 45°), dann Gerade
 
 msgid "Eyedropper / Ruler"
 msgstr "Pipette / Linealwerkzeug"
+
+msgid "Warp"
+msgstr "Verformen"
+
+msgid "Warp cancelled"
+msgstr "Verformen abgebrochen"
+
+msgid "Nothing to warp: the layer is empty."
+msgstr "Nichts zu verformen: die Ebene ist leer."
+
+msgid "Cannot warp: {error}"
+msgstr "Verformen nicht möglich: {error}"
+
+msgid "Warp: drag the points and handles to bend the layer. Enter applies, Esc cancels."
+msgstr "Verformen: Punkte und Griffe ziehen, um die Ebene zu biegen. Enter übernimmt, Esc bricht ab."
+
+msgid "Bend the layer with a grid of handles"
+msgstr "Die Ebene mit einem Gitter aus Griffen biegen"
+
+msgid "Drag the corners, handles and inner points; a corner takes its handles along."
+msgstr "Ecken, Griffe und innere Punkte ziehen; eine Ecke nimmt ihre Griffe mit."

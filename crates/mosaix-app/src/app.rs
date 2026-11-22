@@ -107,6 +107,8 @@ enum Drag {
     Paint,
     /// Ruler: measuring from `start`.
     Ruler { start: DVec2 },
+    /// Warp: dragging control point (row, column).
+    WarpPoint { j: usize, i: usize },
     /// Liquify brush: last position (document px) and pressure.
     Liquify {
         last: DVec2,
@@ -492,6 +494,8 @@ pub struct App {
     brush_blend: mosaix_core::BlendMode,
     /// The ruler's line (document px), kept until the next measurement.
     ruler: Option<(DVec2, DVec2)>,
+    /// Edit › Transform › Warp in progress (runs as a liquify session).
+    warp: Option<mosaix_core::warp::Patch>,
     /// Filter › Last Filter (Ctrl+F) repeats it.
     last_filter: Option<mosaix_core::Filter>,
     /// Shape tool: "rect", "ellipse", "line", "polygon", "star" or a preset;
@@ -763,6 +767,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         last_filter: None,
         brush_blend: mosaix_core::BlendMode::Normal,
         ruler: None,
+        warp: None,
         shape: Default::default(),
         openai_key: settings::key_state(),
         wand_tolerance: 32.0,
@@ -1151,6 +1156,7 @@ impl App {
             },
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
+            Button::Primary if self.warp.is_some() => self.warp_press(pos),
             Button::Primary if self.liquifying() => self.begin_liquify(pos, pressure),
             Button::Primary if self.ui_state.color_range_open() => {
                 // Color Range: pick the colour to select from the picture.
@@ -1460,7 +1466,8 @@ impl App {
     }
 
     fn commit_liquify(&mut self) {
-        self.engine_op(|e| e.liquify_commit(tr("Liquify")));
+        let label = if self.warp.take().is_some() { tr("Warp") } else { tr("Liquify") };
+        self.engine_op(|e| e.liquify_commit(label));
         self.needs_redraw = true;
     }
 
@@ -1468,8 +1475,48 @@ impl App {
         if let Some(e) = self.engine() {
             e.liquify_cancel();
         }
-        tracing::info!("{}", tr("Liquify cancelled"));
+        let what = if self.warp.take().is_some() { tr("Warp cancelled") } else { tr("Liquify cancelled") };
+        tracing::info!("{what}");
         self.needs_redraw = true;
+    }
+
+    /// Edit › Transform › Warp: a 4 × 4 grid over the layer's content.
+    fn begin_warp(&mut self) {
+        if self.liquifying() || self.boxed.is_some() {
+            return;
+        }
+        let Some(e) = self.engine() else { return };
+        let id = e.doc().active;
+        let Some((x0, y0, x1, y1)) = e.content_bounds(id) else {
+            return tracing::warn!("{}", tr("Nothing to warp: the layer is empty."));
+        };
+        if let Err(err) = e.liquify_begin() {
+            return tracing::warn!("{}", tr!("Cannot warp: {error}", error = err));
+        }
+        // A transparent margin around the content keeps the warped edge clean.
+        let m = 8.0;
+        self.warp = Some(mosaix_core::warp::Patch::identity(DVec2::new(x0 as f64 - m, y0 as f64 - m), DVec2::new(x1 as f64 + m, y1 as f64 + m)));
+        tracing::info!("{}", tr("Warp: drag the points and handles to bend the layer. Enter applies, Esc cancels."));
+        self.needs_redraw = true;
+    }
+
+    /// Picks the warp control point under the pointer.
+    fn warp_press(&mut self, pos: DVec2) -> Drag {
+        let Some(p) = &self.warp else { return Drag::None };
+        let mut best = None;
+        let mut best_d = 12.0 * self.scale;
+        for (j, row) in p.pts.iter().enumerate() {
+            for (i, q) in row.iter().enumerate() {
+                let d = self.view.doc_to_screen(*q).distance(pos);
+                if d < best_d {
+                    (best_d, best) = (d, Some((j, i)));
+                }
+            }
+        }
+        match best {
+            Some((j, i)) => Drag::WarpPoint { j, i },
+            None => Drag::None,
+        }
     }
 
     /// The liquify tool in effect (Alt reverses twirl and pucker/bloat).
@@ -1963,6 +2010,25 @@ impl App {
             }
             Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
+            }
+            Drag::WarpPoint { j, i } => {
+                let (j, i) = (*j, *i);
+                let doc = self.view.screen_to_doc(pos);
+                if let Some(p) = &mut self.warp {
+                    // A corner takes its two handles along.
+                    let d = doc - p.pts[j][i];
+                    p.pts[j][i] = doc;
+                    if (j == 0 || j == 3) && (i == 0 || i == 3) {
+                        let (dj, di): (isize, isize) = (if j == 0 { 1 } else { -1 }, if i == 0 { 1 } else { -1 });
+                        p.pts[(j as isize + dj) as usize][i] += d;
+                        p.pts[j][(i as isize + di) as usize] += d;
+                    }
+                    let patch = *p;
+                    if let Some(e) = self.engine() {
+                        e.liquify_set_warp(&patch);
+                    }
+                }
+                self.needs_redraw = true;
             }
             Drag::Ruler { start } => {
                 let mut end = self.view.screen_to_doc(pos);
@@ -4424,6 +4490,7 @@ impl App {
                 Some((BoxKind::Transform | BoxKind::Selection, b)) => Some(b.mode),
                 _ => None,
             },
+            warping: self.warp.is_some(),
             liquify: e.liquify_active().then_some((
                 self.liq_tool,
                 self.liq_size,
@@ -4820,6 +4887,7 @@ impl App {
                     }
                 }
                 Action::ClearRuler => self.ruler = None,
+                Action::BeginWarp => self.begin_warp(),
                 Action::SwitchTab(i) => self.switch_tab(i),
                 Action::SelectionToShape => {
                     let cmd = serde_json::json!({ "cmd": "select_to_shape", "color": actions::hex(self.brush.color) });
@@ -5593,6 +5661,29 @@ impl App {
                     points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)],
                     closed: false,
                 }]
+            }
+            _ if self.warp.is_some() => {
+                let p = self.warp.as_ref().unwrap();
+                let mut lines: Vec<OverlayLine> = p
+                    .grid_lines(32)
+                    .into_iter()
+                    .map(|l| OverlayLine { points: l.into_iter().map(|q| v.doc_to_screen(q)).collect(), closed: false })
+                    .collect();
+                // Control points as small squares, handles joined to their corners.
+                let r = 4.0 * self.scale;
+                for row in &p.pts {
+                    for q in row {
+                        let c = v.doc_to_screen(*q);
+                        lines.push(OverlayLine {
+                            points: vec![c + DVec2::new(-r, -r), c + DVec2::new(r, -r), c + DVec2::new(r, r), c + DVec2::new(-r, r)],
+                            closed: true,
+                        });
+                    }
+                }
+                for (j, i, hj, hi) in [(0, 0, 0, 1), (0, 0, 1, 0), (0, 3, 0, 2), (0, 3, 1, 3), (3, 0, 2, 0), (3, 0, 3, 1), (3, 3, 3, 2), (3, 3, 2, 3)] {
+                    lines.push(OverlayLine { points: vec![v.doc_to_screen(p.pts[j][i]), v.doc_to_screen(p.pts[hj][hi])], closed: false });
+                }
+                lines
             }
             _ if self.tool == Tool::Ruler && self.ruler.is_some() => {
                 let (a, b) = self.ruler.unwrap();

@@ -339,6 +339,8 @@ pub struct Model {
     /// Shape tool: ellipse instead of rectangle.
     pub shape: ShapeOpts,
     pub brush_blend: BlendMode,
+    /// A Warp session is open (shown instead of the liquify tools).
+    pub warping: bool,
     /// Ruler: length (px) and angle (degrees, counter-clockwise from horizontal).
     pub ruler: Option<(f64, f64)>,
     /// Histogram of what is below the active adjustment (levels and curves).
@@ -366,6 +368,8 @@ pub enum Action {
     /// Ruler › Straighten, Clear.
     Straighten,
     ClearRuler,
+    /// Edit › Transform › Warp.
+    BeginWarp,
     /// Select › Selection to Shape Layer (foreground colour).
     SelectionToShape,
     /// The active layer's locks.
@@ -1263,6 +1267,7 @@ pub enum Extra {
     Upscale(u32),
     LoadChannel(usize),
     Recent(std::path::PathBuf),
+    Warp,
 }
 
 pub struct ExtraItem {
@@ -1330,6 +1335,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         let ok = transform_ok(m, mo);
         add("Edit", &format!("Transform {}", mo.name()), format!("{}: {}", tr("Transform"), tr(mo.name())), (!ok).then_some(tr("Not for this layer")), Extra::Transform(mo));
     }
+    add("Edit", "Transform Warp", format!("{}: {}", tr("Transform"), tr("Warp")), (!pixel_active(m)).then_some(tr("Works on pixel layers")), Extra::Warp);
     for f in mosaix_core::Filter::defaults().into_iter().chain(m.filter_plugins.iter().filter_map(|p| p.result.as_ref().ok().cloned())) {
         let name = f.name().to_string();
         add("Filter", &format!("Filter {name}"), format!("{}: {name} …", tr("Filter")), None, Extra::Filter(f));
@@ -1393,6 +1399,7 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
         Extra::Upscale(k) => out.push(Action::Upscale(k)),
         Extra::LoadChannel(i) => out.push(Action::Agent(serde_json::json!({ "cmd": "select_load", "channel": i, "mode": "replace" }))),
         Extra::Recent(p) => out.push(Action::OpenFile(p)),
+        Extra::Warp => out.push(Action::BeginWarp),
     }
 }
 
@@ -1542,6 +1549,13 @@ fn special_entry(
                             out.push(Action::BoxMode(mo));
                             ui.close();
                         }
+                    }
+                    let r = ui
+                        .add_enabled(pixel_active(m), egui::Button::new(tr("Warp")))
+                        .on_disabled_hover_text(tr("Works on pixel layers"));
+                    if r.on_hover_text(tr("Bend the layer with a grid of handles")).clicked() {
+                        out.push(Action::BeginWarp);
+                        ui.close();
                     }
                 });
             })
@@ -1876,6 +1890,18 @@ fn options_bar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().slider_width = 96.0;
         ui.spacing_mut().item_spacing.x = 6.0;
+        if m.warping {
+            ui.label(RichText::new(tr("Warp")).strong());
+            ui.separator();
+            if ui.button(tr("Apply")).on_hover_text("Enter").clicked() {
+                out.push(Action::LiquifyCommit);
+            }
+            if ui.button(tr("Cancel")).on_hover_text("Esc").clicked() {
+                out.push(Action::LiquifyCancel);
+            }
+            hint(ui, tr("Drag the corners, handles and inner points; a corner takes its handles along."));
+            return;
+        }
         if let Some((tool, size, strength)) = m.liquify {
             ui.label(RichText::new(tr("Liquify")).strong());
             ui.separator();

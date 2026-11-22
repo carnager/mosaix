@@ -3954,3 +3954,32 @@ fn rotate_all_layers_about_the_centre() {
     let (x0, _, x1, _) = e.content_bounds(a).unwrap();
     assert!(x1 - x0 > 190, "one undo step");
 }
+
+#[test]
+fn warp_bends_the_layer() {
+    use mosaix_core::warp::Patch;
+    let Some(g) = gpu() else { return };
+    let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+    let layer = e.doc().active;
+    // A white square 64…192.
+    let mut sq = vec![f16::ZERO; TS * TS * 4];
+    for y in 64..192 {
+        for x in 64..192 {
+            sq[(y * TS + x) * 4..][..4].fill(f16::ONE);
+        }
+    }
+    e.upload_tile(layer, TileCoord::new(0, 0), &sq);
+    e.liquify_begin().unwrap();
+    // Unchanged patch: nothing moves.
+    let mut p = Patch::identity(DVec2::new(64.0, 64.0), DVec2::new(192.0, 192.0));
+    e.liquify_set_warp(&p);
+    // Pull the middle of the top edge up by 40 px.
+    p.pts[0][1].y -= 40.0;
+    p.pts[0][2].y -= 40.0;
+    e.liquify_set_warp(&p);
+    e.liquify_commit("Warp").unwrap();
+    let t = e.read_layer_tile(layer, TileCoord::new(0, 0)).unwrap();
+    assert!(px(&t, 128, 50)[3] > 0.9, "the top bulges up: {:?}", px(&t, 128, 50));
+    assert!(px(&t, 66, 50)[3] < 0.1, "the corners stay");
+    assert!(px(&t, 128, 128)[3] > 0.9 && px(&t, 128, 220)[3] < 0.1);
+}

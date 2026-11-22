@@ -164,6 +164,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         recent_fonts: vec!["IBM Plex Mono".into()],
         shape: Default::default(),
         brush_blend: Default::default(),
+        warping: std::env::var_os("MOSAIX_SNAPSHOT_WARP").is_some(),
         ruler: std::env::var_os("MOSAIX_SNAPSHOT_RULER").map(|_| (412.3, 2.75)),
         histogram: None,
     };

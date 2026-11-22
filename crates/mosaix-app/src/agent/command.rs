@@ -164,6 +164,11 @@ pub enum Command {
     },
     /// Layer › Delete Hidden Layers.
     LayerDeleteHidden,
+    /// Edit › Transform › Warp: 16 offsets (row-major, top row first) for
+    /// the 4 × 4 Bézier grid over the layer's content.
+    LayerWarp {
+        offsets: Vec<[f64; 2]>,
+    },
     /// Turn the whole image by an angle (degrees, clockwise) about its centre.
     ImageRotate {
         angle: f64,
@@ -705,6 +710,7 @@ impl Command {
             Self::LayerVia { .. } => "layer_via",
             Self::LayerDeleteHidden => "layer_delete_hidden",
             Self::ImageRotate { .. } => "image_rotate",
+            Self::LayerWarp { .. } => "layer_warp",
             Self::SelectLayerPixels { .. } => "select_layer_pixels",
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
@@ -1762,6 +1768,21 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let id = pixel_layer(s, layer)?;
             s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
             ok(s)
+        }
+        Command::LayerWarp { offsets } => {
+            ensure!(offsets.len() == 16, "offsets needs 16 [dx, dy] pairs (4 × 4 grid, row by row)");
+            let id = pixel_layer(s, None)?;
+            let (x0, y0, x1, y1) = s.engine.content_bounds(id).context("the layer is empty")?;
+            let m = 8.0;
+            let mut p = mosaix_core::warp::Patch::identity(DVec2::new(x0 as f64 - m, y0 as f64 - m), DVec2::new(x1 as f64 + m, y1 as f64 + m));
+            for (k, d) in offsets.iter().enumerate() {
+                p.pts[k / 4][k % 4] += DVec2::new(d[0], d[1]);
+            }
+            s.engine.liquify_begin().map_err(engine_err)?;
+            s.engine.liquify_set_warp(&p);
+            s.engine.liquify_commit(tr("Warp")).map_err(engine_err)?;
+            let bounds = s.engine.content_bounds(id).map(bounds_json);
+            Ok(Output::json(json!({ "ok": true, "bounds": bounds })))
         }
         Command::ImageRotate { angle } => {
             ensure!(angle.is_finite() && angle.abs() <= 360.0, "angle must be −360…360");

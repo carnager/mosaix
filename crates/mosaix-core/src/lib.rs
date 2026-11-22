@@ -21,6 +21,7 @@ pub mod style;
 pub mod tile;
 pub mod vector;
 pub mod view;
+pub mod warp;
 
 pub use adjust::Adjustment;
 pub use blend::{BlendMode, BlendSpace};
