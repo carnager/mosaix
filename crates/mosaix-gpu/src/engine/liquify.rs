@@ -248,6 +248,71 @@ impl Engine {
         l.mark(0, 0, fw, fh);
     }
 
+    /// The liquify field's grid: origin, spacing (document px) and size.
+    pub fn liquify_field_grid(&self) -> Option<(DVec2, f64, usize, usize)> {
+        self.liquify.as_ref().map(|l| (l.origin, l.spacing, l.fw, l.fh))
+    }
+
+    /// Replaces the whole field (row-major, as [`Engine::liquify_field_grid`]).
+    pub fn liquify_set_field(&mut self, field: Vec<[f32; 2]>) {
+        let Some(l) = &mut self.liquify else { return };
+        if field.len() != l.field.len() {
+            return;
+        }
+        l.field = field;
+        let (fw, fh) = (l.fw, l.fh);
+        l.mark(0, 0, fw, fh);
+    }
+
+    /// Which `cell`-px squares of a pixel layer hold visible pixels:
+    /// origin, columns, rows and the flags (row-major).
+    pub fn layer_cells(&self, layer: LayerId, cell: f64) -> Option<(DVec2, usize, usize, Vec<bool>)> {
+        let tiles = self.doc.find(layer)?.tiles()?.clone();
+        if tiles.is_empty() {
+            return None;
+        }
+        let ts = TILE_SIZE as i64;
+        let coords: Vec<TileCoord> = tiles.keys().copied().collect();
+        let list: Vec<crate::pool::Tile> = coords.iter().map(|c| tiles[c].clone()).collect();
+        let data = self.read_layer_tiles(&list);
+        let (mut x0, mut y0, mut x1, mut y1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+        let mut hits: Vec<(i64, i64)> = Vec::new();
+        for (c, px) in coords.iter().zip(&data) {
+            let (ox, oy) = (c.x as i64 * ts, c.y as i64 * ts);
+            for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
+                if p[3].to_f32() > 0.02 {
+                    let (x, y) = (ox + i as i64 % ts, oy + i as i64 / ts);
+                    hits.push((x, y));
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                }
+            }
+        }
+        if hits.is_empty() {
+            return None;
+        }
+        // One empty cell of margin around the content.
+        let origin = DVec2::new(x0 as f64 - cell, y0 as f64 - cell);
+        let cols = ((x1 - x0 + 1) as f64 / cell).ceil() as usize + 2;
+        let rows = ((y1 - y0 + 1) as f64 / cell).ceil() as usize + 2;
+        let mut occ = vec![false; cols * rows];
+        for (x, y) in hits {
+            let c = ((x as f64 - origin.x) / cell) as usize;
+            let r = ((y as f64 - origin.y) / cell) as usize;
+            occ[r.min(rows - 1) * cols + c.min(cols - 1)] = true;
+        }
+        // Grown by one cell, so the mesh reaches past the content's edge.
+        let grown: Vec<bool> = (0..rows * cols)
+            .map(|k| {
+                let (c, r) = ((k % cols) as i64, (k / cols) as i64);
+                (-1..=1).any(|dr| (-1..=1).any(|dc| {
+                    let (cc, rr) = (c + dc, r + dr);
+                    cc >= 0 && rr >= 0 && (cc as usize) < cols && (rr as usize) < rows && occ[rr as usize * cols + cc as usize]
+                }))
+            })
+            .collect();
+        Some((origin, cols, rows, grown))
+    }
+
     pub fn liquify_active(&self) -> bool {
         self.liquify.is_some()
     }

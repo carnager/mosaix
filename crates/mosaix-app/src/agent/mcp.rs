@@ -486,6 +486,15 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "layer_puppet_warp",
+            "Edit › Puppet Warp on the active pixel layer: a mesh is laid over its visible pixels; each pin sits on the pixels at `from` and is moved to `to` (to = from holds that place). The shape bends as rigidly as possible – e.g. pin a body and swing an arm. Gaps in the layer are respected.",
+            json!({ "pins": { "type": "array", "items": { "type": "object", "properties": {
+                "from": { "type": "array", "items": { "type": "number" } },
+                "to": { "type": "array", "items": { "type": "number" } } }, "required": ["from", "to"] } } }),
+            &["pins"],
+            false,
+        ),
+        tool(
             "image_rotate",
             "Turn the whole image (every layer) by an angle in degrees, clockwise, about the canvas centre – e.g. to straighten a horizon. Content outside the canvas is kept; crop afterwards if wanted.",
             json!({ "angle": { "type": "number" } }),
@@ -1181,7 +1190,7 @@ mod tests {
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
             "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
             "generative_fill": {"prompt": "a bench"},
-            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "image_rotate": {"angle": 2.5}, "shape_combine": {"op": "unite"}, "layer_warp": {"offsets": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]}, "layer_distribute": {"direction": "vertical"}
+            "bucket_fill": {"x": 1, "y": 1, "color": "#ff0000"}, "adjustment_apply": {"adjustment": {"kind": "invert"}}, "stroke_selection": {"width": 2, "color": "#000000"}, "layer_align": {"edge": "left"}, "history_source": {"position": 0}, "auto_adjust": {"mode": "tone"}, "image_rotate": {"angle": 2.5}, "shape_combine": {"op": "unite"}, "layer_puppet_warp": {"pins": [{"from": [1, 1], "to": [2, 2]}]}, "layer_warp": {"offsets": [[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0],[0,0]]}, "layer_distribute": {"direction": "vertical"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {
@@ -1226,6 +1235,7 @@ mod tests {
                         ("negative", _) => json!([[1, 2]]),
                         ("also", _) => json!([1]),
                         ("offsets", _) => json!(vec![[0.0, 0.0]; 16]),
+                        ("pins", _) => json!([{"from": [1, 1], "to": [2, 2]}]),
                         ("corners", _) => json!([[0, 0], [10, 0], [10, 10], [0, 10]]),
                         ("noise", _) => json!({"luminance": 10, "color": 30}),
                         ("raw", _) => json!({"white_balance": {"mode": "custom", "temperature": 5000, "tint": 0}, "exposure": 1}),

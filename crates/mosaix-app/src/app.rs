@@ -109,6 +109,8 @@ enum Drag {
     Ruler { start: DVec2 },
     /// Warp: dragging control point (row, column).
     WarpPoint { j: usize, i: usize },
+    /// Puppet Warp: dragging pin `k`.
+    PuppetPin { k: usize },
     /// Liquify brush: last position (document px) and pressure.
     Liquify {
         last: DVec2,
@@ -500,6 +502,8 @@ pub struct App {
     ruler: Option<(DVec2, DVec2)>,
     /// Edit › Transform › Warp in progress (runs as a liquify session).
     warp: Option<mosaix_core::warp::Patch>,
+    /// Edit › Puppet Warp in progress (also a liquify session).
+    puppet: Option<crate::puppet::Puppet>,
     /// Filter › Last Filter (Ctrl+F) repeats it.
     last_filter: Option<mosaix_core::Filter>,
     /// Shape tool: "rect", "ellipse", "line", "polygon", "star" or a preset;
@@ -772,6 +776,7 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         brush_blend: mosaix_core::BlendMode::Normal,
         ruler: None,
         warp: None,
+        puppet: None,
         shape: Default::default(),
         openai_key: settings::key_state(),
         wand_tolerance: 32.0,
@@ -1161,6 +1166,7 @@ impl App {
             Button::Primary if self.space => Drag::Pan { last: pos },
             Button::Primary if self.r_key => Drag::Rotate { last: pos },
             Button::Primary if self.warp.is_some() => self.warp_press(pos),
+            Button::Primary if self.puppet.is_some() => self.puppet_press(pos),
             Button::Primary if self.liquifying() => self.begin_liquify(pos, pressure),
             Button::Primary if self.ui_state.color_range_open() => {
                 // Color Range: pick the colour to select from the picture.
@@ -1471,7 +1477,13 @@ impl App {
     }
 
     fn commit_liquify(&mut self) {
-        let label = if self.warp.take().is_some() { tr("Warp") } else { tr("Liquify") };
+        let label = if self.warp.take().is_some() {
+            tr("Warp")
+        } else if self.puppet.take().is_some() {
+            tr("Puppet Warp")
+        } else {
+            tr("Liquify")
+        };
         self.engine_op(|e| e.liquify_commit(label));
         self.needs_redraw = true;
     }
@@ -1480,7 +1492,13 @@ impl App {
         if let Some(e) = self.engine() {
             e.liquify_cancel();
         }
-        let what = if self.warp.take().is_some() { tr("Warp cancelled") } else { tr("Liquify cancelled") };
+        let what = if self.warp.take().is_some() {
+            tr("Warp cancelled")
+        } else if self.puppet.take().is_some() {
+            tr("Puppet Warp cancelled")
+        } else {
+            tr("Liquify cancelled")
+        };
         tracing::info!("{what}");
         self.needs_redraw = true;
     }
@@ -1503,6 +1521,52 @@ impl App {
         self.warp = Some(mosaix_core::warp::Patch::identity(DVec2::new(x0 as f64 - m, y0 as f64 - m), DVec2::new(x1 as f64 + m, y1 as f64 + m)));
         tracing::info!("{}", tr("Warp: drag the points and handles to bend the layer. Enter applies, Esc cancels."));
         self.needs_redraw = true;
+    }
+
+    /// Edit › Puppet Warp on the active pixel layer.
+    fn begin_puppet(&mut self) {
+        if self.liquifying() || self.boxed.is_some() {
+            return;
+        }
+        let Some(e) = self.engine() else { return };
+        match crate::puppet::Puppet::begin(e) {
+            Ok(mut p) => {
+                p.update(e);
+                self.puppet = Some(p);
+                tracing::info!("{}", tr("Puppet Warp: click on the layer to add pins, drag them to bend it, Alt+click removes a pin. Enter applies, Esc cancels."));
+            }
+            Err(err) => tracing::warn!("{}", tr!("Cannot warp: {error}", error = err)),
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Puppet Warp: a pin under the pointer is dragged (Alt: removed);
+    /// elsewhere on the mesh a new pin is placed and dragged.
+    fn puppet_press(&mut self, pos: DVec2) -> Drag {
+        let doc = self.view.screen_to_doc(pos);
+        let r = 8.0 * self.scale / self.view.zoom;
+        let alt = self.mods.alt;
+        let Some(p) = &mut self.puppet else { return Drag::None };
+        let k = match p.pin_at(doc, r) {
+            Some(k) if alt => {
+                p.remove_pin(k);
+                let mut p = self.puppet.take().unwrap();
+                if let Some(e) = self.engine() {
+                    p.update(e);
+                }
+                self.puppet = Some(p);
+                self.needs_redraw = true;
+                return Drag::None;
+            }
+            Some(k) => k,
+            None if alt => return Drag::None,
+            None => match p.add_pin(doc) {
+                Some(k) => k,
+                None => return Drag::None,
+            },
+        };
+        self.needs_redraw = true;
+        Drag::PuppetPin { k }
     }
 
     /// Picks the warp control point under the pointer.
@@ -2016,6 +2080,17 @@ impl App {
             }
             Drag::Gradient { end, .. } | Drag::Move { end, .. } => {
                 *end = self.view.screen_to_doc(pos);
+            }
+            Drag::PuppetPin { k } => {
+                let (k, doc) = (*k, self.view.screen_to_doc(pos));
+                if let Some(mut p) = self.puppet.take() {
+                    p.move_pin(k, doc);
+                    if let Some(e) = self.engine() {
+                        p.update(e);
+                    }
+                    self.puppet = Some(p);
+                }
+                self.needs_redraw = true;
             }
             Drag::WarpPoint { j, i } => {
                 let (j, i) = (*j, *i);
@@ -4514,6 +4589,7 @@ impl App {
                 _ => None,
             },
             warping: self.warp.is_some(),
+            puppet: self.puppet.as_ref().map(|p| p.show_mesh),
             liquify: e.liquify_active().then_some((
                 self.liq_tool,
                 self.liq_size,
@@ -4912,6 +4988,12 @@ impl App {
                 }
                 Action::ClearRuler => self.ruler = None,
                 Action::BeginWarp => self.begin_warp(),
+                Action::BeginPuppet => self.begin_puppet(),
+                Action::PuppetMesh(on) => {
+                    if let Some(p) = &mut self.puppet {
+                        p.show_mesh = on;
+                    }
+                }
                 Action::SwitchTab(i) => self.switch_tab(i),
                 Action::SelectionToShape => {
                     let cmd = serde_json::json!({ "cmd": "select_to_shape", "color": actions::hex(self.brush.color) });
@@ -5685,6 +5767,30 @@ impl App {
                     points: vec![v.doc_to_screen(*start), v.doc_to_screen(*end)],
                     closed: false,
                 }]
+            }
+            _ if self.puppet.is_some() => {
+                let p = self.puppet.as_ref().unwrap();
+                let pts = p.deformed();
+                let mut lines: Vec<OverlayLine> = Vec::new();
+                if p.show_mesh {
+                    for (i, ns) in p.mesh.nbrs.iter().enumerate() {
+                        for &j in ns {
+                            if (j as usize) > i {
+                                lines.push(OverlayLine { points: vec![v.doc_to_screen(pts[i]), v.doc_to_screen(pts[j as usize])], closed: false });
+                            }
+                        }
+                    }
+                }
+                // Pins: small diamonds.
+                let r = 5.0 * self.scale;
+                for (_, q) in &p.pins {
+                    let c = v.doc_to_screen(*q);
+                    lines.push(OverlayLine {
+                        points: vec![c + DVec2::new(0.0, -r), c + DVec2::new(r, 0.0), c + DVec2::new(0.0, r), c + DVec2::new(-r, 0.0)],
+                        closed: true,
+                    });
+                }
+                lines
             }
             _ if self.warp.is_some() => {
                 let p = self.warp.as_ref().unwrap();

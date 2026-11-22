@@ -38,6 +38,7 @@ pub enum Special {
     /// Layer › Delete Hidden Layers.
     DeleteHidden,
     CombineShapes,
+    PuppetWarp,
     ConvertToSmart,
     NewGuide,
     GridSettings,
@@ -114,6 +115,7 @@ const EDIT: &[Item] = &[
     Sep,
     C("Free Transform", G(g::BOUNDING_BOX)),
     S(Special::Transform, G(g::PERSPECTIVE)),
+    S(Special::PuppetWarp, Icon::None),
     C("Fill Area", G(g::PAINT_BUCKET)),
     S(Special::StrokeSelection, G(g::SELECTION)),
     C("Delete Selection (Pixels)", G(g::TRASH)),

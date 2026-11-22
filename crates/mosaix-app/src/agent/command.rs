@@ -71,6 +71,14 @@ fn default_true() -> bool {
     true
 }
 
+/// A Puppet Warp pin: from where (document px, on the layer) to where.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PuppetPin {
+    pub from: [f64; 2],
+    pub to: [f64; 2],
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
@@ -168,6 +176,11 @@ pub enum Command {
     /// the 4 × 4 Bézier grid over the layer's content.
     LayerWarp {
         offsets: Vec<[f64; 2]>,
+    },
+    /// Edit › Puppet Warp: pins at `from` move to `to` (equal: holds that
+    /// place); the layer bends as rigidly as possible.
+    LayerPuppetWarp {
+        pins: Vec<PuppetPin>,
     },
     /// Turn the whole image by an angle (degrees, clockwise) about its centre.
     ImageRotate {
@@ -719,6 +732,7 @@ impl Command {
             Self::LayerDeleteHidden => "layer_delete_hidden",
             Self::ImageRotate { .. } => "image_rotate",
             Self::LayerWarp { .. } => "layer_warp",
+            Self::LayerPuppetWarp { .. } => "layer_puppet_warp",
             Self::SelectLayerPixels { .. } => "select_layer_pixels",
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
@@ -1781,6 +1795,24 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let id = pixel_layer(s, layer)?;
             s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
             ok(s)
+        }
+        Command::LayerPuppetWarp { pins } => {
+            ensure!(!pins.is_empty(), "pins must not be empty");
+            let id = pixel_layer(s, None)?;
+            not_painting(s)?;
+            let mut p = crate::puppet::Puppet::begin(&mut s.engine).map_err(|e| anyhow::anyhow!(e))?;
+            for (k, pin) in pins.iter().enumerate() {
+                let from = DVec2::new(pin.from[0], pin.from[1]);
+                let Some(i) = p.add_pin(from) else {
+                    s.engine.liquify_cancel();
+                    bail!("pin {k} at {:?} is not on the layer's pixels", pin.from);
+                };
+                p.move_pin(i, DVec2::new(pin.to[0], pin.to[1]));
+            }
+            p.update(&mut s.engine);
+            s.engine.liquify_commit(tr("Puppet Warp")).map_err(engine_err)?;
+            let bounds = s.engine.content_bounds(id).map(bounds_json);
+            Ok(Output::json(json!({ "ok": true, "bounds": bounds })))
         }
         Command::LayerWarp { offsets } => {
             ensure!(offsets.len() == 16, "offsets needs 16 [dx, dy] pairs (4 × 4 grid, row by row)");

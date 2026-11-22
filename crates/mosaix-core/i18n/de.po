@@ -3823,3 +3823,21 @@ msgstr "Stauchen"
 
 msgid "Twist"
 msgstr "Verbiegen"
+
+msgid "Puppet Warp"
+msgstr "Formgitter"
+
+msgid "Puppet Warp cancelled"
+msgstr "Formgitter abgebrochen"
+
+msgid "Puppet Warp: click on the layer to add pins, drag them to bend it, Alt+click removes a pin. Enter applies, Esc cancels."
+msgstr "Formgitter: auf die Ebene klicken setzt Pins, Ziehen verbiegt sie, Alt+Klick entfernt einen Pin. Enter übernimmt, Esc bricht ab."
+
+msgid "Pins on the layer: move them and the shape bends naturally (arms, branches …)"
+msgstr "Pins auf der Ebene: verschieben und die Form biegt sich natürlich (Arme, Äste …)"
+
+msgid "Show Mesh"
+msgstr "Gitter anzeigen"
+
+msgid "Click: add a pin · drag a pin to bend · Alt+click: remove a pin. Pin what should stay, then move the rest."
+msgstr "Klick: Pin setzen · Pin ziehen: verbiegen · Alt+Klick: Pin entfernen. Erst festpinnen, was bleiben soll, dann den Rest bewegen."

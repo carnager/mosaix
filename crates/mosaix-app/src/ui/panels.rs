@@ -345,6 +345,8 @@ pub struct Model {
     pub brush_blend: BlendMode,
     /// A Warp session is open (shown instead of the liquify tools).
     pub warping: bool,
+    /// A Puppet Warp session is open: whether its mesh is shown.
+    pub puppet: Option<bool>,
     /// Ruler: length (px) and angle (degrees, counter-clockwise from horizontal).
     pub ruler: Option<(f64, f64)>,
     /// Histogram of what is below the active adjustment (levels and curves).
@@ -374,6 +376,9 @@ pub enum Action {
     ClearRuler,
     /// Edit › Transform › Warp.
     BeginWarp,
+    /// Edit › Puppet Warp; show its mesh.
+    BeginPuppet,
+    PuppetMesh(bool),
     /// Select › Selection to Shape Layer (foreground colour).
     SelectionToShape,
     /// The active layer's locks.
@@ -1273,6 +1278,7 @@ pub enum Extra {
     Recent(std::path::PathBuf),
     Warp,
     CombineShapes(mosaix_core::vector::PathOp),
+    Puppet,
 }
 
 pub struct ExtraItem {
@@ -1344,6 +1350,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         let off = (shapes_picked(m) < 2).then_some(tr("Select two or more shape layers"));
         add("Layer", &format!("Combine Shapes {}", op.key()), format!("{}: {}", tr("Combine Shapes"), op.name()), off, Extra::CombineShapes(op));
     }
+    add("Edit", "Puppet Warp", tr("Puppet Warp").to_string(), (!pixel_active(m)).then_some(tr("Works on pixel layers")), Extra::Puppet);
     add("Edit", "Transform Warp", format!("{}: {}", tr("Transform"), tr("Warp")), (!pixel_active(m)).then_some(tr("Works on pixel layers")), Extra::Warp);
     for f in mosaix_core::Filter::defaults().into_iter().chain(m.filter_plugins.iter().filter_map(|p| p.result.as_ref().ok().cloned())) {
         let name = f.name().to_string();
@@ -1409,6 +1416,7 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
         Extra::LoadChannel(i) => out.push(Action::Agent(serde_json::json!({ "cmd": "select_load", "channel": i, "mode": "replace" }))),
         Extra::Recent(p) => out.push(Action::OpenFile(p)),
         Extra::Warp => out.push(Action::BeginWarp),
+        Extra::Puppet => out.push(Action::BeginPuppet),
         Extra::CombineShapes(op) => out.push(Action::Agent(serde_json::json!({ "cmd": "shape_combine", "op": op.key() }))),
     }
 }
@@ -1638,6 +1646,13 @@ fn special_entry(
             let r = ui.add_enabled(m.can_revert, egui::Button::new((icon, tr("Revert"))));
             if r.on_disabled_hover_text(tr("The image was never saved")).on_hover_text(tr("Reload the last saved version")).clicked() {
                 run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
+        Special::PuppetWarp => {
+            let r = ui.add_enabled(pixel_active(m), egui::Button::new((icon, tr("Puppet Warp"))));
+            if r.on_disabled_hover_text(tr("Works on pixel layers")).on_hover_text(tr("Pins on the layer: move them and the shape bends naturally (arms, branches …)")).clicked() {
+                out.push(Action::BeginPuppet);
                 ui.close();
             }
         }
@@ -1915,6 +1930,22 @@ fn options_bar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Action>) {
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().slider_width = 96.0;
         ui.spacing_mut().item_spacing.x = 6.0;
+        if let Some(show) = m.puppet {
+            ui.label(RichText::new(tr("Puppet Warp")).strong());
+            ui.separator();
+            let mut s = show;
+            if ui.checkbox(&mut s, tr("Show Mesh")).changed() {
+                out.push(Action::PuppetMesh(s));
+            }
+            if ui.button(tr("Apply")).on_hover_text("Enter").clicked() {
+                out.push(Action::LiquifyCommit);
+            }
+            if ui.button(tr("Cancel")).on_hover_text("Esc").clicked() {
+                out.push(Action::LiquifyCancel);
+            }
+            hint(ui, tr("Click: add a pin · drag a pin to bend · Alt+click: remove a pin. Pin what should stay, then move the rest."));
+            return;
+        }
         if m.warping {
             ui.label(RichText::new(tr("Warp")).strong());
             ui.separator();

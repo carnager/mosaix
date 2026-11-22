@@ -6,6 +6,7 @@ mod app;
 mod boxedit;
 mod loader;
 mod portal;
+mod puppet;
 mod session;
 mod settings;
 mod tablet;
