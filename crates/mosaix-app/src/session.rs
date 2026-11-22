@@ -236,7 +236,7 @@ impl Session {
         };
         let uploaded = self
             .engine
-            .load_mask(m.layer, cpu, m.enabled)
+            .load_mask(m.slot, cpu, m.enabled)
             .context(tr("GPU memory full"))?;
         for (c, t) in uploaded {
             if let Some(b) = m.blobs.get(&c) {
@@ -312,7 +312,7 @@ impl Session {
                 }
             }
         });
-        if let Some(sel) = &doc.selection {
+        for sel in doc.selection.iter().chain(doc.channels.iter().map(|c| &c.mask)) {
             for t in sel.tiles.values() {
                 if let MaskTile::Pixels(tile) = t {
                     mask_tiles

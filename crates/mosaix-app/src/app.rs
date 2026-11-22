@@ -1751,7 +1751,6 @@ impl App {
             Keysym::a if ctrl => json!({ "cmd": "select_all" }),
             Keysym::d if ctrl => json!({ "cmd": "select_none" }),
             Keysym::i | Keysym::I if ctrl && shift => json!({ "cmd": "select_invert" }),
-            Keysym::F6 if shift && has_sel => json!({ "cmd": "select_feather", "radius": 10.0 }),
             Keysym::m | Keysym::M if ctrl && shift && !alt => json!({ "cmd": "layer_mask_add" }),
             Keysym::m | Keysym::M if ctrl && alt && shift => json!({ "cmd": "layer_mask_apply" }),
             Keysym::r if ctrl && alt => json!({ "cmd": "layer_rasterize" }),
@@ -2295,6 +2294,30 @@ impl App {
     }
 
     /// Computes a new selection from the current one on a worker thread.
+    /// Select › Modify in the background (large selections take a moment).
+    fn modify_selection(&mut self, op: &'static str, amount: f64) {
+        use mosaix_core::mask::Modify;
+        let Some((w, h)) = self.session.as_ref().map(|s| s.engine.size()) else { return };
+        if self.session.as_ref().is_some_and(|s| !s.engine.has_selection()) {
+            tracing::warn!("{}", tr("no selection"));
+            return;
+        }
+        let (label, m) = match op {
+            "expand" => (tr("Expand Selection"), Some(Modify::Expand(amount))),
+            "contract" => (tr("Contract Selection"), Some(Modify::Contract(amount))),
+            "border" => (tr("Border Selection"), Some(Modify::Border(amount))),
+            "smooth" => (tr("Smooth Selection"), Some(Modify::Smooth(amount))),
+            _ => (tr("Feather Selection"), None),
+        };
+        self.selection_job(label, move |sel| {
+            let sel = sel.context(tr("no selection"))?;
+            Ok(match m {
+                Some(m) => mosaix_core::mask::modify(&sel, m, w, h),
+                None => mosaix_core::mask::feather(&sel, amount, w, h),
+            })
+        });
+    }
+
     fn selection_job(
         &mut self,
         label: &'static str,
@@ -2922,14 +2945,11 @@ impl App {
             Keysym::d if ctrl => self.engine_op(|e| e.deselect(tr("Deselect"))),
             Keysym::i | Keysym::I if ctrl && shift => self.engine_op(|e| e.invert_selection(tr("Inverse"))),
             Keysym::F6 if shift => {
-                let Some((w, h)) = self.session.as_ref().map(|s| s.engine.size()) else { return };
                 if self.session.as_ref().is_some_and(|s| !s.engine.has_selection()) {
                     tracing::warn!("{}", tr("no selection"));
                 } else {
-                    self.selection_job(tr("Feather Selection (10 px)"), move |sel| {
-                        let sel = sel.context(tr("no selection"))?;
-                        Ok(mosaix_core::mask::feather(&sel, 10.0, w, h))
-                    });
+                    self.ui_state.open_modify("feather");
+                    self.ui_state.hidden = false;
                 }
             }
             Keysym::m | Keysym::M if ctrl && alt && shift => {
@@ -3265,6 +3285,31 @@ impl App {
         PostAction::Continue
     }
 
+    /// Runs an agent command from the interface (dialogs that have one);
+    /// errors go to the message line.
+    fn run_agent_cmd(&mut self, v: serde_json::Value) {
+        let cmd = match command::Command::parse(v) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("{e:#}");
+                return;
+            }
+        };
+        let mutates = cmd.mutates();
+        let mut ctx = command::Ctx {
+            gpu: &self.gpu,
+            format: self.surface_config.format,
+            session: &mut self.session,
+        };
+        match command::execute(&mut ctx, cmd) {
+            Ok(_) if mutates => self.touch(),
+            Ok(_) => {}
+            Err(e) => tracing::warn!("{e:#}"),
+        }
+        self.needs_redraw = true;
+        self.update_title();
+    }
+
     fn agent_line(&mut self, line: &[u8]) -> String {
         let req: serde_json::Value = match serde_json::from_slice(line) {
             Ok(v) => v,
@@ -3523,6 +3568,7 @@ impl App {
             history,
             history_done,
             has_selection: doc.selection.is_some(),
+            channels: doc.channels.iter().map(|c| c.name.clone()).collect(),
             status: self.ui_status.clone(),
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
             recent: self.settings.recent.clone(),
@@ -3594,6 +3640,8 @@ impl App {
             }
             match a {
                 Action::Command(c) => self.run_cmd(c),
+                Action::Agent(v) => self.run_agent_cmd(v),
+                Action::ModifySelection { op, amount } => self.modify_selection(op, amount),
                 Action::Run(e) => self.run_action(&e),
                 Action::StartRecording => self.start_recording(),
                 Action::StopRecording(name) => {
@@ -4953,6 +5001,8 @@ smithay_client_toolkit::delegate_dispatch2!(App);
 fn recorded_action(a: &Action) -> Option<serde_json::Value> {
     use serde_json::json;
     Some(match a {
+        Action::Agent(v) => v.clone(),
+        Action::ModifySelection { op, amount } => json!({ "cmd": "select_modify", "op": op, "amount": amount }),
         Action::ApplyFilter(f) => json!({ "cmd": "filter_apply", "filter": f }),
         Action::AddSmartFilter(f) => json!({ "cmd": "filter_apply", "filter": f, "smart": true }),
         Action::AddAdjustment(adj) => json!({ "cmd": "adjustment_add", "adjustment": adj }),

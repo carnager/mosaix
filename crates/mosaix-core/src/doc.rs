@@ -214,6 +214,22 @@ pub enum Op<'a, T> {
     },
 }
 
+/// A saved selection (Photoshop's alpha channel).
+#[derive(Debug, Clone)]
+pub struct Channel<T> {
+    pub name: String,
+    pub mask: Mask<T>,
+}
+
+/// Where a mask belongs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaskSlot {
+    Layer(LayerId),
+    Selection,
+    /// Index into [`Document::channels`].
+    Channel(usize),
+}
+
 #[derive(Debug, Clone)]
 pub struct Document<T> {
     pub width: u32,
@@ -224,6 +240,8 @@ pub struct Document<T> {
     pub active: LayerId,
     /// `None` = nothing selected, everything is editable.
     pub selection: Option<Mask<T>>,
+    /// Saved selections.
+    pub channels: Vec<Channel<T>>,
     next_id: LayerId,
 }
 
@@ -246,6 +264,7 @@ impl<T: Clone> Document<T> {
             layers: Vec::new(),
             active: 0,
             selection: None,
+            channels: Vec::new(),
             next_id: 1,
         }
     }
@@ -784,7 +803,7 @@ impl<T: Clone> Document<T> {
                 }
             }
         });
-        if let Some(sel) = &self.selection {
+        for sel in self.selection.iter().chain(self.channels.iter().map(|c| &c.mask)) {
             for t in sel.tiles.values() {
                 if let MaskTile::Pixels(p) = t {
                     f(p);
@@ -829,6 +848,7 @@ impl<T: Clone> Document<T> {
             layers: map(&self.layers, f),
             active: self.active,
             selection: self.selection.as_ref().map(|m| m.map(f)),
+            channels: self.channels.iter().map(|c| Channel { name: c.name.clone(), mask: c.mask.map(f) }).collect(),
             next_id: self.next_id,
         }
     }

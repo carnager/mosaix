@@ -322,27 +322,33 @@ fn add_span(line: &mut [f32], x0: f64, x1: f64, weight: f32) {
     }
 }
 
-/// Softens a mask with an approximately Gaussian blur (three box passes) of
-/// the given radius. Works on the bounding box of all non-default tiles,
-/// expanded by the blur reach, clipped to the document.
-pub fn feather(mask: &CpuMask, radius: f64, doc_w: u32, doc_h: u32) -> CpuMask {
-    if radius < 0.5 || mask.tiles.is_empty() {
-        return mask.clone();
+/// A part of the document gathered into one image (f32, 0…255), for the
+/// CPU mask operations: the bounding box of all non-default tiles, grown by
+/// `reach` px, clipped to the document.
+struct Region {
+    img: Vec<f32>,
+    w: usize,
+    h: usize,
+    tx0: i32,
+    ty0: i32,
+    tx1: i32,
+    ty1: i32,
+}
+
+fn gather_region(mask: &CpuMask, reach: usize, doc_w: u32, doc_h: u32) -> Option<Region> {
+    if mask.tiles.is_empty() {
+        return None;
     }
     let (gw, gh) = grid_size(doc_w, doc_h);
-    // Box radius for 3 passes ≈ Gaussian with sigma = radius / 2.
-    let sigma = radius / 2.0;
-    let r = (((12.0 * sigma * sigma / 3.0 + 1.0).sqrt() - 1.0) / 2.0)
-        .round()
-        .max(1.0) as usize;
-    let reach_tiles = (3 * r).div_ceil(TS) as i32;
+    let reach_tiles = reach.div_ceil(TS) as i32;
     let tx0 = (mask.tiles.keys().map(|c| c.x).min().unwrap() - reach_tiles).max(0);
     let ty0 = (mask.tiles.keys().map(|c| c.y).min().unwrap() - reach_tiles).max(0);
     let tx1 = (mask.tiles.keys().map(|c| c.x).max().unwrap() + reach_tiles + 1).min(gw as i32);
     let ty1 = (mask.tiles.keys().map(|c| c.y).max().unwrap() + reach_tiles + 1).min(gh as i32);
+    if tx1 <= tx0 || ty1 <= ty0 {
+        return None;
+    }
     let (w, h) = (((tx1 - tx0) as usize) * TS, ((ty1 - ty0) as usize) * TS);
-
-    // Gather into one f32 image.
     let mut img = vec![mask.default as f32; w * h];
     img.par_chunks_mut(w * TS)
         .enumerate()
@@ -361,31 +367,179 @@ pub fn feather(mask: &CpuMask, radius: f64, doc_w: u32, doc_h: u32) -> CpuMask {
                 }
             }
         });
-    for _ in 0..3 {
-        box_rows(&mut img, w, r, mask.default as f32);
-        let mut t = transpose(&img, w, h);
-        box_rows(&mut t, h, r, mask.default as f32);
-        img = transpose(&t, h, w);
-    }
-    // Scatter back into tiles.
-    let mut tiles = HashMap::new();
-    for ty in ty0..ty1 {
-        for tx in tx0..tx1 {
+    Some(Region { img, w, h, tx0, ty0, tx1, ty1 })
+}
+
+fn scatter_region(r: &Region, default: u8) -> CpuMask {
+    let tiles: HashMap<TileCoord, MaskData> = (r.ty0..r.ty1)
+        .flat_map(|ty| (r.tx0..r.tx1).map(move |tx| (tx, ty)))
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|(tx, ty)| {
             let mut px = vec![0u8; TILE_PX];
-            let (bx, by) = (((tx - tx0) as usize) * TS, ((ty - ty0) as usize) * TS);
+            let (bx, by) = (((tx - r.tx0) as usize) * TS, ((ty - r.ty0) as usize) * TS);
             for y in 0..TS {
                 for x in 0..TS {
-                    px[y * TS + x] = img[(by + y) * w + bx + x].round().clamp(0.0, 255.0) as u8;
+                    px[y * TS + x] = r.img[(by + y) * r.w + bx + x].round().clamp(0.0, 255.0) as u8;
                 }
             }
-            tiles.insert(TileCoord::new(tx, ty), MaskData::Pixels(px));
-        }
-    }
-    let mut out = CpuMask {
-        tiles,
-        default: mask.default,
-    };
+            (TileCoord::new(tx, ty), MaskData::Pixels(px).normalized())
+        })
+        .collect();
+    let mut out = CpuMask { tiles, default };
     out.compact();
+    out
+}
+
+/// Softens a mask with an approximately Gaussian blur (three box passes) of
+/// the given radius. Works on the bounding box of all non-default tiles,
+/// expanded by the blur reach, clipped to the document.
+pub fn feather(mask: &CpuMask, radius: f64, doc_w: u32, doc_h: u32) -> CpuMask {
+    if radius < 0.5 || mask.tiles.is_empty() {
+        return mask.clone();
+    }
+    // Box radius for 3 passes ≈ Gaussian with sigma = radius / 2.
+    let sigma = radius / 2.0;
+    let r = (((12.0 * sigma * sigma / 3.0 + 1.0).sqrt() - 1.0) / 2.0)
+        .round()
+        .max(1.0) as usize;
+    let Some(mut reg) = gather_region(mask, 3 * r, doc_w, doc_h) else {
+        return mask.clone();
+    };
+    let (w, h) = (reg.w, reg.h);
+    for _ in 0..3 {
+        box_rows(&mut reg.img, w, r, mask.default as f32);
+        let mut t = transpose(&reg.img, w, h);
+        box_rows(&mut t, h, r, mask.default as f32);
+        reg.img = transpose(&t, h, w);
+    }
+    scatter_region(&reg, mask.default)
+}
+
+/// Select › Modify.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Modify {
+    /// Grow the selection by this many px (round corners).
+    Expand(f64),
+    /// Shrink it by this many px.
+    Contract(f64),
+    /// A soft ring of this width around the selection's edge.
+    Border(f64),
+    /// Round off corners and remove specks smaller than the radius.
+    Smooth(f64),
+}
+
+/// Expands, contracts, borders or smooths a mask (edges at 50 %). Soft
+/// selections keep their softness where the operation does not reach.
+pub fn modify(mask: &CpuMask, op: Modify, doc_w: u32, doc_h: u32) -> CpuMask {
+    let amount = match op {
+        Modify::Expand(r) | Modify::Contract(r) | Modify::Border(r) | Modify::Smooth(r) => r,
+    };
+    if amount < 0.5 || mask.tiles.is_empty() {
+        return mask.clone();
+    }
+    if let Modify::Smooth(r) = op {
+        // Blur, then back to a crisp (anti-aliased) edge at the same place.
+        let mut m = feather(mask, r * 2.0, doc_w, doc_h);
+        for t in m.tiles.values_mut() {
+            if let MaskData::Pixels(p) = t {
+                for v in p.iter_mut() {
+                    *v = ((*v as f32 - 127.5) * 4.0 + 127.5).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        m.compact();
+        return m;
+    }
+    let reach = amount.ceil() as usize + 2;
+    let Some(mut reg) = gather_region(mask, reach, doc_w, doc_h) else {
+        return mask.clone();
+    };
+    let (w, h) = (reg.w, reg.h);
+    let inside: Vec<bool> = reg.img.par_iter().map(|v| *v >= 127.5).collect();
+    // Distance from every pixel to the nearest pixel on the other side.
+    let d_out = distance(&inside, w, h, true); // outside pixels → nearest inside
+    let d_in = distance(&inside, w, h, false); // inside pixels → nearest outside
+    let cover = |t: f64| t.clamp(0.0, 1.0) as f32 * 255.0;
+    reg.img.par_iter_mut().enumerate().for_each(|(i, v)| {
+        *v = match op {
+            Modify::Expand(r) => v.max(if inside[i] { 255.0 } else { cover(r + 1.0 - d_out[i]) }),
+            Modify::Contract(r) => v.min(if inside[i] { cover(d_in[i] - r) } else { 0.0 }),
+            Modify::Border(wd) => {
+                // Signed distance to the edge, which lies between pixels.
+                let d = if inside[i] { d_in[i] - 0.5 } else { d_out[i] - 0.5 };
+                cover(wd * 0.5 + 0.5 - d)
+            }
+            Modify::Smooth(_) => unreachable!(),
+        };
+    });
+    let default = match op {
+        // Far from every edge a ring is empty.
+        Modify::Border(_) => 0,
+        _ => mask.default,
+    };
+    let out = scatter_region(&reg, default);
+    match op {
+        Modify::Border(wd) => feather(&out, (wd * 0.25).max(1.0), doc_w, doc_h),
+        _ => out,
+    }
+}
+
+/// Euclidean distance of every pixel to the nearest pixel whose `inside` is
+/// `target` (0 for those pixels themselves). Felzenszwalb & Huttenlocher.
+fn distance(inside: &[bool], w: usize, h: usize, target: bool) -> Vec<f64> {
+    const INF: f64 = 1e20;
+    let mut f: Vec<f64> = inside.par_iter().map(|&v| if v == target { 0.0 } else { INF }).collect();
+    // Columns (via transpose), then rows.
+    let mut t = transpose_f64(&f, w, h);
+    t.par_chunks_mut(h).for_each(dt1d);
+    f = transpose_f64(&t, h, w);
+    f.par_chunks_mut(w).for_each(dt1d);
+    f.par_iter_mut().for_each(|v| *v = v.sqrt());
+    f
+}
+
+/// Squared distance transform of one line, in place.
+fn dt1d(f: &mut [f64]) {
+    let n = f.len();
+    if n == 0 {
+        return;
+    }
+    let src = f.to_vec();
+    let mut v = vec![0usize; n];
+    let mut z = vec![0f64; n + 1];
+    let meet = |q: usize, p: usize| ((src[q] + (q * q) as f64) - (src[p] + (p * p) as f64)) / (2.0 * (q as f64 - p as f64));
+    let mut k = 0usize;
+    z[0] = f64::NEG_INFINITY;
+    z[1] = f64::INFINITY;
+    for q in 1..n {
+        let mut s = meet(q, v[k]);
+        while s <= z[k] {
+            k -= 1; // z[0] = −∞ stops this at 0
+            s = meet(q, v[k]);
+        }
+        k += 1;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = f64::INFINITY;
+    }
+    k = 0;
+    for (q, out) in f.iter_mut().enumerate() {
+        while z[k + 1] < q as f64 {
+            k += 1;
+        }
+        let d = q as f64 - v[k] as f64;
+        *out = d * d + src[v[k]];
+    }
+}
+
+fn transpose_f64(img: &[f64], w: usize, h: usize) -> Vec<f64> {
+    let mut out = vec![0f64; w * h];
+    out.par_chunks_mut(h).enumerate().for_each(|(x, col)| {
+        for y in 0..h {
+            col[y] = img[y * w + x];
+        }
+    });
     out
 }
 
@@ -746,5 +900,42 @@ mod flood_tests {
     fn flood_from_a_non_matching_pixel_is_empty() {
         let m = from_fn(300, 300, |x, _| if x < 100 { 255 } else { 0 });
         assert!(flood(&m, 200, 10, 300, 300).is_empty());
+    }
+
+    #[test]
+    fn modify_expands_contracts_and_borders() {
+        let (w, h) = (600, 400);
+        let sel = rasterize(&Shape::Rect { x: 100.0, y: 100.0, w: 200.0, h: 100.0 }, w, h);
+        let grown = modify(&sel, Modify::Expand(10.0), w, h);
+        assert_eq!(grown.value_at(92, 150), 255);
+        assert_eq!(grown.value_at(85, 150), 0);
+        // Corners are rounded: (92, 92) is 11.3 px from the corner, outside.
+        assert_eq!(grown.value_at(92, 92), 0);
+        assert_eq!(grown.value_at(97, 97), 255);
+        let shrunk = modify(&sel, Modify::Contract(10.0), w, h);
+        assert_eq!(shrunk.value_at(105, 150), 0);
+        assert_eq!(shrunk.value_at(112, 150), 255);
+        assert_eq!(shrunk.value_at(200, 150), 255);
+        let ring = modify(&sel, Modify::Border(10.0), w, h);
+        assert!(ring.value_at(100, 150) > 200, "on the edge");
+        assert_eq!(ring.value_at(200, 150), 0, "middle is empty");
+        assert_eq!(ring.value_at(50, 150), 0, "far outside is empty");
+        // Smoothing removes a speck smaller than the radius.
+        let speck = rasterize(&Shape::Rect { x: 400.0, y: 300.0, w: 3.0, h: 3.0 }, w, h);
+        let both = combine(&sel, &speck, CombineOp::Add);
+        let smooth = modify(&both, Modify::Smooth(5.0), w, h);
+        assert_eq!(smooth.value_at(401, 301), 0);
+        assert_eq!(smooth.value_at(200, 150), 255);
+    }
+
+    #[test]
+    fn distance_transform_is_euclidean() {
+        let (w, h) = (7, 5);
+        let mut inside = vec![false; w * h];
+        inside[2 * w + 3] = true;
+        let d = distance(&inside, w, h, true);
+        assert_eq!(d[2 * w + 3], 0.0);
+        assert!((d[0] - (9.0f64 + 4.0).sqrt()).abs() < 1e-9);
+        assert!((d[2 * w + 6] - 3.0).abs() < 1e-9);
     }
 }

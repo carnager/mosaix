@@ -286,7 +286,7 @@ pub const COMMANDS: &[Cmd] = &[
     c("Select", "Select All", K::a, true, false, false),
     c("Select", "Deselect", K::d, true, false, false),
     c("Select", "Inverse", K::I, true, true, false),
-    c("Select", "Feather (10 px)", K::F6, false, true, false),
+    c("Select", "Feather …", K::F6, false, true, false),
     c("Select", "Quick Mask View", K::q, false, false, false),
     c("Select", "Subject (AI)", K::s, true, false, true),
     c("Tool", "Object Selection (AI)", K::W, false, true, false),

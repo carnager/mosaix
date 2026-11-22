@@ -422,6 +422,46 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "select_modify",
+            "Select › Modify: expand or contract the selection by amount px (round corners), border (a soft ring of that \
+             width around the edge), smooth (round off corners, drop specks smaller than amount) or feather.",
+            json!({ "op": { "type": "string", "enum": ["expand", "contract", "border", "smooth", "feather"] },
+                    "amount": { "type": "number", "minimum": 0, "maximum": 500 } }),
+            &["op", "amount"],
+            false,
+        ),
+        tool(
+            "select_save",
+            "Save the selection as a channel in the document (Photoshop: alpha channel); the same name replaces it. \
+             Channels are stored in .mosaix files.",
+            json!({ "name": { "type": "string" } }),
+            &["name"],
+            false,
+        ),
+        tool(
+            "select_load",
+            "Load a saved selection (channel by index or name), combined with the current one by mode; invert loads its inverse.",
+            json!({ "channel": { "type": "integer", "minimum": 0 }, "name": { "type": "string" }, "mode": mode_param(),
+                    "invert": { "type": "boolean" } }),
+            &[],
+            false,
+        ),
+        tool("channel_list", "Names of the saved selections (channels), by index.", json!({}), &[], false),
+        tool(
+            "channel_delete",
+            "Delete a saved selection (channel) by index.",
+            json!({ "channel": { "type": "integer", "minimum": 0 } }),
+            &["channel"],
+            false,
+        ),
+        tool(
+            "channel_rename",
+            "Rename a saved selection (channel).",
+            json!({ "channel": { "type": "integer", "minimum": 0 }, "name": { "type": "string" } }),
+            &["channel", "name"],
+            false,
+        ),
+        tool(
             "select_magic_wand",
             "Magic wand: select pixels similar in colour to the one at (x, y). tolerance 0–255 (default 32) is the largest \
              allowed channel difference in 8-bit sRGB; contiguous (default true) keeps only the connected region; \
@@ -950,6 +990,11 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .extend(more.as_object().unwrap().clone());
+        let selection = json!({
+            "select_modify": {"op": "expand", "amount": 3}, "select_save": {"name": "a"},
+            "channel_delete": {"channel": 0}, "channel_rename": {"channel": 0, "name": "b"}
+        });
+        samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {
             let name = t["name"].as_str().unwrap();
             // Tools without required parameters need no sample.

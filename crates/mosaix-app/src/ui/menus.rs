@@ -20,6 +20,11 @@ pub enum Special {
     Recent,
     /// Free transform in a given mode (scale, skew, distort, perspective).
     Transform,
+    ColorRange,
+    /// Expand, contract, border, smooth.
+    Modify,
+    SaveSelection,
+    LoadSelection,
     Actions,
     Filters,
     Adjustments,
@@ -132,8 +137,15 @@ const SELECT: &[Item] = &[
     C("Deselect", G(g::SELECTION_SLASH)),
     C("Inverse", G(g::SELECTION_INVERSE)),
     Sep,
+    S(Special::ColorRange, G(g::EYEDROPPER_SAMPLE)),
     C("Subject (AI)", G(g::USER_FOCUS)),
-    C("Feather (10 px)", G(g::SELECTION_FOREGROUND)),
+    Sep,
+    S(Special::Modify, G(g::SELECTION_PLUS)),
+    C("Feather …", G(g::SELECTION_FOREGROUND)),
+    Sep,
+    S(Special::SaveSelection, G(g::FLOPPY_DISK)),
+    S(Special::LoadSelection, G(g::FOLDER_OPEN)),
+    Sep,
     C("Quick Mask View", G(g::MASK_HAPPY)),
 ];
 

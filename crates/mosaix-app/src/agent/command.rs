@@ -251,6 +251,28 @@ pub enum Command {
     SelectFeather {
         radius: f64,
     },
+    SelectModify {
+        op: String,
+        amount: f64,
+    },
+    SelectSave {
+        name: String,
+    },
+    SelectLoad {
+        channel: Option<usize>,
+        name: Option<String>,
+        mode: Option<String>,
+        #[serde(default)]
+        invert: bool,
+    },
+    ChannelList,
+    ChannelDelete {
+        channel: usize,
+    },
+    ChannelRename {
+        channel: usize,
+        name: String,
+    },
     SelectMagicWand {
         x: u32,
         y: u32,
@@ -530,6 +552,12 @@ impl Command {
             Self::SelectNone => "select_none",
             Self::SelectInvert => "select_invert",
             Self::SelectFeather { .. } => "select_feather",
+            Self::SelectModify { .. } => "select_modify",
+            Self::SelectSave { .. } => "select_save",
+            Self::SelectLoad { .. } => "select_load",
+            Self::ChannelList => "channel_list",
+            Self::ChannelDelete { .. } => "channel_delete",
+            Self::ChannelRename { .. } => "channel_rename",
             Self::LayerMaskAdd { .. } => "layer_mask_add",
             Self::LayerMaskDelete { .. } => "layer_mask_delete",
             Self::LayerMaskSet { .. } => "layer_mask_set",
@@ -725,6 +753,10 @@ fn selection_info(s: &Session) -> Value {
             json!({ "selection": { "default": m.default, "tiles": m.tiles.len(), "edge_tiles": partial } })
         }
     }
+}
+
+fn channel_names(s: &Session) -> Vec<String> {
+    s.engine.doc().channels.iter().map(|c| c.name.clone()).collect()
 }
 
 fn yes() -> bool {
@@ -1402,6 +1434,46 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 .feather_selection(radius, tr("Feather Selection"))
                 .map_err(engine_err)?;
             Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectModify { op, amount } => {
+            use mosaix_core::mask::Modify;
+            ensure!((0.0..=500.0).contains(&amount), "amount must be 0–500 px");
+            let (m, label) = match op.as_str() {
+                "expand" => (Modify::Expand(amount), tr("Expand Selection")),
+                "contract" => (Modify::Contract(amount), tr("Contract Selection")),
+                "border" => (Modify::Border(amount), tr("Border Selection")),
+                "smooth" => (Modify::Smooth(amount), tr("Smooth Selection")),
+                "feather" => {
+                    s.engine.feather_selection(amount, tr("Feather Selection")).map_err(engine_err)?;
+                    return Ok(Output::json(selection_info(s)));
+                }
+                _ => bail!("op must be expand, contract, border, smooth or feather"),
+            };
+            s.engine.modify_selection(m, label).map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::SelectSave { name } => {
+            let index = s.engine.save_selection(&name, tr("Save Selection")).map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "channel": index, "channels": channel_names(s) })))
+        }
+        Command::SelectLoad { channel, name, mode, invert } => {
+            let names = channel_names(s);
+            let index = match (channel, name) {
+                (Some(i), None) => i,
+                (None, Some(n)) => names.iter().position(|c| *c == n).with_context(|| format!("no channel named {n:?}; there are {names:?}"))?,
+                _ => bail!("give channel (index) or name"),
+            };
+            s.engine.load_channel(index, parse_mode(&mode)?, invert, tr("Load Selection")).map_err(engine_err)?;
+            Ok(Output::json(selection_info(s)))
+        }
+        Command::ChannelList => Ok(Output::json(json!({ "channels": channel_names(s) }))),
+        Command::ChannelDelete { channel } => {
+            s.engine.delete_channel(channel, tr("Delete Channel")).map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "channels": channel_names(s) })))
+        }
+        Command::ChannelRename { channel, name } => {
+            s.engine.rename_channel(channel, &name, tr("Rename Channel")).map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "channels": channel_names(s) })))
         }
         Command::SelectMagicWand {
             x,

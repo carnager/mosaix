@@ -201,6 +201,8 @@ pub struct Model {
     pub history: Vec<String>,
     pub history_done: usize,
     pub has_selection: bool,
+    /// Names of the saved selections.
+    pub channels: Vec<String>,
     pub status: String,
     pub busy: bool,
     pub recent: Vec<std::path::PathBuf>,
@@ -223,6 +225,10 @@ pub struct Model {
 
 #[derive(Debug, Clone)]
 pub enum Action {
+    /// An agent command (JSON), run in the window and recorded as is.
+    Agent(serde_json::Value),
+    /// Select › Modify (`op` as in the `select_modify` command).
+    ModifySelection { op: &'static str, amount: f64 },
     Command(Cmd),
     /// Open a camera RAW file developed with these settings.
     OpenRaw(std::path::PathBuf, mosaix_io::raw::Develop),
@@ -418,7 +424,20 @@ pub struct State {
 enum Dialog {
     Canvas { w: u32, h: u32, anchor: (u8, u8) },
     Image { w: u32, h: u32, keep: bool },
+    /// Select › Modify (op as in `select_modify`).
+    Modify { op: &'static str, amount: f64 },
+    ColorRange { color: [f32; 3], fuzziness: f32, image: bool, mode: &'static str },
+    SaveSelection { name: String },
 }
+
+/// Select › Modify: agent op, menu label, default amount.
+const MODIFY: [(&str, &str, f64); 5] = [
+    ("expand", "Expand …", 5.0),
+    ("contract", "Contract …", 5.0),
+    ("border", "Border …", 10.0),
+    ("smooth", "Smooth …", 5.0),
+    ("feather", "Feather …", 10.0),
+];
 
 const ACCENT: Color32 = Color32::from_rgb(90, 150, 255);
 
@@ -427,6 +446,13 @@ impl State {
     pub fn open_effect(&mut self, i: usize) {
         self.fx_open = Some(i);
         self.focus_pane = Some(super::dock::Pane::Styles);
+    }
+
+    /// Opens a Select › Modify dialog (`op` as in `select_modify`).
+    pub fn open_modify(&mut self, op: &str) {
+        if let Some((op, _, amount)) = MODIFY.iter().find(|x| x.0 == op) {
+            self.dialog = Some(Dialog::Modify { op, amount: *amount });
+        }
     }
 
     pub fn open_filter(&mut self, f: mosaix_core::Filter) {
@@ -860,7 +886,7 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
         "Undo" => need(m.history_done > 0, tr("Nothing to undo")),
         "Redo" => need(m.history_done < m.history.len(), tr("Nothing to redo")),
         "Delete Selection (Pixels)" | "Content-Aware Fill" | "Content-Aware Fill (All Layers)" | "Remove (AI)"
-        | "Deselect" | "Inverse" | "Feather (10 px)" => {
+        | "Deselect" | "Inverse" | "Feather …" => {
             need(m.has_selection, tr("Needs a selection"))
         }
         "Ungroup Layers" => need(active.is_some_and(|r| r.group), tr("The active layer is not a group")),
@@ -904,6 +930,65 @@ fn special_entry(
             });
         }
         Special::Actions => actions_menu(ui, icon, m, st, out),
+        Special::ColorRange => {
+            if ui.button((icon, tr("Color Range …"))).clicked() {
+                st.dialog = Some(Dialog::ColorRange { color: m.color, fuzziness: 40.0, image: false, mode: "replace" });
+                ui.close();
+            }
+        }
+        Special::Modify => {
+            ui.add_enabled_ui(m.has_selection, |ui| {
+                ui.menu_button((icon, tr("Modify")), |ui| {
+                    for (op, label, _) in MODIFY.iter().filter(|x| x.0 != "feather") {
+                        if ui.button(tr(label)).clicked() {
+                            st.open_modify(op);
+                            ui.close();
+                        }
+                    }
+                });
+            })
+            .response
+            .on_disabled_hover_text(tr("Needs a selection"));
+        }
+        Special::SaveSelection => {
+            let r = ui.add_enabled(m.has_selection, egui::Button::new((icon, tr("Save Selection …"))));
+            if r.on_disabled_hover_text(tr("Needs a selection")).clicked() {
+                let n = m.channels.len() + 1;
+                st.dialog = Some(Dialog::SaveSelection { name: tr!("Selection {n}", n = n).to_string() });
+                ui.close();
+            }
+        }
+        Special::LoadSelection => {
+            ui.add_enabled_ui(!m.channels.is_empty(), |ui| {
+                ui.menu_button((icon, tr("Load Selection")), |ui| {
+                    let mods = ui.input(|i| i.modifiers);
+                    for (i, name) in m.channels.iter().enumerate() {
+                        let r = ui.button(name).on_hover_text(tr("Shift: add · Alt: subtract · Shift+Alt: intersect"));
+                        if r.clicked() {
+                            let mode = match (mods.shift, mods.alt) {
+                                (true, true) => "intersect",
+                                (true, false) => "add",
+                                (false, true) => "subtract",
+                                _ => "replace",
+                            };
+                            out.push(Action::Agent(serde_json::json!({ "cmd": "select_load", "channel": i, "mode": mode })));
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.menu_button(tr("Delete"), |ui| {
+                        for (i, name) in m.channels.iter().enumerate() {
+                            if ui.button(name).clicked() {
+                                out.push(Action::Agent(serde_json::json!({ "cmd": "channel_delete", "channel": i })));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+            })
+            .response
+            .on_disabled_hover_text(tr("No saved selections yet"));
+        }
         Special::Transform => {
             use crate::boxedit::Mode;
             let active = m.layers.iter().find(|r| r.id == m.active);
@@ -2462,6 +2547,92 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                     );
                     if ui.button("OK").clicked() {
                         out.push(Action::ImageSize { w: *w, h: *h });
+                        done = true;
+                    }
+                });
+        }
+        Dialog::Modify { op, amount } => {
+            let title = MODIFY.iter().find(|x| x.0 == *op).map_or("", |x| x.1).trim_end_matches(" …");
+            egui::Window::new(tr(title))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(if *op == "border" { tr("Width") } else { tr("Radius") });
+                        let r = ui.add(egui::DragValue::new(amount).range(0.0..=500.0).speed(0.25).max_decimals(1).suffix(" px"));
+                        r.request_focus();
+                    });
+                    if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        out.push(Action::ModifySelection { op, amount: *amount });
+                        done = true;
+                    }
+                });
+        }
+        Dialog::ColorRange { color, fuzziness, image, mode } => {
+            egui::Window::new(tr("Color Range"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    egui::Grid::new("color range").num_columns(2).show(ui, |ui| {
+                        ui.label(tr("Color"));
+                        ui.horizontal(|ui| {
+                            ui.color_edit_button_rgb(color);
+                            if ui.small_button(tr("Foreground")).clicked() {
+                                *color = m.color;
+                            }
+                        });
+                        ui.end_row();
+                        ui.label(tr("Fuzziness"));
+                        ui.add(egui::Slider::new(fuzziness, 0.0..=200.0).max_decimals(0));
+                        ui.end_row();
+                        ui.label(tr("Sample"));
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(image, false, tr("Layer"));
+                            ui.selectable_value(image, true, tr("Image"));
+                        });
+                        ui.end_row();
+                        ui.label(tr("Selection"));
+                        ui.horizontal(|ui| {
+                            for (k, l) in [("replace", "New"), ("add", "Add"), ("subtract", "Subtract"), ("intersect", "Intersect")] {
+                                ui.selectable_value(mode, k, tr(l));
+                            }
+                        });
+                        ui.end_row();
+                    });
+                    ui.label(RichText::new(tr("Selects this color everywhere, softly by fuzziness.")).weak());
+                    if ui.button("OK").clicked() {
+                        let hex = format!(
+                            "#{:02x}{:02x}{:02x}",
+                            (color[0] * 255.0).round() as u8,
+                            (color[1] * 255.0).round() as u8,
+                            (color[2] * 255.0).round() as u8
+                        );
+                        out.push(Action::Agent(serde_json::json!({
+                            "cmd": "select_color_range", "color": hex, "fuzziness": *fuzziness,
+                            "sample": if *image { "image" } else { "layer" }, "mode": *mode,
+                        })));
+                        done = true;
+                    }
+                });
+        }
+        Dialog::SaveSelection { name } => {
+            egui::Window::new(tr("Save Selection"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(tr("Name"));
+                        ui.text_edit_singleline(name).request_focus();
+                    });
+                    if m.channels.iter().any(|c| c == name.trim()) {
+                        ui.label(RichText::new(tr("Replaces the saved selection of that name.")).weak());
+                    }
+                    let ok = !name.trim().is_empty();
+                    if ui.add_enabled(ok, egui::Button::new("OK")).clicked() || (ok && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                        out.push(Action::Agent(serde_json::json!({ "cmd": "select_save", "name": name.trim() })));
                         done = true;
                     }
                 });

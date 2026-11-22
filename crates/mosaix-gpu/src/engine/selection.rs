@@ -146,6 +146,83 @@ impl Engine {
         self.set_selection(Some(feather(&sel, radius, w, h)), label)
     }
 
+    /// Select › Modify: expand, contract, border or smooth.
+    pub fn modify_selection(&mut self, op: mosaix_core::mask::Modify, label: &str) -> Result<(), &'static str> {
+        let Some(sel) = self.selection_cpu() else {
+            return Err(mosaix_core::tr("no selection"));
+        };
+        let (w, h) = self.size();
+        self.set_selection(Some(mosaix_core::mask::modify(&sel, op, w, h)), label)
+    }
+
+    // ---- saved selections (channels) ---------------------------------------------
+
+    /// Saves the selection as a new channel (or replaces the one with this
+    /// name). Returns its index.
+    pub fn save_selection(&mut self, name: &str, label: &str) -> Result<usize, &'static str> {
+        let Some(sel) = self.doc.selection.clone() else {
+            return Err(mosaix_core::tr("no selection"));
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(mosaix_core::tr("the name is empty"));
+        }
+        let index = self.doc.channels.iter().position(|c| c.name == name).unwrap_or(self.doc.channels.len());
+        let name = name.to_string();
+        self.edit(label, |d| {
+            let c = mosaix_core::Channel { name, mask: sel };
+            match d.channels.get_mut(index) {
+                Some(old) => *old = c,
+                None => d.channels.push(c),
+            }
+            true
+        });
+        Ok(index)
+    }
+
+    /// Loads a channel as the selection, combined with the current one.
+    pub fn load_channel(&mut self, index: usize, op: CombineOp, invert: bool, label: &str) -> Result<(), &'static str> {
+        let m = self.doc.channels.get(index).ok_or(mosaix_core::tr("no such channel"))?.mask.clone();
+        let mut new = self.mask_to_cpu(&m);
+        if invert {
+            new = new.invert();
+        }
+        let result = match self.selection_cpu() {
+            Some(old) if op != CombineOp::Replace => combine(&old, &new, op),
+            None if op == CombineOp::Subtract => CpuMask::filled(0),
+            None if op == CombineOp::Intersect => CpuMask::filled(0),
+            _ => new,
+        };
+        self.set_selection(Some(result), label)
+    }
+
+    pub fn delete_channel(&mut self, index: usize, label: &str) -> Result<(), &'static str> {
+        if index >= self.doc.channels.len() {
+            return Err(mosaix_core::tr("no such channel"));
+        }
+        self.edit(label, |d| {
+            d.channels.remove(index);
+            true
+        });
+        Ok(())
+    }
+
+    pub fn rename_channel(&mut self, index: usize, name: &str, label: &str) -> Result<(), &'static str> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err(mosaix_core::tr("the name is empty"));
+        }
+        if index >= self.doc.channels.len() {
+            return Err(mosaix_core::tr("no such channel"));
+        }
+        self.edit(label, |d| {
+            let changed = d.channels[index].name != name;
+            d.channels[index].name = name;
+            changed
+        });
+        Ok(())
+    }
+
     // ---- layer masks --------------------------------------------------------------
 
     pub fn layer_mask_cpu(&self, layer: LayerId) -> Option<CpuMask> {
@@ -219,7 +296,7 @@ impl Engine {
     /// Loads a mask from a file without creating an undo step.
     pub fn load_mask(
         &mut self,
-        layer: Option<LayerId>,
+        slot: mosaix_core::MaskSlot,
         mask: CpuMask,
         enabled: bool,
     ) -> Option<Vec<(TileCoord, Tile)>> {
@@ -232,14 +309,15 @@ impl Engine {
                 MaskTile::Solid(_) => None,
             })
             .collect();
-        match layer {
-            Some(id) => {
+        match slot {
+            mosaix_core::MaskSlot::Layer(id) => {
                 let l = self.doc.find_mut(id)?;
                 l.mask = Some(gpu);
                 l.mask_enabled = enabled;
                 self.recheck_all = true;
             }
-            None => self.doc.selection = Some(gpu),
+            mosaix_core::MaskSlot::Selection => self.doc.selection = Some(gpu),
+            mosaix_core::MaskSlot::Channel(i) => self.doc.channels.get_mut(i)?.mask = gpu,
         }
         Some(uploaded)
     }

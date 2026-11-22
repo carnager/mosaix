@@ -31,7 +31,7 @@ pub type TileData = (TileCoord, Vec<f16>, Option<BlobRef>);
 
 /// A layer mask (`layer: Some`) or the selection (`None`) read from a file.
 pub struct MaskLoad {
-    pub layer: Option<LayerId>,
+    pub slot: mosaix_core::MaskSlot,
     pub default: u8,
     pub enabled: bool,
     pub tiles: HashMap<TileCoord, MaskData>,
@@ -216,6 +216,9 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                 empty.find_mut(*id).unwrap().mask = None;
             }
             empty.selection = None;
+            for c in &mut empty.channels {
+                c.mask = mosaix_core::Mask::filled(c.mask.default);
+            }
             send(LoaderMsg::Structure {
                 doc: empty,
                 name,
@@ -237,16 +240,20 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                     send(LoaderMsg::Tiles { layer, tiles })?;
                 }
             }
-            let mut masks: Vec<(Option<LayerId>, mosaix_core::Mask<BlobRef>, bool)> = Vec::new();
+            use mosaix_core::MaskSlot;
+            let mut masks: Vec<(MaskSlot, mosaix_core::Mask<BlobRef>, bool)> = Vec::new();
             doc.for_each(&mut |l, _| {
                 if let Some(m) = &l.mask {
-                    masks.push((Some(l.id), m.clone(), l.mask_enabled));
+                    masks.push((MaskSlot::Layer(l.id), m.clone(), l.mask_enabled));
                 }
             });
             if let Some(sel) = &doc.selection {
-                masks.push((None, sel.clone(), true));
+                masks.push((MaskSlot::Selection, sel.clone(), true));
             }
-            for (layer, m, enabled) in masks {
+            for (i, c) in doc.channels.iter().enumerate() {
+                masks.push((MaskSlot::Channel(i), c.mask.clone(), true));
+            }
+            for (slot, m, enabled) in masks {
                 let entries: Vec<_> = m.tiles.iter().map(|(c, t)| (*c, t.clone())).collect();
                 let decoded = entries
                     .par_iter()
@@ -267,7 +274,7 @@ fn load(source: Source, tx: &impl Sink) -> anyhow::Result<()> {
                     .collect();
                 let tiles = decoded.into_iter().map(|(c, d, _)| (c, d)).collect();
                 send(LoaderMsg::Mask(MaskLoad {
-                    layer,
+                    slot,
                     default: m.default,
                     enabled,
                     tiles,
@@ -595,7 +602,7 @@ fn load_psd(
             tiles.insert(TileCoord::new(tx as i32, ty as i32), MaskData::Pixels(t));
         }
         send(LoaderMsg::Mask(MaskLoad {
-            layer: Some(id),
+            slot: mosaix_core::MaskSlot::Layer(id),
             default: m.default,
             enabled: m.enabled,
             tiles,

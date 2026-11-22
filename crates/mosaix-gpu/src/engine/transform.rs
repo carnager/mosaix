@@ -713,6 +713,51 @@ impl Engine {
         Ok(())
     }
 
+    /// A mask (e.g. a saved selection) resampled by `fwd`.
+    fn warp_mask(&mut self, m: &Mask<Tile>, fwd: Warp, interp: Interp) -> Result<Mask<Tile>, &'static str> {
+        let inv = fwd.inverse();
+        let mut grids = Grids::default();
+        let g = grids.mask(m);
+        let coords: Vec<TileCoord> = m
+            .tiles
+            .iter()
+            .filter(|(_, t)| !matches!(t, MaskTile::Solid(v) if *v == m.default))
+            .map(|(c, _)| *c)
+            .collect();
+        let dest: Vec<TileCoord> = footprint_warp(coords, &fwd, 4.0, None).into_iter().collect();
+        let jobs: Vec<WarpJob> = dest
+            .iter()
+            .map(|c| {
+                let (x, y) = c.origin();
+                let tg = tile_geom(&inv, DVec2::new(x as f64, y as f64));
+                let samples = if interp == Interp::Nearest { 1 } else { (tg.stretch - 0.01).ceil().clamp(1.0, 4.0) as u32 };
+                WarpJob {
+                    s0_int: tg.s0_int,
+                    s0_frac: tg.s0_frac,
+                    lin: tg.lin,
+                    src: g,
+                    src_sel: GridRef::default(),
+                    old_slot: NONE,
+                    old_const: 0.0,
+                    dsel_slot: NONE,
+                    dsel_const: 0.0,
+                    mode: MODE_REPLACE,
+                    interp: if samples > 1 && interp == Interp::Bicubic { Interp::Bilinear } else { interp } as u32,
+                    samples,
+                    side: tg.side,
+                    persp: tg.persp,
+                    ref_pt: tg.ref_pt,
+                }
+            })
+            .collect();
+        self.grid_buf.write(&self.device, &self.queue, bytemuck::cast_slice(&grids.data));
+        let tiles = self.run_warp(StrokeTarget::Mask, &jobs).ok_or(mosaix_core::tr("GPU memory full"))?;
+        Ok(Mask {
+            tiles: Arc::new(dest.into_iter().zip(tiles.into_iter().map(MaskTile::Pixels)).collect()),
+            default: m.default,
+        })
+    }
+
     /// Crops (or extends) the canvas to `w × h` starting at `(x, y)`; content
     /// outside the new canvas is kept, not deleted. Drops the selection.
     pub fn crop(
@@ -893,6 +938,19 @@ impl Engine {
             } else {
                 self.warp_layer(id, fwd.into(), interp, false, None, &mut out)?;
             }
+        }
+        // Saved selections move with the image.
+        for i in 0..out.channels.len() {
+            let m = out.channels[i].mask.clone();
+            out.channels[i].mask = if tile_shift {
+                let (dx, dy) = ((t.x / ts) as i32, (t.y / ts) as i32);
+                Mask {
+                    tiles: Arc::new(m.tiles.iter().map(|(c, t)| (TileCoord::new(c.x + dx, c.y + dy), t.clone())).collect()),
+                    default: m.default,
+                }
+            } else {
+                self.warp_mask(&m, fwd.into(), interp)?
+            };
         }
         out.width = w;
         out.height = h;

@@ -713,8 +713,8 @@ msgstr "Favorit"
 msgid "Favorites"
 msgstr "Favoriten"
 
-msgid "Feather (10 px)"
-msgstr "Weiche Kante (10 px)"
+msgid "Feather …"
+msgstr "Weiche Kante …"
 
 msgid "Feather Selection"
 msgstr "Weiche Auswahlkante"
@@ -2692,3 +2692,105 @@ msgstr "Gegenüberliegende Ecken bewegen sich gemeinsam"
 
 msgid "distort and perspective work on pixels: rasterize text, shape and RAW layers first"
 msgstr "Verzerren und Perspektive wirken auf Pixel: Text-, Form- und RAW-Ebenen erst rastern"
+
+msgid "Expand Selection"
+msgstr "Auswahl erweitern"
+
+msgid "Contract Selection"
+msgstr "Auswahl verkleinern"
+
+msgid "Border Selection"
+msgstr "Auswahlrand"
+
+msgid "Smooth Selection"
+msgstr "Auswahl abrunden"
+
+msgid "Save Selection"
+msgstr "Auswahl speichern"
+
+msgid "Load Selection"
+msgstr "Auswahl laden"
+
+msgid "Delete Channel"
+msgstr "Kanal löschen"
+
+msgid "Rename Channel"
+msgstr "Kanal umbenennen"
+
+msgid "Color Range …"
+msgstr "Farbbereich …"
+
+msgid "Modify"
+msgstr "Verändern"
+
+msgid "Save Selection …"
+msgstr "Auswahl speichern …"
+
+msgid "Selection {n}"
+msgstr "Auswahl {n}"
+
+msgid "Shift: add · Alt: subtract · Shift+Alt: intersect"
+msgstr "Umschalt: hinzufügen · Alt: abziehen · Umschalt+Alt: Schnittmenge"
+
+msgid "No saved selections yet"
+msgstr "Noch keine gespeicherten Auswahlen"
+
+msgid "Radius"
+msgstr "Radius"
+
+msgid "Foreground"
+msgstr "Vordergrund"
+
+msgid "Fuzziness"
+msgstr "Toleranz"
+
+msgid "Sample"
+msgstr "Aufnehmen"
+
+msgid "Selects this color everywhere, softly by fuzziness."
+msgstr "Wählt diese Farbe überall aus, weich nach Toleranz."
+
+msgid "Replaces the saved selection of that name."
+msgstr "Ersetzt die gespeicherte Auswahl dieses Namens."
+
+msgid "the name is empty"
+msgstr "der Name ist leer"
+
+msgid "no such channel"
+msgstr "diesen Kanal gibt es nicht"
+
+msgid "Expand …"
+msgstr "Erweitern …"
+
+msgid "Contract …"
+msgstr "Verkleinern …"
+
+msgid "Border …"
+msgstr "Rand …"
+
+msgid "Smooth …"
+msgstr "Abrunden …"
+
+msgid "Expand"
+msgstr "Erweitern"
+
+msgid "Contract"
+msgstr "Verkleinern"
+
+msgid "Border"
+msgstr "Rand"
+
+msgid "Smooth"
+msgstr "Abrunden"
+
+msgid "Feather"
+msgstr "Weiche Kante"
+
+msgid "New"
+msgstr "Neu"
+
+msgid "Add"
+msgstr "Hinzufügen"
+
+msgid "Intersect"
+msgstr "Schnittmenge"
