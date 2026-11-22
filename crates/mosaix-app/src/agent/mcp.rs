@@ -269,6 +269,7 @@ pub fn tools() -> Vec<Value> {
                 "visible": { "type": "boolean" },
                 "clip": { "type": "boolean", "description": "Clipping mask: the layer shows only where the layers below it (down to the first unclipped one) have pixels; that base layer's opacity and blend mode apply to the group" },
                 "pass_through": { "type": "boolean", "description": "Groups only: Pass Through (Photoshop's default for groups) – children blend directly with what is below the group; false = isolated group using its own blend mode" },
+                "label": { "type": "string", "enum": ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"], "description": "Colour label in the layer panel" },
                 "lock": { "type": "object", "description": "Locks (missing = false): transparency (painting keeps each pixel's opacity), pixels (no painting/filling/filters), position (no moving/transforming)", "properties": { "transparency": { "type": "boolean" }, "pixels": { "type": "boolean" }, "position": { "type": "boolean" } } }
             }),
             &[],
@@ -476,6 +477,7 @@ pub fn tools() -> Vec<Value> {
             &[],
             false,
         ),
+        tool("layer_delete_hidden", "Delete all hidden layers (and hidden groups).", json!({}), &[], false),
         tool(
             "layer_via",
             "Layer via Copy (cut: false) or Cut (cut: true): the active layer's pixels inside the selection onto a new layer above, in place (soft edges become alpha).",
@@ -567,7 +569,7 @@ pub fn tools() -> Vec<Value> {
         tool(
             "layer_merge",
             "Merge layers into one pixel layer, as they look (blend modes, masks, styles, text baked in; pixels outside the canvas kept). mode: down = the active layer onto the one below, selected = the layers selected with layer_select (default when several are selected; they must share a group), visible = all visible top-level layers (hidden ones stay), flatten = everything into one layer (hidden layers are dropped).",
-            json!({ "mode": { "type": "string", "enum": ["down", "selected", "visible", "flatten"] } }),
+            json!({ "mode": { "type": "string", "enum": ["down", "selected", "group", "visible", "flatten"] } }),
             &[],
             false,
         ),
@@ -1195,6 +1197,7 @@ mod tests {
                         ("highlights", _) => json!("clip"),
                         ("tone", _) => json!({"highlights": -50}),
                         ("lock", _) => json!({"pixels": true}),
+                        ("label", _) => json!("red"),
                         ("negative", _) => json!([[1, 2]]),
                         ("also", _) => json!([1]),
                         ("corners", _) => json!([[0, 0], [10, 0], [10, 10], [0, 10]]),

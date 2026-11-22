@@ -3661,3 +3661,30 @@ msgstr "Keine Einstellungen."
 
 msgid "Brush Size"
 msgstr "Pinselgröße"
+
+msgid "Merge Group"
+msgstr "Gruppe zusammenfügen"
+
+msgid "Delete Hidden Layers"
+msgstr "Ausgeblendete Ebenen löschen"
+
+msgid "No hidden layers"
+msgstr "Keine ausgeblendeten Ebenen"
+
+msgid "Color Label"
+msgstr "Farbmarkierung"
+
+msgid "Orange"
+msgstr "Orange"
+
+msgid "Violet"
+msgstr "Violett"
+
+msgid "Gray"
+msgstr "Grau"
+
+msgid "No Color"
+msgstr "Keine Farbe"
+
+msgid "the active layer is not a group"
+msgstr "die aktive Ebene ist keine Gruppe"

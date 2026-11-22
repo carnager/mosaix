@@ -74,6 +74,20 @@ pub enum ToolId {
     HistoryBrush,
 }
 
+/// Display name of a colour label.
+fn label_name(n: &str) -> &'static str {
+    match n {
+        "red" => tr("Red"),
+        "orange" => tr("Orange"),
+        "yellow" => tr("Yellow"),
+        "green" => tr("Green"),
+        "blue" => tr("Blue"),
+        "violet" => tr("Violet"),
+        "gray" => tr("Gray"),
+        _ => tr("No Color"),
+    }
+}
+
 /// Shape tool settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeOpts {
@@ -136,7 +150,21 @@ pub struct LayerRow {
     /// Mask thumbnail (grey) and the used part of it.
     pub mask_thumb: Option<(egui::TextureId, (f32, f32))>,
     pub lock: mosaix_core::doc::Lock,
+    /// Colour label (see `mosaix_core::doc::LABELS`).
+    pub label: u8,
 }
+
+/// Colours of the layer labels (index as `Layer::label`).
+pub const LABEL_COLORS: [Color32; 8] = [
+    Color32::TRANSPARENT,
+    Color32::from_rgb(200, 70, 70),
+    Color32::from_rgb(215, 130, 50),
+    Color32::from_rgb(205, 180, 60),
+    Color32::from_rgb(90, 160, 80),
+    Color32::from_rgb(70, 120, 200),
+    Color32::from_rgb(140, 100, 190),
+    Color32::from_rgb(130, 130, 130),
+];
 
 /// A path layer offered for text on a path.
 #[derive(Debug, Clone, PartialEq)]
@@ -1135,6 +1163,7 @@ fn command_text(c: &palette::Cmd, m: &Model) -> &'static str {
         "Duplicate Layer" if m.has_selection && pixel_active(m) => tr("Layer via Copy"),
         "Duplicate Layer" if several => tr("Duplicate Layers"),
         "Merge Down" if several => tr("Merge Layers"),
+        "Merge Down" if m.layers.iter().any(|r| r.id == m.active && r.group) => tr("Merge Group"),
         "Group Layers" if several => tr("Group Layers"),
         _ => c.label_text(),
     }
@@ -1174,6 +1203,7 @@ fn unavailable(label: &str, m: &Model) -> Option<&'static str> {
             let d0 = depth(m.active);
             need(m.selected.iter().all(|id| depth(*id) == d0), tr("The selected layers must be in the same group"))
         }
+        "Merge Down" if m.layers.iter().any(|r| r.id == m.active && r.group) => None,
         "Merge Down" => {
             // Rows run top → bottom; the sibling below is the next row at the same depth.
             let below = m.layers.iter().position(|r| r.id == m.active).and_then(|i| {
@@ -1273,6 +1303,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
         ("Select", S::SelectAndMask, "Select and Mask …", sel(m.has_selection)),
         ("Edit", S::Preferences, "Preferences …", None),
         ("Select", S::SelectionToShape, "Selection to Shape Layer", sel(m.has_selection)),
+        ("Layer", S::DeleteHidden, "Delete Hidden Layers", (!m.layers.iter().any(|r| !r.visible)).then_some(tr("No hidden layers"))),
         ("File", S::Revert, "Revert", (!m.can_revert).then_some(tr("The image was never saved"))),
         ("Edit", S::StrokeSelection, "Stroke …", (!(m.has_selection && pixel_active(m))).then_some(tr("Needs a selection on a pixel layer"))),
     ] {
@@ -1334,6 +1365,7 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
             S::Revert => out.push(Action::Revert),
             S::TransformSelection => out.push(Action::TransformSelection),
             S::SelectionToShape => out.push(Action::SelectionToShape),
+            S::DeleteHidden => out.push(Action::Agent(serde_json::json!({ "cmd": "layer_delete_hidden" }))),
             S::Preferences => st.dialog = Some(Dialog::Prefs { p: m.prefs.clone(), language: m.language.clone() }),
             S::SelectAndMask => {
                 st.dialog = Some(Dialog::Refine { radius: 10.0, contrast: 0.0, shift: 0.0, feather: 0.0, to_mask: false });
@@ -1571,6 +1603,14 @@ fn special_entry(
         Special::Revert => {
             let r = ui.add_enabled(m.can_revert, egui::Button::new((icon, tr("Revert"))));
             if r.on_disabled_hover_text(tr("The image was never saved")).on_hover_text(tr("Reload the last saved version")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
+                ui.close();
+            }
+        }
+        Special::DeleteHidden => {
+            let any = m.layers.iter().any(|r| !r.visible);
+            let r = ui.add_enabled(any, egui::Button::new((icon, tr("Delete Hidden Layers"))));
+            if r.on_disabled_hover_text(tr("No hidden layers")).clicked() {
                 run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
@@ -2892,6 +2932,11 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                         } else if resp.hovered() {
                             painter.rect_filled(rect, 3.0, Color32::from_white_alpha(10));
                         }
+                        if row.label > 0 {
+                            // The colour label: a band behind the eye (like Photoshop).
+                            let band = egui::Rect::from_min_size(rect.min, Vec2::new(24.0, rect.height()));
+                            painter.rect_filled(band, 3.0, LABEL_COLORS[row.label as usize % 8].linear_multiply(0.55));
+                        }
                         // Eye.
                         let eye = egui::Rect::from_center_size(
                             egui::pos2(rect.min.x + 12.0, rect.center().y),
@@ -3177,6 +3222,22 @@ pub(super) fn layer_section(ui: &mut egui::Ui, m: &Model, st: &mut State, out: &
                                     }
                                 }
                             }
+                            ui.separator();
+                            ui.menu_button(tr("Color Label"), |ui| {
+                                for (i, n) in mosaix_core::doc::LABELS.iter().enumerate() {
+                                    let clicked = ui
+                                        .horizontal(|ui| {
+                                            let (r, _) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), Sense::hover());
+                                            ui.painter().rect_filled(r, 2.0, LABEL_COLORS[i]);
+                                            ui.button(label_name(n)).clicked()
+                                        })
+                                        .inner;
+                                    if clicked {
+                                        out.push(Action::Agent(serde_json::json!({ "cmd": "layer_set", "label": n })));
+                                        ui.close();
+                                    }
+                                }
+                            });
                             ui.separator();
                             if ui.button(tr("Delete Layer")).clicked() {
                                 out.push(Action::DeleteLayer);
@@ -3890,6 +3951,7 @@ pub fn layer_rows<T: Clone>(doc: &mosaix_core::Document<T>) -> Vec<LayerRow> {
                 fx: l.effects.iter().any(|e| e.enabled),
                 clip: l.clip,
                 lock: l.lock,
+                label: l.label,
                 mask_thumb: None,
             })
         })

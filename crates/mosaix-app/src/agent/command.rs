@@ -159,7 +159,11 @@ pub enum Command {
         fill_opacity: Option<f32>,
         /// Locks: {transparency, pixels, position}.
         lock: Option<mosaix_core::doc::Lock>,
+        /// Colour label: none, red, orange, yellow, green, blue, violet, gray.
+        label: Option<String>,
     },
+    /// Layer › Delete Hidden Layers.
+    LayerDeleteHidden,
     LayerSelect {
         layer: LayerId,
         /// Further layers selected along with it (delete, group, merge,
@@ -693,6 +697,7 @@ impl Command {
             Self::LayerConvertSmart { .. } => "layer_convert_smart",
             Self::LayerMerge { .. } => "layer_merge",
             Self::LayerVia { .. } => "layer_via",
+            Self::LayerDeleteHidden => "layer_delete_hidden",
             Self::SelectLayerPixels { .. } => "select_layer_pixels",
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
@@ -1237,8 +1242,18 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             pass_through,
             fill_opacity,
             lock,
+            label,
         } => {
             let id = target_layer(s, layer)?;
+            let label = label
+                .map(|l| {
+                    mosaix_core::doc::LABELS
+                        .iter()
+                        .position(|n| *n == l)
+                        .map(|i| i as u8)
+                        .with_context(|| format!("unknown label {l:?}; valid: {}", mosaix_core::doc::LABELS.join(", ")))
+                })
+                .transpose()?;
             let blend = blend
                 .map(|b| {
                     BlendMode::from_key(&b).with_context(|| {
@@ -1275,6 +1290,9 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
                 }
                 if let Some(k) = lock {
                     l.lock = k;
+                }
+                if let Some(c) = label {
+                    l.label = c;
                 }
                 true
             })?;
@@ -1733,6 +1751,14 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
             ok(s)
         }
+        Command::LayerDeleteHidden => {
+            let ids = s.engine.doc().hidden_layers();
+            ensure!(!ids.is_empty(), "no hidden layers");
+            edit(s, tr("Delete Hidden Layers"), |d| d.remove_layers(&ids)).context("cannot delete the last layer")?;
+            let mut v = ok(s)?;
+            v.result["deleted"] = json!(ids.len());
+            Ok(v)
+        }
         Command::LayerVia { cut } => {
             pixel_layer(s, None)?;
             let label = if cut { tr("Layer via Cut") } else { tr("Layer via Copy") };
@@ -1893,17 +1919,27 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             ok(s)
         }
         Command::LayerMerge { mode } => {
-            let mode = mode.unwrap_or_else(|| if s.engine.doc().selected_layers().len() > 1 { "selected".into() } else { "down".into() });
+            let mode = mode.unwrap_or_else(|| {
+                if s.engine.doc().selected_layers().len() > 1 {
+                    "selected".into()
+                } else if s.engine.doc().active_layer().is_some_and(|l| l.is_group()) {
+                    "group".into()
+                } else {
+                    "down".into()
+                }
+            });
             let kind = match mode.as_str() {
                 "selected" => mosaix_core::MergeKind::Selected,
+                "group" => mosaix_core::MergeKind::Group,
                 "down" => mosaix_core::MergeKind::Down,
                 "visible" => mosaix_core::MergeKind::Visible,
                 "flatten" => mosaix_core::MergeKind::Flatten,
-                m => bail!("unknown merge mode {m:?} (down, selected, visible, flatten)"),
+                m => bail!("unknown merge mode {m:?} (down, selected, group, visible, flatten)"),
             };
             let label = match kind {
                 mosaix_core::MergeKind::Down => tr("Merge Down"),
                 mosaix_core::MergeKind::Selected => tr("Merge Layers"),
+                mosaix_core::MergeKind::Group => tr("Merge Group"),
                 mosaix_core::MergeKind::Visible => tr("Merge Visible"),
                 mosaix_core::MergeKind::Flatten => tr("Flatten Image"),
             };
@@ -2902,6 +2938,12 @@ pub fn info(s: &Session) -> Value {
                 });
                 if l.fill_opacity < 1.0 {
                     v["fill_opacity"] = json!(l.fill_opacity);
+                }
+                if l.label > 0 {
+                    v["label"] = json!(mosaix_core::doc::LABELS[l.label.min(7) as usize]);
+                }
+                if l.lock.any() {
+                    v["lock"] = serde_json::to_value(l.lock).unwrap_or_default();
                 }
                 if let Some(m) = &l.mask {
                     v["mask"] = json!({ "enabled": l.mask_enabled, "default": m.default, "tiles": m.tiles.len() });

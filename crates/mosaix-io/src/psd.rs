@@ -83,6 +83,8 @@ pub struct Info {
     pub shape: Option<mosaix_core::vector::ShapeSpec>,
     /// Fill opacity ("iOpa"): the layer's pixels only, not its style.
     pub fill_opacity: f32,
+    /// Colour label (0 none … 7 grey).
+    pub label: u8,
 }
 
 /// A Photoshop text layer, as far as mosaix can use it.
@@ -334,6 +336,7 @@ struct Record {
     name: String,
     divider: Option<u32>,
     fill_opacity: Option<u8>,
+    label: u8,
     special: Option<&'static str>,
     adjustment: Option<mosaix_core::Adjustment>,
     text: Option<Text>,
@@ -452,6 +455,7 @@ fn record(c: &mut Cur) -> Result<Record> {
     e.skip(pad.min(e.left()))?;
     let mut divider = None;
     let mut fill_opacity = None;
+    let mut label = 0u8;
     let mut special = None;
     let mut adjustment = None;
     let mut text = None;
@@ -479,6 +483,8 @@ fn record(c: &mut Cur) -> Result<Record> {
             }
             b"lsct" | b"lsdk" => divider = Some(d.u32()?),
             b"iOpa" => fill_opacity = Some(d.u8()?),
+            // Layer colour: 2 bytes index (0 none … 7 grey), then padding.
+            b"lclr" => label = d.u16()?.min(7) as u8,
             b"CgEd" => {
                 // New-style brightness/contrast (overrides "brit").
                 // Descriptor version (16), then the descriptor.
@@ -554,6 +560,7 @@ fn record(c: &mut Cur) -> Result<Record> {
         name,
         divider,
         fill_opacity,
+        label,
         special,
         adjustment: match (adjustment, cged) {
             (Some(mosaix_core::Adjustment::BrightnessContrast { .. }), Some(c))
@@ -1043,6 +1050,7 @@ pub fn read(bytes: &[u8]) -> Result<Psd> {
         };
         let info = Info {
             fill_opacity,
+            label: r.label,
             shape,
             effects,
             name: r.name.clone(),
@@ -1163,6 +1171,8 @@ pub struct WLayer {
     pub effects: Vec<mosaix_core::style::Effect>,
     /// Fill opacity (written as "iOpa").
     pub fill_opacity: f32,
+    /// Colour label (0 none … 7 grey), written as "lclr".
+    pub label: u8,
     /// A shape layer (written as a fill layer with vector mask and stroke;
     /// the pixels stay as Photoshop's rendering of it).
     pub shape: Option<crate::psd_shape::PsdShape>,
@@ -1552,6 +1562,13 @@ fn write_record(
         o.b.extend(crate::psd_layers::write_text(t, *height));
         o.close(blk, 4);
     }
+    if l.label > 0 {
+        o.b.extend(b"8BIMlclr");
+        let blk = o.open(false);
+        o.u16(l.label.min(7) as u16);
+        o.b.extend([0u8; 6]);
+        o.close(blk, 4);
+    }
     if l.fill_opacity < 1.0 {
         o.b.extend(b"8BIMiOpa");
         let blk = o.open(false);
@@ -1650,6 +1667,7 @@ pub fn write(
         adjustment: None,
         effects: Vec::new(),
         fill_opacity: 1.0,
+        label: 0,
         shape: None,
         text: None,
         tiles: Vec::new(),
@@ -1672,6 +1690,7 @@ pub fn write(
                     adjustment: None,
                     effects: Vec::new(),
                     fill_opacity: 1.0,
+        label: l.label,
                     shape: None,
                     text: None,
                     tiles: Vec::new(),
@@ -1819,6 +1838,7 @@ pub fn write(
         adjustment: None,
         effects: Vec::new(),
         fill_opacity: 1.0,
+        label: 0,
         shape: None,
         text: None,
         tiles: composite.to_vec(),

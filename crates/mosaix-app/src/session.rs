@@ -689,6 +689,7 @@ impl PsdLayers {
                     adjustment: None,
                     effects: l.effects.clone(),
                     fill_opacity: l.fill_opacity,
+                    label: l.label,
                     shape: shapes.remove(&l.id),
                     text: texts.remove(&l.id),
                     tiles: Vec::new(),

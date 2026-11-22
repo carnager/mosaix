@@ -405,6 +405,7 @@ fn load_psd(
         l.clip = i.clipped;
         l.effects = i.effects.clone();
         l.fill_opacity = i.fill_opacity;
+        l.label = i.label;
     }
     let mut fonts: Option<Vec<mosaix_vector::FontGroup>> = None;
     let mut missing_fonts = std::collections::BTreeSet::new();
@@ -489,6 +490,7 @@ fn load_psd(
                 effects: Vec::new(),
                 shape: None,
                 fill_opacity: 1.0,
+                label: 0,
             },
             rect: Rect { x: 0, y: 0, w, h },
             pixels: Some(merged),

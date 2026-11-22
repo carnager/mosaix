@@ -47,7 +47,7 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `raw_set` | Re-develop a RAW layer (`white_balance`, `exposure`, `highlights`: `reconstruct`/`clip`, `noise`: `{luminance, color}` 0–100, `lens`: lens correction on/off, `tone`: `{contrast, highlights, shadows, vibrance, saturation}` −100…100). Opened RAW files and those placed with `place_image` stay RAW layers (the file is inside the document, transforms are lossless); `layer_rasterize` turns them into pixels |
 | `layer_add`, `layer_duplicate`, `layer_delete`, `layer_select`, `layer_move`, `layer_group`, `layer_ungroup` | Layer management |
 | `layer_select` with `also` | Select several layers; `layer_delete`, `layer_group`, `layer_duplicate`, `layer_merge` (mode `selected`, the default then) and `layer_translate`/`layer_transform` act on all of them |
-| `layer_set` | Name, opacity, blend mode (`multiply`, `screen`, `overlay`, … 19 in all), visibility |
+| `layer_set` | Name, `label` (colour), opacity, blend mode (`multiply`, `screen`, `overlay`, … 19 in all), visibility |
 | `set_blend_space` | `srgb` (Photoshop-like) or `linear` |
 | `paint_stroke` | Brush stroke along a list of points, optionally with pressure per point; size, hardness, opacity, flow, eraser; tips (`tip`: round/chalk/bristles/spray/rough/charcoal), angle, roundness, jitter (`size_jitter`, `angle_jitter`, `scatter`, `flow_jitter`), `follow_direction`; `smudge: 0…1` smudges instead of painting; `tone` (dodge/burn/sponge_saturate/sponge_desaturate/blur/sharpen) with `range` and `amount` retouches instead of painting; `target: "mask"` paints into the layer mask |
 | `select_rect`, `select_ellipse`, `select_polygon` | Anti-aliased selection; `mode`: `replace`, `add`, `subtract`, `intersect` |
@@ -64,7 +64,8 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `select_transform` | Transform the selection outline only: `scale`, `scale_x/y`, `rotate`, `dx`, `dy` |
 | `paint_stroke` with `pencil` / `history` | Pencil (no anti-aliasing); History Brush, painting back the state set with `history_source {position}` |
 | `select_to_shape` | The selection's outline as an editable shape layer (`color`, `tolerance`) |
-| `layer_merge` | Merge layers as they look (blend modes, masks, styles, text baked in; pixels outside the canvas are kept): `mode` `down` (the active layer onto the one below, default), `visible` (all visible top-level layers; hidden ones stay), `flatten` (everything into one layer; hidden layers are dropped) |
+| `layer_delete_hidden` | Delete all hidden layers |
+| `layer_merge` | Merge layers as they look (blend modes, masks, styles, text baked in; pixels outside the canvas are kept): `mode` `down` (the active layer onto the one below, default), `group` (the active group's contents), `visible` (all visible top-level layers; hidden ones stay), `flatten` (everything into one layer; hidden layers are dropped) |
 | `layer_place`, `layer_convert_smart`, `smart_replace` | Smart objects: embed an image, convert a pixel layer, replace the contents; transforms stay lossless |
 | `guide_add`, `guide_list`, `guide_delete`, `guide_clear` | Guides (`orientation` vertical/horizontal, `position` in px) |
 | `select_modify` | `op` expand/contract/border/smooth/feather by `amount` px |

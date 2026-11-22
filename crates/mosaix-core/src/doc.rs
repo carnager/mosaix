@@ -117,6 +117,9 @@ pub struct Layer<T> {
     pub clip: bool,
     /// Lock transparent pixels / all pixels / the position.
     pub lock: Lock,
+    /// Colour label in the layer panel: 0 none, 1 red, 2 orange, 3 yellow,
+    /// 4 green, 5 blue, 6 violet, 7 grey (Photoshop's order).
+    pub label: u8,
     /// Groups: "Pass Through" – the children blend directly with what is
     /// below the group (Photoshop's default); otherwise the group is
     /// composited on its own first (isolated, "Normal").
@@ -239,6 +242,9 @@ pub enum MaskSlot {
     Channel(usize),
 }
 
+/// Colour label names, by [`Layer::label`] index.
+pub const LABELS: [&str; 8] = ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"];
+
 /// What a layer protects (the lock buttons in the layer panel).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -268,6 +274,8 @@ pub enum MergeKind {
     Flatten,
     /// The selected layers (active plus [`Document::picked`]), siblings.
     Selected,
+    /// The active group's contents into one layer.
+    Group,
 }
 
 #[derive(Debug, Clone)]
@@ -461,6 +469,22 @@ impl<T: Clone> Document<T> {
         Some(gid)
     }
 
+    /// The hidden layers (and groups), outermost first.
+    pub fn hidden_layers(&self) -> Vec<LayerId> {
+        fn walk<T>(ls: &[Layer<T>], out: &mut Vec<LayerId>) {
+            for l in ls {
+                if !l.visible {
+                    out.push(l.id);
+                } else if let Content::Group(c) = &l.content {
+                    walk(c, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.layers, &mut out);
+        out
+    }
+
     /// Duplicates the layers `ids`, each above itself; the copies become the selection.
     pub fn duplicate_layers(&mut self, ids: &[LayerId]) -> Vec<LayerId> {
         let mut copies = Vec::new();
@@ -508,6 +532,13 @@ impl<T: Clone> Document<T> {
                     return Err(crate::tr("the selected layers must be in the same group"));
                 }
                 Ok(ids)
+            }
+            MergeKind::Group => {
+                let l = self.active_layer().ok_or_else(|| crate::tr("no active layer"))?;
+                if !l.is_group() {
+                    return Err(crate::tr("the active layer is not a group"));
+                }
+                Ok(vec![l.id])
             }
             MergeKind::Flatten => {
                 if self.layers.len() == 1 && self.layers[0].is_pixels() && self.layers[0].visible {
@@ -741,6 +772,7 @@ impl<T: Clone> Document<T> {
             effects: Vec::new(),
             clip: false,
             lock: Lock::default(),
+            label: 0,
         };
         list.insert(i, group);
         self.active = gid;
@@ -1032,6 +1064,7 @@ impl<T: Clone> Document<T> {
                     effects: l.effects.clone(),
                     clip: l.clip,
                     lock: l.lock,
+                    label: l.label,
                     pass_through: l.pass_through,
                     fill_opacity: l.fill_opacity,
                 })
@@ -1097,6 +1130,7 @@ impl<T> Layer<T> {
             effects: Vec::new(),
             clip: false,
             lock: Lock::default(),
+            label: 0,
             pass_through: false,
             fill_opacity: 1.0,
         }

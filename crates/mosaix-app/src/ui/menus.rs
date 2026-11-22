@@ -35,6 +35,8 @@ pub enum Special {
     SelectAndMask,
     Preferences,
     SelectionToShape,
+    /// Layer › Delete Hidden Layers.
+    DeleteHidden,
     ConvertToSmart,
     NewGuide,
     GridSettings,
@@ -184,6 +186,7 @@ const LAYER: &[Item] = &[
     C("Merge Down", G(g::ARROWS_IN_SIMPLE)),
     C("Merge Visible", G(g::STACK)),
     C("Flatten Image", G(g::IMAGE)),
+    S(Special::DeleteHidden, G(g::TRASH)),
     C("Create/Release Clipping Mask", G(g::ARROW_ELBOW_DOWN_RIGHT)),
     Sep,
     C("Add Layer Mask", G(g::MASK_HAPPY)),
