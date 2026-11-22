@@ -3169,3 +3169,61 @@ fn smart_objects_scale_without_loss() {
     e.rasterize(layer, "Rasterize").unwrap();
     assert!(e.doc().find(layer).unwrap().tiles().is_some());
 }
+
+#[test]
+fn merge_keeps_the_look_and_off_canvas_pixels() {
+    use mosaix_core::MergeKind;
+    let Some(g) = gpu() else { return };
+    for space in [BlendSpace::Srgb, BlendSpace::Linear] {
+        let mut e = Engine::new(&g.device, &g.queue, FMT, &Document::<()>::new(256, 256));
+        let bottom = e.doc().active;
+        e.upload_tile(bottom, TileCoord::new(0, 0), &pattern(1, true));
+        let (mut top, mut hidden) = (0, 0);
+        e.edit("Layers", |d| {
+            d.blend_space = space;
+            top = d.add_pixel_layer();
+            let l = d.find_mut(top).unwrap();
+            l.blend = BlendMode::Multiply;
+            l.opacity = 0.7;
+            hidden = d.add_pixel_layer();
+            d.find_mut(hidden).unwrap().visible = false;
+            d.active = top;
+            true
+        });
+        e.upload_tile(top, TileCoord::new(0, 0), &pattern(4, false));
+        // Outside the canvas: must survive the merge.
+        e.upload_tile(top, TileCoord::new(-1, 0), &pattern(2, true));
+        e.upload_tile(hidden, TileCoord::new(0, 0), &pattern(3, true));
+        e.flush();
+        let before = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+
+        let merged = e.merge(MergeKind::Down, "Merge Down").unwrap();
+        e.flush();
+        let after = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+        let worst = before.iter().zip(&after).map(|(a, b)| (a.to_f32() - b.to_f32()).abs()).fold(0.0, f32::max);
+        assert!(worst < 2e-3, "{space:?}: looks different after merging ({worst})");
+        let d = e.doc();
+        assert_eq!(d.layers.len(), 2, "bottom and top became one, the hidden layer stays");
+        assert_eq!(d.active, merged);
+        let l = d.find(merged).unwrap();
+        assert_eq!((l.blend, l.opacity), (BlendMode::Normal, 1.0));
+        // Off canvas: the top layer's pixels, Multiply onto nothing below.
+        let off = e.read_layer_tile(merged, TileCoord::new(-1, 0)).expect("off-canvas tile kept");
+        assert!(px(&off, 10, 10)[3] > 0.6, "{:?}", px(&off, 10, 10));
+
+        // Undo brings both back.
+        e.undo();
+        assert!(e.doc().find(top).is_some() && e.doc().find(bottom).is_some());
+        e.redo();
+
+        // Flatten: one layer, the hidden one is gone, the look the same.
+        e.merge(MergeKind::Flatten, "Flatten").unwrap();
+        e.flush();
+        let flat = e.read_composite(&[TileCoord::new(0, 0)]).remove(0);
+        let worst = before.iter().zip(&flat).map(|(a, b)| (a.to_f32() - b.to_f32()).abs()).fold(0.0, f32::max);
+        assert!(worst < 2e-3, "{space:?}: flatten changed the look ({worst})");
+        assert_eq!(e.doc().layers.len(), 1);
+        assert!(e.merge(MergeKind::Flatten, "Flatten").is_err(), "nothing left to flatten");
+        assert!(e.merge(MergeKind::Down, "Merge Down").is_err(), "nothing below");
+    }
+}

@@ -475,7 +475,7 @@ fn base_has_effects(d: &Document<Tile>) -> bool {
 
 /// Ids for the layers that carry a layer's outer effects (never clash with
 /// document ids, which count up from 1).
-fn effect_layer_id(layer: LayerId, k: usize) -> LayerId {
+pub(super) fn effect_layer_id(layer: LayerId, k: usize) -> LayerId {
     u32::MAX - layer.wrapping_mul(16) - k as u32
 }
 

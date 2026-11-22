@@ -287,6 +287,11 @@ pub enum Command {
     LayerConvertSmart {
         layer: Option<LayerId>,
     },
+    /// "down" (active onto the one below), "visible" or "flatten".
+    LayerMerge {
+        #[serde(default = "default_merge")]
+        mode: String,
+    },
     SmartReplace {
         layer: Option<LayerId>,
         path: PathBuf,
@@ -590,6 +595,7 @@ impl Command {
             Self::GenerativeFill { .. } => "generative_fill",
             Self::LayerPlace { .. } => "layer_place",
             Self::LayerConvertSmart { .. } => "layer_convert_smart",
+            Self::LayerMerge { .. } => "layer_merge",
             Self::SmartReplace { .. } => "smart_replace",
             Self::GuideDelete { .. } => "guide_delete",
             Self::GuideClear => "guide_clear",
@@ -800,6 +806,10 @@ fn channel_names(s: &Session) -> Vec<String> {
 
 fn yes() -> bool {
     true
+}
+
+fn default_merge() -> String {
+    "down".into()
 }
 
 fn default_upscale() -> u32 {
@@ -1572,6 +1582,21 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
         Command::LayerConvertSmart { layer } => {
             let id = pixel_layer(s, layer)?;
             s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
+            ok(s)
+        }
+        Command::LayerMerge { mode } => {
+            let kind = match mode.as_str() {
+                "down" => mosaix_core::MergeKind::Down,
+                "visible" => mosaix_core::MergeKind::Visible,
+                "flatten" => mosaix_core::MergeKind::Flatten,
+                m => bail!("unknown merge mode {m:?} (down, visible, flatten)"),
+            };
+            let label = match kind {
+                mosaix_core::MergeKind::Down => tr("Merge Down"),
+                mosaix_core::MergeKind::Visible => tr("Merge Visible"),
+                mosaix_core::MergeKind::Flatten => tr("Flatten Image"),
+            };
+            s.engine.merge(kind, label).map_err(engine_err)?;
             ok(s)
         }
         Command::SmartReplace { layer, path } => {

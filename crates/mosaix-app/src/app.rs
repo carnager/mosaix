@@ -1932,6 +1932,9 @@ impl App {
             Keysym::y if ctrl => json!({ "cmd": "redo" }),
             Keysym::n | Keysym::N if ctrl && shift => json!({ "cmd": "layer_add" }),
             Keysym::j if ctrl => json!({ "cmd": "layer_duplicate" }),
+            Keysym::e | Keysym::E if ctrl && !shift && alt => json!({ "cmd": "layer_merge", "mode": "visible" }),
+            Keysym::e if ctrl && !shift && !alt => json!({ "cmd": "layer_merge", "mode": "down" }),
+            Keysym::f | Keysym::F if ctrl && shift && alt => json!({ "cmd": "layer_merge", "mode": "flatten" }),
             Keysym::g | Keysym::G if ctrl && shift && !alt => json!({ "cmd": "layer_ungroup" }),
             Keysym::g if ctrl && !alt => json!({ "cmd": "layer_group" }),
             Keysym::Delete | Keysym::BackSpace if !alt && !shift && has_sel => json!({ "cmd": "clear" }),
@@ -3134,6 +3137,9 @@ impl App {
                 true
             }),
             Keysym::j if ctrl => self.edit(tr("Duplicate Layer"), |d| d.duplicate_active().is_some()),
+            Keysym::e | Keysym::E if ctrl && !shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "visible" })),
+            Keysym::e if ctrl && !shift && !alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "down" })),
+            Keysym::f | Keysym::F if ctrl && shift && alt => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_merge", "mode": "flatten" })),
             Keysym::g | Keysym::G if ctrl && shift => self.edit(tr("Ungroup Layers"), |d| d.ungroup_active()),
             // Ctrl+Alt+G: clipping mask on/off (clips to the layer below).
             Keysym::b | Keysym::B if ctrl && alt && shift => self.file_dialog(ui::files::FileMode::ImportBrushes),

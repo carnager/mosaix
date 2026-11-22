@@ -31,6 +31,7 @@ mod heal;
 mod histogram;
 mod liquify;
 mod magic;
+mod merge;
 mod plugin;
 pub mod raw;
 pub use plugin::validate as validate_plugin;

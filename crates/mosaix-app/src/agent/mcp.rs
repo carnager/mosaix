@@ -474,6 +474,13 @@ pub fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "layer_merge",
+            "Merge layers into one pixel layer, as they look (blend modes, masks, styles, text baked in; pixels outside the canvas kept). mode: down = the active layer onto the one below (default), visible = all visible top-level layers (hidden ones stay), flatten = everything into one layer (hidden layers are dropped).",
+            json!({ "mode": { "type": "string", "enum": ["down", "visible", "flatten"] } }),
+            &[],
+            false,
+        ),
+        tool(
             "smart_replace",
             "Replace the image inside a smart object (its placement stays).",
             json!({ "layer": layer_param(), "path": { "type": "string" } }),

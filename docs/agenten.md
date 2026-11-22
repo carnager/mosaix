@@ -52,6 +52,7 @@ Jedes mosaix-Fenster lauscht auf `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (nur für 
 | `select_rect`, `select_ellipse`, `select_polygon` | Auswahl mit Kantenglättung; `mode`: `replace`, `add`, `subtract`, `intersect` |
 | `select_all`, `select_none`, `select_invert`, `select_feather` | Auswahl verwalten, weiche Kante |
 | `generative_fill` | Auswahl aus einem Prompt malen lassen, mit dem im Dialog eingestellten Anbieter (OpenAI nur nach Zustimmung des Nutzers dort) |
+| `layer_merge` | Ebenen zusammenfügen, so wie sie aussehen (Mischmodi, Masken, Stile, Text eingebacken; Pixel außerhalb der Leinwand bleiben): `mode` `down` (aktive auf die darunter, Standard), `visible` (alle sichtbaren oberen Ebenen, ausgeblendete bleiben), `flatten` (alles in eine Ebene, ausgeblendete fallen weg) |
 | `layer_place`, `layer_convert_smart`, `smart_replace` | Smart-Objekte: Bild einbetten, Pixelebene umwandeln, Inhalt tauschen; Transformationen bleiben verlustfrei |
 | `guide_add`, `guide_list`, `guide_delete`, `guide_clear` | Hilfslinien (`orientation` vertical/horizontal, `position` in px) |
 | `select_modify` | `op` expand/contract/border/smooth/feather um `amount` px |

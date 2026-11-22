@@ -237,6 +237,17 @@ pub enum MaskSlot {
     Channel(usize),
 }
 
+/// Layer › Merge Down, Merge Visible, Flatten Image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeKind {
+    /// The active layer onto the one below it.
+    Down,
+    /// All visible top-level layers into one; hidden layers stay.
+    Visible,
+    /// Everything into one layer; hidden layers are dropped.
+    Flatten,
+}
+
 #[derive(Debug, Clone)]
 pub struct Document<T> {
     pub width: u32,
@@ -344,6 +355,63 @@ impl<T: Clone> Document<T> {
             None
         }
         walk(&mut self.layers, id)
+    }
+
+    /// The list holding `id` (bottom → top) and its index there.
+    pub fn siblings(&self, id: LayerId) -> Option<(&[Layer<T>], usize)> {
+        fn walk<T>(ls: &[Layer<T>], id: LayerId) -> Option<(&[Layer<T>], usize)> {
+            if let Some(i) = ls.iter().position(|l| l.id == id) {
+                return Some((ls, i));
+            }
+            ls.iter().find_map(|l| match &l.content {
+                Content::Group(c) => walk(c, id),
+                _ => None,
+            })
+        }
+        walk(&self.layers, id)
+    }
+
+    /// The layers a merge combines (bottom → top, all in one list).
+    pub fn merge_set(&self, kind: MergeKind) -> Result<Vec<LayerId>, &'static str> {
+        match kind {
+            MergeKind::Down => {
+                let (list, i) = self.siblings(self.active).ok_or_else(|| crate::tr("no active layer"))?;
+                if i == 0 {
+                    return Err(crate::tr("there is no layer below to merge with"));
+                }
+                let (lo, hi) = (&list[i - 1], &list[i]);
+                if !lo.visible || !hi.visible {
+                    return Err(crate::tr("both layers must be visible to merge"));
+                }
+                Ok(vec![lo.id, hi.id])
+            }
+            MergeKind::Visible => {
+                let ids: Vec<LayerId> = self.layers.iter().filter(|l| l.visible).map(|l| l.id).collect();
+                if ids.len() < 2 {
+                    return Err(crate::tr("fewer than two visible layers"));
+                }
+                Ok(ids)
+            }
+            MergeKind::Flatten => {
+                if self.layers.len() == 1 && self.layers[0].is_pixels() && self.layers[0].visible {
+                    return Err(crate::tr("the image has only one layer"));
+                }
+                Ok(self.layers.iter().map(|l| l.id).collect())
+            }
+        }
+    }
+
+    /// Puts `merged` where the lowest of the sibling layers `ids` was and
+    /// removes them; `merged` becomes active.
+    pub fn replace_merged(&mut self, ids: &[LayerId], merged: Layer<T>) -> bool {
+        let Some(&first) = ids.first() else { return false };
+        let Some((list, _)) = self.locate_mut(first) else { return false };
+        let Some(at) = list.iter().position(|l| ids.contains(&l.id)) else { return false };
+        let id = merged.id;
+        list.retain(|l| !ids.contains(&l.id));
+        list.insert(at.min(list.len()), merged);
+        self.active = id;
+        true
     }
 
     /// Mutable access to a pixel layer's tile map (copy-on-write).

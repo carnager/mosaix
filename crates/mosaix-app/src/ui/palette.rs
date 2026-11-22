@@ -208,6 +208,9 @@ pub const COMMANDS: &[Cmd] = &[
     ),
     c("Layer", "New Layer", K::N, true, true, false),
     c("Layer", "Duplicate Layer", K::j, true, false, false),
+    c("Layer", "Merge Down", K::e, true, false, false),
+    c("Layer", "Merge Visible", K::e, true, false, true),
+    c("Layer", "Flatten Image", K::F, true, true, true),
     c(
         "Layer",
         "Create/Release Clipping Mask",

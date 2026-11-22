@@ -3052,3 +3052,36 @@ msgstr "Generieren"
 
 msgid "Not for this layer"
 msgstr "Nicht für diese Ebene"
+
+msgid "Merge Down"
+msgstr "Auf eine Ebene reduzieren"
+
+msgid "Merge Visible"
+msgstr "Sichtbare auf eine Ebene reduzieren"
+
+msgid "Flatten Image"
+msgstr "Auf Hintergrundebene reduzieren"
+
+msgid "there is no layer below to merge with"
+msgstr "darunter liegt keine Ebene zum Zusammenfügen"
+
+msgid "both layers must be visible to merge"
+msgstr "zum Zusammenfügen müssen beide Ebenen sichtbar sein"
+
+msgid "fewer than two visible layers"
+msgstr "weniger als zwei sichtbare Ebenen"
+
+msgid "the image has only one layer"
+msgstr "das Bild hat nur eine Ebene"
+
+msgid "finish the stroke first"
+msgstr "erst den Strich beenden"
+
+msgid "no such layer"
+msgstr "diese Ebene gibt es nicht"
+
+msgid "Merged"
+msgstr "Zusammengefügt"
+
+msgid "could not merge"
+msgstr "Zusammenfügen fehlgeschlagen"
