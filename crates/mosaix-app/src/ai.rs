@@ -135,6 +135,18 @@ pub fn inpaint(job: mosaix_gpu::FillJob) -> Result<mosaix_gpu::FillResult> {
     job.run_with(|w, h, img, hole| m.fill(w, h, img, hole))
 }
 
+/// Area around the selection a generative model sees.
+pub const GENERATIVE_CONTEXT: i64 = 1024;
+
+/// Generative fill: the hole painted from `prompt` by `provider` (worker thread).
+pub fn generative_fill(
+    job: mosaix_gpu::FillJob,
+    provider: &mosaix_ai::generative::Provider,
+    prompt: &str,
+) -> Result<mosaix_gpu::FillResult> {
+    job.run_with(|w, h, img, hole| mosaix_ai::generative::fill(provider, w, h, img, hole, prompt))
+}
+
 /// Upscale (AI): every pixel layer of the job enlarged with Real-ESRGAN
 /// (worker thread; progress in the log every 10 %).
 pub fn upscale(job: mosaix_gpu::UpscaleJob) -> Result<mosaix_gpu::UpscaleResult> {

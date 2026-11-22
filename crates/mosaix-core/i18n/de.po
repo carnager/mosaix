@@ -2977,3 +2977,54 @@ msgstr "die Ebene ließ sich nicht kodieren"
 
 msgid "not a smart object"
 msgstr "kein Smart-Objekt"
+
+msgid "Set the program for generative fill first"
+msgstr "Erst das Programm für generatives Füllen einstellen"
+
+msgid "Generative fill with OpenAI needs your consent first (Edit › Generative Fill …)"
+msgstr "Generatives Füllen mit OpenAI braucht erst deine Zustimmung (Bearbeiten › Generatives Füllen …)"
+
+msgid "No OpenAI API key: set OPENAI_API_KEY in the environment"
+msgstr "Kein OpenAI-API-Schlüssel: OPENAI_API_KEY in der Umgebung setzen"
+
+msgid "Generative fill needs a selection"
+msgstr "Generatives Füllen braucht eine Auswahl"
+
+msgid "Generative fill: “{prompt}” …"
+msgstr "Generatives Füllen: „{prompt}“ …"
+
+msgid "Generative Fill"
+msgstr "Generatives Füllen"
+
+msgid "Generative Fill …"
+msgstr "Generatives Füllen …"
+
+msgid "What should appear in the selection?"
+msgstr "Was soll in der Auswahl erscheinen?"
+
+msgid "e.g. a wooden bench, morning light"
+msgstr "z. B. eine Holzbank, Morgenlicht"
+
+msgid "Provider"
+msgstr "Anbieter"
+
+msgid "Own program"
+msgstr "Eigenes Programm"
+
+msgid "Program"
+msgstr "Programm"
+
+msgid "Called as: program image.png mask.png prompt out.png (mask white = fill). Runs on this computer."
+msgstr "Aufruf: programm bild.png maske.png prompt aus.png (Maske weiß = füllen). Läuft auf diesem Rechner."
+
+msgid "Model"
+msgstr "Modell"
+
+msgid "The API key is read from OPENAI_API_KEY."
+msgstr "Der API-Schlüssel kommt aus OPENAI_API_KEY."
+
+msgid "Send the selected area and its surroundings to OpenAI (they may keep it as their terms say)"
+msgstr "Den ausgewählten Bereich samt Umgebung an OpenAI senden (die dürfen ihn laut ihren Bedingungen behalten)"
+
+msgid "Generate"
+msgstr "Generieren"

@@ -480,6 +480,14 @@ pub fn tools() -> Vec<Value> {
             &["path"],
             false,
         ),
+        tool(
+            "generative_fill",
+            "Paint the selection from a text prompt with the provider set up under Edit › Generative Fill (OpenAI image \
+             edits – only after the user agreed there – or the user's own program). Applied to the layer as one undo step.",
+            json!({ "layer": layer_param(), "prompt": { "type": "string" } }),
+            &["prompt"],
+            false,
+        ),
         tool("guide_list", "The guides: [{vertical, pos}] by index.", json!({}), &[], false),
         tool(
             "guide_delete",
@@ -1039,7 +1047,8 @@ mod tests {
             "select_modify": {"op": "expand", "amount": 3}, "select_save": {"name": "a"},
             "channel_delete": {"channel": 0}, "channel_rename": {"channel": 0, "name": "b"},
             "guide_add": {"orientation": "vertical", "position": 10}, "guide_delete": {"index": 0},
-            "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"}
+            "layer_place": {"path": "a.png"}, "smart_replace": {"path": "a.png"},
+            "generative_fill": {"prompt": "a bench"}
         });
         samples.as_object_mut().unwrap().extend(selection.as_object().unwrap().clone());
         for t in tools() {

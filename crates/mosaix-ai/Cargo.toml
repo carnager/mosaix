@@ -10,6 +10,8 @@ rayon.workspace = true
 ort = { version = "2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-29"] }
 ndarray = "0.17"
 ureq = "3"
+image.workspace = true
+serde_json.workspace = true
+base64 = "0.23"
 
 [dev-dependencies]
-image.workspace = true

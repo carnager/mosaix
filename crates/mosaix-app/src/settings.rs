@@ -78,6 +78,47 @@ impl Brush {
     }
 }
 
+/// Generative fill: who paints. The OpenAI key comes from the environment
+/// (`OPENAI_API_KEY`), never from this file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GenSettings {
+    /// "openai" or "command".
+    pub provider: String,
+    pub model: String,
+    /// The program for "command": `program image.png mask.png prompt out.png`.
+    pub command: String,
+    /// The user agreed that pixels go to the hosted provider.
+    pub remote_ok: bool,
+}
+
+impl Default for GenSettings {
+    fn default() -> Self {
+        Self { provider: "openai".into(), model: "gpt-image-1".into(), command: String::new(), remote_ok: false }
+    }
+}
+
+impl GenSettings {
+    /// The provider to use, or why there is none.
+    pub fn provider(&self) -> Result<mosaix_ai::generative::Provider, String> {
+        use mosaix_ai::generative::Provider;
+        match self.provider.as_str() {
+            "command" if self.command.trim().is_empty() => Err(mosaix_core::tr("Set the program for generative fill first").into()),
+            "command" => Ok(Provider::Command { program: self.command.clone() }),
+            _ => {
+                if !self.remote_ok {
+                    return Err(mosaix_core::tr("Generative fill with OpenAI needs your consent first (Edit › Generative Fill …)").into());
+                }
+                let key = std::env::var("MOSAIX_OPENAI_KEY").or_else(|_| std::env::var("OPENAI_API_KEY")).unwrap_or_default();
+                if key.trim().is_empty() {
+                    return Err(mosaix_core::tr("No OpenAI API key: set OPENAI_API_KEY in the environment").into());
+                }
+                Ok(Provider::OpenAi { model: self.model.clone(), key })
+            }
+        }
+    }
+}
+
 /// Dodge, burn, sponge, blur and sharpen.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -142,6 +183,7 @@ pub struct Settings {
     pub recent_fonts: Vec<String>,
     pub view: ViewOpts,
     pub tone: ToneOpts,
+    pub generative: GenSettings,
 }
 
 impl Default for Settings {
@@ -165,6 +207,7 @@ impl Default for Settings {
             recent_fonts: Vec::new(),
             view: ViewOpts::default(),
             tone: ToneOpts::default(),
+            generative: GenSettings::default(),
         }
     }
 }

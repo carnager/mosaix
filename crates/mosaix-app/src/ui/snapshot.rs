@@ -132,6 +132,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             doc.guides.clone()
         },
         panels: Default::default(),
+        generative: Default::default(),
         view_opts: crate::settings::ViewOpts {
             rulers: std::env::var_os("MOSAIX_SNAPSHOT_RULERS").is_some(),
             grid: std::env::var_os("MOSAIX_SNAPSHOT_GRID").is_some(),
@@ -208,6 +209,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
             state.file = Some(d);
         }
         Ok("confirm") => state.confirm = Some(tr("They will be lost when quitting.").into()),
+        Ok("generative") => state.open_generative(),
         Ok("filter") => state.open_filter(mosaix_core::Filter::GaussianBlur { radius: 25.0 }),
         Ok(d) if d.starts_with("filter:") => {
             let lib = crate::app::filters::load_library(&crate::app::filters::filter_dir());

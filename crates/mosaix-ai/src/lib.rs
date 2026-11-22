@@ -17,6 +17,7 @@ use ort::session::Session;
 use ort::value::Tensor;
 use rayon::prelude::*;
 
+pub mod generative;
 pub mod models;
 
 pub use models::{INPAINT, Model, SAM, SUBJECT, UPSCALE};

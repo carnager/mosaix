@@ -51,6 +51,7 @@ Jedes mosaix-Fenster lauscht auf `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (nur für 
 | `paint_stroke` | Pinselstrich entlang einer Punktliste, optional mit Druck pro Punkt; Größe, Härte, Deckkraft, Fluss, Radierer; Spitzen (`tip`: round/chalk/bristles/spray/rough/charcoal), Winkel, Rundheit, Zufall (`size_jitter`, `angle_jitter`, `scatter`, `flow_jitter`), `follow_direction`; `smudge: 0…1` verwischt statt zu malen; `tone` (dodge/burn/sponge_saturate/sponge_desaturate/blur/sharpen) mit `range` und `amount` retuschiert statt zu malen; `target: "mask"` malt in die Ebenenmaske |
 | `select_rect`, `select_ellipse`, `select_polygon` | Auswahl mit Kantenglättung; `mode`: `replace`, `add`, `subtract`, `intersect` |
 | `select_all`, `select_none`, `select_invert`, `select_feather` | Auswahl verwalten, weiche Kante |
+| `generative_fill` | Auswahl aus einem Prompt malen lassen, mit dem im Dialog eingestellten Anbieter (OpenAI nur nach Zustimmung des Nutzers dort) |
 | `layer_place`, `layer_convert_smart`, `smart_replace` | Smart-Objekte: Bild einbetten, Pixelebene umwandeln, Inhalt tauschen; Transformationen bleiben verlustfrei |
 | `guide_add`, `guide_list`, `guide_delete`, `guide_clear` | Hilfslinien (`orientation` vertical/horizontal, `position` in px) |
 | `select_modify` | `op` expand/contract/border/smooth/feather um `amount` px |

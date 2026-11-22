@@ -277,6 +277,10 @@ pub enum Command {
         position: f64,
     },
     GuideList,
+    GenerativeFill {
+        layer: Option<LayerId>,
+        prompt: String,
+    },
     LayerPlace {
         path: PathBuf,
     },
@@ -583,6 +587,7 @@ impl Command {
             Self::ChannelList => "channel_list",
             Self::GuideAdd { .. } => "guide_add",
             Self::GuideList => "guide_list",
+            Self::GenerativeFill { .. } => "generative_fill",
             Self::LayerPlace { .. } => "layer_place",
             Self::LayerConvertSmart { .. } => "layer_convert_smart",
             Self::SmartReplace { .. } => "smart_replace",
@@ -1541,6 +1546,22 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             Ok(Output::json(json!({ "guides": s.engine.doc().guides })))
         }
         Command::GuideList => Ok(Output::json(json!({ "guides": s.engine.doc().guides }))),
+        Command::GenerativeFill { layer, prompt } => {
+            pixel_layer(s, layer)?;
+            ensure!(s.engine.has_selection(), "generative fill needs a selection");
+            let settings = crate::settings::Settings::load_from(&crate::settings::config_path()).generative;
+            let provider = settings.provider().map_err(|e| anyhow::anyhow!(e))?;
+            let job = s
+                .engine
+                .fill_job_sized(true, crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW)
+                .map_err(engine_err)?;
+            let r = crate::ai::generative_fill(job, &provider, &prompt)?;
+            let ms = r.ms;
+            ensure!(s.engine.apply_fill(r, tr("Generative Fill")), "the layer has changed in the meantime");
+            let mut v = ok(s)?;
+            v.result["ms"] = json!(ms.round());
+            Ok(v)
+        }
         Command::LayerPlace { path } => {
             let bytes = std::fs::read(&path).with_context(|| format!("cannot read {}", path.display()))?;
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

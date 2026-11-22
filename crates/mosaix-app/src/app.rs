@@ -2818,6 +2818,30 @@ impl App {
         }
     }
 
+    /// Edit › Generative Fill: the selection painted from a prompt (background).
+    fn generative_fill(&mut self, prompt: String) {
+        let provider = match self.settings.generative.provider() {
+            Ok(p) => p,
+            Err(e) => return tracing::warn!("{e}"),
+        };
+        let Some(e) = self.engine() else { return };
+        if !e.has_selection() {
+            return tracing::warn!("{}", tr("Generative fill needs a selection"));
+        }
+        match e.fill_job_sized(true, crate::ai::GENERATIVE_CONTEXT, crate::ai::REMOVE_GROW) {
+            Ok(job) => {
+                tracing::info!("{}", tr!("Generative fill: “{prompt}” …", prompt = prompt.clone()));
+                let started = Instant::now();
+                self.spawn_bg("generative fill", move || BgDone::Filled {
+                    result: crate::ai::generative_fill(job, &provider, &prompt).map_err(|e| format!("{e:#}")),
+                    started,
+                    label: tr("Generative Fill"),
+                });
+            }
+            Err(err) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Generative Fill"), error = tr(err))),
+        }
+    }
+
     /// Image › Upscale (AI): every pixel layer enlarged on a worker, then the
     /// document scaled (one undo step).
     fn ai_upscale(&mut self, factor: u32) {
@@ -3801,6 +3825,7 @@ impl App {
             view: self.view,
             guides: doc.guides.clone(),
             view_opts: self.settings.view,
+            generative: self.settings.generative.clone(),
             panels: Default::default(),
             status: self.ui_status.clone(),
             busy: self.bg_running > 0 || self.saving || self.save_job.is_some() || self.loading,
@@ -3912,6 +3937,13 @@ impl App {
                 Action::ViewOpts(v) => self.settings.view = v,
                 Action::ToneOpts(t) => self.settings.tone = t,
                 Action::PickFile(mode) => self.file_dialog(mode),
+                Action::GenSettings(g) => {
+                    self.settings.generative = g;
+                    if let Err(e) = self.settings.save_to(&settings::config_path()) {
+                        tracing::warn!("{}", tr!("Settings not saved: {error}", error = format!("{e:#}")));
+                    }
+                }
+                Action::GenerativeFill(prompt) => self.generative_fill(prompt),
                 Action::PlaceEmbedded(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_place", "path": p })),
                 Action::ReplaceContents(p) => self.run_agent_cmd(serde_json::json!({ "cmd": "smart_replace", "path": p })),
                 Action::ConvertToSmart => self.run_agent_cmd(serde_json::json!({ "cmd": "layer_convert_smart" })),

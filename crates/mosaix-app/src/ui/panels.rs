@@ -220,6 +220,7 @@ pub struct Model {
     pub view: mosaix_core::View,
     pub guides: Vec<mosaix_core::Guide>,
     pub view_opts: crate::settings::ViewOpts,
+    pub generative: crate::settings::GenSettings,
     /// Navigator texture, histogram and pointer colour (when those panels show).
     pub panels: super::navigator::PanelData,
     pub status: String,
@@ -247,6 +248,8 @@ pub enum Action {
     /// An agent command (JSON), run in the window and recorded as is.
     Agent(serde_json::Value),
     PickFile(super::files::FileMode),
+    GenSettings(crate::settings::GenSettings),
+    GenerativeFill(String),
     PlaceEmbedded(std::path::PathBuf),
     ReplaceContents(std::path::PathBuf),
     ConvertToSmart,
@@ -468,6 +471,7 @@ enum Dialog {
     ColorRange { color: [f32; 3], fuzziness: f32, image: bool, mode: &'static str },
     SaveSelection { name: String },
     NewGuide { vertical: bool, pos: f64 },
+    Generative { prompt: String, settings: crate::settings::GenSettings },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -499,6 +503,11 @@ impl State {
     pub fn open_effect(&mut self, i: usize) {
         self.fx_open = Some(i);
         self.focus_pane = Some(super::dock::Pane::Styles);
+    }
+
+    /// Opens Edit › Generative Fill (UI snapshots).
+    pub fn open_generative(&mut self) {
+        self.dialog = Some(Dialog::Generative { prompt: String::new(), settings: Default::default() });
     }
 
     /// The Color Range dialog is open (clicks on the canvas pick its colour).
@@ -1024,6 +1033,15 @@ fn special_entry(
                 .on_disabled_hover_text(tr("Works on pixel layers"));
             if r.clicked() {
                 out.push(Action::ConvertToSmart);
+                ui.close();
+            }
+        }
+        Special::GenerativeFill => {
+            let r = ui
+                .add_enabled(m.has_selection, egui::Button::new((icon, tr("Generative Fill …"))))
+                .on_disabled_hover_text(tr("Needs a selection"));
+            if r.clicked() {
+                st.dialog = Some(Dialog::Generative { prompt: String::new(), settings: m.generative.clone() });
                 ui.close();
             }
         }
@@ -2802,6 +2820,51 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
             } else if changed {
                 out.push(Action::ColorRange { cmd, phase: RangePhase::Preview });
             }
+        }
+        Dialog::Generative { prompt, settings } => {
+            egui::Window::new(tr("Generative Fill"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .default_width(360.0)
+                .show(ctx, |ui| {
+                    ui.label(tr("What should appear in the selection?"));
+                    let r = ui.add(egui::TextEdit::multiline(prompt).desired_rows(2).desired_width(340.0).hint_text(tr("e.g. a wooden bench, morning light")));
+                    r.request_focus();
+                    ui.add_space(6.0);
+                    let before = settings.clone();
+                    egui::CollapsingHeader::new(tr("Provider")).default_open(settings.provider == "openai" && !settings.remote_ok).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(&mut settings.provider, "openai".to_string(), "OpenAI");
+                            ui.selectable_value(&mut settings.provider, "command".to_string(), tr("Own program"));
+                        });
+                        if settings.provider == "command" {
+                            ui.horizontal(|ui| {
+                                ui.label(tr("Program"));
+                                ui.text_edit_singleline(&mut settings.command);
+                            });
+                            ui.label(RichText::new(tr("Called as: program image.png mask.png prompt out.png (mask white = fill). Runs on this computer.")).weak());
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.label(tr("Model"));
+                                ui.text_edit_singleline(&mut settings.model);
+                            });
+                            ui.label(RichText::new(tr("The API key is read from OPENAI_API_KEY.")).weak());
+                            ui.checkbox(
+                                &mut settings.remote_ok,
+                                tr("Send the selected area and its surroundings to OpenAI (they may keep it as their terms say)"),
+                            );
+                        }
+                    });
+                    if *settings != before {
+                        out.push(Action::GenSettings(settings.clone()));
+                    }
+                    let ready = !prompt.trim().is_empty() && (settings.provider == "command" || settings.remote_ok);
+                    if ui.add_enabled(ready, egui::Button::new(tr("Generate"))).clicked() {
+                        out.push(Action::GenerativeFill(prompt.trim().to_string()));
+                        done = true;
+                    }
+                });
         }
         Dialog::NewGuide { vertical, pos } => {
             egui::Window::new(tr("New Guide"))
