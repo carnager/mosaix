@@ -135,6 +135,7 @@ pub const MENUS: [&str; 7] = ["File", "Edit", "Image", "Layer", "Select", "Tool"
 pub const COMMANDS: &[Cmd] = &[
     c("File", "New …", K::n, true, false, false),
     c("File", "Open …", K::o, true, false, false),
+    c("File", "Close", K::w, true, false, false),
     c("File", "Save", K::s, true, false, false),
     c("File", "Save As …", K::S, true, true, false),
     c("File", "Export As …", K::E, true, true, true),
@@ -343,6 +344,8 @@ pub const COMMANDS: &[Cmd] = &[
     c("View", "100 %", K::_1, true, false, false),
     c("View", "Reset Rotation", K::R, false, true, false),
     c("View", "Toggle Interface", K::Tab, false, false, false),
+    c("View", "Next Document", K::Tab, true, false, false),
+    c("View", "Previous Document", K::ISO_Left_Tab, true, true, false),
     c("View", "Rulers", K::r, true, false, false),
     c("View", "Guides", K::semicolon, true, false, false),
     c("View", "Grid", K::apostrophe, true, false, false),
@@ -383,7 +386,7 @@ impl Cmd {
         let name = match self.key {
             K::BackSpace => tr("Backspace").to_string(),
             K::Delete => tr("Del").to_string(),
-            K::Tab => "Tab".to_string(),
+            K::Tab | K::ISO_Left_Tab => "Tab".to_string(),
             K::backslash => "\\".to_string(),
             K::comma => ",".to_string(),
             K::plus => "+".to_string(),

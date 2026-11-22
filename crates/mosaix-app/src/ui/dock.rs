@@ -130,7 +130,12 @@ impl TabViewer for Viewer<'_> {
         let (m, st, out) = (self.m, &mut *self.st, &mut *self.out);
         match tab {
             Pane::Canvas => {
-                let r = ui.max_rect();
+                let mut r = ui.max_rect();
+                if m.tabs.len() > 1 {
+                    let strip = egui::Rect::from_min_size(r.min, egui::vec2(r.width(), 26.0));
+                    doc_tabs(ui, strip, m, out);
+                    r.min.y = strip.max.y;
+                }
                 st.canvas = Some(r);
                 ui.allocate_rect(r, egui::Sense::hover());
             }
@@ -164,6 +169,37 @@ impl TabViewer for Viewer<'_> {
             _ => [false, true],
         }
     }
+}
+
+/// The open documents above the canvas: click switches, the × or a
+/// middle click closes.
+fn doc_tabs(ui: &mut Ui, strip: egui::Rect, m: &Model, out: &mut Vec<Action>) {
+    let p = ui.painter_at(strip);
+    p.rect_filled(strip, 0.0, egui::Color32::from_rgb(30, 31, 35));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(strip.shrink2(egui::vec2(4.0, 2.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    egui::ScrollArea::horizontal().id_salt("doc tabs").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(&mut child, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for (i, (name, modified)) in m.tabs.iter().enumerate() {
+                let active = i == m.tab;
+                let text = format!("{}{}", if *modified { "• " } else { "" }, name);
+                let fill = if active { egui::Color32::from_rgb(52, 56, 64) } else { egui::Color32::from_rgb(38, 40, 45) };
+                egui::Frame::new().fill(fill).corner_radius(4.0).inner_margin(egui::Margin::symmetric(8, 2)).show(ui, |ui| {
+                    let label = egui::RichText::new(text).color(if active { egui::Color32::WHITE } else { egui::Color32::from_gray(170) });
+                    let r = ui.add(egui::Label::new(label).sense(egui::Sense::click()).truncate());
+                    if r.clicked() {
+                        out.push(Action::SwitchTab(i));
+                    }
+                    if r.middle_clicked() {
+                        out.push(Action::CloseTab(i));
+                    }
+                    if ui.add(egui::Button::new(egui::RichText::new("×").size(13.0)).frame(false)).on_hover_text(tr("Close (Ctrl+W)")).clicked() {
+                        out.push(Action::CloseTab(i));
+                    }
+                });
+            }
+        });
+    });
 }
 
 /// Shows the dock in the remaining area.

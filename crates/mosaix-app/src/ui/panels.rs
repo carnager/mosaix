@@ -167,6 +167,10 @@ pub struct Model {
     pub doc_size: (u32, u32),
     pub name: String,
     pub modified: bool,
+    /// Open documents (name, unsaved changes) in tab order and the active
+    /// one; empty with a single document.
+    pub tabs: Vec<(String, bool)>,
+    pub tab: usize,
     pub zoom: f64,
     pub rotation_deg: f64,
     pub cursor_doc: Option<(f64, f64)>,
@@ -273,6 +277,9 @@ pub enum Action {
     BucketAll(bool),
     /// The active layer's locks.
     SetLock(mosaix_core::doc::Lock),
+    /// Document tabs: make one active, close one.
+    SwitchTab(usize),
+    CloseTab(usize),
     /// Layer panel: Ctrl+click (toggle) or Shift+click (`range`) a layer.
     PickLayer { layer: LayerId, range: bool },
     /// Saves (`Some`) or forgets (`None`) the OpenAI API key.
@@ -556,6 +563,14 @@ impl State {
         self.dialog = Some(Dialog::Adjust { adj: a });
         self.dialog_new = true;
         self.adj_editor = Default::default();
+    }
+
+    /// Closes what belongs to one document (dialogs, filter preview,
+    /// renaming) before another one becomes active.
+    pub fn close_doc_dialogs(&mut self) {
+        self.dialog = None;
+        self.filter = None;
+        self.rename = None;
     }
 
     /// Opens Edit › Stroke (UI snapshots).

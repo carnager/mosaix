@@ -3310,3 +3310,18 @@ msgstr "Breite"
 
 msgid "height"
 msgstr "Höhe"
+
+msgid "They will be lost when you close it."
+msgstr "Sie gehen beim Schließen verloren."
+
+msgid "Something is still running in the background – please wait a moment."
+msgstr "Im Hintergrund läuft noch etwas – bitte einen Moment warten."
+
+msgid "Close (Ctrl+W)"
+msgstr "Schließen (Strg+W)"
+
+msgid "Next Document"
+msgstr "Nächstes Dokument"
+
+msgid "Previous Document"
+msgstr "Vorheriges Dokument"

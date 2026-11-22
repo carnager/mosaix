@@ -315,6 +315,24 @@ enum Pending {
     Quit,
     Open(std::path::PathBuf),
     New { w: u32, h: u32, white: bool },
+    /// File › Revert: reload over the current document.
+    Revert(std::path::PathBuf),
+    /// Close the active document tab.
+    Close,
+}
+
+/// An open document that is not the active one (a tab in the background),
+/// with the state that belongs to it.
+struct Parked {
+    session: Session,
+    view: View,
+    view_fitted: bool,
+    modified: bool,
+    mask_edit: bool,
+    autosave_path: Option<std::path::PathBuf>,
+    autosave_mark: u64,
+    edit_count: u64,
+    save_mark: u64,
 }
 
 /// Recovery copies: `~/.local/state/mosaix/autosave/` (or `$XDG_STATE_HOME`).
@@ -380,6 +398,12 @@ pub struct App {
     /// For key repeat (the keyboard is made once the seat shows up).
     loop_handle: smithay_client_toolkit::reexports::calloop::LoopHandle<'static, App>,
     session: Option<Session>,
+    /// All open documents in tab order; `None` marks the active one
+    /// (`session`). Empty while only one document is open.
+    tabs: Vec<Option<Parked>>,
+    /// The current load parked the previous document (to bring it back if
+    /// loading fails).
+    parked_for_load: bool,
     gpu: GpuContext,
     surface_config: wgpu::SurfaceConfiguration,
 
@@ -656,6 +680,8 @@ pub fn run(source: Source, bench: bool, home: bool) -> anyhow::Result<()> {
         loop_handle: event_loop.handle(),
         surface,
         session: None,
+        tabs: Vec::new(),
+        parked_for_load: false,
         gpu,
         surface_config,
         qh: qh.clone(),
@@ -1037,6 +1063,7 @@ impl App {
                 decode_ms,
                 total_ms,
             } => {
+                self.parked_for_load = false;
                 tracing::info!(
                     "{}",
                     tr!(
@@ -1060,6 +1087,18 @@ impl App {
                 tracing::error!("{}", tr!("Loading failed: {error}", error = e));
                 self.loading = false;
                 self.fill_white_on_load = false;
+                if std::mem::take(&mut self.parked_for_load) {
+                    // Back to the document that was open before.
+                    let at = self.active_tab();
+                    self.tabs.remove(at);
+                    let back = at.saturating_sub(1);
+                    if let Some(p) = self.tabs.get_mut(back).and_then(|t| t.take()) {
+                        self.restore_parked(p);
+                    }
+                    if self.tabs.len() <= 1 {
+                        self.tabs.clear();
+                    }
+                }
                 if !self.ever_loaded {
                     self.exit = true;
                 }
@@ -2152,12 +2191,15 @@ impl App {
 
     /// Runs `action` now, or first asks what to do with unsaved changes.
     fn guard_unsaved(&mut self, action: Pending) {
-        if !self.modified {
+        // Opening and New go into a new tab: nothing is lost.
+        let loses = self.modified && matches!(action, Pending::Quit | Pending::Close | Pending::Revert(_));
+        if !loses {
             return self.run_pending(action);
         }
         let what = match action {
             Pending::Quit => tr("They will be lost when you quit."),
-            Pending::Open(_) | Pending::New { .. } => tr("The new image replaces it."),
+            Pending::Close => tr("They will be lost when you close it."),
+            Pending::Open(_) | Pending::New { .. } | Pending::Revert(_) => tr("The new image replaces it."),
         };
         self.ui_state.confirm = Some(what.into());
         self.ui_state.hidden = false;
@@ -2167,7 +2209,14 @@ impl App {
 
     fn run_pending(&mut self, action: Pending) {
         match action {
+            // One document after the other: close this one, ask for the next.
+            Pending::Quit if self.tabs.len() > 1 => {
+                self.close_active();
+                self.guard_unsaved(Pending::Quit);
+            }
             Pending::Quit => self.exit = true,
+            Pending::Close => self.close_active(),
+            Pending::Revert(p) => self.open_source_with(Source::File(p), false, true),
             Pending::Open(p) if mosaix_io::raw::is_raw(&p) => {
                 self.ui_state.raw = Some(ui::raw_ui::RawDialog::new(p));
                 self.ui_state.hidden = false;
@@ -2192,8 +2241,20 @@ impl App {
         }
     }
 
-    /// Replaces the document (the old one stays until the new structure arrives).
+    /// Opens a document in a new tab (an untouched blank start image is
+    /// replaced instead).
     fn open_source(&mut self, source: Source, white: bool) {
+        self.open_source_with(source, white, false)
+    }
+
+    /// The active document has nothing worth keeping (blank, never edited).
+    fn active_is_scratch(&self) -> bool {
+        self.session.as_ref().is_none_or(|s| s.source.is_none() && !s.has_save_path()) && !self.modified && self.edit_count == 0
+    }
+
+    /// Loads `source`; `replace`: over the active document (Revert),
+    /// otherwise into a new tab.
+    fn open_source_with(&mut self, source: Source, white: bool, replace: bool) {
         if self.loading {
             tracing::warn!("{}", tr("Still loading."));
             return;
@@ -2203,7 +2264,21 @@ impl App {
             return;
         }
         self.remember_thumbnail();
-        self.drop_autosave();
+        self.parked_for_load = false;
+        if !replace && !self.active_is_scratch() && self.session.is_some() {
+            // Keep the current document as a tab; the new one comes after it.
+            self.end_transient();
+            let p = self.take_parked();
+            if self.tabs.is_empty() {
+                self.tabs.push(None);
+            }
+            let at = self.active_tab();
+            self.tabs[at] = Some(p);
+            self.tabs.insert(at + 1, None);
+            self.parked_for_load = true;
+        } else {
+            self.drop_autosave();
+        }
         self.pending_uploads.clear();
         self.loading = true;
         self.modified = false;
@@ -2567,6 +2642,153 @@ impl App {
         }
         self.autosave_mark = self.edit_count;
         self.autosave_at = Instant::now();
+    }
+
+    // ---- document tabs ------------------------------------------------------
+
+    /// Index of the active document among the tabs (0 with a single one).
+    fn active_tab(&self) -> usize {
+        self.tabs.iter().position(|t| t.is_none()).unwrap_or(0)
+    }
+
+    /// Finishes what is in progress on the canvas before the document changes.
+    fn end_transient(&mut self) {
+        self.ui_state.close_doc_dialogs();
+        self.end_text_edit();
+        self.pen_finish(false);
+        if self.boxed.is_some() {
+            self.commit_box();
+        }
+        self.poly = None;
+        self.drag = Drag::None;
+        if std::mem::take(&mut self.range_preview)
+            && let Some(e) = self.engine()
+        {
+            e.undo();
+        }
+        if let Some(e) = self.engine() {
+            let _ = e.set_filter_preview(None);
+        }
+    }
+
+    /// Takes the active document and its state out of the app.
+    fn take_parked(&mut self) -> Parked {
+        let p = Parked {
+            session: self.session.take().expect("an active document"),
+            view: self.view,
+            view_fitted: self.view_fitted,
+            modified: self.modified,
+            mask_edit: self.mask_edit,
+            autosave_path: self.autosave_path.take(),
+            autosave_mark: self.autosave_mark,
+            edit_count: self.edit_count,
+            save_mark: self.save_mark,
+        };
+        self.modified = false;
+        self.mask_edit = false;
+        self.edit_count = 0;
+        self.save_mark = 0;
+        self.autosave_mark = 0;
+        self.forget_doc_caches();
+        p
+    }
+
+    fn restore_parked(&mut self, p: Parked) {
+        self.session = Some(p.session);
+        self.view = p.view;
+        self.view_fitted = p.view_fitted;
+        self.modified = p.modified;
+        self.mask_edit = p.mask_edit;
+        self.autosave_path = p.autosave_path;
+        self.autosave_mark = p.autosave_mark;
+        self.edit_count = p.edit_count;
+        self.save_mark = p.save_mark;
+        self.forget_doc_caches();
+        self.update_title();
+        self.needs_redraw = true;
+    }
+
+    /// Caches keyed by layer id or tied to one document.
+    fn forget_doc_caches(&mut self) {
+        self.thumb_ids.clear();
+        self.mask_thumbs.clear();
+        self.nav_drawn = None;
+        self.info_hist = None;
+        self.info_color = None;
+        self.last_model = None;
+        self.clone_source = None;
+        self.clone_offset = None;
+        self.move_bounds = None;
+    }
+
+    /// Why the document cannot change right now.
+    fn busy_reason(&self) -> Option<&'static str> {
+        if self.loading {
+            Some(tr("Still loading."))
+        } else if self.saving || self.save_job.is_some() || self.export_job.is_some() {
+            Some(tr("Still saving – please wait a moment."))
+        } else if self.bg_running > 0 {
+            Some(tr("Something is still running in the background – please wait a moment."))
+        } else if self.session.as_ref().is_some_and(|s| s.engine.liquify_active()) {
+            Some(tr("Apply (Enter) or cancel (Esc) Liquify first"))
+        } else {
+            None
+        }
+    }
+
+    /// Makes tab `i` the active document.
+    fn switch_tab(&mut self, i: usize) {
+        let at = self.active_tab();
+        if i == at || i >= self.tabs.len() {
+            return;
+        }
+        if let Some(why) = self.busy_reason() {
+            return tracing::warn!("{why}");
+        }
+        self.end_transient();
+        let cur = self.take_parked();
+        self.tabs[at] = Some(cur);
+        if let Some(p) = self.tabs[i].take() {
+            self.restore_parked(p);
+        }
+    }
+
+    /// Closes tab `i`, asking first about unsaved changes.
+    fn close_tab(&mut self, i: usize) {
+        if let Some(why) = self.busy_reason() {
+            return tracing::warn!("{why}");
+        }
+        if !self.tabs.is_empty() && i != self.active_tab() {
+            self.switch_tab(i);
+        }
+        self.guard_unsaved(Pending::Close);
+    }
+
+    /// Closes the active document; the neighbour becomes active (the last
+    /// one closed leaves a blank image).
+    fn close_active(&mut self) {
+        self.end_transient();
+        self.remember_thumbnail();
+        self.drop_autosave();
+        if self.tabs.len() <= 1 {
+            self.tabs.clear();
+            self.session = None;
+            self.modified = false;
+            self.edit_count = 0;
+            self.home_pending = true;
+            self.open_source_with(Source::Blank(4000, 3000), false, true);
+            return;
+        }
+        let at = self.active_tab();
+        self.session = None;
+        self.tabs.remove(at);
+        let next = at.min(self.tabs.len() - 1);
+        if let Some(p) = self.tabs[next].take() {
+            self.restore_parked(p);
+        }
+        if self.tabs.len() == 1 {
+            self.tabs.clear();
+        }
     }
 
     /// Removes the recovery copy (after a real save or a clean exit).
@@ -3187,6 +3409,14 @@ impl App {
             Keysym::q | Keysym::Q if ctrl => self.request_quit(),
             Keysym::p | Keysym::P if ctrl && shift => self.ui_state.palette = Some((String::new(), 0)),
             Keysym::k if ctrl => self.ui_state.palette = Some((String::new(), 0)),
+            Keysym::Tab | Keysym::ISO_Left_Tab if ctrl => {
+                let n = self.tabs.len();
+                if n > 1 {
+                    let at = self.active_tab();
+                    self.switch_tab(if shift || sym == Keysym::ISO_Left_Tab { (at + n - 1) % n } else { (at + 1) % n });
+                }
+            }
+            Keysym::w | Keysym::W if ctrl && !shift && !alt => self.close_tab(self.active_tab()),
             Keysym::Tab => self.ui_state.hidden = !self.ui_state.hidden,
             Keysym::Escape if self.liquifying() => self.cancel_liquify(),
             Keysym::Return | Keysym::KP_Enter if self.liquifying() => self.commit_liquify(),
@@ -3910,6 +4140,15 @@ impl App {
             doc_size: e.size(),
             name: s.name.clone(),
             modified: self.modified,
+            tabs: self
+                .tabs
+                .iter()
+                .map(|t| match t {
+                    Some(p) => (p.session.name.clone(), p.modified),
+                    None => (s.name.clone(), self.modified),
+                })
+                .collect(),
+            tab: self.active_tab(),
             zoom: self.view.zoom / self.scale,
             rotation_deg: self.view.rotation.to_degrees(),
             // Not while dragging: the panels need not be rebuilt for every stroke frame.
@@ -4131,7 +4370,7 @@ impl App {
                     self.run_agent_cmd(serde_json::json!({ "cmd": "place_image", "path": p, "name": name }));
                 }
                 Action::Revert => match self.session.as_ref().and_then(|s| s.revert_path()) {
-                    Some(p) => self.guard_unsaved(Pending::Open(p)),
+                    Some(p) => self.guard_unsaved(Pending::Revert(p)),
                     None => tracing::warn!("{}", tr("Nothing to revert to: the image was never saved")),
                 },
                 Action::StrokeSelection { width, position, opacity } => {
@@ -4341,6 +4580,8 @@ impl App {
                 Action::WandTolerance(v) => self.wand_tolerance = v,
                 Action::WandContiguous(v) => self.wand_contiguous = v,
                 Action::BucketAll(v) => self.bucket_all = v,
+                Action::SwitchTab(i) => self.switch_tab(i),
+                Action::CloseTab(i) => self.close_tab(i),
                 Action::SetLock(l) => self.run_agent_cmd(serde_json::json!({
                     "cmd": "layer_set", "lock": { "transparency": l.transparency, "pixels": l.pixels, "position": l.position },
                 })),
