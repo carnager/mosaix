@@ -5,7 +5,7 @@ pub mod engine;
 pub mod pool;
 
 pub use engine::{
-    Align, CloneSource, CopiedPixels, Engine, FillJob, FillResult, UpscaleJob, UpscaleResult, GradientKind, Histogram, Interp,
+    Align, CaScaleJob, CaScaleResult, CloneSource, CopiedPixels, Engine, FillJob, FillResult, UpscaleJob, UpscaleResult, GradientKind, Histogram, Interp,
     LiquifyTool, Overlay, OverlayLine, PoolKind, Readback, RenderStats, SampleFrom, StrokeParams,
     StrokeTarget, Tone, ToneKind, Warp, is_integer_translation, FIRST_CUSTOM_TIP, MAX_CUSTOM_TIPS, TIP_SIZE,
 };

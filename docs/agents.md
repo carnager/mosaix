@@ -68,6 +68,7 @@ Every Mosaix window listens on `$XDG_RUNTIME_DIR/mosaix/<pid>.sock` (accessible 
 | `shape_combine` | Layer › Combine Shapes: the selected shape layers become one with `op` unite/subtract/intersect/exclude (`shape_add` takes `combine` with the same values to add a shape to the active shape layer) |
 | `layer_puppet_warp` | Puppet Warp: `pins` = list of `{from: [x, y], to: [x, y]}` on the active pixel layer (from = to holds a place); bends as rigidly as possible |
 | `layer_warp` | Bend the active pixel layer with a 4 × 4 Bézier grid over its content: `offsets` = 16 `[dx, dy]` moves, row by row (corners 0, 3, 12, 15) |
+| `layer_content_aware_scale` | Content-Aware Scale on the active pixel layer: `width`/`height` in px or `width_pct`/`height_pct` (an axis left out stays), `amount` 0 (plain resize) to 1 (default), `protect_selection`. Stays centred |
 | `image_rotate` | Turn every layer by `angle` degrees (clockwise) about the canvas centre, e.g. to straighten a horizon |
 | `layer_merge` | Merge layers as they look (blend modes, masks, styles, text baked in; pixels outside the canvas are kept): `mode` `down` (the active layer onto the one below, default), `group` (the active group's contents), `visible` (all visible top-level layers; hidden ones stay), `flatten` (everything into one layer; hidden layers are dropped) |
 | `layer_place`, `layer_convert_smart`, `smart_replace` | Smart objects: embed an image, convert a pixel layer, replace the contents; transforms stay lossless |

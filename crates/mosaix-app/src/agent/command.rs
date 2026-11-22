@@ -182,6 +182,23 @@ pub enum Command {
     LayerPuppetWarp {
         pins: Vec<PuppetPin>,
     },
+    /// Edit › Content-Aware Scale on a pixel layer: new content size in px
+    /// or percent (an axis left out stays); stays centred.
+    LayerContentAwareScale {
+        #[serde(default)]
+        width: Option<u32>,
+        #[serde(default)]
+        height: Option<u32>,
+        #[serde(default)]
+        width_pct: Option<f64>,
+        #[serde(default)]
+        height_pct: Option<f64>,
+        /// 0 = plain resize, 1 = fully content-aware.
+        #[serde(default = "default_ca_amount")]
+        amount: f32,
+        #[serde(default)]
+        protect_selection: bool,
+    },
     /// Turn the whole image by an angle (degrees, clockwise) about its centre.
     ImageRotate {
         angle: f64,
@@ -733,6 +750,7 @@ impl Command {
             Self::ImageRotate { .. } => "image_rotate",
             Self::LayerWarp { .. } => "layer_warp",
             Self::LayerPuppetWarp { .. } => "layer_puppet_warp",
+            Self::LayerContentAwareScale { .. } => "layer_content_aware_scale",
             Self::SelectLayerPixels { .. } => "select_layer_pixels",
             Self::BucketFill { .. } => "bucket_fill",
             Self::StrokeSelection { .. } => "stroke_selection",
@@ -955,6 +973,17 @@ fn channel_names(s: &Session) -> Vec<String> {
 
 fn yes() -> bool {
     true
+}
+
+fn default_ca_amount() -> f32 {
+    1.0
+}
+
+/// New size from a current one: pixels win over percent; an axis with
+/// neither stays.
+pub(crate) fn ca_target(w: u32, h: u32, nw: Option<u32>, nh: Option<u32>, wp: Option<f64>, hp: Option<f64>) -> (u32, u32) {
+    let axis = |v: u32, px: Option<u32>, pct: Option<f64>| px.unwrap_or_else(|| pct.map_or(v, |p| (v as f64 * p / 100.0).round().max(1.0) as u32));
+    (axis(w, nw, wp), axis(h, nh, hp))
 }
 
 fn default_upscale() -> u32 {
@@ -1795,6 +1824,21 @@ fn execute_on(s: &mut Session, cmd: Command) -> anyhow::Result<Output> {
             let id = pixel_layer(s, layer)?;
             s.engine.convert_to_smart(id, tr("Convert to Smart Object")).map_err(engine_err)?;
             ok(s)
+        }
+        Command::LayerContentAwareScale { width, height, width_pct, height_pct, amount, protect_selection } => {
+            ensure!((0.0..=1.0).contains(&amount), "amount must be 0 to 1");
+            ensure!(width.is_some() || height.is_some() || width_pct.is_some() || height_pct.is_some(), "give width, height, width_pct or height_pct");
+            ensure!(width_pct.is_none_or(|p| p > 0.0) && height_pct.is_none_or(|p| p > 0.0), "percentages must be above 0");
+            let id = pixel_layer(s, None)?;
+            not_painting(s)?;
+            let job = s
+                .engine
+                .ca_scale_job(id, |w, h| ca_target(w, h, width, height, width_pct, height_pct), amount, protect_selection)
+                .map_err(engine_err)?;
+            let r = job.run();
+            let (w, h) = r.size;
+            s.engine.apply_ca_scale(r, tr("Content-Aware Scale")).map_err(engine_err)?;
+            Ok(Output::json(json!({ "ok": true, "width": w, "height": h })))
         }
         Command::LayerPuppetWarp { pins } => {
             ensure!(!pins.is_empty(), "pins must not be empty");

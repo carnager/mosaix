@@ -196,6 +196,7 @@ pub fn run(source: Source, out: &Path, size: (u32, u32)) -> anyhow::Result<()> {
         state.palette = Some((q.clone(), 0));
     }
     match std::env::var("MOSAIX_SNAPSHOT_DIALOG").as_deref() {
+        Ok("cascale") => state.dialog = Some(panels::Dialog::CaScale { w: 70.0, h: 100.0, keep: false, amount: 1.0, protect: false }),
         Ok("open") => {
             let home = std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)

@@ -312,6 +312,10 @@ enum BgDone {
         result: anyhow::Result<mosaix_gpu::UpscaleResult>,
         started: Instant,
     },
+    CaScaled {
+        result: mosaix_gpu::CaScaleResult,
+        started: Instant,
+    },
 }
 
 /// The rectangle of a shape drag: Shift = square, Alt = from the centre.
@@ -3301,6 +3305,17 @@ impl App {
                 },
                 Err(e) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Upscale (AI)"), error = format!("{e:#}"))),
             },
+            BgDone::CaScaled { result, started } => {
+                let (w, h) = result.size;
+                match self.engine().map(|e| e.apply_ca_scale(result, tr("Content-Aware Scale"))) {
+                    Some(Ok(())) => {
+                        self.touch();
+                        tracing::info!("{}", tr!("Content-Aware Scale: {w} × {h} px in {s} s", w = w, h = h, s = format!("{:.1}", started.elapsed().as_secs_f64())));
+                    }
+                    Some(Err(e)) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Content-Aware Scale"), error = tr(e))),
+                    None => {}
+                }
+            }
             BgDone::ModelDownloaded { name, result } => match result {
                 Ok(()) => tracing::info!("{}", tr!("{name} is ready – try again", name = name)),
                 Err(e) => tracing::error!("{}", tr!("Download of {name} failed: {error}", name = name, error = format!("{e:#}"))),
@@ -3537,6 +3552,21 @@ impl App {
                 });
             }
             Err(err) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Generative Fill"), error = tr(err))),
+        }
+    }
+
+    /// Edit › Content-Aware Scale: carved on a worker, applied as one undo step.
+    fn content_aware_scale(&mut self, w_pct: f64, h_pct: f64, amount: f32, protect: bool) {
+        let Some(e) = self.engine() else { return };
+        let id = e.doc().active;
+        let target = |w: u32, h: u32| crate::agent::command::ca_target(w, h, None, None, Some(w_pct), Some(h_pct));
+        match e.ca_scale_job(id, target, amount, protect) {
+            Ok(job) => {
+                tracing::info!("{}", tr("Content-Aware Scale …"));
+                let started = Instant::now();
+                self.spawn_bg("content-aware scale", move || BgDone::CaScaled { result: job.run(), started });
+            }
+            Err(err) => tracing::warn!("{}", tr!("{label}: {error}", label = tr("Content-Aware Scale"), error = tr(err))),
         }
     }
 
@@ -5333,6 +5363,7 @@ impl App {
                     self.view_fitted = false;
                 }
                 Action::Upscale(k) => self.ai_upscale(k),
+                Action::ContentAwareScale { w_pct, h_pct, amount, protect } => self.content_aware_scale(w_pct, h_pct, amount, protect),
             }
         }
     }
@@ -6456,6 +6487,9 @@ fn recorded_action(a: &Action) -> Option<serde_json::Value> {
         }
         Action::ImageSize { w, h } => json!({ "cmd": "image_resize", "width": w, "height": h }),
         Action::Upscale(k) => json!({ "cmd": "image_upscale", "factor": k }),
+        Action::ContentAwareScale { w_pct, h_pct, amount, protect } => {
+            json!({ "cmd": "layer_content_aware_scale", "width_pct": w_pct, "height_pct": h_pct, "amount": amount, "protect_selection": protect })
+        }
         Action::HistoryJump(_) => {
             tracing::warn!("{}", tr("Jumps in the history are not recorded"));
             return None;

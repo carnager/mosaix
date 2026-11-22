@@ -514,6 +514,13 @@ pub enum Action {
         w: u32,
         h: u32,
     },
+    /// Edit › Content-Aware Scale: new size in percent, 0–1 amount.
+    ContentAwareScale {
+        w_pct: f64,
+        h_pct: f64,
+        amount: f32,
+        protect: bool,
+    },
     /// Image › Upscale (AI): the factor.
     Upscale(u32),
     OpenFile(std::path::PathBuf),
@@ -583,7 +590,7 @@ pub struct State {
     /// keys are being recorded.
     pub shortcuts: Option<ShortcutsDialog>,
     rename: Option<(LayerId, String)>,
-    dialog: Option<Dialog>,
+    pub(super) dialog: Option<Dialog>,
     show_log: bool,
     /// Picker state: HSV and the linear colour it produced.
     hsv: Option<([f32; 3], [f32; 3])>,
@@ -620,7 +627,9 @@ pub struct State {
     edit_bg: bool,
 }
 
-enum Dialog {
+pub(super) enum Dialog {
+    /// Edit › Content-Aware Scale.
+    CaScale { w: f64, h: f64, keep: bool, amount: f32, protect: bool },
     /// Edit › Preferences (a draft until OK).
     Prefs { p: crate::settings::Prefs, language: String },
     /// Select › Select and Mask.
@@ -1316,6 +1325,7 @@ pub fn palette_extras(m: &Model) -> Vec<ExtraItem> {
     for (menu, sp, en, disabled) in [
         ("File", S::PlaceEmbedded, "Place Embedded …", None),
         ("Edit", S::GenerativeFill, "Generative Fill …", sel(m.has_selection)),
+        ("Edit", S::ContentAwareScale, "Content-Aware Scale …", sel(pixel_active(m))),
         ("Image", S::ImageSize, "Image Size …", None),
         ("Image", S::CanvasSize, "Canvas Size …", None),
         ("Layer", S::ConvertToSmart, "Convert to Smart Object", (!can_convert_to_smart(m)).then_some(tr("Works on pixel layers"))),
@@ -1392,6 +1402,7 @@ fn run_extra(e: Extra, m: &Model, st: &mut State, out: &mut Vec<Action>) {
             }
             S::CanvasSize => st.dialog = Some(Dialog::Canvas { w: m.doc_size.0, h: m.doc_size.1, anchor: (1, 1) }),
             S::ImageSize => st.dialog = Some(Dialog::Image { w: m.doc_size.0, h: m.doc_size.1, keep: true }),
+            S::ContentAwareScale => st.dialog = Some(Dialog::CaScale { w: 100.0, h: 100.0, keep: false, amount: 1.0, protect: m.has_selection }),
             S::Messages => st.show_log = true,
             S::OpenAsLayers => out.push(Action::PickFile(super::files::FileMode::OpenAsLayer)),
             S::Revert => out.push(Action::Revert),
@@ -1653,6 +1664,13 @@ fn special_entry(
             let r = ui.add_enabled(pixel_active(m), egui::Button::new((icon, tr("Puppet Warp"))));
             if r.on_disabled_hover_text(tr("Works on pixel layers")).on_hover_text(tr("Pins on the layer: move them and the shape bends naturally (arms, branches …)")).clicked() {
                 out.push(Action::BeginPuppet);
+                ui.close();
+            }
+        }
+        Special::ContentAwareScale => {
+            let r = ui.add_enabled(pixel_active(m), egui::Button::new((icon, tr("Content-Aware Scale …"))));
+            if r.on_disabled_hover_text(tr("Works on pixel layers")).on_hover_text(tr("Resizes the layer but keeps its subjects: the least visible parts are removed or stretched")).clicked() {
+                run_extra(Extra::Special(sp), m, st, out);
                 ui.close();
             }
         }
@@ -3693,6 +3711,44 @@ fn dialogs(ctx: &egui::Context, m: &Model, st: &mut State, out: &mut Vec<Action>
                             h: *h,
                             anchor: (anchor.0 as f64 / 2.0, anchor.1 as f64 / 2.0),
                         });
+                        done = true;
+                    }
+                });
+        }
+        Dialog::CaScale { w, h, keep, amount, protect } => {
+            egui::Window::new(tr("Content-Aware Scale"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    let (pw, ph) = (*w, *h);
+                    egui::Grid::new("content aware scale").num_columns(2).show(ui, |ui| {
+                        ui.label(tr("Width"));
+                        ui.add(egui::DragValue::new(w).range(1.0..=400.0).speed(0.5).max_decimals(1).suffix(" %"));
+                        ui.end_row();
+                        ui.label(tr("Height"));
+                        ui.add(egui::DragValue::new(h).range(1.0..=400.0).speed(0.5).max_decimals(1).suffix(" %"));
+                        ui.end_row();
+                        ui.label(tr("Amount"));
+                        let mut pct = *amount * 100.0;
+                        if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %")).changed() {
+                            *amount = pct / 100.0;
+                        }
+                        ui.end_row();
+                    });
+                    ui.checkbox(keep, tr("Constrain Proportions"));
+                    if *keep {
+                        if *w != pw {
+                            *h = (ph * *w / pw).clamp(1.0, 400.0);
+                        } else if *h != ph {
+                            *w = (pw * *h / ph).clamp(1.0, 400.0);
+                        }
+                    }
+                    ui.add_enabled(m.has_selection, egui::Checkbox::new(protect, tr("Protect Selection")))
+                        .on_disabled_hover_text(tr("Select what must not change first"));
+                    ui.label(RichText::new(tr("Keeps subjects intact while the rest gives way. Amount 0 % is a plain resize.")).weak());
+                    if ui.button("OK").clicked() {
+                        out.push(Action::ContentAwareScale { w_pct: *w, h_pct: *h, amount: *amount, protect: *protect && m.has_selection });
                         done = true;
                     }
                 });

@@ -3841,3 +3841,33 @@ msgstr "Gitter anzeigen"
 
 msgid "Click: add a pin · drag a pin to bend · Alt+click: remove a pin. Pin what should stay, then move the rest."
 msgstr "Klick: Pin setzen · Pin ziehen: verbiegen · Alt+Klick: Pin entfernen. Erst festpinnen, was bleiben soll, dann den Rest bewegen."
+
+msgid "Content-Aware Scale"
+msgstr "Inhaltsbasiert skalieren"
+
+msgid "Content-Aware Scale …"
+msgstr "Inhaltsbasiert skalieren …"
+
+msgid "Content-Aware Scale: {w} × {h} px in {s} s"
+msgstr "Inhaltsbasiert skalieren: {w} × {h} px in {s} s"
+
+msgid "Protect Selection"
+msgstr "Auswahl schützen"
+
+msgid "Select what must not change first"
+msgstr "Zuerst auswählen, was sich nicht ändern soll"
+
+msgid "Keeps subjects intact while the rest gives way. Amount 0 % is a plain resize."
+msgstr "Motive bleiben erhalten, der Rest gibt nach. Stärke 0 % ist normales Skalieren."
+
+msgid "Resizes the layer but keeps its subjects: the least visible parts are removed or stretched"
+msgstr "Ändert die Ebenengröße, erhält aber die Motive: Die unauffälligsten Bereiche werden entfernt oder gedehnt"
+
+msgid "The layer is locked"
+msgstr "Die Ebene ist gesperrt"
+
+msgid "Apply or delete the layer mask first"
+msgstr "Zuerst die Ebenenmaske anwenden oder löschen"
+
+msgid "Nothing to scale: the layer is empty."
+msgstr "Nichts zu skalieren: Die Ebene ist leer."
